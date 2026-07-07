@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "../../lib/supabase/browser";
+import { JobPageValidation } from "../../lib/supabase/validation/job";
+import { CollectionStopValidation } from "../../lib/supabase/validation/job";
+import { DeliveryStopValidation } from "../../lib/supabase/validation/job";
 
 const TENANT_ID = "2f7cc0dc-b7fd-4556-92be-445e4b42ddcd";
 
@@ -297,14 +300,20 @@ export default function JobsPage() {
     setLoading(true);
     setMessage("");
 
-    const reference = form.reference.trim();
+    // 1. Zod Validation Runs
+    const validation = JobPageValidation.safeParse(form);
 
-    if (!reference) {
+    if (!validation.success) {
       setLoading(false);
-      setMessage("Reference is required.");
+      // Fallback to a generic message if Zod fails, else show first error message
+      const firstErrorMessage = validation.error.issues[0]?.message || "Please fill in all required fields.";
+      setMessage(firstErrorMessage);
       return;
     }
 
+    const reference = validation.data.reference;
+
+    // 2. Filter out any empty stops
     const validStops = form.stops
       .map((stop: any) => ({
         ...stop,
@@ -320,6 +329,21 @@ export default function JobsPage() {
       return;
     }
 
+    // 3. Validate the valid stops using Zod
+    for (const stop of validStops) {
+      const stopSchema = stop.type === "collection"
+        ? CollectionStopValidation
+        : DeliveryStopValidation;
+
+      const stopValidation = stopSchema.safeParse(stop);
+
+      if (!stopValidation.success) {
+        setLoading(false);
+        const stopErrorMessage = stopValidation.error.issues[0]?.message || "Stop details are invalid.";
+        setMessage(stopErrorMessage);
+        return;
+      }
+    }
     const customerPrice =
       form.customer_price === "" ? null : Number(form.customer_price);
 
