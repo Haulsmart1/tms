@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import AppHeader from "./components/AppHeader";
 
 export const metadata: Metadata = {
   title: "TMS Wizzard",
@@ -21,6 +22,7 @@ export default function RootLayout({
           color: "#0f172a",
         }}
       >
+        <AppHeader />
         {children}
       </body>
     </html>
