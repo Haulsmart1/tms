@@ -19,6 +19,12 @@ export default function HomePage() {
     if (params.get("submitted") === "1") {
       setRegistrationSuccess(true);
     }
+
+    if (params.get("error")) {
+      setMessage(
+        "That sign-in link didn't work or has expired. Enter your email below and we'll send you a fresh one."
+      );
+    }
   }, []);
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {

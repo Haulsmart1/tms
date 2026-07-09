@@ -68,10 +68,15 @@ export default function UsersPage() {
         e.preventDefault();
 
         const { error } = await supabase.auth.signInWithOtp({
-            email
+            email,
+            options: {
+                emailRedirectTo: `${window.location.origin}/api/auth/callback?next=/dashboard`,
+            },
         });
 
-        if (!error) {
+        if (error) {
+            setMessage(error.message);
+        } else {
             setMessage("Invite sent");
             setEmail("");
         }
