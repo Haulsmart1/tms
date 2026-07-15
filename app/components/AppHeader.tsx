@@ -103,6 +103,7 @@ export default function AppHeader() {
 
         <div style={sectionStyle}>
           <Link href="/dashboard" style={linkStyle}>Dashboard</Link>
+          <Link href="/stats" style={linkStyle}>Stats</Link>
           <Link href="/jobs" style={linkStyle}>Jobs</Link>
           <Link href="/pod" style={linkStyle}>POD</Link>
           <Link href="/invoices" style={linkStyle}>Invoices</Link>

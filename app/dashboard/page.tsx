@@ -1,6 +1,12 @@
 export default function DashboardPage() {
   const cards = [
     {
+      title: "Stats",
+      description: "Company KPIs, revenue and performance",
+      href: "/stats",
+      icon: "📊",
+    },
+    {
       title: "Jobs",
       description: "Create jobs with multi collection & delivery stops",
       href: "/jobs",
