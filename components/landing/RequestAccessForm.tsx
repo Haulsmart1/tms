@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import Link from "next/link";
 import Field from "../Field";
@@ -16,6 +16,16 @@ export default function RequestAccessForm() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  /* Flipping `done` unmounts the whole form subtree, including the submit
+     button that currently has focus, which would drop focus to <body> and
+     silently return a keyboard user to the top of the document. Move focus to
+     the confirmation instead. role="status" alone does not guarantee this is
+     read, because the element the user was on has just disappeared. */
+  useEffect(() => {
+    if (done) panelRef.current?.focus();
+  }, [done]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -74,9 +84,16 @@ export default function RequestAccessForm() {
         </div>
 
         {done ? (
-          <div className="rounded-lg border border-success-border bg-success-tint p-6" role="status">
-            <p className="text-base font-semibold text-success-strong">Request sent.</p>
-            <p className="mt-1 text-sm text-ink-2">Thanks. We will be in touch shortly.</p>
+          <div
+            ref={panelRef}
+            tabIndex={-1}
+            role="status"
+            className="rounded-lg border border-success-border bg-success-tint p-6"
+          >
+            <p className="text-base font-semibold text-success-strong">Request received.</p>
+            <p className="mt-1 text-sm text-ink-2">
+              Thanks, we have your details and will be in touch shortly.
+            </p>
           </div>
         ) : (
           <form

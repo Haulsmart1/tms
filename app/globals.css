@@ -30,6 +30,11 @@
     border-color: var(--line);
   }
   :where(.ds) :where(h1, h2, h3, h4, p, figure, ul, ol) { margin: 0; }
+  /* Preflight normally resets anchors too. Without this every link on the new
+     pages gets the UA underline, and any link without an explicit text-* class
+     renders in browser blue. Links that should LOOK like links opt back in with
+     an explicit `underline` class. */
+  :where(.ds) :where(a) { color: inherit; text-decoration: inherit; }
   :where(.ds) :where(button, [type="button"], [type="submit"]) {
     -webkit-appearance: none;
     appearance: none;

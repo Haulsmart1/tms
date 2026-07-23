@@ -5,7 +5,7 @@ export default function PricingCard() {
   return (
     <section id="pricing" className="py-12 md:py-16">
       <Container className="text-center">
-        <p className="text-overline uppercase text-ink-3">Pricing</p>
+        <p className="text-overline uppercase text-ink-2">Pricing</p>
         <h2 className="mt-1 text-xl font-semibold text-ink">Simple, per-vehicle pricing</h2>
         <div className="mx-auto mt-6 inline-block rounded-lg border-2 border-primary bg-surface p-6 text-left">
           <div className="text-2xl font-semibold text-ink">

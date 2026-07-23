@@ -18,26 +18,49 @@ import { createAdminClient } from "../../../lib/supabase/admin";
 const HONEYPOT_FIELD = "companyWebsite";
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 5;
+const RATE_LIMIT_MAX_KEYS = 10_000;
+const OVERFLOW_KEY = "__overflow__";
 const recentHits = new Map<string, number[]>();
+let lastPrune = 0;
 
+/* Identify the caller from a header the CLIENT CANNOT FORGE.
+   A raw x-forwarded-for is client-supplied on any proxy that appends rather
+   than overwrites, so keying on its leftmost value makes the limiter trivially
+   bypassable: a fresh spoofed value per request means every request looks like
+   a new client. We therefore trust only platform-set headers and otherwise fall
+   back to a single shared bucket, which fails CLOSED (everyone unidentifiable
+   shares one allowance) rather than open. */
 function clientKey(request: Request): string {
-  const forwarded = request.headers.get("x-forwarded-for");
-  return (
-    forwarded?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "unknown"
-  );
+  const trusted =
+    request.headers.get("x-vercel-forwarded-for") ?? request.headers.get("x-real-ip");
+  const value = trusted?.split(",")[0]?.trim();
+  return value && value.length > 0 ? value : "unidentified";
 }
 
 function isRateLimited(key: string): boolean {
   const now = Date.now();
-  // Prune while we are here so the map cannot grow without bound.
-  for (const [k, times] of recentHits) {
-    const kept = times.filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
-    if (kept.length === 0) recentHits.delete(k);
-    else recentHits.set(k, kept);
+
+  /* Prune at most once per window. The previous version walked the entire map
+     on every request, which is O(n^2) under a flood and turns the limiter into
+     its own denial-of-service vector. */
+  if (now - lastPrune > RATE_LIMIT_WINDOW_MS) {
+    lastPrune = now;
+    for (const [k, times] of recentHits) {
+      if (times.every((t) => now - t >= RATE_LIMIT_WINDOW_MS)) recentHits.delete(k);
+    }
   }
-  const mine = recentHits.get(key) ?? [];
+
+  /* Hard cap on distinct keys so a flood cannot exhaust memory. Once full, new
+     keys share one overflow bucket, so the worst case is a global 429 rather
+     than unbounded growth. */
+  const effectiveKey =
+    recentHits.has(key) || recentHits.size < RATE_LIMIT_MAX_KEYS ? key : OVERFLOW_KEY;
+
+  const mine = (recentHits.get(effectiveKey) ?? []).filter(
+    (t) => now - t < RATE_LIMIT_WINDOW_MS,
+  );
   mine.push(now);
-  recentHits.set(key, mine);
+  recentHits.set(effectiveKey, mine);
   return mine.length > RATE_LIMIT_MAX;
 }
 
@@ -115,9 +138,14 @@ export async function POST(request: Request) {
   const from = process.env.MAIL_FROM;
   const to = process.env.LEAD_INBOX;
 
+  /* `notified` is returned so the client can tell the visitor the truth. A
+     stored-but-unnotified lead is invisible until somebody opens
+     /super-admin/requests, so it must not be reported as a plain success. */
   if (!apiKey || !from || !to) {
-    console.warn("request-access: stored, but email not configured (RESEND_API_KEY / MAIL_FROM / LEAD_INBOX)");
-    return NextResponse.json({ ok: true });
+    console.warn(
+      "request-access: LEAD STORED BUT NOBODY NOTIFIED. Email is not configured (RESEND_API_KEY / MAIL_FROM / LEAD_INBOX). Check /super-admin/requests.",
+    );
+    return NextResponse.json({ ok: true, notified: false });
   }
 
   try {
@@ -139,11 +167,16 @@ export async function POST(request: Request) {
       ].join("\n"),
     });
     if (sendError) {
-      console.error("request-access: stored, but notification email failed", sendError);
+      console.error(
+        "request-access: LEAD STORED BUT NOBODY NOTIFIED. Resend rejected the send (a sending domain must be verified for MAIL_FROM). Check /super-admin/requests.",
+        sendError,
+      );
+      return NextResponse.json({ ok: true, notified: false });
     }
   } catch (err) {
-    console.error("request-access: stored, but notification email threw", err);
+    console.error("request-access: LEAD STORED BUT NOBODY NOTIFIED. Send threw.", err);
+    return NextResponse.json({ ok: true, notified: false });
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, notified: true });
 }

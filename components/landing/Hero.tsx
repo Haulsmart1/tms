@@ -83,7 +83,7 @@ export default function Hero() {
               Sign in
             </Link>
           </div>
-          <p className="mt-4 text-xs text-ink-3">
+          <p className="mt-4 text-xs text-ink-2">
             Built for UK and EU operators · WCAG 2.1 AA · Your data stays yours
           </p>
         </div>

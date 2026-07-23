@@ -1,4 +1,5 @@
 import { createClient } from "../../../lib/supabase/server";
+import { createAdminClient } from "../../../lib/supabase/admin";
 import Badge from "../../../components/Badge";
 
 /* Server component. Reads with the normal (anon-key + session cookie) client,
@@ -53,10 +54,31 @@ export default async function AccessRequestsPage() {
 
   const requests = (data ?? []) as RegistrationRequest[];
 
+  /* An empty result is AMBIGUOUS and must not be reported as "no requests".
+     When RLS filters every row, PostgREST returns 200 with an empty array, not
+     an error, so a missing or mismatched read policy looks exactly like an
+     empty table. Left unhandled, the page would confidently say "No requests
+     yet" while real leads accumulate and nobody investigates.
+
+     Cross-check the true row count with the service role (server-only, bypasses
+     RLS) so the two cases can be told apart. */
+  let hiddenByPolicy = 0;
+  if (!error && requests.length === 0) {
+    try {
+      const admin = createAdminClient();
+      const { count } = await admin
+        .from("registration_requests")
+        .select("id", { count: "exact", head: true });
+      hiddenByPolicy = count ?? 0;
+    } catch {
+      // Service role not configured. Fall through to the plain empty state.
+    }
+  }
+
   return (
     <div className="ds min-h-screen bg-canvas px-4 py-8 font-sans text-ink md:px-8">
       <div className="mx-auto w-full max-w-6xl">
-        <p className="text-overline uppercase text-ink-3">Sales</p>
+        <p className="text-overline uppercase text-ink-2">Sales</p>
         <h1 className="mt-1 text-xl font-semibold text-ink">Access requests</h1>
         <p className="mt-1 text-sm text-ink-2">
           Submissions from the landing page form, newest first.
@@ -70,11 +92,27 @@ export default async function AccessRequestsPage() {
             Could not load requests. If this persists, check that the
             registration_requests read policy allows super admins.
           </div>
+        ) : hiddenByPolicy > 0 ? (
+          <div
+            role="alert"
+            className="mt-6 rounded-lg border border-warning-border bg-warning-tint p-4 text-sm text-warning-strong"
+          >
+            <p className="font-semibold">
+              {hiddenByPolicy} request{hiddenByPolicy === 1 ? " exists" : "s exist"} but your
+              session cannot see {hiddenByPolicy === 1 ? "it" : "them"}.
+            </p>
+            <p className="mt-1">
+              This is a Row Level Security misconfiguration, not an empty table. Run
+              docs/sql/registration_requests_rls.sql and confirm the read policy&apos;s
+              profiles-to-roles join matches how super_admin is actually stored.
+            </p>
+          </div>
         ) : requests.length === 0 ? (
           <div className="mt-6 rounded-lg border border-line bg-surface p-8 text-center">
             <p className="text-base font-semibold text-ink">No requests yet</p>
-            <p className="mt-1 text-sm text-ink-3">
-              New submissions from the landing page will appear here.
+            <p className="mt-1 text-sm text-ink-2">
+              New submissions from the landing page will appear here. If you are expecting
+              requests, confirm the registration_requests read policy has been applied.
             </p>
           </div>
         ) : (

@@ -142,8 +142,29 @@ same session handling.
 ### The request-access endpoint
 
 ```
-RequestAccessForm  ->  POST /api/request-access  ->  Zod validation  ->  Resend
+RequestAccessForm -> POST /api/request-access -> Zod validation
+                  -> INSERT registration_requests (service role)   [system of record]
+                  -> Resend email                                  [best effort]
+                  -> /super-admin/requests                         [where leads are read]
 ```
+
+**The database is the system of record, not the email.** Earlier this emailed and
+nothing else, so a Resend failure lost the lead permanently and nobody knew
+anyone had tried. Now the row is stored first and the notification is attempted
+afterwards, allowed to fail without failing the request. The response carries
+`notified: true|false` so a stored-but-unnotified lead is distinguishable.
+
+**Writes use the SERVICE ROLE key, not anon.** The anon key is public, it ships in
+the client bundle, so granting anon INSERT would let anyone POST straight to
+PostgREST and bypass the honeypot and rate limit. Routing writes through the
+service role makes the guarded route the only way in. This was not theoretical:
+during setup an anon insert genuinely returned `201` until a leftover INSERT
+policy was dropped. See `lib/supabase/admin.ts` and
+`docs/sql/registration_requests_rls.sql`.
+
+**Reading leads** happens at `/super-admin/requests`, which reads with the ordinary
+session client so RLS does the real work. The layout's role guard is the first
+layer and the RLS policy is the second.
 
 - `lib/validation/requestAccess.ts` is the Zod schema, covered by 7 Vitest tests.
 - The route returns **field-keyed 400s**, so the form renders each message under
@@ -210,12 +231,25 @@ minute returns 429.
 
 ## 5. Outstanding before this can go live
 
-1. **Resend needs a verified sending domain.** Add the DNS records Resend provides
-   for `adrcarriers.net` and set `MAIL_FROM` to an address on that domain. Until
-   then the form cannot deliver to real inboxes; `onboarding@resend.dev` works for
-   local development only. See `.env.example`.
-2. **Set `RESEND_API_KEY` and `LEAD_INBOX`** in the deployment environment.
-3. **Look at it.** Everything above is measured, but nobody has yet judged whether
+**In this order. The first two break lead capture hardest, and both fail quietly.**
+
+1. **Set `SUPABASE_SERVICE_ROLE_KEY`** in the deployment environment (Vercel project
+   settings). Without it, every submission returns a 500 and no lead is stored at
+   all. Server-only, no `NEXT_PUBLIC_` prefix. See `.env.example`.
+2. **Run `docs/sql/registration_requests_rls.sql`** in the Supabase SQL editor, then
+   run the verification queries at the bottom of that file. Without it, either
+   anyone with the public anon key can write to the table, or super admins cannot
+   read it. The requests page detects the second case and says so explicitly rather
+   than showing a misleading "No requests yet".
+3. **Resend needs a verified sending domain.** Add the DNS records Resend provides
+   for `adrcarriers.net` and set `MAIL_FROM` to an address on that domain, plus
+   `RESEND_API_KEY` and `LEAD_INBOX`. Until this is done, **leads are stored but
+   nobody is notified**: the route returns `notified: false` and logs
+   "LEAD STORED BUT NOBODY NOTIFIED", and the only place they surface is
+   `/super-admin/requests`. The visitor is told their request was received, which
+   is true, so the risk is that real leads sit unread. Either finish this before
+   launch or make someone responsible for checking that page daily.
+4. **Look at it.** Everything above is measured, but nobody has yet judged whether
    it looks right. Run `npm run dev` and open `/` at desktop and mobile widths.
 
 ### Known follow-ups, none blocking
