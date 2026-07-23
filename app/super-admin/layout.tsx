@@ -68,6 +68,7 @@ export default async function SuperAdminLayout({
           >
             <Link href="/super-admin" style={linkStyle}>Overview</Link>
             <Link href="/super-admin/companies" style={linkStyle}>Companies</Link>
+            <Link href="/super-admin/requests" style={linkStyle}>Requests</Link>
             <Link href="/super-admin/users" style={linkStyle}>Users</Link>
             <Link href="/super-admin/billing" style={linkStyle}>Billing</Link>
             <Link href="/super-admin/invoices" style={linkStyle}>Invoices</Link>
