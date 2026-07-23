@@ -252,6 +252,16 @@ minute returns 429.
 4. **Look at it.** Everything above is measured, but nobody has yet judged whether
    it looks right. Run `npm run dev` and open `/` at desktop and mobile widths.
 
+### Deferred review findings
+
+A five-lens pre-merge review produced 2 critical, 8 high, 17 medium and 22 low
+findings. **All criticals and all highs were fixed before merge.** The remaining
+10 medium and 22 low items are written up in
+[`landing-redesign-followups.md`](landing-redesign-followups.md). The ones most
+worth doing first: the dead Privacy and Terms links on a page that now collects
+personal data, the absence of a retention or erasure path for that data, and the
+lack of a visible loading indicator on submit.
+
 ### Known follow-ups, none blocking
 
 - The dark scaffold in `tokens.css` overrides 27 of 37 tokens. `--focus` is the

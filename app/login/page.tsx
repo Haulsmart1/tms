@@ -61,8 +61,11 @@ export default function LoginPage() {
   return (
     <div className="ds grid min-h-screen place-items-center bg-canvas px-4 font-sans text-ink">
       <div className="w-full max-w-sm rounded-lg border border-line bg-surface p-6 shadow-sm">
-        <Link href="/" className="text-sm text-ink-3 hover:text-ink-2">
-          Back
+        {/* Explicit `underline`: the .ds reset strips the UA underline from all
+            anchors, so a link that should read AS a link has to opt back in.
+            Without it this rendered as plain grey text with no affordance. */}
+        <Link href="/" className="text-sm text-ink-2 underline hover:text-ink">
+          Back to home
         </Link>
         <h1 className="mt-2 text-xl font-semibold text-ink">Sign in</h1>
         <p className="mt-1 text-sm text-ink-2">We&apos;ll email you a magic link.</p>
