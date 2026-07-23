@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
 import { RequestAccessValidation } from "../../../lib/validation/requestAccess";
+import { createAdminClient } from "../../../lib/supabase/admin";
 
 /* ABUSE PROTECTION.
    This endpoint is public and unauthenticated, and sends an email on every
@@ -71,41 +72,77 @@ export async function POST(request: Request) {
 
   const { companyName, contactName, email, phone, vehicles, notes } = parsed.data;
 
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.MAIL_FROM;
-  const to = process.env.LEAD_INBOX;
-  if (!apiKey || !from || !to) {
-    // Deliberately vague to the client, specific in the log: the response is
-    // public and must not disclose which piece of config is missing.
-    console.error("request-access: missing RESEND_API_KEY / MAIL_FROM / LEAD_INBOX");
+  /* The database is the system of record, not the email. Store the lead first
+     and only then try to notify. If we emailed first and the send failed, the
+     lead would be gone forever and nobody would know someone had tried.
+
+     `status` is deliberately omitted so the column default applies.
+     No `.select()` is chained: that would ask PostgREST to read the row back,
+     which is a different permission from writing it. */
+  let supabase;
+  try {
+    supabase = createAdminClient();
+  } catch (err) {
+    console.error("request-access: Supabase admin client unavailable", err);
     return NextResponse.json(
       { ok: false, error: "Server is not configured to receive requests." },
       { status: 500 },
     );
   }
 
-  const resend = new Resend(apiKey);
-  const { error } = await resend.emails.send({
-    from,
-    to,
-    replyTo: email,
-    subject: `New access request: ${companyName}`,
-    text: [
-      `Company: ${companyName}`,
-      `Contact: ${contactName}`,
-      `Email: ${email}`,
-      `Phone: ${phone ?? "-"}`,
-      `Vehicles: ${vehicles}`,
-      `Notes: ${notes ?? "-"}`,
-    ].join("\n"),
+  const { error: insertError } = await supabase.from("registration_requests").insert({
+    company_name: companyName,
+    contact_name: contactName,
+    email,
+    phone: phone ?? null,
+    vehicle_count: vehicles,
+    notes: notes ?? null,
   });
 
-  if (error) {
-    console.error("request-access: Resend send failed", error);
+  if (insertError) {
+    console.error("request-access: could not store the request", insertError);
     return NextResponse.json(
-      { ok: false, error: "Could not send your request. Please try again." },
+      { ok: false, error: "Could not save your request. Please try again." },
       { status: 500 },
     );
+  }
+
+  /* Notification is BEST EFFORT from here on. The lead is safely stored, so a
+     mail failure must not fail the request or the visitor would resubmit and
+     create duplicates. Resend cannot deliver until a sending domain is verified
+     for the MAIL_FROM address, so this is expected to fail until that is done. */
+  const apiKey = process.env.RESEND_API_KEY;
+  const from = process.env.MAIL_FROM;
+  const to = process.env.LEAD_INBOX;
+
+  if (!apiKey || !from || !to) {
+    console.warn("request-access: stored, but email not configured (RESEND_API_KEY / MAIL_FROM / LEAD_INBOX)");
+    return NextResponse.json({ ok: true });
+  }
+
+  try {
+    const resend = new Resend(apiKey);
+    const { error: sendError } = await resend.emails.send({
+      from,
+      to,
+      replyTo: email,
+      subject: `New access request: ${companyName}`,
+      text: [
+        `Company: ${companyName}`,
+        `Contact: ${contactName}`,
+        `Email: ${email}`,
+        `Phone: ${phone ?? "-"}`,
+        `Vehicles: ${vehicles}`,
+        `Notes: ${notes ?? "-"}`,
+        "",
+        "Stored in registration_requests.",
+      ].join("\n"),
+    });
+    if (sendError) {
+      console.error("request-access: stored, but notification email failed", sendError);
+    }
+  } catch (err) {
+    console.error("request-access: stored, but notification email threw", err);
   }
 
   return NextResponse.json({ ok: true });
