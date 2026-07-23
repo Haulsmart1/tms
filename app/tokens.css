@@ -1,0 +1,19 @@
+/* TMS Wizzard design tokens, imported once from app/globals.css.
+   Light is the default; .dark is a scaffold for later (apply class on <html>). */
+:root {
+  --canvas: #F4F6F8;   --surface: #FFFFFF;   --surface-2: #F8FAFC;
+  --line: #E2E8F0;     --line-strong: #CBD5E1;
+  --ink: #0F172A;      --ink-2: #475569;     --ink-3: #64748B;   --ink-4: #94A3B8;
+  --primary: #2D54DE;  --primary-hover: #2444BE;  --primary-active: #21399A;
+  --primary-tint: #EEF4FF;  --primary-tint-border: #C5D6FD;  --primary-deep: #21399A;
+  --accent: #D97706;   --accent-text: #B45309;  --accent-tint: #FFFBEB;  --accent-border: #FDE68A;
+  --success: #15803D;  --success-strong: #166534;  --success-tint: #F0FDF4;  --success-border: #BBF7D0;
+  --warning: #B45309;  --warning-strong: #92400E;  --warning-tint: #FFFBEB;  --warning-border: #FDE68A;
+  --danger: #DC2626;   --danger-hover: #B91C1C;  --danger-strong: #991B1B;  --danger-tint: #FEF2F2;  --danger-border: #FECACA;
+  --focus: #2D54DE;
+  --shadow-xs: 0 1px 2px rgba(15,23,42,.05);
+  --shadow-sm: 0 1px 2px rgba(15,23,42,.05), 0 2px 8px -2px rgba(15,23,42,.08);
+  --shadow-md: 0 4px 16px -4px rgba(15,23,42,.12), 0 2px 4px -2px rgba(15,23,42,.06);
+  --shadow-lg: 0 16px 40px -8px rgba(15,23,42,.22);
+}
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

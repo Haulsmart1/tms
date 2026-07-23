@@ -1,0 +1,34 @@
+@import "./tokens.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Preflight is OFF (see tailwind.config.ts) so the global reset does not touch
+   the other ~15 pages. We instead scope the essential resets to the ".ds"
+   wrapper that the landing and /login apply to their root element. Without
+   this: `border` utilities render nothing (CSS default border-style is none),
+   content-box sizing overflows containers, native buttons/inputs ignore the
+   Plex font, and UA heading/paragraph margins drift the spacing. Scoped to
+   .ds, so the inline-styled existing pages are untouched. */
+@layer base {
+  .ds, .ds *, .ds ::before, .ds ::after {
+    box-sizing: border-box;
+    border-width: 0;
+    border-style: solid;
+    border-color: var(--line);
+  }
+  .ds h1, .ds h2, .ds h3, .ds h4, .ds p, .ds figure, .ds ul, .ds ol { margin: 0; }
+  .ds button, .ds [type="button"], .ds [type="submit"] {
+    -webkit-appearance: none;
+    appearance: none;
+    background-image: none;
+  }
+  .ds button, .ds input, .ds textarea, .ds select {
+    font-family: inherit;
+    font-size: 100%;
+    line-height: inherit;
+    color: inherit;
+  }
+  .ds button { cursor: pointer; }
+}
