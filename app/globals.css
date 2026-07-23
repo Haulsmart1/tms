@@ -9,8 +9,19 @@
    wrapper that the landing and /login apply to their root element. Without
    this: `border` utilities render nothing (CSS default border-style is none),
    content-box sizing overflows containers, native buttons/inputs ignore the
-   Plex font, and UA heading/paragraph margins drift the spacing. Scoped to
-   .ds, so the inline-styled existing pages are untouched. */
+   Plex font, and UA heading/paragraph margins drift the spacing.
+
+   SPECIFICITY, READ BEFORE EDITING: the element-name rules use :where() so
+   they contribute ZERO specificity. Real Preflight uses bare element selectors
+   at (0,0,1), which sit BELOW every utility. Prefixing them with `.ds` raises
+   them to (0,1,1), which beats utilities at (0,1,0), so the reset would
+   override the utilities it exists to support: `mt-*` on headings would stop
+   working, and `color: inherit` would beat `text-white` on the primary button,
+   dropping the CTA to about 1.9:1 contrast (a WCAG AA failure). :where() keeps
+   these below the utility layer, matching Preflight's behaviour.
+
+   The first rule deliberately does NOT use :where(): `.ds *` is (0,1,0), which
+   ties with `border` / `box-content` and correctly loses on source order. */
 @layer base {
   .ds, .ds *, .ds ::before, .ds ::after {
     box-sizing: border-box;
@@ -18,17 +29,17 @@
     border-style: solid;
     border-color: var(--line);
   }
-  .ds h1, .ds h2, .ds h3, .ds h4, .ds p, .ds figure, .ds ul, .ds ol { margin: 0; }
-  .ds button, .ds [type="button"], .ds [type="submit"] {
+  :where(.ds) :where(h1, h2, h3, h4, p, figure, ul, ol) { margin: 0; }
+  :where(.ds) :where(button, [type="button"], [type="submit"]) {
     -webkit-appearance: none;
     appearance: none;
     background-image: none;
   }
-  .ds button, .ds input, .ds textarea, .ds select {
+  :where(.ds) :where(button, input, textarea, select) {
     font-family: inherit;
     font-size: 100%;
     line-height: inherit;
     color: inherit;
   }
-  .ds button { cursor: pointer; }
+  :where(.ds) :where(button) { cursor: pointer; }
 }
