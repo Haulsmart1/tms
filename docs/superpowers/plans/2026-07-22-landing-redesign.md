@@ -87,7 +87,7 @@ import type { Config } from "tailwindcss";
    synthesise alpha from them. Opacity modifiers like bg-primary/10 or
    text-ink/60 compile to NOTHING, silently. Use a *-tint token instead. */
 const config: Config = {
-  content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
+  content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./lib/**/*.{ts,tsx}"],
   darkMode: "class",
   corePlugins: { preflight: false },
   theme: {
@@ -172,7 +172,16 @@ export default config;
 
 /* Dark scaffold from the handoff. Tune against real screens before shipping.
    Activated by putting class="dark" on <html> (darkMode: "class" in the
-   config). Present so the comment above describes real code. */
+   config).
+
+   INCOMPLETE, measured: this overrides 27 of the 37 tokens. NOT overridden:
+   --accent, --success, --warning, --danger, --danger-hover, --focus, and the
+   four --shadow-* values. Against this scaffold's own #111A2C surface,
+   --focus (#2D54DE) is 2.84:1 and --danger-hover (#B91C1C) is 2.69:1, both
+   below the 3:1 non-text minimum; --danger/--warning/--success sit near 3.5:1
+   so they are non-text only; the shadows stay navy and are invisible on the
+   #0B1220 canvas. --focus matters most because the focus ring is global and
+   reaches every page in the app. Fix these before enabling dark mode. */
 .dark {
   --canvas: #0B1220;   --surface: #111A2C;  --surface-2: #0E1626;
   --line: #223049;     --line-strong: #33435F;

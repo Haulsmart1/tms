@@ -11,7 +11,7 @@ import type { Config } from "tailwindcss";
    synthesise alpha from them. Opacity modifiers like bg-primary/10 or
    text-ink/60 compile to NOTHING, silently. Use a *-tint token instead. */
 const config: Config = {
-  content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
+  content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./lib/**/*.{ts,tsx}"],
   darkMode: "class",
   corePlugins: { preflight: false },
   theme: {
