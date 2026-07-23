@@ -1000,6 +1000,8 @@ git commit -m "feat: add landing nav, hero, and footer sections"
 > - Keep exactly ONE form-level `role="alert"` for the error summary. Per-field errors are now plain `<p>` elements referenced by `aria-describedby`, so they must not be given their own live regions.
 > - `<Field type="number">` will show native UA spin buttons; the `.ds` reset applies `appearance: none` to buttons, not inputs. Decide whether to suppress them.
 > - Use `wrapperClassName` (not `className`) when a field needs to span grid columns.
+> - **The form MUST include the honeypot field** the route expects. Add a visually hidden, non-focusable input named `companyWebsite`, `tabIndex={-1}`, `autoComplete="off"`, `aria-hidden="true"`, hidden with a positioning rule rather than `display:none` (some bots skip display:none). If it arrives non-empty the route silently returns 200 without emailing. Real users never see or fill it.
+> - The route is rate limited to 5 requests per IP per minute and returns 429. The form should surface that message rather than treating it as a generic failure.
 
 **Files:**
 - Create: `components/landing/FeatureGrid.tsx`, `components/landing/PricingCard.tsx`, `components/landing/RequestAccessForm.tsx`
