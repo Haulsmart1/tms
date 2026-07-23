@@ -18,7 +18,15 @@ const config: Config = {
      and it would vanish again if the class were ever applied dynamically or
      composed at runtime. That reset is load-bearing (borders, box-sizing,
      control font inheritance), so it must not depend on incidental string
-     detection. Safelisting guarantees it is always emitted. */
+     detection. Safelisting guarantees it is always emitted.
+
+     This literal must track the wrapper class name in app/globals.css. Rename
+     one without the other and the reset silently disappears again.
+
+     From Task 9 this becomes belt-and-braces, because the landing and /login
+     will carry class="ds" and the content scan will find it. Do not delete it
+     then: it is the insurance for the case where the class is composed at
+     runtime, which the scanner cannot see. */
   safelist: ["ds"],
   darkMode: "class",
   corePlugins: { preflight: false },
