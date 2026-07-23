@@ -77,17 +77,26 @@ module.exports = {
 import type { Config } from "tailwindcss";
 
 /* Classes map to the CSS variables in tokens.css, so a dark theme is a
-   variable swap, no class changes. Note: text-base is 14px by design.
+   variable swap, no class changes. Note: text-base is 14px by design, and
+   text-md (16px) is LARGER than text-base, so `text-md` is not a synonym for
+   the default. The scale is capped at 2xl; use arbitrary values above that.
    Preflight is OFF so the global reset does not touch the ~15 existing
-   inline-styled pages. Re-enable it during the future app-wide restyle. */
+   inline-styled pages. Re-enable it during the future app-wide restyle.
+
+   CONSTRAINT: the token colours are plain var() strings, so Tailwind cannot
+   synthesise alpha from them. Opacity modifiers like bg-primary/10 or
+   text-ink/60 compile to NOTHING, silently. Use a *-tint token instead. */
 const config: Config = {
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
   darkMode: "class",
   corePlugins: { preflight: false },
   theme: {
     fontFamily: {
-      sans: ["var(--font-sans)", "system-ui", "sans-serif"],
-      mono: ["var(--font-mono)", "ui-monospace", "SFMono-Regular", "monospace"],
+      // Fallback INSIDE var(): if --font-sans is ever undefined, the whole
+      // declaration is invalid at computed-value time and the listed
+      // fallbacks never run (the property inherits instead).
+      sans: ["var(--font-sans, system-ui)", "system-ui", "sans-serif"],
+      mono: ["var(--font-mono, ui-monospace)", "ui-monospace", "SFMono-Regular", "monospace"],
     },
     fontSize: {
       overline: ["11px", { lineHeight: "16px", letterSpacing: "0.06em", fontWeight: "600" }],
@@ -100,6 +109,10 @@ const config: Config = {
       "2xl": ["30px", "36px"],
     },
     boxShadow: {
+      // DEFAULT is required: this object REPLACES Tailwind's shadow scale
+      // rather than extending it, so without it a bare `shadow` (one of the
+      // most-typed classes) emits nothing at all, silently.
+      DEFAULT: "var(--shadow-sm)",
       xs: "var(--shadow-xs)", sm: "var(--shadow-sm)",
       md: "var(--shadow-md)", lg: "var(--shadow-lg)", none: "none",
     },
@@ -113,6 +126,10 @@ const config: Config = {
           DEFAULT: "var(--primary)", hover: "var(--primary-hover)",
           active: "var(--primary-active)", tint: "var(--primary-tint)",
           "tint-border": "var(--primary-tint-border)", deep: "var(--primary-deep)",
+          // Literal hex ramp from the handoff. WARNING: these are NOT themed.
+          // They will not change when the CSS variables swap for dark mode,
+          // and 50/200/600/700/800 duplicate token values above. Prefer the
+          // var()-backed keys (primary, primary-tint, primary-hover, ...).
           50: "#EEF4FF", 100: "#DFE9FE", 200: "#C5D6FD", 300: "#9DB8FB", 400: "#6C92F6",
           500: "#4470F0", 600: "#2D54DE", 700: "#2444BE", 800: "#21399A", 900: "#20337A", 950: "#16204A",
         },
@@ -152,6 +169,27 @@ export default config;
   --shadow-md: 0 4px 16px -4px rgba(15,23,42,.12), 0 2px 4px -2px rgba(15,23,42,.06);
   --shadow-lg: 0 16px 40px -8px rgba(15,23,42,.22);
 }
+
+/* Dark scaffold from the handoff. Tune against real screens before shipping.
+   Activated by putting class="dark" on <html> (darkMode: "class" in the
+   config). Present so the comment above describes real code. */
+.dark {
+  --canvas: #0B1220;   --surface: #111A2C;  --surface-2: #0E1626;
+  --line: #223049;     --line-strong: #33435F;
+  --ink: #E7ECF5;      --ink-2: #A6B3C9;    --ink-3: #7E8CA6;  --ink-4: #55637D;
+  --primary: #6C92F6;  --primary-hover: #86A6F8; --primary-active: #4470F0;
+  --primary-tint: #182448; --primary-tint-border: #2A3A6B; --primary-deep: #C5D6FD;
+  --accent-tint: #2A2110; --accent-border: #6B4E12; --accent-text: #F5B454;
+  --success-tint: #0E2418; --success-border: #1E4D32; --success-strong: #7ADFA4;
+  --warning-tint: #2A2110; --warning-border: #6B4E12; --warning-strong: #F5B454;
+  --danger-tint: #2C1516;  --danger-border: #5C2626; --danger-strong: #F09090;
+}
+
+/* Deliberately GLOBAL, not scoped to .ds. From Task 2, when globals.css is
+   imported into the root layout, this gives every focusable element on the
+   legacy pages a visible focus ring too. That is an accepted accessibility
+   improvement, and the handoff says never remove outlines without a
+   replacement. It is the one rule here that intentionally affects other pages. */
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 ```
 
@@ -171,8 +209,19 @@ export default config;
    wrapper that the landing and /login apply to their root element. Without
    this: `border` utilities render nothing (CSS default border-style is none),
    content-box sizing overflows containers, native buttons/inputs ignore the
-   Plex font, and UA heading/paragraph margins drift the spacing. Scoped to
-   .ds, so the inline-styled existing pages are untouched. */
+   Plex font, and UA heading/paragraph margins drift the spacing.
+
+   SPECIFICITY, READ BEFORE EDITING: the element-name rules use :where() so
+   they contribute ZERO specificity. Real Preflight uses bare element selectors
+   at (0,0,1), which sit BELOW every utility. Prefixing them with `.ds` raises
+   them to (0,1,1), which beats utilities at (0,1,0), so the reset would
+   override the utilities it exists to support: `mt-*` on headings would stop
+   working, and `color: inherit` would beat `text-white` on the primary button,
+   dropping the CTA to about 1.9:1 contrast (a WCAG AA failure). :where() keeps
+   these below the utility layer, matching Preflight's behaviour.
+
+   The first rule deliberately does NOT use :where(): `.ds *` is (0,1,0), which
+   ties with `border` / `box-content` and correctly loses on source order. */
 @layer base {
   .ds, .ds *, .ds ::before, .ds ::after {
     box-sizing: border-box;
@@ -180,19 +229,19 @@ export default config;
     border-style: solid;
     border-color: var(--line);
   }
-  .ds h1, .ds h2, .ds h3, .ds h4, .ds p, .ds figure, .ds ul, .ds ol { margin: 0; }
-  .ds button, .ds [type="button"], .ds [type="submit"] {
+  :where(.ds) :where(h1, h2, h3, h4, p, figure, ul, ol) { margin: 0; }
+  :where(.ds) :where(button, [type="button"], [type="submit"]) {
     -webkit-appearance: none;
     appearance: none;
     background-image: none;
   }
-  .ds button, .ds input, .ds textarea, .ds select {
+  :where(.ds) :where(button, input, textarea, select) {
     font-family: inherit;
     font-size: 100%;
     line-height: inherit;
     color: inherit;
   }
-  .ds button { cursor: pointer; }
+  :where(.ds) :where(button) { cursor: pointer; }
 }
 ```
 
