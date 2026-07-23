@@ -130,10 +130,45 @@ export async function POST(request: Request) {
     );
   }
 
-  /* Notification is BEST EFFORT from here on. The lead is safely stored, so a
-     mail failure must not fail the request or the visitor would resubmit and
-     create duplicates. Resend cannot deliver until a sending domain is verified
-     for the MAIL_FROM address, so this is expected to fail until that is done. */
+  /* Notification is BEST EFFORT from here on, across BOTH channels. The lead is
+     safely stored, so a notification failure must never fail the request or the
+     visitor would resubmit and create duplicates. `notified` tracks whether
+     ANY channel got through, so a stored-but-silent lead stays visible. */
+  let notified = false;
+
+  const lead = {
+    company_name: companyName,
+    contact_name: contactName,
+    email,
+    phone: phone ?? null,
+    vehicle_count: vehicles,
+    notes: notes ?? null,
+  };
+
+  /* n8n webhook. Self-hosted, so this is an internal hop rather than a third
+     party. Awaited with a short timeout rather than left dangling: an
+     un-awaited promise can be killed when the serverless response returns, and
+     an un-timed-out one could hang the visitor's request behind a slow VPS. */
+  const n8nUrl = process.env.N8N_WEBHOOK_URL;
+  if (n8nUrl) {
+    try {
+      const n8nSecret = process.env.N8N_WEBHOOK_SECRET;
+      const res = await fetch(n8nUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(n8nSecret ? { "x-webhook-secret": n8nSecret } : {}),
+        },
+        body: JSON.stringify({ type: "INSERT", table: "registration_requests", record: lead }),
+        signal: AbortSignal.timeout(3000),
+      });
+      if (res.ok) notified = true;
+      else console.error("request-access: n8n webhook returned", res.status);
+    } catch (err) {
+      console.error("request-access: n8n webhook failed or timed out", err);
+    }
+  }
+
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.MAIL_FROM;
   const to = process.env.LEAD_INBOX;
@@ -142,10 +177,12 @@ export async function POST(request: Request) {
      stored-but-unnotified lead is invisible until somebody opens
      /super-admin/requests, so it must not be reported as a plain success. */
   if (!apiKey || !from || !to) {
-    console.warn(
-      "request-access: LEAD STORED BUT NOBODY NOTIFIED. Email is not configured (RESEND_API_KEY / MAIL_FROM / LEAD_INBOX). Check /super-admin/requests.",
-    );
-    return NextResponse.json({ ok: true, notified: false });
+    if (!notified) {
+      console.warn(
+        "request-access: LEAD STORED BUT NOBODY NOTIFIED. No n8n webhook and email is not configured (RESEND_API_KEY / MAIL_FROM / LEAD_INBOX). Check /super-admin/requests.",
+      );
+    }
+    return NextResponse.json({ ok: true, notified });
   }
 
   try {
@@ -171,15 +208,23 @@ export async function POST(request: Request) {
     });
     if (sendError) {
       console.error(
-        "request-access: LEAD STORED BUT NOBODY NOTIFIED. Resend rejected the send (a sending domain must be verified for MAIL_FROM). Check /super-admin/requests.",
+        notified
+          ? "request-access: notified via n8n, but the Resend email failed (a sending domain must be verified for MAIL_FROM)."
+          : "request-access: LEAD STORED BUT NOBODY NOTIFIED. Resend rejected the send and no n8n webhook succeeded. Check /super-admin/requests.",
         sendError,
       );
-      return NextResponse.json({ ok: true, notified: false });
+      return NextResponse.json({ ok: true, notified });
     }
+    notified = true;
   } catch (err) {
-    console.error("request-access: LEAD STORED BUT NOBODY NOTIFIED. Send threw.", err);
-    return NextResponse.json({ ok: true, notified: false });
+    console.error(
+      notified
+        ? "request-access: notified via n8n, but the email send threw."
+        : "request-access: LEAD STORED BUT NOBODY NOTIFIED. Send threw and no n8n webhook succeeded.",
+      err,
+    );
+    return NextResponse.json({ ok: true, notified });
   }
 
-  return NextResponse.json({ ok: true, notified: true });
+  return NextResponse.json({ ok: true, notified });
 }

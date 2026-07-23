@@ -166,6 +166,42 @@ policy was dropped. See `lib/supabase/admin.ts` and
 session client so RLS does the real work. The layout's role guard is the first
 layer and the RLS policy is the second.
 
+**Notifying** happens on two independent best-effort channels, and `notified` in
+the response is true if EITHER got through:
+
+1. **n8n webhook** (self-hosted on the IONOS VPS), set via `N8N_WEBHOOK_URL`.
+   POSTs `{ type, table, record }` with the record in snake_case, matching the
+   database columns. Sends an `x-webhook-secret` header from `N8N_WEBHOOK_SECRET`.
+2. **Resend email**, which needs a verified sending domain and so is expected to
+   fail until that is done.
+
+Both are awaited with failure handling, and the n8n call has a 3 second timeout,
+so a slow or offline VPS cannot hang a visitor's submission. Verified: with the
+webhook down the route still returns `{ok: true, notified: false}` and the lead is
+still stored.
+
+### Setting up the n8n side
+
+1. Add a **Webhook** node, method POST, and copy its **production** URL into
+   `N8N_WEBHOOK_URL`. It must be **https**: this payload carries prospect names,
+   emails and phone numbers, so plain http would put personal data on the wire in
+   clear text. Put a reverse proxy with a certificate in front of n8n.
+2. Set `N8N_WEBHOOK_SECRET` to a long random string, and make the FIRST node after
+   the webhook an IF that rejects any request whose `x-webhook-secret` header does
+   not match. Without that check, anyone who learns the URL can inject fake leads
+   into your triage flow.
+3. **Turn down execution data retention.** n8n saves execution history including
+   full payloads by default, so prospect personal data would accumulate in n8n's
+   own database indefinitely. Set `EXECUTIONS_DATA_MAX_AGE` and
+   `EXECUTIONS_DATA_PRUNE`, or disable saving success payloads. This is the part
+   people forget, and it is the part that matters for GDPR.
+4. Lock the VPS firewall to the ports you actually need.
+
+Self-hosting keeps this inside your own infrastructure, so n8n is not a new data
+processor. That is a materially better GDPR position than a cloud automation
+service, and it is why the form's notice can promise not to sell or share the
+data for marketing.
+
 - `lib/validation/requestAccess.ts` is the Zod schema, covered by 7 Vitest tests.
 - The route returns **field-keyed 400s**, so the form renders each message under
   its own input.
