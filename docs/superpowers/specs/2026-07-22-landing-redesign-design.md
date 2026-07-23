@@ -67,7 +67,7 @@ Importing `globals.css` (which includes `@tailwind base`, i.e. Preflight) into t
 - `app/tokens.css`: from the handoff (`:root` light theme, `.dark` scaffold, global `:focus-visible` ring).
 - `tailwind.config.ts`: from the handoff, with `corePlugins.preflight = false` added; `content` globs cover `app/**` and `components/**`.
 - `postcss.config.js`: `tailwindcss` + `autoprefixer` (valid because we pinned v3).
-- `app/globals.css`: `@tailwind base/components/utilities;` then `@import "./tokens.css";` **after** the directives.
+- `app/globals.css`: `@import "./tokens.css";` **first**, then the `@tailwind base/components/utilities;` directives, then the scoped `.ds` base layer. The import must come first because CSS requires `@import` to precede all other rules; a late import is silently dropped by postcss-import, which would strip every design token from the compiled CSS. (The handoff README says to import after the directives. That is wrong and was caught in review.)
 - `app/layout.tsx`: import `globals.css`; load IBM Plex Sans + Mono via `next/font/google`, exposing `--font-sans` and `--font-mono` **as CSS variables on `<html>` without applying them to `<body>`**. **Do not change the body background or default font here** (that would hit other routes). The landing and `/login` opt into `font-sans` and `bg-canvas` on their own top-level wrapper.
 
 ### 4.4 Existing header

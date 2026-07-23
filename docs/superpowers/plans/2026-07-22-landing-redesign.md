@@ -155,14 +155,16 @@ export default config;
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 ```
 
-- [ ] **Step 5: Create `app/globals.css` (directives, then tokens)**
+- [ ] **Step 5: Create `app/globals.css` (tokens FIRST, then directives)**
+
+> **Ordering is load-bearing.** CSS requires `@import` to precede all other rules, so postcss-import silently DROPS a late `@import`. Putting `@import "./tokens.css"` after the `@tailwind` directives strips the entire `:root` token block from the compiled output, leaving every token-backed utility (`bg-canvas`, `text-ink`, `border-line`, the whole colour map) resolving against undefined variables. Verified by compiling both orderings: the tokens are present with the import first and absent with it last. The handoff README says "after the @tailwind directives"; the handoff README is wrong on this point.
 
 ```css
+@import "./tokens.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import "./tokens.css";
 
 /* Preflight is OFF (see tailwind.config.ts) so the global reset does not touch
    the other ~15 pages. We instead scope the essential resets to the ".ds"
