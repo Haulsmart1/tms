@@ -379,14 +379,29 @@ git commit -m "feat: load globals + Plex font variables in root layout (scoped)"
 
 - [ ] **Step 1: Create `lib/cn.ts`**
 
+> **Revised after review.** `className` passed last does NOT override a component's base classes: Tailwind resolves equal-specificity utilities by stylesheet order, not class-attribute order. Verified failing on `max-w-*` and `px-*`. Documented rather than papered over, because tailwind-merge's default config does not know this project's custom `text-overline` / `text-md` scale.
+
 ```ts
-/** Join truthy class names into one string. */
-export function cn(...classes: Array<string | false | null | undefined>): string {
-  return classes.filter(Boolean).join(" ");
+/**
+ * Join truthy class names into one string.
+ *
+ * IMPORTANT: this COMPOSES, it does not OVERRIDE. Tailwind resolves
+ * equal-specificity utilities by stylesheet order, not by the order they appear
+ * in the class attribute. So passing `className="max-w-3xl"` to a component
+ * whose base is `max-w-6xl` silently keeps max-w-6xl, and `px-0` against a base
+ * of `px-4` is likewise ignored. Both verified in a browser.
+ *
+ * Where a component genuinely needs an override, give it an explicit prop
+ * rather than relying on className.
+ */
+export function cn(...classes: Array<string | boolean | null | undefined>): string {
+  return classes.filter((c): c is string => typeof c === "string" && c.length > 0).join(" ");
 }
 ```
 
 - [ ] **Step 2: Create `components/Button.tsx`**
+
+> **Revised after review.** Three measured defects in the original: disabling the focused button on `loading` dropped keyboard focus to `<body>`; swapping children for "Please wait..." discarded the label and shrank the button ~14px mid-submit; and `disabled:opacity-60` rendered the label at 2.74:1. The revised version keeps children, keeps the button focusable while loading (consumers guard double-submit with `if (loading) return`), defaults `type="button"` so a later secondary action cannot silently submit a form, and exports `buttonClasses()` so links that look like buttons do not nest a `<button>` inside an `<a>` (invalid HTML). **See `components/Button.tsx` for the authoritative source.**
 
 ```tsx
 import type { ButtonHTMLAttributes } from "react";
@@ -491,7 +506,9 @@ git commit -m "feat: add cn helper, Button, and Badge primitives"
 
 - [ ] **Step 1: Create `components/Field.tsx`**
 
-Labelled input wired for AA: real `<label for>`, hint via `aria-describedby`, error via `role="alert"`.
+Labelled input wired for AA: real `<label for>`, hint via `aria-describedby`, error text referenced by `aria-describedby`.
+
+> **Revised after review (one Critical).** `border-line-strong` (#CBD5E1) measures **1.48:1** on white and fails WCAG 1.4.11, which needs 3:1; that border is the only thing identifying an empty input, and on the Task 8 `surface-2` form card the fill differentiation is 1.045:1. Changed to `border-ink-3` (#64748B, 4.76:1). Placeholder likewise moved from `ink-4` (2.56:1) to `ink-3`. Per-field `role="alert"` was demoted to a plain `<p>`: a form setting six errors at once would mount six assertive live regions that interrupt each other, so the form owns a single form-level alert instead. Added `wrapperClassName` so a consumer can reach the wrapping grid cell (e.g. `sm:col-span-2`). **See `components/Field.tsx` for the authoritative source.**
 
 ```tsx
 import type { InputHTMLAttributes, ReactNode } from "react";
@@ -776,6 +793,11 @@ git commit -m "feat: add request-access API route (Zod + Resend) + env example"
 
 ## Task 7: Landing sections part 1 (Nav, Hero, Footer)
 
+> **Carry-forward from the Task 3/4 review, apply while building these:**
+> - Links that look like buttons must use `buttonClasses(variant, size)` on the `<a>`/`<Link>` itself. Do NOT wrap `<Button>` inside an anchor: interactive content inside `<a>` is invalid HTML and double-stops in the accessibility tree.
+> - Bump the nav CTA from `size="sm"` (36px) to `size="md"` (40px), or add vertical padding to the nav row. It is the most-tapped element on the page and `sm` is the smallest target in the design.
+> - Badge borders are near-invisible against their own tint (1.16 to 1.32:1). Decorative only, so acceptable, but do not rely on them to define the pill edge.
+
 **Files:**
 - Create: `components/landing/LandingNav.tsx`, `components/landing/Hero.tsx`, `components/landing/Footer.tsx`
 
@@ -971,6 +993,13 @@ git commit -m "feat: add landing nav, hero, and footer sections"
 ---
 
 ## Task 8: Landing sections part 2 (FeatureGrid, PricingCard, RequestAccessForm)
+
+> **Carry-forward from the Task 3/4 review, apply while building these:**
+> - `Field` renders an `<input>`, so `<Field id="notes">` would give a 40px single-line box for free-text notes. Add a small `Textarea` sibling primitive for that field rather than accepting a one-line notes box.
+> - Guard double submission in the submit handler with `if (loading) return;`. `Button` deliberately stays focusable while loading, so it no longer blocks a second click itself.
+> - Keep exactly ONE form-level `role="alert"` for the error summary. Per-field errors are now plain `<p>` elements referenced by `aria-describedby`, so they must not be given their own live regions.
+> - `<Field type="number">` will show native UA spin buttons; the `.ds` reset applies `appearance: none` to buttons, not inputs. Decide whether to suppress them.
+> - Use `wrapperClassName` (not `className`) when a field needs to span grid columns.
 
 **Files:**
 - Create: `components/landing/FeatureGrid.tsx`, `components/landing/PricingCard.tsx`, `components/landing/RequestAccessForm.tsx`

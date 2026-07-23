@@ -1,6 +1,10 @@
 import type { ReactNode } from "react";
 import { cn } from "../lib/cn";
 
+/* Renders correctly ONLY inside a `.ds` wrapper. Preflight is disabled, so the
+   border here depends on the scoped reset in app/globals.css supplying
+   border-style: solid. Outside `.ds` the border disappears entirely. */
+
 type Tone = "info" | "success" | "warning" | "danger" | "neutral";
 
 const tones: Record<Tone, string> = {
