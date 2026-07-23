@@ -19,6 +19,29 @@
 
 alter table public.registration_requests enable row level security;
 
+-- FIRST: remove any pre-existing INSERT policy, whatever it is named.
+-- Enabling RLS does NOT remove policies that already exist, and a leftover
+-- permissive insert policy lets anyone with the public anon key POST straight
+-- to PostgREST and bypass the honeypot and rate limit. This was found live: an
+-- anon insert returned 201 even after the policies below were created.
+do $$
+declare pol record;
+begin
+  for pol in
+    select policyname from pg_policies
+    where schemaname = 'public'
+      and tablename  = 'registration_requests'
+      and cmd = 'INSERT'
+  loop
+    execute format('drop policy %I on public.registration_requests', pol.policyname);
+    raise notice 'dropped pre-existing insert policy: %', pol.policyname;
+  end loop;
+end $$;
+
+-- Remove the grant as well, so anon cannot even attempt a write. RLS already
+-- denies it; this is the second layer.
+revoke insert, update, delete on public.registration_requests from anon;
+
 -- Reads: super admins only.
 drop policy if exists "super admins read registration requests"
   on public.registration_requests;
