@@ -28,7 +28,10 @@ export async function GET(request: NextRequest) {
   const next = safeNextPath(url.searchParams.get("next"), url.origin);
 
   if (!tokenHash && !code) {
-    return NextResponse.redirect(new URL("/?error=missing_code", url.origin));
+    // Errors go to /login, not /. The landing page no longer carries a sign-in
+    // form, so redirecting failures there would leave the user with no way to
+    // request a fresh link.
+    return NextResponse.redirect(new URL("/login?error=missing_code", url.origin));
   }
 
   const response = NextResponse.redirect(new URL(next, url.origin));
@@ -56,7 +59,7 @@ export async function GET(request: NextRequest) {
 
   if (error) {
     console.error("magic link verification failed", error.message);
-    return NextResponse.redirect(new URL("/?error=auth", url.origin));
+    return NextResponse.redirect(new URL("/login?error=auth", url.origin));
   }
 
   return response;
