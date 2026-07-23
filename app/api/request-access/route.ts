@@ -154,7 +154,10 @@ export async function POST(request: Request) {
       from,
       to,
       replyTo: email,
-      subject: `New access request: ${companyName}`,
+      // Strip CR/LF: a subject line is a mail header, and newlines in
+      // user-controlled header content are a header-injection vector. The
+      // schema also caps the length, this is the second layer.
+      subject: `New access request: ${companyName.replace(/[\r\n]+/g, " ").slice(0, 200)}`,
       text: [
         `Company: ${companyName}`,
         `Contact: ${contactName}`,

@@ -31,7 +31,10 @@ begin
     select policyname from pg_policies
     where schemaname = 'public'
       and tablename  = 'registration_requests'
-      and cmd = 'INSERT'
+      -- 'ALL' matters as much as 'INSERT': a FOR ALL policy grants insert too,
+      -- and matching only 'INSERT' would leave the exact hole this exists to
+      -- close, while appearing to have worked.
+      and cmd in ('INSERT', 'ALL')
   loop
     execute format('drop policy %I on public.registration_requests', pol.policyname);
     raise notice 'dropped pre-existing insert policy: %', pol.policyname;

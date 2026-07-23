@@ -183,6 +183,15 @@ export default function RequestAccessForm() {
             <Button type="submit" size="lg" loading={loading}>
               Request access
             </Button>
+
+            {/* Notice at the point of collection. This form gathers names,
+                emails and phone numbers of UK and EU prospects, so GDPR
+                applies and the visitor should be told what happens to them
+                before they submit, not buried in a policy page. */}
+            <p className="text-xs text-ink-2">
+              We use these details only to contact you about TMS Wizzard. We will not share
+              them with anyone else, and you can ask us to delete them at any time.
+            </p>
           </form>
         )}
       </Container>

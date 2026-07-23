@@ -693,7 +693,9 @@ git commit -m "feat: add request-access Zod schema with vitest coverage"
 
 ---
 
-## Task 6: `/api/request-access` route (Resend)
+## Task 6: `/api/request-access` route (Supabase + Resend)
+
+> **The code block below is SUPERSEDED. `app/api/request-access/route.ts` is the authoritative source.** What actually shipped differs substantially: it stores the lead in the Supabase `registration_requests` table via the SERVICE ROLE key first (the database is the system of record, not the email), then attempts the Resend notification as best-effort, returning `{ ok, notified }`. It also carries a honeypot field and a per-IP rate limiter keyed on platform-set headers. Task 12's Resend acceptance bullet is likewise superseded: with `RESEND_API_KEY` unset a submit still returns `{ok:true, notified:false}` and shows the confirmation panel, logging "LEAD STORED BUT NOBODY NOTIFIED". The 500 path is now reached only when `SUPABASE_SERVICE_ROLE_KEY` is missing or the insert fails. See `docs/landing-redesign-guide.md` for the current architecture.
 
 **Files:**
 - Create: `app/api/request-access/route.ts`

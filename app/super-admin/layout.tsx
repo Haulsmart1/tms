@@ -14,7 +14,9 @@ export default async function SuperAdminLayout({
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect("/");
+    // /login, not /. The landing page no longer carries a sign-in form, so
+    // sending a logged-out user there strands them with no way back in.
+    redirect("/login");
   }
 
   const { data: profile } = await supabase

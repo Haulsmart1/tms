@@ -13,8 +13,8 @@ type Row = {
 
 const rows: Row[] = [
   { ref: "TMS-2381", customer: "ADR Carriers", tone: "info", status: "In transit", value: "£12,480" },
-  { ref: "TMS-2380", customer: "Northgate Ltd", tone: "success", status: "Delivered", value: "£3,940" },
-  { ref: "TMS-2379", customer: "Baxter Freight", tone: "warning", status: "Awaiting POD", value: "£1,220" },
+  { ref: "TMS-2380", customer: "Example Freight", tone: "success", status: "Delivered", value: "£3,940" },
+  { ref: "TMS-2379", customer: "Sample Logistics", tone: "warning", status: "Awaiting POD", value: "£1,220" },
 ];
 
 /* The hero shows the real product rather than a photograph. The design system
@@ -25,10 +25,14 @@ function ProductMock() {
     <div
       className="overflow-hidden rounded-lg border border-line-strong bg-surface shadow-lg"
       role="img"
-      aria-label="The TMS Wizzard jobs dashboard, showing three transport jobs with their status and value."
+      aria-label="Illustrative screenshot of the TMS Wizzard jobs dashboard, showing three example transport jobs with their status and value."
     >
-      <div className="border-b border-line bg-surface-2 px-4 py-3 text-sm font-semibold text-ink">
-        Jobs, today
+      <div className="flex items-center justify-between border-b border-line bg-surface-2 px-4 py-3">
+        <span className="text-sm font-semibold text-ink">Jobs, today</span>
+        {/* Labelled explicitly: these are illustrative rows with invented
+            values, shown on a public marketing page. Presenting fabricated
+            figures as a real customer dashboard would be misleading. */}
+        <span className="text-overline uppercase text-ink-2">Example data</span>
       </div>
       {/* aria-hidden: the whole mock is already described by the role="img"
           label above, so the table should not be re-read cell by cell. */}

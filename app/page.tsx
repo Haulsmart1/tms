@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Script from "next/script";
 import LandingNav from "../components/landing/LandingNav";
 import Hero from "../components/landing/Hero";
 import FeatureGrid from "../components/landing/FeatureGrid";
@@ -49,8 +48,13 @@ export const metadata: Metadata = {
 export default function HomePage() {
   return (
     <div className="ds min-h-screen bg-canvas font-sans text-ink">
-      <Script
-        id="tmswizzard-ld-json"
+      {/* A PLAIN script tag, not next/script. next/script defaults to
+          afterInteractive and injects client-side, so the structured data was
+          absent from the server-rendered HTML entirely and no crawler ever saw
+          it. Verified: 0 occurrences of type="application/ld+json" in the
+          served HTML before this change. Structured data must be server
+          rendered, which for a server component means a plain <script>. */}
+      <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
           __html: JSON.stringify({
