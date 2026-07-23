@@ -12,6 +12,14 @@ import type { Config } from "tailwindcss";
    text-ink/60 compile to NOTHING, silently. Use a *-tint token instead. */
 const config: Config = {
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./lib/**/*.{ts,tsx}"],
+  /* The .ds reset in globals.css sits in @layer base, which Tailwind
+     tree-shakes against the content scan like any other layer. With no page
+     carrying class="ds" the ENTIRE reset is stripped from the compiled output,
+     and it would vanish again if the class were ever applied dynamically or
+     composed at runtime. That reset is load-bearing (borders, box-sizing,
+     control font inheritance), so it must not depend on incidental string
+     detection. Safelisting guarantees it is always emitted. */
+  safelist: ["ds"],
   darkMode: "class",
   corePlugins: { preflight: false },
   theme: {
