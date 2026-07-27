@@ -136,36 +136,66 @@ export async function POST(request: Request) {
      ANY channel got through, so a stored-but-silent lead stays visible. */
   let notified = false;
 
-  const lead = {
-    company_name: companyName,
-    contact_name: contactName,
-    email,
-    phone: phone ?? null,
-    vehicle_count: vehicles,
-    notes: notes ?? null,
-  };
+  /* Microsoft Teams notification, via a Power Automate ("Workflows") flow whose
+     trigger URL we POST to. That URL is a capability secret: possession alone
+     authorises the post, exactly like a Slack webhook, so it lives in an env var
+     and must never reach the client bundle (no NEXT_PUBLIC_ prefix).
 
-  /* n8n webhook. Self-hosted, so this is an internal hop rather than a third
-     party. Awaited with a short timeout rather than left dangling: an
-     un-awaited promise can be killed when the serverless response returns, and
-     an un-timed-out one could hang the visitor's request behind a slow VPS. */
-  const n8nUrl = process.env.N8N_WEBHOOK_URL;
-  if (n8nUrl) {
+     Awaited with a short timeout rather than left dangling: an un-awaited promise
+     can be killed when the serverless response returns, and an un-timed-out one
+     could hang the visitor's request behind a slow upstream.
+
+     The flow's "post card" action parses the request body DIRECTLY as an Adaptive
+     Card (AdaptiveCard.FromJson), so the body must BE a card object whose top
+     `type` is "AdaptiveCard"; flat JSON makes the flow throw. Field values sit in
+     a FactSet as plain text, and JSON.stringify escapes quotes and newlines, so a
+     prospect's input cannot break out of the card structure. The trigger answers
+     202 Accepted, which res.ok covers. */
+  const teamsUrl = process.env.TEAMS_WEBHOOK_URL;
+  if (teamsUrl) {
     try {
-      const n8nSecret = process.env.N8N_WEBHOOK_SECRET;
-      const res = await fetch(n8nUrl, {
+      const card = {
+        $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+        type: "AdaptiveCard",
+        version: "1.4",
+        body: [
+          {
+            type: "TextBlock",
+            text: "New access request",
+            weight: "Bolder",
+            size: "Large",
+            wrap: true,
+          },
+          {
+            type: "FactSet",
+            facts: [
+              { title: "Company", value: companyName },
+              { title: "Contact", value: contactName },
+              { title: "Email", value: email },
+              { title: "Phone", value: phone ?? "-" },
+              { title: "Vehicles", value: String(vehicles) },
+              { title: "Notes", value: notes ?? "-" },
+            ],
+          },
+          {
+            type: "TextBlock",
+            text: "Stored in registration_requests.",
+            size: "Small",
+            isSubtle: true,
+            wrap: true,
+          },
+        ],
+      };
+      const res = await fetch(teamsUrl, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(n8nSecret ? { "x-webhook-secret": n8nSecret } : {}),
-        },
-        body: JSON.stringify({ type: "INSERT", table: "registration_requests", record: lead }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(card),
         signal: AbortSignal.timeout(3000),
       });
       if (res.ok) notified = true;
-      else console.error("request-access: n8n webhook returned", res.status);
+      else console.error("request-access: Teams webhook returned", res.status);
     } catch (err) {
-      console.error("request-access: n8n webhook failed or timed out", err);
+      console.error("request-access: Teams webhook failed or timed out", err);
     }
   }
 
@@ -179,7 +209,7 @@ export async function POST(request: Request) {
   if (!apiKey || !from || !to) {
     if (!notified) {
       console.warn(
-        "request-access: LEAD STORED BUT NOBODY NOTIFIED. No n8n webhook and email is not configured (RESEND_API_KEY / MAIL_FROM / LEAD_INBOX). Check /super-admin/requests.",
+        "request-access: LEAD STORED BUT NOBODY NOTIFIED. No Teams webhook succeeded and email is not configured (RESEND_API_KEY / MAIL_FROM / LEAD_INBOX). Check /super-admin/requests.",
       );
     }
     return NextResponse.json({ ok: true, notified });
@@ -209,8 +239,8 @@ export async function POST(request: Request) {
     if (sendError) {
       console.error(
         notified
-          ? "request-access: notified via n8n, but the Resend email failed (a sending domain must be verified for MAIL_FROM)."
-          : "request-access: LEAD STORED BUT NOBODY NOTIFIED. Resend rejected the send and no n8n webhook succeeded. Check /super-admin/requests.",
+          ? "request-access: notified via Teams, but the Resend email failed (a sending domain must be verified for MAIL_FROM)."
+          : "request-access: LEAD STORED BUT NOBODY NOTIFIED. Resend rejected the send and no Teams webhook succeeded. Check /super-admin/requests.",
         sendError,
       );
       return NextResponse.json({ ok: true, notified });
@@ -219,8 +249,8 @@ export async function POST(request: Request) {
   } catch (err) {
     console.error(
       notified
-        ? "request-access: notified via n8n, but the email send threw."
-        : "request-access: LEAD STORED BUT NOBODY NOTIFIED. Send threw and no n8n webhook succeeded.",
+        ? "request-access: notified via Teams, but the email send threw."
+        : "request-access: LEAD STORED BUT NOBODY NOTIFIED. Send threw and no Teams webhook succeeded.",
       err,
     );
     return NextResponse.json({ ok: true, notified });
