@@ -11,7 +11,7 @@
 **Execution model (read first):** These scripts are committed to the repo, but take effect only when **Ethan runs them in the Supabase SQL editor**. Every migration is safe to re-run. The corrected `profiles` escalation guard (`docs/sql/profiles_privileged_columns_guard.sql`, now INSERT+UPDATE) is a prerequisite and must be applied first.
 
 **Apply order (matters):** `company_profiles` and the fleet become admin-write, so an admin must exist before those policies land or company-settings saving and roster edits lock to super_admin. Run:
-Task 1 (add column) → **Task 7 steps 1-2 (reseed tenants + assign admin roles)** → Task 2 (helpers) → Task 3 (re-key) → Task 4 (identity) → Task 4b (vehicles) → Task 5 (revokes) → Task 6 (verify) → Task 7 steps 3+ (NOT NULL, cleanup).
+`rls_01` (add column) → **`rls_01b` (reseed: companies, tenants, profiles.tenant_id, admin roles)** → `rls_02` (helpers) → `rls_03` (re-key) → `rls_04` (identity) → `rls_04b` (vehicles) → `rls_05` (revokes) → `rls_09` (verify) → then the optional NOT NULL / data cleanup.
 
 **Incorporates the adversarial review (F1-F9):** enumerate-and-drop instead of drop-by-name (F5); `tenants` read-only (F1); reads/writes split so system tables are not client-writable (F2); `profiles`/`company_profiles`/`companies` stacks consolidated in Phase 1, not deferred (F5); table coverage enumerated not assumed (F4); `asset_types` left locked rather than blindly opened (F6); stray `TRUNCATE`/write grants revoked (F8); harness expanded to insert/delete/closed-write probes and a policy-count assertion (F7); `roles` readability documented as non-security (F9).
 
@@ -598,7 +598,7 @@ git add docs/sql/rls_09_verify.sql && git commit -m "RLS: expanded verification 
 
 ## Task 7: Data reseed and role assignment (operational, test data)
 
-Throwaway test data, so a reset rather than a migration. **Steps 1-2 run EARLY, before the write-closing Tasks 3-5** (see the apply order up top), so an admin exists per company when the admin-write policies land.
+Throwaway test data, so a reset rather than a migration. **Runs EARLY, before the write-closing Tasks 3-5** (see the apply order up top), so an admin exists per company when the admin-write policies land. **Concrete, idempotent SQL: `docs/sql/rls_01b_reseed.sql`** (ensures `companies` rows, creates one `tenants` row per company, points each user at their tenant, and makes each company's sole user its admin). The steps below are the reasoning; the file is what you run.
 
 - [ ] **Step 1:** For each of the 7 companies, create a `tenants` row (fresh `id`, `company_id` set). Run as postgres/service role (Tasks 3-5 closed API writes to `tenants`).
 - [ ] **Step 2:** Set each real user's `profiles.tenant_id` to their company's tenant; set the director's `profiles.role_id` to `admin`. Run as postgres (the guard trigger permits it).

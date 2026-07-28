@@ -1,5 +1,15 @@
 -- RLS Tenancy Hardening (Phase 1) -- 09: verification harness. Each block rolls back.
 -- Run after 01..05 (and the reseed). Any deviation from the expected result blocks sign-off.
+--
+-- IMPORTANT ON TEST USERS: after the reseed (01b) every company user is an ADMIN and the
+-- 8th is super_admin, so there is no null-role "staff" account. The STAFF-restriction probes
+-- (6b, 8, 9, 10a, 10b) only mean something as a null-role user, so first create one:
+--     -- as postgres in the SQL editor:
+--     -- pick a company tenant, create an auth user for it, insert a null-role profile:
+--     --   insert into public.profiles (id, tenant_id) values ('<staff-auth-uid>', '<that-tenant>');
+--     -- ensure a vehicle/job exists in that tenant for probes 9/10.
+-- Then substitute below: '005e1811-...'-> the staff uid, '2f7cc0dc-...'-> their tenant.
+-- Probe 3 keeps the real super_admin id (362aa5fd-...). Probes 1-5,7 hold for any non-admin.
 
 -- 1. Anon sees nothing.
 begin; set local role anon;
