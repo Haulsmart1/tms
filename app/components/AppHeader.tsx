@@ -71,7 +71,11 @@ export default function AppHeader() {
     };
   }, [pathname]);
 
-  if (pathname === "/" || pathname.startsWith("/super-admin")) {
+  if (
+    pathname === "/" ||
+    pathname === "/login" ||
+    pathname.startsWith("/super-admin")
+  ) {
     return null;
   }
 
