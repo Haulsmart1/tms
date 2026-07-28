@@ -155,9 +155,15 @@ do $$ begin
 end $$;
 
 -- P12: system secrets (integration_connections) not readable via the API, even by an admin.
+-- The SELECT grant is revoked, so this errors "permission denied" (caught = PASS); if the
+-- grant were present, RLS with no policy would instead return 0 rows (also PASS).
 do $$ declare n int; begin
   perform set_config('role','authenticated',true);
   perform set_config('request.jwt.claims', json_build_object('sub', current_setting('t.admin',true), 'role','authenticated')::text, true);
-  select count(*) into n from public.integration_connections;
-  raise notice 'P12 admin integration_connections read = %  (PASS if 0)', n;
+  begin
+    select count(*) into n from public.integration_connections;
+    raise notice 'P12 integration_connections read = % row(s)  (PASS if 0)', n;
+  exception
+    when insufficient_privilege then raise notice 'P12 integration_connections read = PASS (denied: no SELECT grant)';
+  end;
 end $$;
