@@ -135,21 +135,26 @@ tables below excluded from the loop and handled explicitly.
 
 **Special tables:**
 - **profiles:** self-visible, plus admins see profiles in their company, plus
-  super_admin sees all. Writes stay guarded (the trigger) and closed to self-service
-  for privileged columns. Policy-stack consolidation is Phase 2; Phase 1 leaves the
-  working set in place.
-- **company_profiles:** already correctly isolated by company (`tenant_id`-as-company
-  = `get_my_company_id()`, with a super_admin branch), and read/written by the
-  company-settings page. Leave functionally as-is; consolidate the 9 overlapping
-  policies in Phase 2.
+  super_admin sees all. Writes stay guarded (the INSERT+UPDATE trigger) and closed to
+  self-service for privileged columns; no INSERT/DELETE policy for authenticated. The
+  policy stack is consolidated in Phase 1 (per the adversarial review).
+- **company_profiles:** read by any company member (`tenant_id`-as-company =
+  `get_my_company_id()`) or super_admin; insert/update by that company's **admin** or
+  super_admin (company settings are an admin action). The 9 overlapping policies are
+  consolidated to one per command in Phase 1.
+- **vehicles / drivers (the fleet):** admin-write. Staff read via `can_access_tenant`;
+  only an admin or super_admin does roster writes via `can_manage_tenant`. `vehicles`
+  additionally lets staff toggle operational status (`active` = VOR) via a column-guard
+  trigger. See the plan's Task 4b.
 - **tenants:** after adding `company_id`, policy = own tenant (`id = get_my_tenant_id()`)
   OR admin's company (`company_id = get_my_company_id()`) OR super_admin. Writes
   service-role only.
 - **companies:** own company OR super_admin (keep existing `companies_select` shape).
 - **roles:** read-only lookup for authenticated (keep the existing `SELECT true`); no
   write policy, so writes are denied.
-- **asset_types:** currently RLS-locked with no policy, so the app cannot read it. Add
-  a read policy for authenticated (`SELECT true`, like roles) if it is a global lookup.
+- **asset_types:** RLS-locked with no policy; the app does not read it, so it is left
+  locked (opening it blindly could leak per-tenant rows). Add a scoped policy only if a
+  real need appears.
 - **user_permissions:** RLS-locked with no policy and unused by the app. Leave locked
   (it gates nothing today). Give it a real policy only when the permissions feature is
   actually built.
