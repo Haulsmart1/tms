@@ -11,10 +11,11 @@ declare
     'profiles','company_profiles','companies','tenants','roles',
     'user_permissions','memberships','registration_requests','asset_types','users',
     'ai_signals','paper_trade_logs','portfolio_history',
-    'vehicles'  -- handled in 04b: admin roster + staff status-only carve-out
+    'vehicles',  -- handled in 04b: admin roster + staff status-only carve-out
+    'integration_connections'  -- service-role only (OAuth tokens); locked in rls_06
   ];
   writes_closed text[] := array[
-    'audit_logs','integration_connections','accounting_exports','billing',
+    'audit_logs','accounting_exports','billing',
     'subscriptions','rate_cards','vehicle_subscription_usage',
     'telematics_devices','telematics_events','telematics_fuel','telematics_positions',
     'telematics_trips','gps_events','vehicle_locations',
@@ -77,5 +78,5 @@ where schemaname = 'public'
   and tablename not in (
     'profiles','company_profiles','companies','tenants','roles',
     'user_permissions','memberships','registration_requests','asset_types','users',
-    'ai_signals','paper_trade_logs','portfolio_history','vehicles')
+    'ai_signals','paper_trade_logs','portfolio_history','vehicles','integration_connections')
   and policyname not in ('tenant_access','tenant_read','admin_all');

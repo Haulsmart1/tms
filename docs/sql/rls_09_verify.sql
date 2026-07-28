@@ -153,3 +153,11 @@ do $$ begin
     when sqlstate 'ROLLB' then null;
   end;
 end $$;
+
+-- P12: system secrets (integration_connections) not readable via the API, even by an admin.
+do $$ declare n int; begin
+  perform set_config('role','authenticated',true);
+  perform set_config('request.jwt.claims', json_build_object('sub', current_setting('t.admin',true), 'role','authenticated')::text, true);
+  select count(*) into n from public.integration_connections;
+  raise notice 'P12 admin integration_connections read = %  (PASS if 0)', n;
+end $$;
