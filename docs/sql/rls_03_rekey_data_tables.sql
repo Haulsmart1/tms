@@ -16,13 +16,15 @@ declare
   ];
   writes_closed text[] := array[
     'audit_logs','accounting_exports','billing',
-    'subscriptions','rate_cards','vehicle_subscription_usage',
-    'telematics_devices','telematics_events','telematics_fuel','telematics_positions',
+    'rate_cards','vehicle_subscription_usage',
+    'telematics_events','telematics_fuel','telematics_positions',
     'telematics_trips','gps_events','vehicle_locations',
     'tachograph_downloads','tachograph_infringements','driver_activity_logs',
     'driver_daily_summary','driver_wtd_weeks'
   ];
-  admin_write text[] := array['drivers'];
+  admin_write text[] := array['drivers','driver_work_rules'];
+  -- Admin read only (system-owned identifiers, e.g. Stripe ids, IMEI/SIM): staff cannot read.
+  admin_read text[] := array['subscriptions','telematics_devices'];
 begin
   for t in
     select c.relname as table_name
@@ -53,6 +55,10 @@ begin
         'create policy admin_all on public.%I for all to authenticated '
         'using (public.can_manage_tenant(tenant_id)) '
         'with check (public.can_manage_tenant(tenant_id))', t.table_name);
+    elsif t.table_name = any(admin_read) then
+      execute format(
+        'create policy admin_read on public.%I for select to authenticated '
+        'using (public.can_manage_tenant(tenant_id))', t.table_name);
     else
       execute format(
         'create policy tenant_access on public.%I for all to authenticated '
@@ -63,6 +69,7 @@ begin
       case
         when t.table_name = any(writes_closed) then 'read-only'
         when t.table_name = any(admin_write) then 'staff-read / admin-write'
+        when t.table_name = any(admin_read) then 'admin-read'
         else 'read+write'
       end;
   end loop;
@@ -79,4 +86,4 @@ where schemaname = 'public'
     'profiles','company_profiles','companies','tenants','roles',
     'user_permissions','memberships','registration_requests','asset_types','users',
     'ai_signals','paper_trade_logs','portfolio_history','vehicles','integration_connections')
-  and policyname not in ('tenant_access','tenant_read','admin_all');
+  and policyname not in ('tenant_access','tenant_read','admin_all','admin_read');
