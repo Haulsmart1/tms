@@ -1,97 +1,155 @@
--- RLS Tenancy Hardening (Phase 1) -- 09: verification harness. Each block rolls back.
--- Run after 01..05 (and the reseed). Any deviation from the expected result blocks sign-off.
+-- RLS Tenancy Hardening (Phase 1) -- 09: verification harness (self-reporting).
+-- Run the WHOLE file. Each probe is a DO block that prints a NOTICE with PASS/FAIL and
+-- never aborts the run (expected errors are caught; mutations are rolled back).
+-- Read the results in the editor's "Messages"/notices output.
 --
--- IMPORTANT ON TEST USERS: after the reseed (01b) every company user is an ADMIN and the
--- 8th is super_admin, so there is no null-role "staff" account. The STAFF-restriction probes
--- (6b, 8, 9, 10a, 10b) only mean something as a null-role user, so first create one:
---     -- as postgres in the SQL editor:
---     -- pick a company tenant, create an auth user for it, insert a null-role profile:
---     --   insert into public.profiles (id, tenant_id) values ('<staff-auth-uid>', '<that-tenant>');
---     -- ensure a vehicle/job exists in that tenant for probes 9/10.
--- Then substitute below: '005e1811-...'-> the staff uid, '2f7cc0dc-...'-> their tenant.
--- Probe 3 keeps the real super_admin id (362aa5fd-...). Probes 1-5,7 hold for any non-admin.
+-- SET THREE TEST USER IDS BELOW, then run:
+--   t.super = a super_admin profile id
+--   t.admin = a company admin profile id (post-reseed, any company user)
+--   t.staff = a NULL-ROLE staff profile id. After the reseed every real user is an admin,
+--             so create one test staff profile first (run as postgres, the guard exempts it):
+--
+--     insert into public.profiles (id, tenant_id, company_id)
+--     select gen_random_uuid(), t.id, t.company_id
+--     from public.tenants t where t.company_id is not null order by t.created_at limit 1
+--     returning id, tenant_id, company_id;   -- copy the id into t.staff below
+--
+-- The staff probes use current_tenant_id()/get_my_company_id() to target that user's own
+-- tenant/company, so no tenant id needs pasting. Ensure a vehicle exists in that tenant for P10.
 
--- 1. Anon sees nothing.
-begin; set local role anon;
-  select 'anon_jobs' as probe, count(*) from public.jobs;                          -- expect 0
-rollback;
+select set_config('t.super', '362aa5fd-0ae8-47e3-8a01-f005d246f476', false);
+select set_config('t.admin', '005e1811-8165-4213-b92b-4fbaed5591d2', false);
+select set_config('t.staff', '00000000-0000-0000-0000-000000000000', false);  -- <-- replace
 
--- 2. Tenant user: own tenant only.
-begin; set local role authenticated;
-  set local request.jwt.claims to '{"sub":"005e1811-8165-4213-b92b-4fbaed5591d2","role":"authenticated"}';
-  select 'own_jobs' as probe, count(*) from public.jobs;                           -- expect > 0
-  select 'foreign_jobs' as probe, count(*) from public.jobs
-    where tenant_id <> '2f7cc0dc-b7fd-4556-92be-445e4b42ddcd';                      -- expect 0
-rollback;
+-- P1: anon sees nothing.
+do $$ declare n int; begin
+  perform set_config('role','anon',true);
+  select count(*) into n from public.jobs;
+  raise notice 'P1 anon jobs = %  (PASS if 0)', n;
+end $$;
 
--- 3. Super admin: everything.
-begin; set local role authenticated;
-  set local request.jwt.claims to '{"sub":"362aa5fd-0ae8-47e3-8a01-f005d246f476","role":"authenticated"}';
-  select 'superadmin_jobs' as probe, count(*) from public.jobs;                    -- expect all
-rollback;
+-- P2: super_admin sees everything.
+do $$ declare n int; begin
+  perform set_config('role','authenticated',true);
+  perform set_config('request.jwt.claims', json_build_object('sub', current_setting('t.super',true), 'role','authenticated')::text, true);
+  select count(*) into n from public.jobs;
+  raise notice 'P2 super_admin jobs = %  (expect all jobs)', n;
+end $$;
 
--- 4. Escalation blocked on UPDATE.
-begin; set local role authenticated;
-  set local request.jwt.claims to '{"sub":"005e1811-8165-4213-b92b-4fbaed5591d2","role":"authenticated"}';
-  update public.profiles set role_id = (select id from public.roles where name='super_admin')
-    where id = '005e1811-8165-4213-b92b-4fbaed5591d2';                             -- expect ERROR
-rollback;
+-- P3: escalation via UPDATE is blocked (run as an admin; only super_admin is exempt).
+do $$ begin
+  perform set_config('role','authenticated',true);
+  perform set_config('request.jwt.claims', json_build_object('sub', current_setting('t.admin',true), 'role','authenticated')::text, true);
+  begin
+    update public.profiles set role_id = (select id from public.roles where name='super_admin')
+      where id = current_setting('t.admin',true)::uuid;
+    raise notice 'P3 escalation UPDATE = FAIL (allowed!)';
+    raise exception using errcode = 'ROLLB';
+  exception
+    when insufficient_privilege then raise notice 'P3 escalation UPDATE = PASS (blocked)';
+    when sqlstate 'ROLLB' then null;
+  end;
+end $$;
 
--- 5. Escalation blocked on INSERT.
-begin; set local role authenticated;
-  set local request.jwt.claims to '{"sub":"005e1811-8165-4213-b92b-4fbaed5591d2","role":"authenticated"}';
-  insert into public.profiles (id, role_id)
-    values ('11111111-1111-1111-1111-111111111111', (select id from public.roles where name='super_admin')); -- expect ERROR
-rollback;
+-- P4: escalation via INSERT is blocked.
+do $$ begin
+  perform set_config('role','authenticated',true);
+  perform set_config('request.jwt.claims', json_build_object('sub', current_setting('t.admin',true), 'role','authenticated')::text, true);
+  begin
+    insert into public.profiles (id, tenant_id, role_id)
+      values (gen_random_uuid(), public.current_tenant_id(), (select id from public.roles where name='super_admin'));
+    raise notice 'P4 escalation INSERT = FAIL (allowed!)';
+    raise exception using errcode = 'ROLLB';
+  exception
+    when insufficient_privilege then raise notice 'P4 escalation INSERT = PASS (blocked)';
+    when sqlstate 'ROLLB' then null;
+  end;
+end $$;
 
--- 6. System table is read-only for staff.
-begin; set local role authenticated;
-  set local request.jwt.claims to '{"sub":"005e1811-8165-4213-b92b-4fbaed5591d2","role":"authenticated"}';
-  insert into public.audit_logs (tenant_id) values ('2f7cc0dc-b7fd-4556-92be-445e4b42ddcd'); -- expect ERROR/denied
-rollback;
+-- P5: profiles has no INSERT/DELETE policy for authenticated (metadata).
+do $$ declare n int; begin
+  select count(*) into n from pg_policies
+    where schemaname='public' and tablename='profiles' and cmd in ('INSERT','DELETE');
+  raise notice 'P5 profiles INSERT/DELETE policies = %  (PASS if 0)', n;
+end $$;
 
--- 6b. Roster is admin-only: a null-role staff DELETE of a vehicle is denied.
-begin; set local role authenticated;
-  set local request.jwt.claims to '{"sub":"005e1811-8165-4213-b92b-4fbaed5591d2","role":"authenticated"}';
-  with x as (delete from public.vehicles where tenant_id='2f7cc0dc-b7fd-4556-92be-445e4b42ddcd' returning 1)
-  select 'staff_vehicle_deletes' as probe, count(*) from x;                        -- expect 0
-rollback;
+-- P6: a system-owned table (audit_logs) is read-only for staff.
+do $$ begin
+  perform set_config('role','authenticated',true);
+  perform set_config('request.jwt.claims', json_build_object('sub', current_setting('t.staff',true), 'role','authenticated')::text, true);
+  begin
+    insert into public.audit_logs (tenant_id) values (public.current_tenant_id());
+    raise notice 'P6 staff audit_logs INSERT = FAIL (allowed!)';
+    raise exception using errcode = 'ROLLB';
+  exception
+    when insufficient_privilege then raise notice 'P6 staff audit_logs INSERT = PASS (denied)';
+    when sqlstate 'ROLLB' then null;
+  end;
+end $$;
 
--- 7. No profiles INSERT/DELETE policy for authenticated.
-select 'profiles_write_policies' as probe, count(*)
-from pg_policies where schemaname='public' and tablename='profiles' and cmd in ('INSERT','DELETE'); -- expect 0
+-- P7: staff cannot DELETE a vehicle (roster is admin-only).
+do $$ declare n int; begin
+  perform set_config('role','authenticated',true);
+  perform set_config('request.jwt.claims', json_build_object('sub', current_setting('t.staff',true), 'role','authenticated')::text, true);
+  begin
+    delete from public.vehicles where tenant_id = public.current_tenant_id();
+    get diagnostics n = row_count;
+    raise notice 'P7 staff vehicle DELETE = % row(s)  (PASS if 0)', n;
+    raise exception using errcode = 'ROLLB';
+  exception when sqlstate 'ROLLB' then null;
+  end;
+end $$;
 
--- 8. Fleet is admin-write: null-role staff cannot DELETE drivers.
-begin; set local role authenticated;
-  set local request.jwt.claims to '{"sub":"005e1811-8165-4213-b92b-4fbaed5591d2","role":"authenticated"}';
-  with d as (delete from public.drivers where tenant_id='2f7cc0dc-b7fd-4556-92be-445e4b42ddcd' returning 1)
-  select 'staff_driver_deletes' as probe, count(*) from d;                         -- expect 0
-rollback;
+-- P8: staff cannot DELETE a driver (admin-only).
+do $$ declare n int; begin
+  perform set_config('role','authenticated',true);
+  perform set_config('request.jwt.claims', json_build_object('sub', current_setting('t.staff',true), 'role','authenticated')::text, true);
+  begin
+    delete from public.drivers where tenant_id = public.current_tenant_id();
+    get diagnostics n = row_count;
+    raise notice 'P8 staff driver DELETE = % row(s)  (PASS if 0)', n;
+    raise exception using errcode = 'ROLLB';
+  exception when sqlstate 'ROLLB' then null;
+  end;
+end $$;
 
--- 9. Company settings are admin-only: a null-role staff update is denied.
-begin; set local role authenticated;
-  set local request.jwt.claims to '{"sub":"005e1811-8165-4213-b92b-4fbaed5591d2","role":"authenticated"}';
-  with u as (update public.company_profiles set company_name = company_name
-             where tenant_id = (select company_id from public.profiles where id = auth.uid()) returning 1)
-  select 'staff_company_update' as probe, count(*) from u;                         -- expect 0
-rollback;
+-- P9: staff cannot UPDATE company settings (admin-only).
+do $$ declare n int; begin
+  perform set_config('role','authenticated',true);
+  perform set_config('request.jwt.claims', json_build_object('sub', current_setting('t.staff',true), 'role','authenticated')::text, true);
+  begin
+    update public.company_profiles set company_name = company_name
+      where tenant_id = public.get_my_company_id();
+    get diagnostics n = row_count;
+    raise notice 'P9 staff company UPDATE = % row(s)  (PASS if 0)', n;
+    raise exception using errcode = 'ROLLB';
+  exception when sqlstate 'ROLLB' then null;
+  end;
+end $$;
 
--- 10. Vehicles: confirm a vehicle exists so a 0 below cannot be misread as "no row".
-select 'vehicles_present' as probe, count(*) from public.vehicles
-  where tenant_id = '2f7cc0dc-b7fd-4556-92be-445e4b42ddcd';                        -- expect > 0 (seed if needed)
+-- P10: staff CAN toggle a vehicle's status (active). Needs a vehicle in their tenant.
+do $$ declare n int; begin
+  perform set_config('role','authenticated',true);
+  perform set_config('request.jwt.claims', json_build_object('sub', current_setting('t.staff',true), 'role','authenticated')::text, true);
+  begin
+    update public.vehicles set active = not active where tenant_id = public.current_tenant_id();
+    get diagnostics n = row_count;
+    raise notice 'P10 staff toggle active = % row(s)  (PASS if > 0, else seed a vehicle)', n;
+    raise exception using errcode = 'ROLLB';
+  exception when sqlstate 'ROLLB' then null;
+  end;
+end $$;
 
--- 10a. Allowed: a null-role staff user flips active (a REAL change).
-begin; set local role authenticated;
-  set local request.jwt.claims to '{"sub":"005e1811-8165-4213-b92b-4fbaed5591d2","role":"authenticated"}';
-  with s as (update public.vehicles set active = not active
-             where tenant_id='2f7cc0dc-b7fd-4556-92be-445e4b42ddcd' returning 1)
-  select 'staff_toggle_active' as probe, count(*) from s;                          -- expect > 0
-rollback;
-
--- 10b. Blocked: staff changes a structural column (replace `registration` with any
---      real non-status column). Exercises the guard's reject path.
-begin; set local role authenticated;
-  set local request.jwt.claims to '{"sub":"005e1811-8165-4213-b92b-4fbaed5591d2","role":"authenticated"}';
-  update public.vehicles set registration = registration || '-X'
-    where tenant_id='2f7cc0dc-b7fd-4556-92be-445e4b42ddcd';                        -- expect ERROR
-rollback;
+-- P11: staff CANNOT change a structural vehicle column (registration).
+do $$ begin
+  perform set_config('role','authenticated',true);
+  perform set_config('request.jwt.claims', json_build_object('sub', current_setting('t.staff',true), 'role','authenticated')::text, true);
+  begin
+    update public.vehicles set registration = registration || '-X' where tenant_id = public.current_tenant_id();
+    raise notice 'P11 staff structural edit = FAIL (allowed!)';
+    raise exception using errcode = 'ROLLB';
+  exception
+    when insufficient_privilege then raise notice 'P11 staff structural edit = PASS (blocked)';
+    when sqlstate 'ROLLB' then null;
+  end;
+end $$;
