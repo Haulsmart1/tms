@@ -47,7 +47,8 @@ Expected: no `company_id` yet.
 alter table public.tenants
   add column if not exists company_id uuid references public.companies(id);
 
-insert into public.tenants (id) values ('2f7cc0dc-b7fd-4556-92be-445e4b42ddcd')
+insert into public.tenants (id, name)  -- tenants.name is NOT NULL
+  values ('2f7cc0dc-b7fd-4556-92be-445e4b42ddcd', 'Shared placeholder tenant')
   on conflict (id) do nothing;
 
 comment on column public.tenants.company_id is
