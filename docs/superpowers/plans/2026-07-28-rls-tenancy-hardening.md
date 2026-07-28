@@ -73,16 +73,13 @@ git add docs/sql/rls_01_tenants_company_id.sql && git commit -m "RLS: add tenant
 - [ ] **Step 1: Write**
 ```sql
 -- docs/sql/rls_02_helpers.sql  (safe to re-run)
-create or replace function public.get_my_tenant_id()
-returns uuid language sql stable security definer set search_path to 'public' as $$
-  select tenant_id from public.profiles where id = auth.uid() limit 1
-$$;
-
+-- get_my_tenant_id is NOT created: public.current_tenant_id() already exists and is
+-- identical (select tenant_id from profiles where id = auth.uid()); we reuse it.
 create or replace function public.can_access_tenant(target_tenant uuid)
 returns boolean language sql stable security definer set search_path to 'public' as $$
   select
     public.get_my_role() = 'super_admin'
-    or target_tenant = public.get_my_tenant_id()
+    or target_tenant = public.current_tenant_id()
     or (public.get_my_role() = 'admin'
         and target_tenant in (
           select t.id from public.tenants t where t.company_id = public.get_my_company_id()
@@ -296,13 +293,13 @@ create policy companies_select on public.companies for select to authenticated u
 -- tenants: read own tenant / admin over its company / super. NO write policy;
 -- tenants is the root of trust for can_access_tenant, so writes are service-role only.
 create policy tenants_select on public.tenants for select to authenticated using (
-  id = public.get_my_tenant_id()
+  id = public.current_tenant_id()
   or public.get_my_role() = 'super_admin'
   or (public.get_my_role() = 'admin' and company_id = public.get_my_company_id())
 );
 ```
 
-`asset_types` is deliberately left with RLS on and no policy (deny-all). The app does not read it (it uses a free-text column), so opening it buys nothing and blind `using(true)` could leak per-tenant rows. Add a scoped policy only if a real need appears.
+`asset_types` (id, name) is a global lookup referenced by `assets.asset_type_id`, but was locked with no policy. rls_04 now makes it readable by any authenticated user (`select true`), with no write policy so writes stay denied.
 
 - [ ] **Step 2: Verify**
 ```sql
@@ -619,6 +616,7 @@ Throwaway test data, so a reset rather than a migration. **Runs EARLY, before th
 - **Behavior change (D):** with `profiles_select` scoped, `/settings/users` and `/settings/permissions` show only the caller's own row for a non-admin (an admin sees their company). Those pages have no server-side role guard today; add one in the app-layer follow-on. This is a tightening that incidentally protects two currently-unguarded pages.
 - **Provisioning rule (owner, 2026-07-28):** in full-serve signup, the FIRST profile created for a company is automatically assigned the `admin` role. This is the app-layer signup flow's job (deferred), and it is how each company gets the admin that the fleet-write policies require. Task 7 assigns the director `admin` manually until then.
 - **Storage:** the `pod-files` bucket public-URL exposure (a real cross-tenant leak) is still open and out of this plan's scope. Recommend a follow-up task to make it private with a tenant-path `storage.objects` policy.
+- **Ground-truth verified (2026-07-28, via `docs/sql/schema_rls_dump.sql`):** the full dump confirmed the uniform mis-keyed `Tenant ID Matches` policy on every tenant table and that every `tenant_id` is foreign-keyed to `tenants.id`. Corrections applied: reuse the pre-existing `current_tenant_id()` rather than creating a twin `get_my_tenant_id()`; make `asset_types` readable. The database also already has `is_super_admin()` (could replace `get_my_role() = 'super_admin'` for clarity later). Open data-integrity item: `drivers`, `defect_reports`, `driver_work_rules`, and `telematics_positions` have a NULLABLE `tenant_id`, so rows with null are invisible to everyone; set NOT NULL once backfilled.
 
 ---
 

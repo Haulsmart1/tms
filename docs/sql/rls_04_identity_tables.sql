@@ -46,10 +46,15 @@ create policy companies_select on public.companies for select to authenticated u
 -- tenants: read own tenant / admin over its company / super. NO write policy; tenants is
 -- the root of trust for can_access_tenant, so writes are service-role only.
 create policy tenants_select on public.tenants for select to authenticated using (
-  id = public.get_my_tenant_id()
+  id = public.current_tenant_id()
   or public.get_my_role() = 'super_admin'
   or (public.get_my_role() = 'admin' and company_id = public.get_my_company_id())
 );
+
+-- asset_types: a global lookup (id, name) referenced by assets.asset_type_id, but locked
+-- with no policy. Make it readable by any authenticated user; no write policy = writes denied.
+drop policy if exists asset_types_read on public.asset_types;
+create policy asset_types_read on public.asset_types for select to authenticated using (true);
 
 -- HARD assertion: no unexpected policy on the identity tables (expect 0 rows).
 select tablename, policyname from pg_policies
