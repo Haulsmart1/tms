@@ -30,10 +30,11 @@ begin
   select count(*) into n from public.jobs;
   probe := 'P2 super_admin jobs'; outcome := n || '  (expect all jobs)'; return next;
 
-  -- P3: escalation via UPDATE blocked (as admin; only super_admin is exempt).
-  perform set_config('request.jwt.claims', json_build_object('sub',p_admin,'role','authenticated')::text, true);
+  -- P3: escalation via UPDATE blocked. Run as the null-role STAFF user (a guaranteed
+  -- non-super actor); super_admins are legitimately exempt so testing one is meaningless.
+  perform set_config('request.jwt.claims', json_build_object('sub',p_staff,'role','authenticated')::text, true);
   begin
-    update public.profiles set role_id = (select id from public.roles where name='super_admin') where id = p_admin;
+    update public.profiles set role_id = (select id from public.roles where name='super_admin') where id = p_staff;
     outcome := 'FAIL (allowed!)'; raise exception using errcode='ROLLB';
   exception
     when insufficient_privilege then outcome := 'PASS (blocked)';
