@@ -38,6 +38,7 @@ begin
   exception
     when insufficient_privilege then outcome := 'PASS (blocked)';
     when sqlstate 'ROLLB' then null;
+    when others then outcome := 'ERROR '||sqlstate||': '||sqlerrm;
   end;
   probe := 'P3 escalation UPDATE'; return next;
 
@@ -49,6 +50,7 @@ begin
   exception
     when insufficient_privilege then outcome := 'PASS (blocked)';
     when sqlstate 'ROLLB' then null;
+    when others then outcome := 'ERROR '||sqlstate||': '||sqlerrm;
   end;
   probe := 'P4 escalation INSERT'; return next;
 
@@ -65,6 +67,7 @@ begin
   exception
     when insufficient_privilege then outcome := 'PASS (denied)';
     when sqlstate 'ROLLB' then null;
+    when others then outcome := 'ERROR '||sqlstate||': '||sqlerrm;
   end;
   probe := 'P6 staff audit_logs INSERT'; return next;
 
@@ -73,7 +76,7 @@ begin
     delete from public.vehicles where tenant_id = public.current_tenant_id();
     get diagnostics n = row_count; outcome := n || ' row(s)  (PASS if 0)';
     raise exception using errcode='ROLLB';
-  exception when sqlstate 'ROLLB' then null; end;
+  exception when sqlstate 'ROLLB' then null; when others then outcome := 'ERROR '||sqlstate||': '||sqlerrm; end;
   probe := 'P7 staff vehicle DELETE'; return next;
 
   -- P8: staff cannot DELETE a driver (admin-only).
@@ -81,7 +84,7 @@ begin
     delete from public.drivers where tenant_id = public.current_tenant_id();
     get diagnostics n = row_count; outcome := n || ' row(s)  (PASS if 0)';
     raise exception using errcode='ROLLB';
-  exception when sqlstate 'ROLLB' then null; end;
+  exception when sqlstate 'ROLLB' then null; when others then outcome := 'ERROR '||sqlstate||': '||sqlerrm; end;
   probe := 'P8 staff driver DELETE'; return next;
 
   -- P9: staff cannot UPDATE company settings (admin-only).
@@ -89,7 +92,7 @@ begin
     update public.company_profiles set company_name = company_name where tenant_id = public.get_my_company_id();
     get diagnostics n = row_count; outcome := n || ' row(s)  (PASS if 0)';
     raise exception using errcode='ROLLB';
-  exception when sqlstate 'ROLLB' then null; end;
+  exception when sqlstate 'ROLLB' then null; when others then outcome := 'ERROR '||sqlstate||': '||sqlerrm; end;
   probe := 'P9 staff company UPDATE'; return next;
 
   -- P10: staff CAN toggle a vehicle's status (active).
@@ -98,7 +101,7 @@ begin
     get diagnostics n = row_count;
     outcome := n || ' row(s)  (PASS if > 0; else seed a vehicle in the staff tenant)';
     raise exception using errcode='ROLLB';
-  exception when sqlstate 'ROLLB' then null; end;
+  exception when sqlstate 'ROLLB' then null; when others then outcome := 'ERROR '||sqlstate||': '||sqlerrm; end;
   probe := 'P10 staff toggle active'; return next;
 
   -- P11: staff CANNOT change a structural vehicle column (registration).
@@ -111,6 +114,7 @@ begin
   exception
     when insufficient_privilege then outcome := 'PASS (blocked)';
     when sqlstate 'ROLLB' then null;
+    when others then outcome := 'ERROR '||sqlstate||': '||sqlerrm;
   end;
   probe := 'P11 staff structural edit'; return next;
 
@@ -121,6 +125,7 @@ begin
     outcome := n || ' row(s)  (PASS if 0)';
   exception
     when insufficient_privilege then outcome := 'PASS (denied: no SELECT grant)';
+    when others then outcome := 'ERROR '||sqlstate||': '||sqlerrm;
   end;
   probe := 'P12 integration_connections read'; return next;
 
@@ -132,5 +137,5 @@ $fn$;
 select * from public.rls_verify(
   '362aa5fd-0ae8-47e3-8a01-f005d246f476'::uuid,   -- super_admin
   '005e1811-8165-4213-b92b-4fbaed5591d2'::uuid,   -- a company admin
-  '00000000-0000-0000-0000-000000000000'::uuid    -- staff  <-- REPLACE with your test staff id
+  '362aa5fd-0ae8-47e3-8a01-f005d246f476'::uuid    -- staff  <-- REPLACE with your test staff id
 );
