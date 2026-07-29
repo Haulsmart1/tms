@@ -18,6 +18,15 @@ language plpgsql
 as $fn$
 declare n int;
 begin
+  -- Guard: p_staff MUST be a real non-super_admin profile, or the staff probes are meaningless
+  -- (a super_admin is exempt from every check and would produce false results).
+  if p_staff = p_super
+     or coalesce((select r.name from public.profiles p join public.roles r on r.id = p.role_id
+                  where p.id = p_staff), '') = 'super_admin'
+  then
+    raise exception 'p_staff must be a non-super_admin profile id (create a null-role staff profile first)';
+  end if;
+
   -- P1: anon sees nothing.
   perform set_config('role','anon',true);
   perform set_config('request.jwt.claims','{}',true);
@@ -72,18 +81,29 @@ begin
   end;
   probe := 'P6 staff audit_logs INSERT'; return next;
 
-  -- P7: staff cannot DELETE a vehicle (roster is admin-only).
+  -- P7: staff cannot DELETE a vehicle (roster is admin-only). INCONCLUSIVE on an empty tenant,
+  -- so "no rows to delete" can't masquerade as a passing block.
   begin
-    delete from public.vehicles where tenant_id = public.current_tenant_id();
-    get diagnostics n = row_count; outcome := n || ' row(s)  (PASS if 0)';
+    select count(*) into n from public.vehicles where tenant_id = public.current_tenant_id();
+    if n = 0 then outcome := 'INCONCLUSIVE (no vehicle in the staff tenant)';
+    else
+      delete from public.vehicles where tenant_id = public.current_tenant_id();
+      get diagnostics n = row_count;
+      outcome := case when n = 0 then 'PASS (blocked)' else 'FAIL ('||n||' deleted!)' end;
+    end if;
     raise exception using errcode='ROLLB';
   exception when sqlstate 'ROLLB' then null; when others then outcome := 'ERROR '||sqlstate||': '||sqlerrm; end;
   probe := 'P7 staff vehicle DELETE'; return next;
 
-  -- P8: staff cannot DELETE a driver (admin-only).
+  -- P8: staff cannot DELETE a driver (admin-only). INCONCLUSIVE on an empty tenant.
   begin
-    delete from public.drivers where tenant_id = public.current_tenant_id();
-    get diagnostics n = row_count; outcome := n || ' row(s)  (PASS if 0)';
+    select count(*) into n from public.drivers where tenant_id = public.current_tenant_id();
+    if n = 0 then outcome := 'INCONCLUSIVE (no driver in the staff tenant)';
+    else
+      delete from public.drivers where tenant_id = public.current_tenant_id();
+      get diagnostics n = row_count;
+      outcome := case when n = 0 then 'PASS (blocked)' else 'FAIL ('||n||' deleted!)' end;
+    end if;
     raise exception using errcode='ROLLB';
   exception when sqlstate 'ROLLB' then null; when others then outcome := 'ERROR '||sqlstate||': '||sqlerrm; end;
   probe := 'P8 staff driver DELETE'; return next;
@@ -138,5 +158,5 @@ $fn$;
 select * from public.rls_verify(
   '362aa5fd-0ae8-47e3-8a01-f005d246f476'::uuid,   -- super_admin
   '005e1811-8165-4213-b92b-4fbaed5591d2'::uuid,   -- a company admin
-  '362aa5fd-0ae8-47e3-8a01-f005d246f476'::uuid    -- staff  <-- REPLACE with your test staff id
+  '00000000-0000-0000-0000-000000000000'::uuid    -- staff  <-- REPLACE with your NULL-ROLE staff id
 );

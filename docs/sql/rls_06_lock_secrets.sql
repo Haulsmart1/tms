@@ -58,6 +58,17 @@ do $$ declare pol record; t text; begin
   end loop;
 end $$;
 
+-- F-A (defense in depth): the admin_read tables are already fail-closed for staff/anon via the
+-- can_manage_tenant policy, but also drop anon's SELECT grant. Do NOT revoke SELECT from
+-- authenticated: grants are ANDed with RLS, so that would break the intended admin reads.
+revoke select on public.subscriptions, public.telematics_devices from anon;
+
+-- F-D (forward-looking governance): stop FUTURE public tables inheriting the broad grants.
+-- (New tables still need `alter table ... enable row level security` explicitly; add a CI check
+-- that fails any new public table lacking RLS + at least one policy.)
+alter default privileges in schema public revoke insert, update, delete on tables from anon, authenticated;
+alter default privileges in schema public revoke select on tables from anon;
+
 -- VERIFY:
 -- select tablename, policyname from pg_policies
 -- where schemaname='public' and tablename in ('integration_connections','memberships');   -- 0 rows

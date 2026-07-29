@@ -34,10 +34,15 @@ set tenant_id = t.id
 from public.tenants t
 where t.company_id = p.company_id and p.company_id is not null;
 
--- 4. Make each company's sole user its admin (first profile in a company = admin).
-update public.profiles
+-- 4. Make each company's FIRST user its admin (first profile in a company = admin). Scoped to
+-- the earliest null-role profile per company, so a LATER-created null-role staff test profile
+-- (rls_09 STEP 1) is not swept into admin if you re-run this reseed.
+update public.profiles p
 set role_id = (select id from public.roles where name = 'admin')
-where company_id is not null and role_id is null;
+where p.role_id is null and p.company_id is not null
+  and p.id = (select p2.id from public.profiles p2
+              where p2.company_id = p.company_id and p2.role_id is null
+              order by p2.created_at limit 1);
 
 -- 5. OPTIONAL (recommended for testing): move the leftover operational test rows off the
 --    shared placeholder tenant onto a real company tenant, so a signed-in user can see them.
