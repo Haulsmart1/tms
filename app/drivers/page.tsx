@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "../../lib/supabase/browser";
-
-const TENANT_ID = "2f7cc0dc-b7fd-4556-92be-445e4b42ddcd";
+import { useTenant } from "../components/TenantProvider";
+import TenantGate from "../components/TenantGate";
 
 const inputStyle = {
   padding: "12px 14px",
@@ -44,6 +44,8 @@ const deleteButtonStyle = {
 export default function DriversPage() {
 
   const supabase = createClient();
+  const tenant = useTenant();
+  const isAdmin = tenant.role === "admin" || tenant.role === "super_admin";
 
   const [drivers, setDrivers] = useState<any[]>([]);
   const [editingId, setEditingId] = useState(null);
@@ -60,10 +62,8 @@ export default function DriversPage() {
 
   async function loadDrivers() {
 
-    const { data, error } = await supabase
-      .from("drivers")
-      .select("*")
-      .eq("tenant_id", TENANT_ID)
+    const { data, error } = await tenant
+      .filterByTenant(supabase.from("drivers").select("*"))
       .order("created_at", { ascending: false });
 
     if (!error) setDrivers(data || []);
@@ -72,7 +72,7 @@ export default function DriversPage() {
 
   useEffect(() => {
     loadDrivers();
-  }, []);
+  }, [tenant.activeTenantId]);
 
   function resetForm() {
 
@@ -110,6 +110,8 @@ export default function DriversPage() {
 
     e.preventDefault();
 
+    if (!isAdmin) { setMessage("Only an admin can change drivers."); return; }
+
     if (!form.name) {
       setMessage("Driver name required");
       return;
@@ -117,7 +119,6 @@ export default function DriversPage() {
 
     const payload = {
 
-      tenant_id: TENANT_ID,
       name: form.name,
       phone: form.phone || null,
       email: form.email || null,
@@ -138,9 +139,14 @@ export default function DriversPage() {
 
     } else {
 
+      if (!tenant.writeTenantId) {
+        setMessage("Pick a specific tenant to create records.");
+        return;
+      }
+
       ({ error } = await supabase
         .from("drivers")
-        .insert([{ ...payload, active: true }]));
+        .insert([{ ...payload, tenant_id: tenant.writeTenantId, active: true }]));
 
     }
 
@@ -163,6 +169,8 @@ export default function DriversPage() {
 
   async function deleteDriver(id: any) {
 
+    if (!isAdmin) { setMessage("Only an admin can change drivers."); return; }
+
     if (!confirm("Delete driver?")) return;
 
     const { error } = await supabase
@@ -181,6 +189,8 @@ export default function DriversPage() {
 
   async function toggleDriver(id: any, active: any) {
 
+    if (!isAdmin) { setMessage("Only an admin can change drivers."); return; }
+
     await supabase
       .from("drivers")
       .update({ active: !active })
@@ -191,6 +201,8 @@ export default function DriversPage() {
   }
 
   return (
+
+    <TenantGate>
 
     <main
       style={{
@@ -213,6 +225,8 @@ export default function DriversPage() {
         <h1 style={{ color: "white" }}>
           Drivers
         </h1>
+
+        {isAdmin && (
 
         <form
           onSubmit={saveDriver}
@@ -298,6 +312,8 @@ export default function DriversPage() {
 
         </form>
 
+        )}
+
         {message && (
 
           <div
@@ -346,6 +362,8 @@ export default function DriversPage() {
 
               </div>
 
+              {isAdmin && (
+
               <div
                 style={{
                   display: "flex",
@@ -378,6 +396,8 @@ export default function DriversPage() {
 
               </div>
 
+              )}
+
             </div>
 
           ))}
@@ -387,6 +407,8 @@ export default function DriversPage() {
       </div>
 
     </main>
+
+    </TenantGate>
 
   );
 
