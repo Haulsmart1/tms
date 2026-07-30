@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "../../lib/supabase/browser";
+import { useTenant } from "../components/TenantProvider";
+import TenantGate from "../components/TenantGate";
 
-const TENANT_ID = "2f7cc0dc-b7fd-4556-92be-445e4b42ddcd";
 const POD_BUCKET = "pod-files";
 
 const inputStyle: React.CSSProperties = {
@@ -38,6 +39,7 @@ const secondaryButtonStyle = {
 
 export default function PodPage() {
   const supabase = createClient();
+  const tenant = useTenant();
 
   const [jobs, setJobs] = useState<any[]>([]);
   const [message, setMessage] = useState("");
@@ -48,9 +50,11 @@ export default function PodPage() {
   async function loadJobs() {
     setMessage("");
 
-    const { data, error } = await supabase
-      .from("jobs")
-      .select(`
+    const { data, error } = await tenant
+      .filterByTenant(
+        supabase
+          .from("jobs")
+          .select(`
         id,
         reference,
         status,
@@ -60,6 +64,7 @@ export default function PodPage() {
         ),
         job_stops (
           id,
+          tenant_id,
           stop_order,
           type,
           address_line,
@@ -75,7 +80,7 @@ export default function PodPage() {
           pod_updated_at
         )
       `)
-      .eq("tenant_id", TENANT_ID)
+      )
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -96,6 +101,7 @@ export default function PodPage() {
     normalized.forEach((job: any) => {
       (job.job_stops || []).forEach((stop: any) => {
         nextForms[stop.id] = {
+          tenant_id: stop.tenant_id,
           recipient_name: stop.recipient_name || "",
           pod_notes: stop.pod_notes || "",
           pod_photo_url: stop.pod_photo_url || "",
@@ -109,7 +115,7 @@ export default function PodPage() {
 
   useEffect(() => {
     loadJobs();
-  }, []);
+  }, [tenant.activeTenantId]);
 
   function updateForm(stopId: any, field: any, value: any) {
     setForms((current: any) => ({
@@ -124,8 +130,13 @@ export default function PodPage() {
     }));
   }
 
-  async function uploadFile(file: any, stopId: any, fieldName: any) {
+  async function uploadFile(file: any, stopId: any, stopTenantId: any, fieldName: any) {
     if (!file) {
+      return;
+    }
+
+    if (!stopTenantId) {
+      setMessage("This stop has no tenant; cannot upload.");
       return;
     }
 
@@ -133,7 +144,7 @@ export default function PodPage() {
     setMessage("");
 
     const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
-    const filePath = `${TENANT_ID}/${stopId}/${fieldName}-${Date.now()}-${safeName}`;
+    const filePath = `${stopTenantId}/${stopId}/${fieldName}-${Date.now()}-${safeName}`;
 
     const { error: uploadError } = await supabase.storage
       .from(POD_BUCKET)
@@ -191,8 +202,7 @@ export default function PodPage() {
     const { error } = await supabase
       .from("job_stops")
       .update(updatePayload)
-      .eq("id", stopId)
-      .eq("tenant_id", TENANT_ID);
+      .eq("id", stopId);
 
     if (error) {
       setSavingStopId(null);
@@ -209,7 +219,6 @@ export default function PodPage() {
         const { data: deliveryStops, error: deliveryError } = await supabase
           .from("job_stops")
           .select("id, pod_status")
-          .eq("tenant_id", TENANT_ID)
           .eq("job_id", job.id)
           .eq("type", "delivery");
 
@@ -222,8 +231,7 @@ export default function PodPage() {
             await supabase
               .from("jobs")
               .update({ status: "completed" })
-              .eq("id", job.id)
-              .eq("tenant_id", TENANT_ID);
+              .eq("id", job.id);
           }
         }
       }
@@ -235,6 +243,7 @@ export default function PodPage() {
   }
 
   return (
+    <TenantGate>
     <main
       style={{
         minHeight: "100vh",
@@ -393,6 +402,7 @@ export default function PodPage() {
                                   uploadFile(
                                     e.target.files?.[0],
                                     stop.id,
+                                    stop.tenant_id,
                                     "pod_photo_url"
                                   )
                                 }
@@ -434,6 +444,7 @@ export default function PodPage() {
                                   uploadFile(
                                     e.target.files?.[0],
                                     stop.id,
+                                    stop.tenant_id,
                                     "pod_document_url"
                                   )
                                 }
@@ -488,6 +499,7 @@ export default function PodPage() {
         </div>
       </div>
     </main>
+    </TenantGate>
   );
 }
 
