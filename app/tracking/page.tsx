@@ -2,26 +2,23 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "../../lib/supabase/browser";
-
-const TENANT_ID = "2f7cc0dc-b7fd-4556-92be-445e4b42ddcd";
+import { useTenant } from "../components/TenantProvider";
+import TenantGate from "../components/TenantGate";
 
 export default function TrackingPage() {
   const supabase = createClient();
+  const tenant = useTenant();
 
   const [vehicles, setVehicles] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
 
   async function loadData() {
-    const { data: vehicleData } = await supabase
-      .from("vehicles")
-      .select("id, registration")
-      .eq("tenant_id", TENANT_ID)
+    const { data: vehicleData } = await tenant
+      .filterByTenant(supabase.from("vehicles").select("id, registration"))
       .eq("active", true);
 
-    const { data: locationData } = await supabase
-      .from("vehicle_locations")
-      .select("*")
-      .eq("tenant_id", TENANT_ID)
+    const { data: locationData } = await tenant
+      .filterByTenant(supabase.from("vehicle_locations").select("*"))
       .order("recorded_at", { ascending: false });
 
     setVehicles(vehicleData || []);
@@ -34,13 +31,14 @@ export default function TrackingPage() {
     const interval = setInterval(loadData, 10000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [tenant.activeTenantId]);
 
   function getLatestLocation(vehicleId: any) {
     return locations.find((x: any) => x.vehicle_id === vehicleId);
   }
 
   return (
+    <TenantGate>
     <main
       style={{
         minHeight: "100vh",
@@ -115,6 +113,7 @@ export default function TrackingPage() {
         </div>
       </div>
     </main>
+    </TenantGate>
   );
 }
 
