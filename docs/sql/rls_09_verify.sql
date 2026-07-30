@@ -150,6 +150,32 @@ begin
   end;
   probe := 'P12 integration_connections read'; return next;
 
+  -- P13: a null tenant_id write is rejected for EVERY role, including super_admin (post rls_08).
+  perform set_config('request.jwt.claims', json_build_object('sub',p_super,'role','authenticated')::text, true);
+  begin
+    insert into public.drivers (tenant_id, name) values (null, 'null-tenant probe');
+    outcome := 'FAIL (allowed!)'; raise exception using errcode='ROLLB';
+  exception
+    when not_null_violation or insufficient_privilege or check_violation
+      then outcome := 'PASS (blocked)';
+    when sqlstate 'ROLLB' then null;
+    when others then outcome := 'ERROR '||sqlstate||': '||sqlerrm;
+  end;
+  probe := 'P13 super null-tenant write'; return next;
+
+  -- P14: a staff write to a FOREIGN tenant is rejected by WITH CHECK.
+  perform set_config('request.jwt.claims', json_build_object('sub',p_staff,'role','authenticated')::text, true);
+  begin
+    insert into public.customers (tenant_id, name)
+      values ('00000000-0000-0000-0000-000000000000', 'foreign-tenant probe');
+    outcome := 'FAIL (allowed!)'; raise exception using errcode='ROLLB';
+  exception
+    when insufficient_privilege or check_violation then outcome := 'PASS (blocked)';
+    when sqlstate 'ROLLB' then null;
+    when others then outcome := 'ERROR '||sqlstate||': '||sqlerrm;
+  end;
+  probe := 'P14 staff foreign-tenant write'; return next;
+
   return;
 end;
 $fn$;
