@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "../../lib/supabase/browser";
-
-const TENANT_ID = "2f7cc0dc-b7fd-4556-92be-445e4b42ddcd";
+import { useTenant } from "../components/TenantProvider";
+import TenantGate from "../components/TenantGate";
 
 const inputStyle: React.CSSProperties = {
   padding: "12px 14px",
@@ -37,6 +37,7 @@ const secondaryButtonStyle = {
 
 export default function SubcontractorsPage() {
   const supabase = createClient();
+  const tenant = useTenant();
 
   const [subcontractors, setSubcontractors] = useState<any[]>([]);
   const [message, setMessage] = useState("");
@@ -52,10 +53,8 @@ export default function SubcontractorsPage() {
   });
 
   async function loadSubcontractors() {
-    const { data, error } = await supabase
-      .from("subcontractors")
-      .select("*")
-      .eq("tenant_id", TENANT_ID)
+    const { data, error } = await tenant
+      .filterByTenant(supabase.from("subcontractors").select("*"))
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -68,7 +67,7 @@ export default function SubcontractorsPage() {
 
   useEffect(() => {
     loadSubcontractors();
-  }, []);
+  }, [tenant.activeTenantId]);
 
   async function createSubcontractor(event: any) {
     event.preventDefault();
@@ -81,11 +80,16 @@ export default function SubcontractorsPage() {
       return;
     }
 
+    if (!tenant.writeTenantId) {
+      setMessage("Pick a specific tenant to create records.");
+      return;
+    }
+
     const { error } = await supabase
       .from("subcontractors")
       .insert([
         {
-          tenant_id: TENANT_ID,
+          tenant_id: tenant.writeTenantId,
           name,
           vehicle_reg: form.vehicle_reg.trim() || null,
           vehicle_type: form.vehicle_type.trim() || null,
@@ -133,6 +137,7 @@ export default function SubcontractorsPage() {
   }
 
   return (
+    <TenantGate>
     <main
       style={{
         minHeight: "100vh",
@@ -350,6 +355,7 @@ export default function SubcontractorsPage() {
         </div>
       </div>
     </main>
+    </TenantGate>
   );
 }
 
