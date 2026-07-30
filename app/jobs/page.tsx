@@ -5,8 +5,8 @@ import { createClient } from "../../lib/supabase/browser";
 import { JobPageValidation } from "../../lib/supabase/validation/job";
 import { CollectionStopValidation } from "../../lib/supabase/validation/job";
 import { DeliveryStopValidation } from "../../lib/supabase/validation/job";
-
-const TENANT_ID = "2f7cc0dc-b7fd-4556-92be-445e4b42ddcd";
+import { useTenant } from "../components/TenantProvider";
+import TenantGate from "../components/TenantGate";
 
 const emptyStop = (type: any) => ({
   type,
@@ -68,6 +68,7 @@ const deleteButtonStyle = {
 
 export default function JobsPage() {
   const supabase = createClient();
+  const tenant = useTenant();
 
   const [jobs, setJobs] = useState<any[]>([]);
   const [vehicles, setVehicles] = useState<any[]>([]);
@@ -94,9 +95,7 @@ export default function JobsPage() {
   async function loadData() {
     setMessage("");
 
-    const { data: jobsData, error: jobsError } = await supabase
-      .from("jobs")
-      .select(`
+    const jobsQuery: any = supabase.from("jobs").select(`
         id,
         reference,
         status,
@@ -135,35 +134,31 @@ export default function JobsPage() {
           pod_notes,
           pod_photo_url
         )
-      `)
-      .eq("tenant_id", TENANT_ID)
+      `);
+
+    const { data: jobsData, error: jobsError } = await tenant
+      .filterByTenant(jobsQuery)
       .order("created_at", { ascending: false });
 
-    const { data: vehicleData, error: vehicleError } = await supabase
-      .from("vehicles")
-      .select("id, registration")
-      .eq("tenant_id", TENANT_ID)
+    const { data: vehicleData, error: vehicleError } = await tenant
+      .filterByTenant(supabase.from("vehicles").select("id, registration") as any)
       .eq("active", true)
       .order("registration", { ascending: true });
 
-    const { data: driverData, error: driverError } = await supabase
-      .from("drivers")
-      .select("id, name")
-      .eq("tenant_id", TENANT_ID)
+    const { data: driverData, error: driverError } = await tenant
+      .filterByTenant(supabase.from("drivers").select("id, name") as any)
       .eq("active", true)
       .order("name", { ascending: true });
 
-    const { data: customerData, error: customerError } = await supabase
-      .from("customers")
-      .select("id, name")
-      .eq("tenant_id", TENANT_ID)
+    const { data: customerData, error: customerError } = await tenant
+      .filterByTenant(supabase.from("customers").select("id, name") as any)
       .eq("active", true)
       .order("name", { ascending: true });
 
-    const { data: subcontractorData, error: subcontractorError } = await supabase
-      .from("subcontractors")
-      .select("id, name, vehicle_reg, driver_name")
-      .eq("tenant_id", TENANT_ID)
+    const { data: subcontractorData, error: subcontractorError } = await tenant
+      .filterByTenant(
+        supabase.from("subcontractors").select("id, name, vehicle_reg, driver_name") as any
+      )
       .eq("active", true)
       .order("name", { ascending: true });
 
@@ -208,7 +203,7 @@ export default function JobsPage() {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [tenant.activeTenantId]);
 
   function resetForm() {
     setEditingJobId(null);
@@ -297,6 +292,12 @@ export default function JobsPage() {
 
   async function saveJob(event: any) {
     event.preventDefault();
+
+    if (!tenant.writeTenantId) {
+      setMessage("Pick a specific tenant to create records.");
+      return;
+    }
+
     setLoading(true);
     setMessage("");
 
@@ -351,7 +352,6 @@ export default function JobsPage() {
       form.subcontractor_cost === "" ? null : Number(form.subcontractor_cost);
 
     const payload = {
-      tenant_id: TENANT_ID,
       reference,
       scheduled_date: form.scheduled_date || null,
       customer_id: form.customer_id || null,
@@ -368,8 +368,7 @@ export default function JobsPage() {
       const { error: updateError } = await supabase
         .from("jobs")
         .update(payload)
-        .eq("id", editingJobId)
-        .eq("tenant_id", TENANT_ID);
+        .eq("id", editingJobId);
 
       if (updateError) {
         setLoading(false);
@@ -380,8 +379,7 @@ export default function JobsPage() {
       const { error: deleteStopsError } = await supabase
         .from("job_stops")
         .delete()
-        .eq("job_id", editingJobId)
-        .eq("tenant_id", TENANT_ID);
+        .eq("job_id", editingJobId);
 
       if (deleteStopsError) {
         setLoading(false);
@@ -394,6 +392,7 @@ export default function JobsPage() {
         .insert([
           {
             ...payload,
+            tenant_id: tenant.writeTenantId,
             status: "planned"
           }
         ])
@@ -410,7 +409,7 @@ export default function JobsPage() {
     }
 
     const stopsToInsert = validStops.map((stop, index) => ({
-      tenant_id: TENANT_ID,
+      tenant_id: tenant.writeTenantId,
       job_id: jobId,
       stop_order: index + 1,
       type: stop.type,
@@ -455,8 +454,7 @@ export default function JobsPage() {
     const { error } = await supabase
       .from("jobs")
       .delete()
-      .eq("id", jobId)
-      .eq("tenant_id", TENANT_ID);
+      .eq("id", jobId);
 
     if (error) {
       setMessage(`Delete job error: ${error.message}`);
@@ -488,8 +486,7 @@ export default function JobsPage() {
         pod_status: "delivered",
         status: "completed"
       })
-      .eq("id", stopId)
-      .eq("tenant_id", TENANT_ID);
+      .eq("id", stopId);
 
     if (stopError) {
       setMessage(`POD save error: ${stopError.message}`);
@@ -499,7 +496,6 @@ export default function JobsPage() {
     const { data: deliveryStops, error: deliveryStopsError } = await supabase
       .from("job_stops")
       .select("id, pod_status, type")
-      .eq("tenant_id", TENANT_ID)
       .eq("job_id", jobId)
       .eq("type", "delivery");
 
@@ -517,8 +513,7 @@ export default function JobsPage() {
       const { error: jobUpdateError } = await supabase
         .from("jobs")
         .update({ status: "completed" })
-        .eq("id", jobId)
-        .eq("tenant_id", TENANT_ID);
+        .eq("id", jobId);
 
       if (jobUpdateError) {
         setMessage(`Job completion error: ${jobUpdateError.message}`);
@@ -532,6 +527,7 @@ export default function JobsPage() {
   }
 
   return (
+    <TenantGate>
     <main
       style={{
         minHeight: "100vh",
@@ -986,6 +982,7 @@ export default function JobsPage() {
         </div>
       </div>
     </main>
+    </TenantGate>
   );
 }
 
