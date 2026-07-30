@@ -95,7 +95,7 @@ export default function JobsPage() {
   async function loadData() {
     setMessage("");
 
-    const jobsQuery: any = supabase.from("jobs").select(`
+    const jobsQuery = supabase.from("jobs").select(`
         id,
         reference,
         status,
@@ -141,23 +141,23 @@ export default function JobsPage() {
       .order("created_at", { ascending: false });
 
     const { data: vehicleData, error: vehicleError } = await tenant
-      .filterByTenant(supabase.from("vehicles").select("id, registration") as any)
+      .filterByTenant(supabase.from("vehicles").select("id, registration"))
       .eq("active", true)
       .order("registration", { ascending: true });
 
     const { data: driverData, error: driverError } = await tenant
-      .filterByTenant(supabase.from("drivers").select("id, name") as any)
+      .filterByTenant(supabase.from("drivers").select("id, name"))
       .eq("active", true)
       .order("name", { ascending: true });
 
     const { data: customerData, error: customerError } = await tenant
-      .filterByTenant(supabase.from("customers").select("id, name") as any)
+      .filterByTenant(supabase.from("customers").select("id, name"))
       .eq("active", true)
       .order("name", { ascending: true });
 
     const { data: subcontractorData, error: subcontractorError } = await tenant
       .filterByTenant(
-        supabase.from("subcontractors").select("id, name, vehicle_reg, driver_name") as any
+        supabase.from("subcontractors").select("id, name, vehicle_reg, driver_name")
       )
       .eq("active", true)
       .order("name", { ascending: true });

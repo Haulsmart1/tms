@@ -8,7 +8,7 @@ import {
   parseTenantContext, pickInitialActiveTenant, computeWriteTenantId, tenantStorageKey,
   type TenantContextData, type TenantOption, type TenantRole, type TenantStatus,
 } from "../../lib/tenant/context";
-import { applyTenantFilter, type TenantQuery } from "../../lib/tenant/filter";
+import { applyTenantFilter } from "../../lib/tenant/filter";
 
 type TenantContextValue = {
   status: TenantStatus;
@@ -17,7 +17,7 @@ type TenantContextValue = {
   activeTenantId: string | null;
   setActiveTenantId: (id: string | null) => void;
   writeTenantId: string | null;
-  filterByTenant: <Q>(query: TenantQuery<Q>) => Q;
+  filterByTenant: <Q>(query: Q) => Q;
 };
 
 const TenantContext = createContext<TenantContextValue | null>(null);
