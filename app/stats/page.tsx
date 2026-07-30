@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "../../lib/supabase/browser";
+import { useTenant } from "../components/TenantProvider";
+import TenantGate from "../components/TenantGate";
 
 // EU daily driving limit (Regulation 561/2006): 9 hours.
 const DAILY_DRIVING_LIMIT_MINUTES = 540;
@@ -214,10 +216,9 @@ function StatCard({
 
 export default function StatsPage() {
   const supabase = createClient();
+  const tenant = useTenant();
 
-  const [status, setStatus] = useState<"loading" | "signed-out" | "ready">(
-    "loading"
-  );
+  const [status, setStatus] = useState<"loading" | "ready">("loading");
   const [message, setMessage] = useState("");
   const [period, setPeriod] = useState<PeriodKey>("month");
 
@@ -235,36 +236,6 @@ export default function StatsPage() {
     setMessage("");
 
     try {
-      const { data: userData } = await supabase.auth.getUser();
-      const user = userData?.user;
-      if (!user) {
-        setStatus("signed-out");
-        return;
-      }
-
-      // Deliberately no hardcoded fallback tenant here: on a revenue page,
-      // showing another company's numbers is a leak, not a convenience.
-      const { data: profile, error: profileError } = await supabase
-        .from("profiles")
-        .select("tenant_id")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      if (profileError) {
-        setMessage(`Profile load error: ${profileError.message}`);
-        setStatus("ready");
-        return;
-      }
-
-      const tenantId = profile?.tenant_id;
-      if (!tenantId) {
-        setMessage(
-          "Your profile has no company assigned yet — ask your administrator."
-        );
-        setStatus("ready");
-        return;
-      }
-
       // Jobs and invoices are ordered newest-first so the PostgREST ~1000-row
       // response cap keeps the most recent records if a table ever outgrows it.
       // The proper fix at scale is a SQL view (see design doc).
@@ -277,10 +248,10 @@ export default function StatsPage() {
         licencesRes,
         speedRes,
       ] = await Promise.all([
-        supabase
-          .from("jobs")
-          .select(
-            `
+        tenant
+          .filterByTenant(
+            supabase.from("jobs").select(
+              `
             id,
             reference,
             status,
@@ -294,35 +265,32 @@ export default function StatsPage() {
             drivers ( name ),
             job_stops ( id, type, status, pod_status, delivered_at )
           `
+            )
           )
-          .eq("tenant_id", tenantId)
           .order("created_at", { ascending: false }),
-        supabase
-          .from("invoices")
-          .select("id, issue_date, due_date, total_amount, status")
-          .eq("tenant_id", tenantId)
+        tenant
+          .filterByTenant(
+            supabase
+              .from("invoices")
+              .select("id, issue_date, due_date, total_amount, status")
+          )
           .order("created_at", { ascending: false }),
-        supabase
-          .from("vehicles")
-          .select("id, active")
-          .eq("tenant_id", tenantId),
-        supabase
-          .from("drivers")
-          .select("id, name, active")
-          .eq("tenant_id", tenantId),
-        supabase
-          .from("customers")
-          .select("id, name, active, created_at")
-          .eq("tenant_id", tenantId),
-        supabase
-          .from("vehicle_licences")
-          .select("id, active, expiry_date")
-          .eq("tenant_id", tenantId),
+        tenant.filterByTenant(supabase.from("vehicles").select("id, active")),
+        tenant
+          .filterByTenant(supabase.from("drivers").select("id, name, active")),
+        tenant
+          .filterByTenant(
+            supabase.from("customers").select("id, name, active, created_at")
+          ),
+        tenant
+          .filterByTenant(
+            supabase.from("vehicle_licences").select("id, active, expiry_date")
+          ),
         // Only rows already over the threshold cross the wire.
-        supabase
-          .from("vehicle_locations")
-          .select("id, speed, recorded_at")
-          .eq("tenant_id", tenantId)
+        tenant
+          .filterByTenant(
+            supabase.from("vehicle_locations").select("id, speed, recorded_at")
+          )
           .gt("speed", SPEED_ALERT_THRESHOLD)
           .order("recorded_at", { ascending: false })
           .limit(1000),
@@ -391,7 +359,7 @@ export default function StatsPage() {
 
   useEffect(() => {
     loadStats();
-  }, []);
+  }, [tenant.activeTenantId]);
 
   const start = periodStart(period);
   const now = new Date();
@@ -535,6 +503,7 @@ export default function StatsPage() {
   const topCustomers = groupJobsBy(periodJobs, "customer_id", "customers");
 
   return (
+    <TenantGate>
     <main
       style={{
         minHeight: "100vh",
@@ -576,31 +545,6 @@ export default function StatsPage() {
 
         {status === "loading" ? (
           <p style={{ color: "white" }}>Loading stats...</p>
-        ) : null}
-
-        {status === "signed-out" ? (
-          <div style={{ ...statCardStyle, maxWidth: 420 }}>
-            <h2 style={{ marginTop: 0, marginBottom: 6 }}>
-              Sign in to view stats
-            </h2>
-            <p style={{ margin: "0 0 14px 0", color: "#555" }}>
-              Company stats are only available to signed-in members.
-            </p>
-            <a
-              href="/"
-              style={{
-                display: "inline-block",
-                padding: "10px 14px",
-                borderRadius: 10,
-                background: "#111827",
-                color: "white",
-                fontWeight: 600,
-                textDecoration: "none",
-              }}
-            >
-              Go to sign in
-            </a>
-          </div>
         ) : null}
 
         {status === "ready" ? (
@@ -866,5 +810,6 @@ export default function StatsPage() {
         ) : null}
       </div>
     </main>
+    </TenantGate>
   );
 }
