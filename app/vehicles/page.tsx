@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "../../lib/supabase/browser";
-
-const FALLBACK_TENANT_ID = "2f7cc0dc-b7fd-4556-92be-445e4b42ddcd";
+import { useTenant } from "../components/TenantProvider";
+import TenantGate from "../components/TenantGate";
 
 const inputStyle: React.CSSProperties = {
   padding: "12px 14px",
@@ -54,8 +54,9 @@ type Vehicle = {
 
 export default function VehiclesPage() {
   const supabase = createClient();
+  const tenant = useTenant();
+  const isAdmin = tenant.role === "admin" || tenant.role === "super_admin";
 
-  const [tenantId, setTenantId] = useState<string | null>(null);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
@@ -69,35 +70,11 @@ export default function VehiclesPage() {
     model: "",
   });
 
-  async function resolveTenantId(): Promise<string> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return FALLBACK_TENANT_ID;
-    }
-
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("tenant_id")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    if (error || !data?.tenant_id) {
-      return FALLBACK_TENANT_ID;
-    }
-
-    return data.tenant_id;
-  }
-
-  async function loadVehicles(resolvedTenantId: string) {
+  async function loadVehicles() {
     setLoading(true);
 
-    const { data, error } = await supabase
-      .from("vehicles")
-      .select("*")
-      .eq("tenant_id", resolvedTenantId)
+    const { data, error } = await tenant
+      .filterByTenant(supabase.from("vehicles").select("*"))
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -111,14 +88,8 @@ export default function VehiclesPage() {
   }
 
   useEffect(() => {
-    async function init() {
-      const resolvedTenantId = await resolveTenantId();
-      setTenantId(resolvedTenantId);
-      await loadVehicles(resolvedTenantId);
-    }
-
-    init();
-  }, []);
+    loadVehicles();
+  }, [tenant.activeTenantId]);
 
   function resetForm() {
     setEditingId(null);
@@ -148,8 +119,8 @@ export default function VehiclesPage() {
     event.preventDefault();
     setMessage("");
 
-    if (!tenantId) {
-      setMessage("Tenant not loaded.");
+    if (!isAdmin) {
+      setMessage("Only an admin can change the fleet.");
       return;
     }
 
@@ -158,10 +129,14 @@ export default function VehiclesPage() {
       return;
     }
 
+    if (!editingId && !tenant.writeTenantId) {
+      setMessage("Pick a specific tenant to create records.");
+      return;
+    }
+
     setSaving(true);
 
     const payload = {
-      tenant_id: tenantId,
       registration: form.registration.trim().toUpperCase(),
       vehicle_type: form.vehicle_type.trim() || null,
       make: form.make.trim() || null,
@@ -175,14 +150,13 @@ export default function VehiclesPage() {
       const result = await supabase
         .from("vehicles")
         .update(payload)
-        .eq("id", editingId)
-        .eq("tenant_id", tenantId);
+        .eq("id", editingId);
 
       error = result.error;
     } else {
       const result = await supabase
         .from("vehicles")
-        .insert([{ ...payload, active: true }]);
+        .insert([{ ...payload, tenant_id: tenant.writeTenantId, active: true }]);
 
       error = result.error;
     }
@@ -195,12 +169,16 @@ export default function VehiclesPage() {
 
     resetForm();
     setMessage(wasEditing ? "Vehicle updated" : "Vehicle created");
-    await loadVehicles(tenantId);
+    await loadVehicles();
     setSaving(false);
   }
 
   async function deleteVehicle(id: string) {
-    if (!tenantId) return;
+    if (!isAdmin) {
+      setMessage("Only an admin can change the fleet.");
+      return;
+    }
+
     if (!window.confirm("Delete vehicle?")) return;
 
     setMessage("");
@@ -208,8 +186,7 @@ export default function VehiclesPage() {
     const { error } = await supabase
       .from("vehicles")
       .delete()
-      .eq("id", id)
-      .eq("tenant_id", tenantId);
+      .eq("id", id);
 
     if (error) {
       setMessage(error.message);
@@ -217,19 +194,16 @@ export default function VehiclesPage() {
     }
 
     setMessage("Vehicle deleted");
-    await loadVehicles(tenantId);
+    await loadVehicles();
   }
 
   async function toggleVehicle(id: string, active: boolean | null) {
-    if (!tenantId) return;
-
     setMessage("");
 
     const { error } = await supabase
       .from("vehicles")
       .update({ active: !active })
-      .eq("id", id)
-      .eq("tenant_id", tenantId);
+      .eq("id", id);
 
     if (error) {
       setMessage(error.message);
@@ -237,10 +211,11 @@ export default function VehiclesPage() {
     }
 
     setMessage(!active ? "Vehicle activated" : "Vehicle deactivated");
-    await loadVehicles(tenantId);
+    await loadVehicles();
   }
 
   return (
+    <TenantGate>
     <main
       style={{
         minHeight: "100vh",
@@ -260,6 +235,7 @@ export default function VehiclesPage() {
       >
         <h1 style={{ color: "white", marginTop: 0 }}>Vehicles</h1>
 
+        {isAdmin ? (
         <form
           onSubmit={saveVehicle}
           style={{
@@ -325,6 +301,7 @@ export default function VehiclesPage() {
             ) : null}
           </div>
         </form>
+        ) : null}
 
         {message ? (
           <div
@@ -382,21 +359,25 @@ export default function VehiclesPage() {
                   flexWrap: "wrap",
                 }}
               >
-                <button
-                  type="button"
-                  style={secondaryButtonStyle}
-                  onClick={() => startEdit(vehicle)}
-                >
-                  Edit
-                </button>
+                {isAdmin ? (
+                  <>
+                    <button
+                      type="button"
+                      style={secondaryButtonStyle}
+                      onClick={() => startEdit(vehicle)}
+                    >
+                      Edit
+                    </button>
 
-                <button
-                  type="button"
-                  style={deleteButtonStyle}
-                  onClick={() => deleteVehicle(vehicle.id)}
-                >
-                  Delete
-                </button>
+                    <button
+                      type="button"
+                      style={deleteButtonStyle}
+                      onClick={() => deleteVehicle(vehicle.id)}
+                    >
+                      Delete
+                    </button>
+                  </>
+                ) : null}
 
                 <button
                   type="button"
@@ -411,5 +392,6 @@ export default function VehiclesPage() {
         </div>
       </div>
     </main>
+    </TenantGate>
   );
 }
