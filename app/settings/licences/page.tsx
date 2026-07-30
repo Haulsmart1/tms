@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../../../lib/supabase/browser";
+import { useTenant } from "../../components/TenantProvider";
+import TenantGate from "../../components/TenantGate";
 
-const FALLBACK_TENANT_ID = "2f7cc0dc-b7fd-4556-92be-445e4b42ddcd";
 const PRICE_PER_LICENSED_VEHICLE = 10;
 
 type Vehicle = {
@@ -94,8 +95,8 @@ const deleteButtonStyle: React.CSSProperties = {
 
 export default function VehicleLicencesPage() {
     const supabase = createClient();
+    const tenant = useTenant();
 
-    const [tenantId, setTenantId] = useState<string | null>(null);
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
     const [licences, setLicences] = useState<VehicleLicence[]>([]);
     const [loading, setLoading] = useState(true);
@@ -109,29 +110,7 @@ export default function VehicleLicencesPage() {
     const [active, setActive] = useState(true);
     const [notes, setNotes] = useState("");
 
-    async function resolveTenantId(): Promise<string> {
-        const {
-            data: { user },
-        } = await supabase.auth.getUser();
-
-        if (!user) {
-            return FALLBACK_TENANT_ID;
-        }
-
-        const { data, error } = await supabase
-            .from("profiles")
-            .select("tenant_id")
-            .eq("id", user.id)
-            .maybeSingle();
-
-        if (error || !data?.tenant_id) {
-            return FALLBACK_TENANT_ID;
-        }
-
-        return data.tenant_id;
-    }
-
-    async function loadData(currentTenantId: string) {
+    async function loadData() {
         setLoading(true);
         setMessage("");
 
@@ -139,14 +118,18 @@ export default function VehicleLicencesPage() {
             { data: vehicleData, error: vehicleError },
             { data: licenceData, error: licenceError },
         ] = await Promise.all([
-            supabase
-                .from("vehicles")
-                .select("id, tenant_id, registration, vehicle_type, make, model, active")
-                .eq("tenant_id", currentTenantId)
+            tenant
+                .filterByTenant(
+                    supabase
+                        .from("vehicles")
+                        .select("id, tenant_id, registration, vehicle_type, make, model, active")
+                )
                 .order("registration", { ascending: true }),
-            supabase
-                .from("vehicle_licences")
-                .select(`
+            tenant
+                .filterByTenant(
+                    supabase
+                        .from("vehicle_licences")
+                        .select(`
           id,
           tenant_id,
           vehicle_id,
@@ -166,7 +149,7 @@ export default function VehicleLicencesPage() {
             active
           )
         `)
-                .eq("tenant_id", currentTenantId)
+                )
                 .order("created_at", { ascending: false }),
         ]);
 
@@ -191,14 +174,8 @@ export default function VehicleLicencesPage() {
     }
 
     useEffect(() => {
-        async function init() {
-            const resolved = await resolveTenantId();
-            setTenantId(resolved);
-            await loadData(resolved);
-        }
-
-        init();
-    }, []);
+        loadData();
+    }, [tenant.activeTenantId]);
 
     function resetForm() {
         setVehicleId("");
@@ -213,11 +190,6 @@ export default function VehicleLicencesPage() {
         event.preventDefault();
         setMessage("");
 
-        if (!tenantId) {
-            setMessage("Tenant not loaded.");
-            return;
-        }
-
         if (!vehicleId) {
             setMessage("Please select a vehicle.");
             return;
@@ -228,11 +200,16 @@ export default function VehicleLicencesPage() {
             return;
         }
 
+        if (!tenant.writeTenantId) {
+            setMessage("Pick a specific tenant to create records.");
+            return;
+        }
+
         setSaving(true);
 
         const { error } = await supabase.from("vehicle_licences").insert([
             {
-                tenant_id: tenantId,
+                tenant_id: tenant.writeTenantId,
                 vehicle_id: vehicleId,
                 licence_type: licenceType.trim(),
                 issue_date: issueDate || null,
@@ -251,18 +228,16 @@ export default function VehicleLicencesPage() {
         resetForm();
         setMessage("Licence added.");
         setSaving(false);
-        await loadData(tenantId);
+        await loadData();
     }
 
     async function deleteLicence(id: string) {
-        if (!tenantId) return;
         if (!window.confirm("Delete licence?")) return;
 
         const { error } = await supabase
             .from("vehicle_licences")
             .delete()
-            .eq("id", id)
-            .eq("tenant_id", tenantId);
+            .eq("id", id);
 
         if (error) {
             setMessage(error.message);
@@ -270,17 +245,14 @@ export default function VehicleLicencesPage() {
         }
 
         setMessage("Licence deleted.");
-        await loadData(tenantId);
+        await loadData();
     }
 
     async function toggleLicence(id: string, currentActive: boolean | null) {
-        if (!tenantId) return;
-
         const { error } = await supabase
             .from("vehicle_licences")
             .update({ active: !currentActive })
-            .eq("id", id)
-            .eq("tenant_id", tenantId);
+            .eq("id", id);
 
         if (error) {
             setMessage(error.message);
@@ -288,7 +260,7 @@ export default function VehicleLicencesPage() {
         }
 
         setMessage(!currentActive ? "Licence activated." : "Licence deactivated.");
-        await loadData(tenantId);
+        await loadData();
     }
 
     function vehicleLabel(vehicle: Vehicle) {
@@ -315,6 +287,7 @@ export default function VehicleLicencesPage() {
     const monthlyTotal = billableVehicleCount * PRICE_PER_LICENSED_VEHICLE;
 
     return (
+        <TenantGate>
         <main
             style={{
                 minHeight: "100vh",
@@ -521,5 +494,6 @@ export default function VehicleLicencesPage() {
                 )}
             </div>
         </main>
+        </TenantGate>
     );
 }
