@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import AppHeader from "./components/AppHeader";
+import { TenantProvider } from "./components/TenantProvider";
 import "./globals.css";
 
 /* DESIGN-SYSTEM SEAM, read before editing.
@@ -60,8 +61,10 @@ export default function RootLayout({
           color: "#0f172a",
         }}
       >
-        <AppHeader />
-        {children}
+        <TenantProvider>
+          <AppHeader />
+          {children}
+        </TenantProvider>
       </body>
     </html>
   );

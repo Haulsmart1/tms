@@ -1,84 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { createClient } from "../../lib/supabase/browser";
-import { SUPER_ADMIN_ROLE, extractRoleName } from "../../lib/roles";
-
-type MenuStatus = "loading" | "signed-out" | "tenant" | "super-admin";
+import { useTenant } from "./TenantProvider";
+import TenantSelector from "./TenantSelector";
 
 const linkStyle: CSSProperties = {
-  color: "white",
-  textDecoration: "none",
-  fontWeight: 500,
-  fontSize: 14,
-  opacity: 0.95,
+  color: "white", textDecoration: "none", fontWeight: 500, fontSize: 14, opacity: 0.95,
 };
 
 const sectionStyle: CSSProperties = {
-  display: "flex",
-  gap: 18,
-  alignItems: "center",
-  flexWrap: "wrap",
+  display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap",
 };
 
 const superAdminLinkStyle: CSSProperties = {
-  color: "white",
-  textDecoration: "none",
-  fontWeight: 600,
-  fontSize: 14,
-  padding: "4px 10px",
-  borderRadius: 8,
-  background: "#7c3aed",
+  color: "white", textDecoration: "none", fontWeight: 600, fontSize: 14,
+  padding: "4px 10px", borderRadius: 8, background: "#7c3aed",
 };
 
 export default function AppHeader() {
   const pathname = usePathname();
-  const [status, setStatus] = useState<MenuStatus>("loading");
+  const { status, role } = useTenant();
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadRole() {
-      const supabase = createClient();
-
-      const { data: { user } } = await supabase.auth.getUser();
-
-      if (!user) {
-        if (!cancelled) setStatus("signed-out");
-        return;
-      }
-
-      const { data } = await supabase
-        .from("profiles")
-        .select("roles ( name )")
-        .eq("id", user.id)
-        .single();
-
-      const roleName = extractRoleName(data?.roles);
-
-      if (!cancelled) {
-        setStatus(roleName === SUPER_ADMIN_ROLE ? "super-admin" : "tenant");
-      }
-    }
-
-    loadRole();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [pathname]);
-
-  if (
-    pathname === "/" ||
-    pathname === "/login" ||
-    pathname.startsWith("/super-admin")
-  ) {
+  if (pathname === "/" || pathname === "/login" || pathname.startsWith("/super-admin")) {
     return null;
   }
-
   if (status === "loading" || status === "signed-out") {
     return null;
   }
@@ -122,7 +69,8 @@ export default function AppHeader() {
           <Link href="/maintenance" style={linkStyle}>Maintenance</Link>
           <Link href="/settings" style={linkStyle}>Settings</Link>
 
-          {status === "super-admin" ? (
+          <TenantSelector />
+          {role === "super_admin" ? (
             <Link href="/super-admin" style={superAdminLinkStyle}>
               ⚡ Super Admin
             </Link>
