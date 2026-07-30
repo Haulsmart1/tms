@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "../../lib/supabase/browser";
-
-const TENANT_ID = "2f7cc0dc-b7fd-4556-92be-445e4b42ddcd";
+import { useTenant } from "../components/TenantProvider";
+import TenantGate from "../components/TenantGate";
 
 function formatMoney(value: any) {
   if (value === null || value === undefined || value === "") {
@@ -74,6 +74,7 @@ const selectStyle = {
 
 export default function InvoicesPage() {
   const supabase = createClient();
+  const tenant = useTenant();
 
   const [invoices, setInvoices] = useState<any[]>([]);
   const [jobs, setJobs] = useState<any[]>([]);
@@ -82,9 +83,9 @@ export default function InvoicesPage() {
   async function loadData() {
     setMessage("");
 
-    const { data: invoiceData, error: invoiceError } = await supabase
-      .from("invoices")
-      .select(`
+    const { data: invoiceData, error: invoiceError } = await tenant
+      .filterByTenant(
+        supabase.from("invoices").select(`
         id,
         job_id,
         invoice_number,
@@ -101,12 +102,12 @@ export default function InvoicesPage() {
           name
         )
       `)
-      .eq("tenant_id", TENANT_ID)
+      )
       .order("created_at", { ascending: false });
 
-    const { data: jobsData, error: jobsError } = await supabase
-      .from("jobs")
-      .select(`
+    const { data: jobsData, error: jobsError } = await tenant
+      .filterByTenant(
+        supabase.from("jobs").select(`
         id,
         reference,
         status,
@@ -116,7 +117,7 @@ export default function InvoicesPage() {
           name
         )
       `)
-      .eq("tenant_id", TENANT_ID)
+      )
       .eq("status", "completed")
       .order("created_at", { ascending: false });
 
@@ -142,9 +143,14 @@ export default function InvoicesPage() {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [tenant.activeTenantId]);
 
   async function createInvoice(job: any) {
+    if (!tenant.writeTenantId) {
+      setMessage("Pick a specific tenant to create records.");
+      return;
+    }
+
     const subtotal = Number(job.customer_price || 0);
     const vatAmount = 0;
     const totalAmount = subtotal + vatAmount;
@@ -155,7 +161,7 @@ export default function InvoicesPage() {
 
     const { error } = await supabase.from("invoices").insert([
       {
-        tenant_id: TENANT_ID,
+        tenant_id: tenant.writeTenantId,
         job_id: job.id,
         customer_id: job.customer_id,
         invoice_number: buildInvoiceNumber(),
@@ -181,8 +187,7 @@ export default function InvoicesPage() {
     const { error } = await supabase
       .from("invoices")
       .update({ status })
-      .eq("id", id)
-      .eq("tenant_id", TENANT_ID);
+      .eq("id", id);
 
     if (error) {
       setMessage(`Update error: ${error.message}`);
@@ -193,6 +198,7 @@ export default function InvoicesPage() {
   }
 
   return (
+    <TenantGate>
     <main
       style={{
         minHeight: "100vh",
@@ -328,6 +334,7 @@ export default function InvoicesPage() {
         </section>
       </div>
     </main>
+    </TenantGate>
   );
 }
 
