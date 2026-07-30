@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "../../lib/supabase/browser";
-
-const FALLBACK_TENANT_ID = "2f7cc0dc-b7fd-4556-92be-445e4b42ddcd";
+import { useTenant } from "../components/TenantProvider";
+import TenantGate from "../components/TenantGate";
 
 type Vehicle = {
     id: string;
@@ -43,8 +43,8 @@ type MaintenanceRecordRow = {
 
 export default function MaintenancePage() {
     const supabase = createClient();
+    const tenant = useTenant();
 
-    const [tenantId, setTenantId] = useState<string | null>(null);
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
     const [records, setRecords] = useState<MaintenanceRecord[]>([]);
     const [loading, setLoading] = useState(true);
@@ -59,29 +59,7 @@ export default function MaintenancePage() {
     const [cost, setCost] = useState("");
     const [notes, setNotes] = useState("");
 
-    async function resolveTenantId(): Promise<string> {
-        const {
-            data: { user },
-        } = await supabase.auth.getUser();
-
-        if (!user) {
-            return FALLBACK_TENANT_ID;
-        }
-
-        const { data, error } = await supabase
-            .from("profiles")
-            .select("tenant_id")
-            .eq("id", user.id)
-            .maybeSingle();
-
-        if (error || !data?.tenant_id) {
-            return FALLBACK_TENANT_ID;
-        }
-
-        return data.tenant_id;
-    }
-
-    async function loadData(currentTenantId: string) {
+    async function loadData() {
         setLoading(true);
         setMessage("");
 
@@ -89,10 +67,12 @@ export default function MaintenancePage() {
             { data: vehicleData, error: vehicleError },
             { data: maintenanceData, error: maintenanceError },
         ] = await Promise.all([
-            supabase
-                .from("vehicles")
-                .select("id, tenant_id, registration, vehicle_type, make, model, active")
-                .eq("tenant_id", currentTenantId)
+            tenant
+                .filterByTenant(
+                    supabase
+                        .from("vehicles")
+                        .select("id, tenant_id, registration, vehicle_type, make, model, active")
+                )
                 .order("registration", { ascending: true }),
             supabase
                 .from("maintenance_records")
@@ -136,9 +116,10 @@ export default function MaintenancePage() {
             })
         );
 
-        const filteredMaintenance = normalizedMaintenance.filter(
-            (record) => record.vehicles?.tenant_id === currentTenantId
-        );
+        const activeId = tenant.activeTenantId;
+        const filteredMaintenance = activeId
+            ? normalizedMaintenance.filter((record) => record.vehicles?.tenant_id === activeId)
+            : normalizedMaintenance; // "All": RLS already scoped to the company
 
         setVehicles(tenantVehicles);
         setRecords(filteredMaintenance);
@@ -159,8 +140,8 @@ export default function MaintenancePage() {
         event.preventDefault();
         setMessage("");
 
-        if (!tenantId) {
-            setMessage("Tenant not loaded.");
+        if (!tenant.writeTenantId) {
+            setMessage("Pick a specific tenant to create records.");
             return;
         }
 
@@ -177,6 +158,7 @@ export default function MaintenancePage() {
         setSaving(true);
 
         const payload = {
+            tenant_id: tenant.writeTenantId,
             vehicle_id: vehicleId,
             maintenance_type: maintenanceType.trim(),
             due_date: dueDate || null,
@@ -198,13 +180,12 @@ export default function MaintenancePage() {
             const { error: vehicleUpdateError } = await supabase
                 .from("vehicles")
                 .update({ active: false })
-                .eq("id", vehicleId)
-                .eq("tenant_id", tenantId);
+                .eq("id", vehicleId);
 
             if (vehicleUpdateError) {
                 setMessage(`Maintenance saved, but vehicle VOR update failed: ${vehicleUpdateError.message}`);
                 setSaving(false);
-                await loadData(tenantId);
+                await loadData();
                 return;
             }
         }
@@ -213,26 +194,22 @@ export default function MaintenancePage() {
             await supabase
                 .from("vehicles")
                 .update({ active: true })
-                .eq("id", vehicleId)
-                .eq("tenant_id", tenantId);
+                .eq("id", vehicleId);
         }
 
         resetForm();
         setMessage(status === "vor" ? "Maintenance record saved and vehicle marked VOR." : "Maintenance record added.");
         setSaving(false);
-        await loadData(tenantId);
+        await loadData();
     }
 
     async function markVehicleRoadworthy(vehicleIdToRestore: string) {
-        if (!tenantId) return;
-
         setMessage("");
 
         const { error } = await supabase
             .from("vehicles")
             .update({ active: true })
-            .eq("id", vehicleIdToRestore)
-            .eq("tenant_id", tenantId);
+            .eq("id", vehicleIdToRestore);
 
         if (error) {
             setMessage(error.message);
@@ -240,7 +217,7 @@ export default function MaintenancePage() {
         }
 
         setMessage("Vehicle marked roadworthy and activated.");
-        await loadData(tenantId);
+        await loadData();
     }
 
     function vehicleLabel(vehicle: Vehicle) {
@@ -255,14 +232,8 @@ export default function MaintenancePage() {
     }
 
     useEffect(() => {
-        async function init() {
-            const resolvedTenantId = await resolveTenantId();
-            setTenantId(resolvedTenantId);
-            await loadData(resolvedTenantId);
-        }
-
-        init();
-    }, []);
+        loadData();
+    }, [tenant.activeTenantId]);
 
     const cardStyle: React.CSSProperties = {
         background: "rgba(255,255,255,0.95)",
@@ -302,6 +273,7 @@ export default function MaintenancePage() {
     };
 
     return (
+        <TenantGate>
         <main
             style={{
                 minHeight: "100vh",
@@ -492,5 +464,6 @@ export default function MaintenancePage() {
                 </div>
             </div>
         </main>
+        </TenantGate>
     );
 }
