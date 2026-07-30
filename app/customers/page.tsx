@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "../../lib/supabase/browser";
-
-const TENANT_ID = "2f7cc0dc-b7fd-4556-92be-445e4b42ddcd";
+import { useTenant } from "../components/TenantProvider";
+import TenantGate from "../components/TenantGate";
 
 const inputStyle: React.CSSProperties = {
   padding: "12px 14px",
@@ -46,6 +46,7 @@ const deleteButtonStyle = {
 
 export default function CustomersPage() {
   const supabase = createClient();
+  const tenant = useTenant();
 
   const [customers, setCustomers] = useState<any[]>([]);
   const [editingId, setEditingId] = useState(null);
@@ -60,10 +61,8 @@ export default function CustomersPage() {
   });
 
   async function loadCustomers() {
-    const { data, error } = await supabase
-      .from("customers")
-      .select("*")
-      .eq("tenant_id", TENANT_ID)
+    const { data, error } = await tenant
+      .filterByTenant(supabase.from("customers").select("*"))
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -76,7 +75,7 @@ export default function CustomersPage() {
 
   useEffect(() => {
     loadCustomers();
-  }, []);
+  }, [tenant.activeTenantId]);
 
   function resetForm() {
     setEditingId(null);
@@ -111,7 +110,6 @@ export default function CustomersPage() {
     }
 
     const payload = {
-      tenant_id: TENANT_ID,
       name: form.name,
       contact_name: form.contact_name || null,
       phone: form.phone || null,
@@ -127,9 +125,14 @@ export default function CustomersPage() {
         .update(payload)
         .eq("id", editingId));
     } else {
+      if (!tenant.writeTenantId) {
+        setMessage("Pick a specific tenant to create records.");
+        return;
+      }
+
       ({ error } = await supabase
         .from("customers")
-        .insert([{ ...payload, active: true }]));
+        .insert([{ ...payload, tenant_id: tenant.writeTenantId, active: true }]));
     }
 
     if (error) {
@@ -169,6 +172,7 @@ export default function CustomersPage() {
   }
 
   return (
+    <TenantGate>
     <main
       style={{
         minHeight: "100vh",
@@ -317,6 +321,7 @@ export default function CustomersPage() {
 
       </div>
     </main>
+    </TenantGate>
   );
 }
 
