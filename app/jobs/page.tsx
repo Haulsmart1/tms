@@ -7,6 +7,7 @@ import { CollectionStopValidation } from "../../lib/supabase/validation/job";
 import { DeliveryStopValidation } from "../../lib/supabase/validation/job";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
+import PodLink from "../components/PodLink";
 
 const emptyStop = (type: any) => ({
   type,
@@ -476,16 +477,20 @@ export default function JobsPage() {
       pod_photo_url: ""
     };
 
+    const updatePayload: Record<string, any> = {
+      recipient_name: podForm.recipient_name.trim() || null,
+      pod_notes: podForm.pod_notes.trim() || null,
+      delivered_at: new Date().toISOString(),
+      pod_status: "delivered",
+      status: "completed"
+    };
+    if (podForm.pod_photo_url.trim()) {
+      updatePayload.pod_photo_url = podForm.pod_photo_url.trim();
+    }
+
     const { error: stopError } = await supabase
       .from("job_stops")
-      .update({
-        recipient_name: podForm.recipient_name.trim() || null,
-        pod_notes: podForm.pod_notes.trim() || null,
-        pod_photo_url: podForm.pod_photo_url.trim() || null,
-        delivered_at: new Date().toISOString(),
-        pod_status: "delivered",
-        status: "completed"
-      })
+      .update(updatePayload)
       .eq("id", stopId);
 
     if (stopError) {
@@ -920,15 +925,7 @@ export default function JobsPage() {
 
                           {stop.pod_photo_url ? (
                             <div style={{ marginTop: 6 }}>
-                              Photo:{" "}
-                              <a
-                                href={stop.pod_photo_url}
-                                target="_blank"
-                                rel="noreferrer"
-                                style={{ color: "#111827", fontWeight: 600 }}
-                              >
-                                View POD
-                              </a>
+                              <PodLink value={stop.pod_photo_url} label="View POD" />
                             </div>
                           ) : null}
 
