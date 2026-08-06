@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
+import PodLink from "../components/PodLink";
 
 const POD_BUCKET = "pod-files";
 
@@ -148,9 +149,7 @@ export default function PodPage() {
 
     const { error: uploadError } = await supabase.storage
       .from(POD_BUCKET)
-      .upload(filePath, file, {
-        upsert: true
-      });
+      .upload(filePath, file, { upsert: false });
 
     if (uploadError) {
       setUploadingField("");
@@ -158,19 +157,11 @@ export default function PodPage() {
       return;
     }
 
-    const { data: publicUrlData } = supabase.storage
-      .from(POD_BUCKET)
-      .getPublicUrl(filePath);
-
-    const publicUrl = publicUrlData?.publicUrl || "";
-
-    updateForm(stopId, fieldName, publicUrl);
+    updateForm(stopId, fieldName, filePath);
 
     setUploadingField("");
     setMessage(
-      fieldName === "pod_photo_url"
-        ? "Photo uploaded."
-        : "Document uploaded."
+      fieldName === "pod_photo_url" ? "Photo uploaded." : "Document uploaded."
     );
   }
 
@@ -414,14 +405,7 @@ export default function PodPage() {
                               ) : null}
                               {form.pod_photo_url ? (
                                 <div style={{ marginTop: 10 }}>
-                                  <a
-                                    href={form.pod_photo_url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    style={{ color: "#111827", fontWeight: 600 }}
-                                  >
-                                    View uploaded photo
-                                  </a>
+                                  <PodLink value={form.pod_photo_url} label="View uploaded photo" />
                                 </div>
                               ) : null}
                             </div>
@@ -456,14 +440,7 @@ export default function PodPage() {
                               ) : null}
                               {form.pod_document_url ? (
                                 <div style={{ marginTop: 10 }}>
-                                  <a
-                                    href={form.pod_document_url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    style={{ color: "#111827", fontWeight: 600 }}
-                                  >
-                                    View uploaded document
-                                  </a>
+                                  <PodLink value={form.pod_document_url} label="View uploaded document" />
                                 </div>
                               ) : null}
                             </div>
