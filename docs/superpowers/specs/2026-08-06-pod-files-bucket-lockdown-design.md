@@ -1,205 +1,302 @@
 # pod-files bucket lockdown: design
 
 Date: 2026-08-06
-Status: approved (brainstorming), pending adversarial review + implementation plan
+Status: approved (brainstorming), revised after adversarial review, pending user review + plan
 
 ## Problem
 
 The `pod-files` Supabase Storage bucket is **public** (`getPublicUrl`, `upsert: true`). Storage
-objects live in the `storage` schema and are NOT governed by the public-schema RLS the rest of
-the tenancy model relies on, so:
+objects live in the `storage` schema and are governed by `storage.objects` RLS, not the
+public-schema policies, and the bucket's current policies are permissive:
 
-- **Read leak:** every uploaded POD photo / delivery document (recipient names, signatures,
-  addresses, customer PII) is world-readable by anyone who has the URL, with no auth and no
-  tenant check.
-- **Write leak:** the pod page is a `"use client"` component, so any authenticated user can call
+- **Read leak:** while the bucket is public, every uploaded POD photo / delivery document
+  (recipient names, signatures, addresses, PII) is world-readable by URL, no auth, no tenant check.
+- **Write leak:** the pod page is a `"use client"` component, so any authenticated user can
   `supabase.storage.from('pod-files').upload('<other-tenant-uuid>/.../evil.pdf', file, {upsert:true})`
-  and plant or **overwrite** another tenant's proof-of-delivery evidence.
+  and plant or overwrite another tenant's proof-of-delivery evidence.
 
 The de-hardcode work already made the upload path `${tenant_id}/${stop_id}/...`, so the first
-folder segment is the tenant id, but a path prefix is not access control. This was flagged HIGH
-by the tenant-context adversarial review and elevated to its own security-week task.
+folder segment is the tenant id, but a path prefix is not access control. Flagged HIGH by the
+tenant-context review and elevated to its own security-week task.
 
 ## Goals
 
-- Make `pod-files` private so objects are not world-readable.
-- Enforce tenant isolation on storage objects (read and write) via `storage.objects` RLS keyed
-  on the tenant path segment, reusing the fail-closed `can_access_tenant` helper.
-- Switch the app from public URLs to short-lived signed URLs generated on demand, with no new
-  server layer.
+- Make `pod-files` private and enforce tenant isolation on storage objects (read and write) via
+  `storage.objects` RLS keyed on the tenant path segment, reusing the fail-closed
+  `can_access_tenant`.
+- Replace the pre-existing permissive policies entirely (not add alongside them).
+- Switch the app from public URLs to short-lived signed URLs generated on demand, client-only.
+- Do all of the above without a broken window during rollout, and without destroying data.
 
 ## Non-goals (out of scope)
 
-- The jobs page's manual "paste a POD URL" **input** stays a free-form external-link field. (Its
-  display link is updated to use the shared helper, but the paste input is untouched.)
-- No server route / service-role signing layer (that is a separate future decision, also needed
-  for TomTom/Square). This piece is client-only.
-- Other storage buckets (only `pod-files` is in scope).
+- The jobs page's manual "paste a POD URL" **input** stays a free-form external-link field. Its
+  *display* is updated (external links render as a labeled, sandboxed link; not auto-opened), and
+  its `savePod` is patched so it cannot null an uploaded path, but the paste input itself stays.
+- No server route / service-role signing layer. Client-only.
+- Other storage buckets (only `pod-files` is in scope; the policy cleanup is gated on a discovery
+  query so it cannot silently affect another bucket).
 
-## Approach: client-side signed URLs
+## Approach: client-side signed URLs, permissive policies replaced
 
-Make the bucket private, add tenant-scoped `storage.objects` policies, and have the client mint
-short-lived signed URLs via `supabase.storage.from('pod-files').createSignedUrl(path, ttl)`,
-which the storage API only grants if the caller passes the SELECT policy. The pod page keeps
-uploading (an INSERT/UPDATE policy allows it) but stores the **object path** instead of a public
-URL. A single shared helper turns a stored path into a viewable link on demand. No server code,
-no new secrets; it fits the existing all-client architecture and fully closes the leak.
-
-Rejected: a server route signing with the service-role key (introduces the app's first server
-layer and service-role handling before this fix needs it; the storage policies are required
-either way). Keeping the bucket public is the leak itself.
+Enable RLS on `storage.objects`, **replace** the existing permissive pod-files policies with
+tenant-scoped SELECT + INSERT policies keyed on the tenant path segment, apply those **while the
+bucket is still public** so signing already works, deploy the app, then flip the bucket private.
+The client mints short-lived signed URLs via `createSignedUrl`, which the storage API only grants
+if the caller passes the SELECT policy. The pod page stores the object **path** (not a URL) and
+uploads immutably (`upsert:false`). A pure classifier decides how each stored value is presented.
+No server code, no new secrets. Rejected alternatives unchanged: server-route signing is
+premature; a public bucket is the leak.
 
 ## Architecture
 
-### Storage layer: `docs/sql/rls_10_pod_files_lockdown.sql` (Ethan runs it)
+### Step 0: discovery (Ethan runs, shares output)
 
-Re-runnable. Reuses the rls_08-hardened `can_access_tenant` (rejects null, scopes staff to own
-tenant / admin to company / super to all).
+Because the current permissive policies were created out-of-band (the repo commits zero
+`storage.objects` policy SQL) and are NOT named `pod_files_*`, we must see them before dropping:
 
 ```sql
--- 1. Make the bucket private. Public getPublicUrl links stop resolving.
-update storage.buckets set public = false where id = 'pod-files';
+select policyname, cmd, roles, qual, with_check
+from pg_policies where schemaname='storage' and tablename='objects';
+select relrowsecurity from pg_class where oid = 'storage.objects'::regclass;
+select id, public, allowed_mime_types, file_size_limit from storage.buckets where id='pod-files';
+select distinct split_part(name, '/', 1) as first_segment, count(*)
+from storage.objects where bucket_id='pod-files' group by 1 limit 20;   -- sanity: paths look like tenant uuids
+```
 
--- 2. Tenant-scope storage.objects. Upload path is `${tenant_id}/${stop_id}/...`,
---    so the first folder segment is the tenant id.
+If any policy protects a **different** bucket, we scope the drop instead of dropping all. In this
+project only `pod-files` is referenced by the app, so the expected case is "drop all, recreate two."
+
+### Step 1: `docs/sql/rls_10a_pod_files_policies.sql` (run FIRST, bucket stays public)
+
+Re-runnable. Reuses the rls_08-hardened `can_access_tenant` (rejects null; staff -> own tenant,
+admin -> company, super -> all).
+
+```sql
+-- Assert RLS is on. If it was ever disabled to make the public bucket "just work",
+-- the policies below would be inert. Do not trust the default.
+alter table storage.objects enable row level security;
+
+-- Replace ALL existing pod-files-affecting policies. Per Step 0, in this project every
+-- storage.objects policy concerns pod-files, so drop them all, then create exactly two.
+-- (If Step 0 shows another bucket's policy, drop by explicit name list instead.)
 do $$ declare pol record; begin
   for pol in select policyname from pg_policies
-    where schemaname='storage' and tablename='objects' and policyname like 'pod_files_%'
+    where schemaname='storage' and tablename='objects'
   loop execute format('drop policy %I on storage.objects', pol.policyname); end loop;
 end $$;
 
--- The regex guards the ::uuid cast so a non-uuid or root path segment is denied
--- cleanly instead of raising a cast error (fail-closed).
+-- Strict UUID pattern so the ::uuid cast can never raise on a regex-passing segment.
+-- First folder segment is the tenant id (upload path = `${tenant_id}/${stop_id}/...`).
 create policy pod_files_read on storage.objects for select to authenticated using (
   bucket_id = 'pod-files'
-  and (storage.foldername(name))[1] ~ '^[0-9a-fA-F-]{36}$'
+  and (storage.foldername(name))[1] ~
+      '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
   and public.can_access_tenant(((storage.foldername(name))[1])::uuid));
 
 create policy pod_files_insert on storage.objects for insert to authenticated with check (
   bucket_id = 'pod-files'
-  and (storage.foldername(name))[1] ~ '^[0-9a-fA-F-]{36}$'
+  and (storage.foldername(name))[1] ~
+      '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
   and public.can_access_tenant(((storage.foldername(name))[1])::uuid));
 
-create policy pod_files_update on storage.objects for update to authenticated
-using (bucket_id = 'pod-files'
-  and (storage.foldername(name))[1] ~ '^[0-9a-fA-F-]{36}$'
-  and public.can_access_tenant(((storage.foldername(name))[1])::uuid))
-with check (bucket_id = 'pod-files'
-  and (storage.foldername(name))[1] ~ '^[0-9a-fA-F-]{36}$'
-  and public.can_access_tenant(((storage.foldername(name))[1])::uuid));
+-- No UPDATE policy: uploads are immutable (upsert:false, unique Date.now() names), so no legit
+-- overwrite exists; omitting UPDATE removes the same-tenant evidence-forgery vector.
+-- No DELETE policy: the app never removes objects; deny by default.
 
-create policy pod_files_delete on storage.objects for delete to authenticated using (
-  bucket_id = 'pod-files'
-  and (storage.foldername(name))[1] ~ '^[0-9a-fA-F-]{36}$'
-  and public.can_access_tenant(((storage.foldername(name))[1])::uuid));
+-- Cheap upload hardening: restrict to POD-appropriate types (no SVG/html active content) and cap
+-- size. Client accept= is not a control; this is. Bucket stays public here (privatized in 10b).
+update storage.buckets
+  set allowed_mime_types = array['image/jpeg','image/png','image/webp','image/heic',
+        'application/pdf','application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+      file_size_limit = 15728640      -- 15 MB
+  where id = 'pod-files';
 
--- 3. Clear old public-URL values so every stored value is now a path (test data).
-update public.job_stops set pod_photo_url = null, pod_document_url = null;
+-- VERIFY: exactly the two intended policies remain for the bucket.
+--   select policyname, cmd from pg_policies
+--   where schemaname='storage' and tablename='objects' order by policyname;  -- pod_files_insert, pod_files_read
 ```
 
-- Read and write both gate on `can_access_tenant` (POD is filed by drivers, a staff activity, so
-  uploads are not admin-only). Swapping the insert/update policies to `can_manage_tenant` would
-  make uploads admin-only; not the intent.
-- `storage.foldername(name)` returns the folder segments as a 1-indexed `text[]`; `[1]` is the
-  tenant id. A root-level object yields an empty array, so `[1]` is null and the regex denies it.
-- Service role bypasses RLS, so any future server-side code keeps working.
-- RLS is already enabled on `storage.objects` by default in Supabase.
+### Step 2: `docs/sql/rls_10b_pod_files_privatize.sql` (run AFTER the app is deployed)
 
-### App: upload stores a path
+```sql
+-- Flip private only after the signed-URL app is live, so old getPublicUrl views never 404 in a gap.
+update storage.buckets set public = false where id = 'pod-files';
+-- No destructive data clear: the app's classifier self-heals legacy public URLs (recovers the
+-- object path and signs it), so old rows keep working and nothing is wiped.
+```
 
-In `app/pod/page.tsx` `uploadFile`, remove the `getPublicUrl` call; after a successful `upload`,
-store `filePath` (the object path) via `updateForm(stopId, fieldName, filePath)`. `savePod` then
-persists the path into `job_stops.pod_photo_url` / `pod_document_url`.
+Notes:
+- SELECT + INSERT both gate on `can_access_tenant` (POD is filed by drivers, a staff activity).
+- The strict UUID regex means a matching segment always casts cleanly, and a root-level or
+  non-uuid path (empty `foldername`, traversal, etc.) is denied.
+- Service role bypasses all of this.
 
-### App: shared signing helper `lib/pod/podUrl.ts`
+### App: upload stores a path, immutably
+
+In `app/pod/page.tsx` `uploadFile`: change `upsert: true` -> `upsert: false`; drop the
+`getPublicUrl` call; after a successful `upload`, store `filePath` via
+`updateForm(stopId, fieldName, filePath)`. `savePod` persists the path.
+
+### App: `lib/pod/podUrl.ts` (classifier + signer, unit-testable)
 
 ```ts
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const POD_BUCKET = "pod-files";
 
-// A stored POD value is either an external URL (pasted on the jobs page) or a
-// private-bucket object path (uploaded). Resolve it to something viewable.
-export async function resolvePodUrl(
-  supabase: SupabaseClient,
-  value: string | null | undefined,
-  ttlSeconds = 60,
+export type PodValue =
+  | { kind: "empty" }
+  | { kind: "external"; href: string; host: string } // arbitrary pasted external URL
+  | { kind: "path"; path: string };                   // bucket object path -> sign to view
+
+function publicPrefix(): string {
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+  return base ? `${base}/storage/v1/object/public/${POD_BUCKET}/` : "";
+}
+
+// Decide how to present a stored POD value:
+//  - our own bucket's legacy PUBLIC url -> recover the object path and sign it (self-heal)
+//  - a relative string -> a bucket object path -> sign it
+//  - an arbitrary http(s) url (jobs paste) -> a labeled external link, never auto-opened
+//  - anything else (empty, javascript:, data:, other schemes) -> empty (never surfaced)
+export function classifyPodValue(value: string | null | undefined): PodValue {
+  if (!value || !value.trim()) return { kind: "empty" };
+  const v = value.trim();
+
+  const prefix = publicPrefix();
+  if (prefix && v.startsWith(prefix)) {
+    const path = decodeURIComponent(v.slice(prefix.length).split("?")[0]);
+    return path ? { kind: "path", path } : { kind: "empty" };
+  }
+
+  let parsed: URL | null = null;
+  try { parsed = new URL(v); } catch { parsed = null; }
+  if (parsed) {
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return { kind: "external", href: parsed.toString(), host: parsed.host };
+    }
+    return { kind: "empty" }; // javascript:, data:, etc.
+  }
+  return { kind: "path", path: v }; // relative -> object path
+}
+
+export async function signPodPath(
+  supabase: SupabaseClient, path: string, ttlSeconds = 300,
 ): Promise<string | null> {
-  if (!value) return null;
-  if (/^https?:\/\//i.test(value)) return value;              // external pasted URL
-  const { data, error } = await supabase.storage
-    .from(POD_BUCKET).createSignedUrl(value, ttlSeconds);
+  const { data, error } = await supabase.storage.from(POD_BUCKET).createSignedUrl(path, ttlSeconds);
   return error ? null : (data?.signedUrl ?? null);
 }
 ```
 
-The `http(s)` branch keeps the jobs-page pasted external URLs working; anything else is treated
-as a bucket path and signed.
+### App: View controls
 
-### App: sign-on-click "View" controls
+For each stored POD value, `classifyPodValue` picks the affordance (in both `app/pod/page.tsx`'s
+two "View uploaded ..." spots and `app/jobs/page.tsx`'s "View POD" spot):
 
-The three display spots become buttons whose `onClick` calls `resolvePodUrl(...)` then
-`window.open(url, "_blank", "noopener")` (and set a "could not open the file" message on null):
-- `app/pod/page.tsx`: the "View uploaded photo" and "View uploaded document" links.
-- `app/jobs/page.tsx`: the inline "View POD" link (display only; the paste input is untouched).
+- `kind === "path"` -> a **button** that opens a blank tab **synchronously** (so it is not
+  popup-blocked), then navigates it once signed:
+  ```tsx
+  onClick={async () => {
+    const w = window.open("", "_blank");
+    const url = await signPodPath(supabase, pod.path);       // 5 min TTL
+    if (url && w) { try { (w as unknown as { opener: unknown }).opener = null; } catch {} w.location.href = url; }
+    else { w?.close(); setMessage("Could not open the file."); }
+  }}
+  ```
+- `kind === "external"` -> a **distinct labeled link** (not the "View" button), so an attacker's
+  pasted URL cannot masquerade as an in-app file and does not auto-navigate a reviewer:
+  ```tsx
+  <a href={pod.href} target="_blank" rel="noopener noreferrer">Open external link ({pod.host})</a>
+  ```
+- `kind === "empty"` -> render nothing.
 
-Signing on click with a 60s TTL means a signed URL is minted only when actually used and expires
-almost immediately, so it cannot be bookmarked or leaked; signing every visible photo on page
-load would be more requests and the URLs could go stale before use.
+### App: jobs `savePod` must not null an uploaded path
+
+`app/jobs/page.tsx` `savePod` currently writes `pod_photo_url: podForm.pod_photo_url.trim() || null`,
+which nulls a path uploaded via the pod page when an admin marks delivery with an empty box. Build
+the update payload to **omit** `pod_photo_url` (and any POD-file field) when the box is blank, so it
+never overwrites an existing value:
+```ts
+const payload: Record<string, any> = { recipient_name: ..., pod_notes: ..., /* delivery fields */ };
+if (podForm.pod_photo_url.trim()) payload.pod_photo_url = podForm.pod_photo_url.trim();
+```
 
 ## Data model / existing rows
 
-`job_stops.pod_photo_url` / `pod_document_url` now hold a bucket **path** for uploads (and still
-a free-form external URL for jobs-page pastes; the helper's `http` branch covers that). Existing
-rows hold old public URLs and are cleared by step 3 of `rls_10` (test data, throwaway), so there
-is no stale-URL back-compat beyond the ongoing external-URL case.
+`pod_photo_url` / `pod_document_url` hold a bucket **path** for uploads, and still a free-form
+external URL for jobs-page pastes. **No destructive clear**: the classifier self-heals legacy
+public URLs (recovers the object path and signs it), so pre-existing rows keep working and nothing
+is wiped. (This reverses the earlier "clear old rows" decision; self-healing makes the clear
+unnecessary and it would have destroyed the external URLs the paste field is meant to keep.)
 
-## Security / edge cases (all fail-closed)
+## Security / edge cases
 
-- **Cross-tenant view:** `createSignedUrl` only succeeds if the caller passes the SELECT policy,
-  so a tenant-B user signing a tenant-A path gets an error and the helper returns `null`.
-  Isolation is enforced at the storage layer, not just the `job_stops` row.
-- **Cross-tenant / malformed upload:** the INSERT/UPDATE policy denies a foreign-tenant, non-uuid,
-  or root path; the upload error surfaces to the user.
-- **Null / missing value:** helper returns `null`; the View control renders only when a value
-  exists.
+- **Cross-tenant read/view:** `createSignedUrl` only succeeds if the caller passes the SELECT
+  policy, so a tenant-B user signing a tenant-A path errors and the helper returns `null`.
+- **Cross-tenant / malformed / traversal upload:** the INSERT policy denies a foreign-tenant,
+  non-uuid, root, or traversal path; the strict regex keeps the cast from raising.
+- **Same-tenant forgery / deletion:** `upsert:false` + no UPDATE policy makes objects immutable; no
+  DELETE policy means objects cannot be removed via the API. Orphaned superseded uploads are a
+  storage-cost nit, not a security issue.
+- **Stored external URLs (jobs paste):** never auto-opened; rendered as a labeled external link
+  with `rel="noopener noreferrer"`; `javascript:`/`data:` values classify to `empty` and never
+  surface (this also closes the pre-existing `javascript:` `<a href>` XSS on that field).
+- **Content type:** the bucket `allowed_mime_types` restricts uploads to images + pdf/doc (no SVG /
+  html active content); a same-tenant insider therefore cannot stash active content, and signed
+  files open on the `*.supabase.co` origin, isolated from the app origin regardless.
+- **Accepted limits:** `createSignedUrl`'s TTL is caller-chosen, so a same-tenant user could mint a
+  longer-lived link directly; this is bounded by the SELECT policy (only their own tenant) and
+  accepted. The 300s default is a balance for large document downloads on slow links.
 
-## Sequencing
+## Sequencing (gap-free)
 
-Deploy the app change **first**, then run `rls_10`. The app change is backward-compatible (signed
-URLs work on a still-public bucket, and old `http` values pass straight through the helper), so
-nothing breaks in between. Flipping the bucket private before the new app deployed would 404 the
-old `getPublicUrl` views until deploy.
+1. **Run `rls_10a`** (enable RLS, replace policies, mime limits) **while the bucket is still
+   public.** Old `getPublicUrl` views keep working (public), and `createSignedUrl` now works (SELECT
+   policy exists).
+2. **Deploy the app** (stores paths, `upsert:false`, signs on view). Bucket still public, so any
+   not-yet-migrated public URLs still resolve, and new paths sign fine.
+3. **Run `rls_10b`** (privatize). Public URLs stop resolving; the classifier self-heals any legacy
+   public-URL rows into signed views.
+
+No ordering here leaves a window where a POD cannot be read by its own tenant.
 
 ## Files touched
 
 New:
-- `docs/sql/rls_10_pod_files_lockdown.sql` (Ethan runs it)
+- `docs/sql/rls_10a_pod_files_policies.sql` (Ethan runs, step 1)
+- `docs/sql/rls_10b_pod_files_privatize.sql` (Ethan runs, step 3)
 - `lib/pod/podUrl.ts`
 - `lib/pod/podUrl.test.ts`
 
 Modified:
-- `app/pod/page.tsx` (upload stores the path; two View buttons)
-- `app/jobs/page.tsx` (View POD button uses the helper)
+- `app/pod/page.tsx` (upsert:false; store path; two View controls via classifier)
+- `app/jobs/page.tsx` (View POD control via classifier; `savePod` conditional payload)
 
 ## Verification
 
-- Unit test (`lib/pod/podUrl.test.ts`): `http` branch returns an external URL unchanged;
-  null/empty returns null; the sign branch mocked.
-- Manual security checks once `rls_10` is live: upload a POD then View opens a signed link; the
-  raw object URL fetched logged-out returns 403/404 (bucket private); a previously-working public
-  URL now 404s; a second-tenant account cannot `createSignedUrl` the first tenant's path.
+- **Unit test** (`lib/pod/podUrl.test.ts`): `classifyPodValue` for empty, a bucket path, a legacy
+  public URL of our bucket (-> path), an external `https` URL (-> external + host), a `javascript:`
+  value (-> empty); `signPodPath` mocked.
+- **SQL diagnostics** (Ethan): after `rls_10a`, `pg_policies` for `storage.objects` shows exactly
+  `pod_files_read` + `pod_files_insert`; `relrowsecurity` is true; no `to public`/`to anon` policy
+  remains.
+- **Manual, two accounts in DIFFERENT companies (or staff):**
+  - read: tenant B cannot `createSignedUrl` a tenant-A path (error); a signed link opens for the
+    owner; after `rls_10b`, a raw public object URL fetched logged-out returns 403/404.
+  - **write**: tenant B `upload('<tenantA-uuid>/x.jpg', ...)` is denied.
+  - popup: "View" opens the signed file (not popup-blocked), including right after upload.
+  - external: a pasted `https://example.com` renders as a labeled external link, not a "View" file.
 - Typecheck + build.
 
 ## Dependencies / order
 
-0. **Stacks on the tenant-context de-hardcode** (branch `feat/tenant-context-de-hardcode`, not yet
-   merged): that work provides the `${tenant_id}/${stop_id}/...` upload path and the current
-   pod/jobs page structure this design edits. Implement this on top of that branch (or after it
-   merges to main), not off a stale `main`.
-1. RLS overhaul + `rls_08` must be applied (they provide `can_access_tenant`). Already done/queued
-   with the tenant-context work.
-2. Build the app change (helper + upload-stores-path + View buttons); typecheck/build/test.
-3. Deploy the app change.
-4. Run `rls_10_pod_files_lockdown.sql` in Supabase.
-5. Manual security checks.
+0. **Stacks on the tenant-context de-hardcode** (`feat/tenant-context-de-hardcode`, unmerged): it
+   provides the `${tenant_id}/${stop_id}/...` upload path and the current pod/jobs structure.
+   Implement on `feat/pod-files-lockdown` (stacked on it), not off stale `main`.
+1. RLS overhaul + `rls_08` applied (provides `can_access_tenant`). Queued with the tenant-context work.
+2. Step 0 discovery -> confirm drop scope.
+3. Build app change (classifier + upsert:false + View controls + jobs savePod); typecheck/build/test.
+4. Run `rls_10a` (bucket still public) -> deploy app -> run `rls_10b` (privatize).
+5. Manual security checks (read AND write cross-tenant denied; policy enumeration).
