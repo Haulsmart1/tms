@@ -50,6 +50,8 @@ update storage.buckets
       file_size_limit = 15728640      -- 15 MB
   where id = 'pod-files';
 
--- VERIFY (expect exactly two rows: pod_files_insert, pod_files_read):
+-- VERIFY (pod-files now has exactly pod_files_insert + pod_files_read; job-files untouched):
 --   select policyname, cmd from pg_policies
---   where schemaname='storage' and tablename='objects' order by policyname;
+--   where schemaname='storage' and tablename='objects'
+--     and (coalesce(qual,'') like '%''pod-files''%' or coalesce(with_check,'') like '%''pod-files''%')
+--   order by policyname;   -- expect exactly two rows: pod_files_insert, pod_files_read
