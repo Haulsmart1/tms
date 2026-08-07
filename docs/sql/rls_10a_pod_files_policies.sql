@@ -12,12 +12,18 @@
 -- Assert RLS is on (if it was disabled to make the public bucket "just work", policies are inert).
 alter table storage.objects enable row level security;
 
--- Replace ALL existing storage.objects policies. In this project every such policy concerns
--- pod-files (Step 0 confirms), so drop them all then create exactly two. If Step 0 shows another
--- bucket's policy, replace this loop with an explicit drop-by-name list for pod-files only.
+-- Step 0 discovery (2026-08-06) found a SECOND bucket 'job-files' with its own permissive
+-- policies, so we must NOT drop-all. Drop only the policies that grant pod-files access (matched
+-- by their bucket_id predicate, which is robust to the policy names) plus our own, leaving
+-- job-files untouched. (job-files is a separate cross-tenant leak of the same class and needs its
+-- own lockdown -- NOT handled in this file.)
 do $$ declare pol record; begin
-  for pol in select policyname from pg_policies
+  for pol in
+    select policyname from pg_policies
     where schemaname='storage' and tablename='objects'
+      and ( coalesce(qual,'')       like '%''pod-files''%'
+         or coalesce(with_check,'') like '%''pod-files''%'
+         or policyname in ('pod_files_read','pod_files_insert') )
   loop execute format('drop policy %I on storage.objects', pol.policyname); end loop;
 end $$;
 
