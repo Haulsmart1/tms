@@ -1,6 +1,23 @@
 -- pod-files lockdown -- 10a: enable RLS + replace policies + MIME limits. Bucket STAYS PUBLIC here.
 -- Run AFTER the Step 0 discovery below confirms which policies exist. Safe to re-run.
 --
+-- SUPERSEDED 2026-08-10: this file's DROP+CREATE-PERMISSIVE approach could not be run as
+-- written. storage.objects is owned by the reserved role supabase_storage_admin, not postgres
+-- (only a true superuser can grant that membership -- confirmed via 42501 errors on both the SQL
+-- editor and a `grant supabase_storage_admin to postgres` attempt). The Supabase Dashboard's
+-- Storage > Policies UI also showed the 4 existing pod-files policies as locked/uneditable
+-- (org-permission gate, not a Postgres issue -- resolving that is Stuart's call, he can also
+-- decide the job-files bucket at the same time).
+-- What actually landed instead: docs/sql/rls_10a_pod_files_restrictive.sql, 4 new RESTRICTIVE
+-- policies created via the dashboard's "New Policy" flow (creating was allowed even though
+-- editing/deleting the old ones was not). RESTRICTIVE policies AND against the existing
+-- permissive grants instead of replacing them, achieving the same net tenant-scoped access
+-- without touching the locked policies. VERIFIED LIVE 2026-08-10 (see that file for the
+-- verification query and results). The bucket's public flag and MIME/size limits below WERE
+-- applied via plain `update storage.buckets` (DML, not policy DDL, so no ownership issue).
+-- Keep this file as the target state for whenever Stuart consolidates onto a single clean
+-- policy set; do not re-run it as-is (the DROP POLICY step will fail with the same 42501).
+--
 -- STEP 0 discovery (run these first, share the output; do NOT skip):
 --   select policyname, cmd, roles, qual, with_check
 --     from pg_policies where schemaname='storage' and tablename='objects';
