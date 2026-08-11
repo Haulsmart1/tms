@@ -1,7 +1,13 @@
 # Console design system — Phase 1 (Dashboard & Jobs) + Phase 2 (Operations): design
 
 Date: 2026-08-11
-Status: brainstormed, pending user review
+Status: approved. **Scope narrowed 2026-08-11 (same day, after initial approval):** Ethan
+asked to defer Phase 2 (Operations: POD, Tracking, Invoices, Customers, Subcontractors) along
+with Phases 3-5, and to add the landing page ("hero") to the active build instead. **Active
+build scope is now: Foundation + Landing/Hero + Dashboard + Jobs.** The Phase 2 sections below
+stay in this document as a preserved reference for when that work is picked back up (the
+analysis doesn't go stale, only the sequencing changed) — read them as "not being built right
+now," not "wrong." See the new "Landing / Hero" section for the added scope.
 
 ## Problem
 
@@ -171,6 +177,38 @@ this phase that renders a fetched table. This is new *presentation* around the e
 fetch call, not a change to what's fetched or how errors are handled underneath, **except**
 Tracking (see below), which currently has no error state to make presentational at all.
 
+### Landing / Hero (added to active scope 2026-08-11)
+
+Good news surfaced while scoping this: `app/page.tsx` (landing) and its sections
+(`components/landing/*`) already compose the shared design-system primitives — `Badge`,
+`Container`, `buttonClasses` — rather than hardcoding their own colors. `Hero.tsx`'s
+`ProductMock` (the illustrative jobs-table mock, `components/landing/Hero.tsx:23-65`) already
+uses `font-mono` for reference/value columns and `Badge` for status, which is exactly Console's
+"data speaks in mono, status is a badge" convention. **This means the Foundation token re-theme
+alone visually updates the landing page correctly, with no changes needed to `Hero.tsx` or the
+other landing sections' logic or copy.**
+
+The one concrete gap: `components/landing/LandingNav.tsx:22` renders the logo as a bare
+placeholder — `<span className="h-5 w-5 rounded-md bg-primary" aria-hidden />`, a colored
+square, not the actual mark. Now that the logo is finalized, swap it for the real asset. Using
+Console's own exported SVGs (fetched from the Logo Concepts project, confirmed identical to
+what the Console mockup itself renders as `{{logoEl}}`):
+
+```svg
+<!-- tile mark (nav / header use) -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect width="48" height="48" rx="13" fill="#2953E3"/><circle cx="13" cy="35" r="5" fill="#FFFFFF"/><path d="M13 35 C 13 21.5, 21 13.5, 31 13.5" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round"/><polygon points="29,6.5 41,13.5 29,20.5" fill="#FFFFFF"/></svg>
+```
+
+Inline as an SVG component (not an `<img>`, so it inherits no extra request and can use
+`currentColor`-free fixed brand colors as designed — the mark's colors are fixed regardless of
+theme per the logo project's own rationale). Same swap applies to the favicon
+(`app/favicon.ico` or `app/icon.*` — check what Next's file convention currently serves; the
+Logo Concepts project also exports `favicon-16.png`/`favicon-32.png`/`apple-touch-icon.png` if
+a raster favicon is preferred over an SVG one).
+
+No changes to landing/login business logic, copy, or the request-access flow. This is a
+visual-only addition to the Foundation phase, not its own separate build phase.
+
 ### `/dashboard` — new data layer (Phase 1)
 
 Currently `app/dashboard/page.tsx` is a server component with no data, no tenant gating, and
@@ -289,6 +327,14 @@ Modified:
 - `components/Button.tsx`, `Badge.tsx`, `Field.tsx`, `Textarea.tsx`, `Container.tsx`
   (restyled to new tokens, API unchanged)
 - `app/components/PodLink.tsx` (token values only)
+- `components/landing/LandingNav.tsx` (placeholder square → real logo mark SVG)
+- New: `app/icon.svg` (Next's file-convention favicon — confirmed there's no existing
+  `favicon.ico`/`icon.*` anywhere in `app/` or `public/` today, so this is a straight add, not
+  a replacement)
+
+**Not touched in the active build** (Phase 2, deferred): `app/pod/page.tsx`,
+`app/tracking/page.tsx`, `app/invoices/page.tsx`, `app/customers/page.tsx`,
+`app/subcontractors/page.tsx` — their sections above stay as reference for later.
 
 ## Verification
 
@@ -303,16 +349,18 @@ Modified:
   conditions — wrong path, wrong status) before this ships; confirm `/dashboard`'s new
   queries are read-only and tenant-filtered; confirm no page's write path changed.
 
-## Dependencies / order
+## Dependencies / order (active build: Foundation + Landing/Hero + Dashboard + Jobs)
 
-1. Foundation (tokens + fonts + AppShell) — nothing else in this phase can build without it.
-   **Confirm the token-scoping question above (shared keys vs. new keys) before starting**,
-   since it decides whether the landing page changes color as a side effect.
-2. Dashboard (new data layer) and Jobs (visual-only) — Phase 1 proper, matches the Console
+1. Foundation (tokens + fonts + AppShell) — nothing else can build without it. Confirmed:
+   shared token keys update now, so landing/login inherit the new palette as a side effect.
+2. Landing/Hero logo swap — small, independent of Dashboard/Jobs, can land alongside or right
+   after Foundation. No data/logic dependency on anything else in this phase.
+3. Dashboard (new data layer) and Jobs (visual-only) — Phase 1 proper, matches the Console
    mockup, can happen in either order or in parallel once the foundation lands.
-3. Phase 2 pages (POD, Tracking, Invoices, Customers, Subcontractors) — stack on the
-   foundation + component set from step 1, apply the established pattern. Tracking carries
-   the one small additive logic change (error capture); the rest are presentation-only.
 
-No open product-behavior questions remain in this spec — both flagged decisions (token
+**Deferred, not in this build:** Phase 2 (POD, Tracking, Invoices, Customers, Subcontractors)
+and Phases 3-5, per Ethan's 2026-08-11 scoping decision. Their design sections above remain
+valid for when this is picked back up.
+
+No open product-behavior questions remain in the active scope — both flagged decisions (token
 scoping, "On the road" stand-in) are confirmed above.
