@@ -34,6 +34,9 @@ export default function AppShell() {
 
   const initials = (userEmail ?? "?").slice(0, 2).toUpperCase();
 
+  // sticky top-0 (with h-screen) keeps the sidebar pinned to the viewport as the
+  // page scrolls — without it, the aside has an explicit height so flexbox's
+  // stretch never grows it, and it scrolls away on any page taller than 100vh.
   return (
     <aside className="sticky top-0 flex h-screen w-[220px] flex-none flex-col bg-chrome">
       <div className="flex flex-none items-center gap-2 border-b border-chrome-border px-4 py-4">
