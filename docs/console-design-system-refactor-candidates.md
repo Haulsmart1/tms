@@ -8,6 +8,25 @@ itself: locations are from reading the files while writing the spec, not from an
 pass, so treat line numbers as approximate and re-verify during the review rather than as
 findings to act on directly.
 
+## Live, currently-broken bug (found during execution, 2026-08-11 — not a "candidate", confirmed)
+
+- **`app/invoices/page.tsx` and `app/stats/page.tsx` query a column that does not exist.**
+  Both reference `invoices.total_amount`. The real column, confirmed by querying the live
+  database directly with the service-role key (bypasses RLS, so not a permissions artifact):
+  `select total` succeeds, `select total_amount` fails with Postgres error `42703 — column
+  invoices.total_amount does not exist`. This means both pages currently 400 on every load in
+  production for any tenant that reaches them. Found by accident: the Console redesign's new
+  `/dashboard` page was initially built (and briefly, incorrectly, "fixed") to also use
+  `total_amount`, on the mistaken theory that these two already-shipped pages were reliable
+  evidence of the real column name — they were not; they carry the same bug. `/dashboard` was
+  corrected to use `total` and verified live. **`/invoices` and `/stats` were NOT touched or
+  fixed** — out of scope for this redesign, and not exercised by any of its automated
+  verification (typecheck/build don't catch this, since Supabase's browser client here isn't
+  typed against a generated schema). Given "nobody is using this app/codebase in production
+  yet" (per earlier session memory), this has likely gone unnoticed rather than being a recent
+  regression. Recommend fixing both files' `total_amount` → `total` as a priority item,
+  independent of any redesign work — this blocks real usage of two live pages entirely.
+
 ## Business-logic duplication / drift risk
 
 - **Delivered-stop cascade logic exists twice, independently.** `app/jobs/page.tsx`

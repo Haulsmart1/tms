@@ -131,13 +131,32 @@ clicking out of the new shell to an old page is expected and fine mid-rollout.
 
 **Security guard — carried over from `AppHeader`, not weakened:**
 
+**Correction (caught by adversarial code review during implementation, then independently
+verified against `git show 91fa6b0`): the historical incident was cosmetic, not an auth
+bypass.** 91fa6b0's own commit message states it plainly: "Signed-out visitors were never
+affected (the header hides when signed out), so this is cosmetic, not an auth bypass." The
+actual bug was that `/login` was missing from `AppHeader`'s pathname exemption, so an
+**already-signed-in** user landing on `/login` (bookmark, back button, a consumed magic link)
+saw a stray "Dashboard" link on what should be a plain sign-in page — not a signed-out
+visitor seeing the internal nav. This correction supersedes every other place in this spec,
+the implementation plan, and prior session memory that described this as a nav-leak/auth-
+bypass fixed for signed-out users; that framing was wrong and originated with me
+(Claude), not with the historical commit itself.
+
+The `shouldShowShell` guard below is still correct and still worth having exactly as
+designed — the status check remains a genuine fail-closed improvement (it's stricter than
+`AppHeader` ever was, since `AppHeader` never covered `"no-tenant"`) — the guard just isn't
+"the fix for a real unauthenticated nav leak," because no such leak occurred.
+
 ```ts
-// Both checks are required. The pathname check alone was the original bug
-// (91fa6b0): before it existed, /login rendered the full internal nav to a
-// signed-out visitor. The status check is the fail-closed backstop — it's what
-// makes a forgotten future public route safe by default. Implemented (see the
-// plan) as `status === "ready"` rather than enumerating "loading"/"signed-out",
-// so any future status value not yet accounted for defaults to hidden too.
+// Both checks are required. The pathname exemption alone was the gap 91fa6b0
+// closed: /login was missing from it, so an ALREADY-SIGNED-IN user saw a
+// stray Dashboard link on the sign-in page (cosmetic, not an auth bypass —
+// signed-out visitors were already blocked by the status check below). The
+// status check is the fail-closed backstop regardless: implemented (see the
+// plan) as `status === "ready"` — an allowlist of the one good value, not a
+// denylist of bad ones — so any future status value not yet accounted for
+// defaults to hidden too.
 function shouldShowShell(pathname: string, status: TenantStatus): boolean {
   if (pathname === "/" || pathname === "/login" || pathname.startsWith("/super-admin")) {
     return false;
@@ -254,7 +273,9 @@ future pass can grep for it.
 "Needs attention" list: PODs awaiting > 48h old (via `job_stops.planned_at`) and overdue
 invoices, merged and sorted by age — both already-fetched sets, no new query. "Today's jobs"
 table: same `jobs` query as the Jobs board (see below), filtered to today, capped at ~8 rows,
-"View all" links to `/jobs`. Revenue chart: last-7-days sum of `invoices.total` where
+"View all" links to `/jobs`. Revenue chart: last-7-days sum of `invoices.total` (confirmed the
+correct name by querying the live database directly with the service-role key after an earlier
+review-time "fix" to `total_amount` turned out to be wrong — see the plan's Task 17) where
 `status = 'paid'`, grouped by `issue_date` — client-side aggregation, matching the pattern
 already used on `/stats`. All reads only; this page gains a data layer but no write path.
 Wrapped in `TenantGate` like every other data page (it currently isn't gated at all).
@@ -317,9 +338,10 @@ edit/delete UI. Customers keeps no delete-guard.
 
 ## Security
 
-- The AppShell rewrite is the highest-risk file in this phase because it's exactly where the
-  original hotfix (91fa6b0) was needed — reviewed above under Architecture, both guards
-  carried forward, `no-tenant` gap closed.
+- The AppShell rewrite is the highest-risk file in this phase because it's where the historical
+  91fa6b0 fix lived — reviewed above under Architecture (correction: that fix was cosmetic, an
+  already-signed-in user seeing a stray link, not an auth bypass), both guards carried
+  forward, `no-tenant` gap closed.
 - `/dashboard`'s new queries are reads only, through the same `filterByTenant` every other
   page uses; no new write path, no new RLS surface. Wrapping it in `TenantGate` is itself a
   security improvement (today it renders un-gated, though it currently has no data to leak).

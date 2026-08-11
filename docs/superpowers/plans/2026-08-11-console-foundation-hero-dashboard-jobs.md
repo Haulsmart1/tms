@@ -590,9 +590,18 @@ git commit -m "feat: add the Console nav taxonomy as pure config"
 - Create: `lib/nav/shouldShowShell.ts`
 - Create: `lib/nav/shouldShowShell.test.ts`
 
-This is the highest-stakes file in the whole plan: it's what prevented the original
-`91fa6b0` nav-leak regression, and it must keep doing that in `AppShell`. Extracting it as a
-pure function (rather than inline JSX conditionals in the component) means it can be tested
+This is the highest-stakes file in the whole plan. **Correction, added after implementation
+(caught by adversarial code review, then independently verified against `git show 91fa6b0`):
+everywhere below that calls this "the fix for a nav-leak" is wrong.** 91fa6b0's own commit
+message: "Signed-out visitors were never affected (the header hides when signed out), so this
+is cosmetic, not an auth bypass." The real historical bug was an already-signed-in user seeing
+a stray Dashboard link on `/login` — not an unauthenticated visitor seeing the internal nav.
+That framing originated with me (Claude) during brainstorming and was never correct; it
+propagated through this plan, the spec, and session memory before an adversarial review caught
+it during Task 10. The guard itself is still worth building exactly as designed below — it's a
+genuine fail-closed improvement over `AppHeader` regardless of the corrected history — so the
+task steps are unchanged, only the surrounding narrative was wrong. Extracting it as a pure
+function (rather than inline JSX conditionals in the component) means it can be tested
 directly, without a component-testing library this repo doesn't have.
 
 - [ ] **Step 1: Write the failing test**
@@ -966,6 +975,16 @@ git commit -m "feat: add generic Modal dialog primitive"
 
 ## Task 14: `AppShell` — replaces `AppHeader`
 
+**Correction (caught by code review during Task 15, fixed retroactively here): the `<aside>`
+below is written with `sticky top-0` added to its className.** The original version of this
+task (and the code actually built first) omitted `sticky`, which is a real layout bug: the
+aside has an explicit `height: 100vh` (via `h-screen`), so flexbox's `align-items: stretch`
+never touches it, and with no sticky/fixed positioning it scrolls out of the viewport on any
+page taller than one screen — which is most of this app's real interior pages (jobs, dashboard,
+invoices). `sticky top-0` pins it to the viewport top as the page scrolls, matching the
+pattern Console's own mockup uses on its sidebar. Fixed in the actual implementation as part
+of Task 15's review cycle; this plan text is corrected to match.
+
 **Files:**
 - Create: `app/components/AppShell.tsx`
 
@@ -1014,7 +1033,7 @@ export default function AppShell() {
   const initials = (userEmail ?? "?").slice(0, 2).toUpperCase();
 
   return (
-    <aside className="flex h-screen w-[220px] flex-none flex-col bg-chrome">
+    <aside className="sticky top-0 flex h-screen w-[220px] flex-none flex-col bg-chrome">
       <div className="flex flex-none items-center gap-2 border-b border-chrome-border px-4 py-4">
         <Logo variant="tile" size={28} />
         <span className="text-sm font-semibold text-chrome-text-strong">TMS Wizzard</span>
@@ -1339,6 +1358,29 @@ git commit -m "feat: add pure dashboard aggregation logic (needs-attention, reve
 
 ## Task 17: `/dashboard` — data layer + Console UI
 
+**Correction history on the invoices column name (read this one carefully, it went back and
+forth):** the original code used `total`, grounded in `schema_dump.json`. During review, that
+was changed to `total_amount` on the theory that `schema_dump.json` was stale and
+`app/invoices/page.tsx`/`app/stats/page.tsx` (which reference `total_amount`) were the more
+trustworthy live evidence. **That "fix" was wrong.** Caught by actually signing into a live
+dev server and hitting the real database: Postgres returned
+`"column invoices.total_amount does not exist"`. Verified directly with the service-role key
+(bypasses RLS, so not a permissions artifact): `select total` succeeds, `select total_amount`
+fails with code `42703`. **The real column is `total`** — `schema_dump.json` was right.
+`app/invoices/page.tsx` and `app/stats/page.tsx` referencing `total_amount` means those two
+pre-existing pages (untouched by this plan) have the same bug and are currently broken in the
+live app — a separate, pre-existing issue, not introduced by this session and not fixed here,
+flagged separately for Ethan. The code below uses `total`, the correct name. Because
+Supabase's browser client here isn't typed against a generated schema, this class of error is
+invisible to `tsc`/`next build` and only surfaces at runtime — which is exactly why the
+review-time "fix" wasn't caught until a real sign-in happened. **Lesson: cross-referencing
+sibling app files is not a substitute for querying the actual database** — two files agreeing
+with each other doesn't make them right if they share the same mistake. **Also corrected in
+the same pass:** the "PODs awaiting" KPI was undercounting, because a `planned_at`-not-null
+filter needed only for `buildNeedsAttention`'s age computation was applied upstream of the
+KPI count too, silently dropping any overdue stop on a job with no `scheduled_date`. That part
+of the original correction was right and is reflected in the code below.
+
 **Files:**
 - Modify: `app/dashboard/page.tsx` (full rewrite: static server component → `"use client"`)
 
@@ -1456,7 +1498,11 @@ export default function DashboardPage() {
       // not live vehicle position.
       const onTheRoad = jobsToday.filter((j) => j.status === "planned" && j.vehicle_id).length;
 
-      const overduePods = overduePodStops
+      // Two different concerns: the KPI counts every overdue delivery stop regardless of
+      // whether planned_at is set, but buildNeedsAttention computes an age from planned_at
+      // and would produce an Invalid Date/NaN on a null one — so the attention-list feed
+      // gets a separate, filtered list rather than gating the count on the same condition.
+      const overduePodsForAttention = overduePodStops
         .filter((r: any) => r.planned_at)
         .map((r: any) => ({ stopId: r.id, jobRef: r.jobs?.reference ?? "?", plannedAt: r.planned_at as string }));
 
@@ -1467,7 +1513,7 @@ export default function DashboardPage() {
         jobsToday: jobsToday.length,
         unassigned,
         onTheRoad,
-        podsAwaiting: overduePods.length,
+        podsAwaiting: overduePodStops.length,
         overdueInvoicesTotal,
       });
 
@@ -1482,7 +1528,7 @@ export default function DashboardPage() {
 
       setAttention(
         buildNeedsAttention(
-          overduePods,
+          overduePodsForAttention,
           invoiceRows.map((i) => ({
             id: i.id, invoiceNumber: i.invoice_number, dueDate: i.due_date, total: Number(i.total),
           })),
@@ -1650,7 +1696,19 @@ git commit -m "feat: rebuild /dashboard with a real tenant-scoped data layer"
 - [ ] **Step 1: Restyle `PodLink`'s hardcoded colors**
 
 `PodLink.tsx` uses raw hex (`#111827`, `#b91c1c`) instead of tokens — fix while it's being
-touched by this rebuild. Change:
+touched by this rebuild.
+
+**Correction (caught by code review, then applied during implementation): use `var(--primary)`
+and `var(--danger-strong)`, not literal hex.** The original version of this step (below,
+superseded) used literal hex values reasoned as "matching PodLink's existing self-contained
+inline-style architecture" — but that reasoning was wrong: a hardcoded hex is a snapshot of a
+token's *current* value, not a reference to it, so it silently goes stale the moment the token
+changes (e.g. a future dark-mode pass). `:root` tokens in this app are deliberately global
+(not scoped to `.ds`), so nothing prevents `PodLink`'s existing `CSSProperties` objects from
+referencing `var(--primary)` directly — no need to restructure it into Tailwind classNames,
+just swap the literal hex for the variable reference. Also use `--danger-strong`, not
+`--danger`, for the error text — matching this codebase's established convention for
+standalone error copy (`Field.tsx`, `Stat.tsx` both use the `-strong` variant). Change:
 ```tsx
 const linkButtonStyle: CSSProperties = {
   color: "#111827", fontWeight: 600, cursor: "pointer",
@@ -1662,11 +1720,11 @@ const externalStyle: CSSProperties = { color: "#111827", fontWeight: 600 };
 to:
 ```tsx
 const linkButtonStyle: CSSProperties = {
-  color: "#2953E3", fontWeight: 600, cursor: "pointer",
+  color: "var(--primary)", fontWeight: 600, cursor: "pointer",
   textDecoration: "underline", background: "none", border: "none", padding: 0,
 };
 
-const externalStyle: CSSProperties = { color: "#2953E3", fontWeight: 600 };
+const externalStyle: CSSProperties = { color: "var(--primary)", fontWeight: 600 };
 ```
 And the failure message color:
 ```tsx
@@ -1674,25 +1732,24 @@ And the failure message color:
 ```
 to:
 ```tsx
-        <span style={{ color: "#D23E3E", marginLeft: 8 }}>Could not open the file.</span>
+        <span style={{ color: "var(--danger-strong)", marginLeft: 8 }}>Could not open the file.</span>
 ```
-(Literal hex, not `var(--primary)`/`var(--danger)`: `PodLink` is used inside `StopCard`,
-which is Tailwind-classed, but `PodLink` itself is a plain-inline-style component with no `ds`
-wrapper guarantee at every call site — matching its existing self-contained style, just with
-the new palette's values instead of the old ones.)
 
 - [ ] **Step 2: Write `StopCard`**
 
 Preserves the exact fields and exact `savePod` call shape from the current
 `app/jobs/page.tsx:885-969` — only the JSX/classes change.
 
+Note: no `ReactNode` import needed (an earlier draft had one; it was unused and removed) and
+`Stop`/`PodFormState` are exported — Task 21's orchestrator will want the same shapes without
+hand-duplicating them.
+
 ```tsx
-import type { ReactNode } from "react";
 import Field from "../../components/Field";
 import Button from "../../components/Button";
 import PodLink from "../components/PodLink";
 
-type Stop = {
+export type Stop = {
   id: string;
   stop_order: number;
   type: "collection" | "delivery";
@@ -1707,7 +1764,7 @@ type Stop = {
   pod_photo_url: string | null;
 };
 
-type PodFormState = { recipient_name: string; pod_notes: string; pod_photo_url: string };
+export type PodFormState = { recipient_name: string; pod_notes: string; pod_photo_url: string };
 
 type Props = {
   stop: Stop;
