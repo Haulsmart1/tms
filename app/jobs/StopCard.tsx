@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import Field from "../../components/Field";
 import Button from "../../components/Button";
 import PodLink from "../components/PodLink";
