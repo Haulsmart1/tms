@@ -75,7 +75,7 @@ export default function DashboardPage() {
       );
 
       const { data: overdueInvoices, error: invoiceError } = await tenant
-        .filterByTenant(supabase.from("invoices").select("id, invoice_number, due_date, total, status"))
+        .filterByTenant(supabase.from("invoices").select("id, invoice_number, due_date, total_amount, status"))
         .neq("status", "paid")
         .lt("due_date", today);
 
@@ -85,7 +85,7 @@ export default function DashboardPage() {
         return d.toISOString().slice(0, 10);
       })();
       const { data: paidInvoices, error: revenueError } = await tenant
-        .filterByTenant(supabase.from("invoices").select("issue_date, total, status"))
+        .filterByTenant(supabase.from("invoices").select("issue_date, total_amount, status"))
         .eq("status", "paid")
         .gte("issue_date", sevenDaysAgo);
 
@@ -105,18 +105,18 @@ export default function DashboardPage() {
       // not live vehicle position.
       const onTheRoad = jobsToday.filter((j) => j.status === "planned" && j.vehicle_id).length;
 
-      const overduePods = overduePodStops
+      const overduePodsForAttention = overduePodStops
         .filter((r: any) => r.planned_at)
         .map((r: any) => ({ stopId: r.id, jobRef: r.jobs?.reference ?? "?", plannedAt: r.planned_at as string }));
 
       const invoiceRows = overdueInvoices ?? [];
-      const overdueInvoicesTotal = invoiceRows.reduce((sum, inv) => sum + Number(inv.total), 0);
+      const overdueInvoicesTotal = invoiceRows.reduce((sum, inv) => sum + Number(inv.total_amount), 0);
 
       setKpis({
         jobsToday: jobsToday.length,
         unassigned,
         onTheRoad,
-        podsAwaiting: overduePods.length,
+        podsAwaiting: overduePodStops.length,
         overdueInvoicesTotal,
       });
 
@@ -131,9 +131,9 @@ export default function DashboardPage() {
 
       setAttention(
         buildNeedsAttention(
-          overduePods,
+          overduePodsForAttention,
           invoiceRows.map((i) => ({
-            id: i.id, invoiceNumber: i.invoice_number, dueDate: i.due_date, total: Number(i.total),
+            id: i.id, invoiceNumber: i.invoice_number, dueDate: i.due_date, total: Number(i.total_amount),
           })),
           new Date(),
         ),
@@ -141,7 +141,7 @@ export default function DashboardPage() {
 
       setRevenue(
         buildRevenueLast7Days(
-          (paidInvoices ?? []).map((i) => ({ issueDate: i.issue_date, total: Number(i.total) })),
+          (paidInvoices ?? []).map((i) => ({ issueDate: i.issue_date, total: Number(i.total_amount) })),
           new Date(),
         ),
       );
