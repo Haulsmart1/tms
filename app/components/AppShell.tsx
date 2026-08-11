@@ -35,7 +35,7 @@ export default function AppShell() {
   const initials = (userEmail ?? "?").slice(0, 2).toUpperCase();
 
   return (
-    <aside className="flex h-screen w-[220px] flex-none flex-col bg-chrome">
+    <aside className="sticky top-0 flex h-screen w-[220px] flex-none flex-col bg-chrome">
       <div className="flex flex-none items-center gap-2 border-b border-chrome-border px-4 py-4">
         <Logo variant="tile" size={28} />
         <span className="text-sm font-semibold text-chrome-text-strong">TMS Wizzard</span>
