@@ -10,6 +10,10 @@ type Props = {
   footer?: ReactNode;
 };
 
+/* No focus trap or focus-restoration: the only consumer today is a simple
+   two-button confirm dialog (Task 20), and this repo has no focus-trap
+   dependency. Revisit if a modal ever needs multi-field forms or nested
+   focusable content where Tab escaping the dialog would matter more. */
 export default function Modal({ open, onClose, title, children, footer }: Props) {
   const panelRef = useRef<HTMLDivElement>(null);
 
