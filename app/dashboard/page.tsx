@@ -51,43 +51,49 @@ export default function DashboardPage() {
       setState("loading");
       const today = todayIso();
 
+      const sevenDaysAgo = (() => {
+        const d = new Date();
+        d.setDate(d.getDate() - 6);
+        return d.toISOString().slice(0, 10);
+      })();
+
       const jobsTodayQuery = tenant.filterByTenant(
         supabase.from("jobs").select("id, reference, status, vehicle_id, driver_id, customer_id, customers(name)"),
       ).eq("scheduled_date", today);
 
-      const { data: jobsTodayData, error: jobsTodayError } = await jobsTodayQuery;
+      const overduePodStopsQuery = tenant.filterByTenant(
+        supabase
+          .from("job_stops")
+          .select("id, planned_at, jobs ( reference, status )")
+          .eq("type", "delivery")
+          .neq("pod_status", "delivered"),
+      );
+
+      const overdueInvoicesQuery = tenant
+        .filterByTenant(supabase.from("invoices").select("id, invoice_number, due_date, total_amount, status"))
+        .neq("status", "paid")
+        .lt("due_date", today);
+
+      const paidInvoicesQuery = tenant
+        .filterByTenant(supabase.from("invoices").select("issue_date, total_amount, status"))
+        .eq("status", "paid")
+        .gte("issue_date", sevenDaysAgo);
+
+      const [
+        { data: jobsTodayData, error: jobsTodayError },
+        { data: overduePodStopsRaw, error: podError },
+        { data: overdueInvoices, error: invoiceError },
+        { data: paidInvoices, error: revenueError },
+      ] = await Promise.all([jobsTodayQuery, overduePodStopsQuery, overdueInvoicesQuery, paidInvoicesQuery]);
 
       // Filtered client-side rather than via a PostgREST embedded-relation filter
       // (`.eq("jobs.status", ...)`) — matches this codebase's existing convention
       // (see app/invoices/page.tsx's "ready to invoice" computation) of doing this
       // kind of cross-table filter after fetch, rather than relying on the less
       // common embedded-filter query syntax.
-      const { data: overduePodStopsRaw, error: podError } = await tenant
-        .filterByTenant(
-          supabase
-            .from("job_stops")
-            .select("id, planned_at, jobs ( reference, status )")
-            .eq("type", "delivery")
-            .neq("pod_status", "delivered"),
-        );
       const overduePodStops = (overduePodStopsRaw ?? []).filter(
         (r: any) => r.jobs?.status === "planned",
       );
-
-      const { data: overdueInvoices, error: invoiceError } = await tenant
-        .filterByTenant(supabase.from("invoices").select("id, invoice_number, due_date, total_amount, status"))
-        .neq("status", "paid")
-        .lt("due_date", today);
-
-      const sevenDaysAgo = (() => {
-        const d = new Date();
-        d.setDate(d.getDate() - 6);
-        return d.toISOString().slice(0, 10);
-      })();
-      const { data: paidInvoices, error: revenueError } = await tenant
-        .filterByTenant(supabase.from("invoices").select("issue_date, total_amount, status"))
-        .eq("status", "paid")
-        .gte("issue_date", sevenDaysAgo);
 
       if (cancelled) return;
 
