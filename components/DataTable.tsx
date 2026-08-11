@@ -57,8 +57,8 @@ export default function DataTable<T>({
         </thead>
         <tbody>
           {state === "loading"
-            ? Array.from({ length: skeletonRows }).map((_, i) => (
-                <tr key={`skeleton-${i}`} className="border-b border-line last:border-0">
+            ? Array.from({ length: skeletonRows }).map((_, rowIndex) => (
+                <tr key={`skeleton-${rowIndex}`} className="border-b border-line last:border-0">
                   {columns.map((col, i) => (
                     <td key={`${col.header}-${i}`} className="px-4 py-3">
                       <span className="block h-3 w-3/4 animate-pulse rounded bg-surface-2" />
