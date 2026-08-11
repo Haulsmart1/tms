@@ -2,7 +2,7 @@ import Field from "../../components/Field";
 import Button from "../../components/Button";
 import PodLink from "../components/PodLink";
 
-type Stop = {
+export type Stop = {
   id: string;
   stop_order: number;
   type: "collection" | "delivery";
@@ -17,7 +17,7 @@ type Stop = {
   pod_photo_url: string | null;
 };
 
-type PodFormState = { recipient_name: string; pod_notes: string; pod_photo_url: string };
+export type PodFormState = { recipient_name: string; pod_notes: string; pod_photo_url: string };
 
 type Props = {
   stop: Stop;
