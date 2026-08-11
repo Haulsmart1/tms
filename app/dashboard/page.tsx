@@ -70,12 +70,12 @@ export default function DashboardPage() {
       );
 
       const overdueInvoicesQuery = tenant
-        .filterByTenant(supabase.from("invoices").select("id, invoice_number, due_date, total_amount, status"))
+        .filterByTenant(supabase.from("invoices").select("id, invoice_number, due_date, total, status"))
         .neq("status", "paid")
         .lt("due_date", today);
 
       const paidInvoicesQuery = tenant
-        .filterByTenant(supabase.from("invoices").select("issue_date, total_amount, status"))
+        .filterByTenant(supabase.from("invoices").select("issue_date, total, status"))
         .eq("status", "paid")
         .gte("issue_date", sevenDaysAgo);
 
@@ -116,7 +116,7 @@ export default function DashboardPage() {
         .map((r: any) => ({ stopId: r.id, jobRef: r.jobs?.reference ?? "?", plannedAt: r.planned_at as string }));
 
       const invoiceRows = overdueInvoices ?? [];
-      const overdueInvoicesTotal = invoiceRows.reduce((sum, inv) => sum + Number(inv.total_amount), 0);
+      const overdueInvoicesTotal = invoiceRows.reduce((sum, inv) => sum + Number(inv.total), 0);
 
       setKpis({
         jobsToday: jobsToday.length,
@@ -139,7 +139,7 @@ export default function DashboardPage() {
         buildNeedsAttention(
           overduePodsForAttention,
           invoiceRows.map((i) => ({
-            id: i.id, invoiceNumber: i.invoice_number, dueDate: i.due_date, total: Number(i.total_amount),
+            id: i.id, invoiceNumber: i.invoice_number, dueDate: i.due_date, total: Number(i.total),
           })),
           new Date(),
         ),
@@ -147,7 +147,7 @@ export default function DashboardPage() {
 
       setRevenue(
         buildRevenueLast7Days(
-          (paidInvoices ?? []).map((i) => ({ issueDate: i.issue_date, total: Number(i.total_amount) })),
+          (paidInvoices ?? []).map((i) => ({ issueDate: i.issue_date, total: Number(i.total) })),
           new Date(),
         ),
       );
