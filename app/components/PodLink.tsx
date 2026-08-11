@@ -5,11 +5,11 @@ import { createClient } from "../../lib/supabase/browser";
 import { classifyPodValue, signPodPath } from "../../lib/pod/podUrl";
 
 const linkButtonStyle: CSSProperties = {
-  color: "#111827", fontWeight: 600, cursor: "pointer",
+  color: "#2953E3", fontWeight: 600, cursor: "pointer",
   textDecoration: "underline", background: "none", border: "none", padding: 0,
 };
 
-const externalStyle: CSSProperties = { color: "#111827", fontWeight: 600 };
+const externalStyle: CSSProperties = { color: "#2953E3", fontWeight: 600 };
 
 export default function PodLink({
   value, label,
@@ -54,7 +54,7 @@ export default function PodLink({
         {busy ? "Opening..." : label}
       </button>
       {failed ? (
-        <span style={{ color: "#b91c1c", marginLeft: 8 }}>Could not open the file.</span>
+        <span style={{ color: "#D23E3E", marginLeft: 8 }}>Could not open the file.</span>
       ) : null}
     </>
   );
