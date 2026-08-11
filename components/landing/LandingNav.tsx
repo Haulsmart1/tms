@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Menu, X } from "lucide-react";
 import { buttonClasses } from "../Button";
 import Container from "../Container";
+import Logo from "../Logo";
 
 const anchors = [
   { href: "#features", label: "Features" },
@@ -19,7 +20,7 @@ export default function LandingNav() {
     <header className="sticky top-0 z-20 border-b border-line bg-surface">
       <Container className="flex h-14 items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="h-5 w-5 rounded-md bg-primary" aria-hidden />
+          <Logo variant="tile" size={24} decorative />
           <span className="text-base font-semibold text-ink">TMS Wizzard</span>
         </div>
 

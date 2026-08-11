@@ -1,20 +1,48 @@
 /* TMS Wizzard design tokens, imported once from app/globals.css.
    Light is the default; .dark is a scaffold for later (apply class on <html>). */
 :root {
-  --canvas: #F4F6F8;   --surface: #FFFFFF;   --surface-2: #F8FAFC;
-  --line: #E2E8F0;     --line-strong: #CBD5E1;
-  --ink: #0F172A;      --ink-2: #475569;     --ink-3: #64748B;   --ink-4: #94A3B8;
-  --primary: #2D54DE;  --primary-hover: #2444BE;  --primary-active: #21399A;
-  --primary-tint: #EEF4FF;  --primary-tint-border: #C5D6FD;  --primary-deep: #21399A;
-  --accent: #D97706;   --accent-text: #B45309;  --accent-tint: #FFFBEB;  --accent-border: #FDE68A;
-  --success: #15803D;  --success-strong: #166534;  --success-tint: #F0FDF4;  --success-border: #BBF7D0;
-  --warning: #B45309;  --warning-strong: #92400E;  --warning-tint: #FFFBEB;  --warning-border: #FDE68A;
-  --danger: #DC2626;   --danger-hover: #B91C1C;  --danger-strong: #991B1B;  --danger-tint: #FEF2F2;  --danger-border: #FECACA;
-  --focus: #2D54DE;
-  --shadow-xs: 0 1px 2px rgba(15,23,42,.05);
-  --shadow-sm: 0 1px 2px rgba(15,23,42,.05), 0 2px 8px -2px rgba(15,23,42,.08);
-  --shadow-md: 0 4px 16px -4px rgba(15,23,42,.12), 0 2px 4px -2px rgba(15,23,42,.06);
-  --shadow-lg: 0 16px 40px -8px rgba(15,23,42,.22);
+  /* surfaces */
+  --canvas: #F2F4F8;         /* was #F4F6F8 */
+  --surface: #FFFFFF;
+  --surface-2: #EDF0F5;      /* was #F8FAFC */
+  --line: #E4E7EE;           /* was #E2E8F0 */
+  --line-strong: #B9BFCC;    /* was #CBD5E1 */
+  /* chrome — new: the dark sidebar/topbar surface AppShell uses, AppHeader never had one */
+  --chrome: #0B1220;
+  --chrome-raised: #1A2438;
+  --chrome-border: #242F47;
+  --chrome-text: #C9CFDD;
+  --chrome-text-strong: #FFFFFF;
+  /* text */
+  --ink: #0B1220;            /* was #0F172A */
+  --ink-2: #5B6474;          /* was #475569 */
+  --ink-3: #737D8F;          /* was #64748B */
+  --ink-4: #98A0B0;          /* was #94A3B8 */
+  /* brand */
+  --primary: #2953E3;        /* was #2D54DE — the finalized logo blue */
+  --primary-hover: #1E41BD;
+  --primary-active: #1A3595;
+  --primary-tint: #F0F4FE;
+  --primary-tint-border: #C3D1F8;
+  --primary-deep: #1E41BD;
+  /* accent — unchanged, Console doesn't define one; kept for existing amber usage */
+  --accent: #D97706;
+  --accent-text: #B45309;
+  --accent-tint: #FFFBEB;
+  --accent-border: #FDE68A;
+  /* semantic status */
+  --success: #0F8547;        --success-strong: #0C6B3A;
+  --success-tint: #DCF3E5;   --success-border: #B7E4C7;
+  --warning: #B25E09;        --warning-strong: #8F4B06;
+  --warning-tint: #FCEFDC;   --warning-border: #F5D9AE;
+  --danger: #D23E3E;         --danger-hover: #AB2F2F;   --danger-strong: #AB2F2F;
+  --danger-tint: #FBE5E5;    --danger-border: #F3C2C2;
+  --focus: #2953E3;
+  /* elevation — same shape, rgba base moved from #0F172A to #0B1220 */
+  --shadow-xs: 0 1px 2px rgba(11,18,32,.05);
+  --shadow-sm: 0 1px 2px rgba(11,18,32,.05), 0 2px 8px -2px rgba(11,18,32,.08);
+  --shadow-md: 0 4px 16px -4px rgba(11,18,32,.12), 0 2px 4px -2px rgba(11,18,32,.06);
+  --shadow-lg: 0 16px 40px -8px rgba(11,18,32,.22);
 }
 
 /* Dark scaffold from the handoff. Tune against real screens before shipping.
