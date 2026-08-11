@@ -131,51 +131,66 @@ clicking out of the new shell to an old page is expected and fine mid-rollout.
 
 **Security guard — carried over from `AppHeader`, not weakened:**
 
-```tsx
+```ts
 // Both checks are required. The pathname check alone was the original bug
 // (91fa6b0): before it existed, /login rendered the full internal nav to a
-// signed-out visitor. The status check is the fail-closed backstop — it's
-// what makes a forgotten future public route safe by default.
-if (pathname === "/" || pathname === "/login" || pathname.startsWith("/super-admin")) {
-  return null;
-}
-if (status === "loading" || status === "signed-out" || status === "no-tenant") {
-  return null;
+// signed-out visitor. The status check is the fail-closed backstop — it's what
+// makes a forgotten future public route safe by default. Implemented (see the
+// plan) as `status === "ready"` rather than enumerating "loading"/"signed-out",
+// so any future status value not yet accounted for defaults to hidden too.
+function shouldShowShell(pathname: string, status: TenantStatus): boolean {
+  if (pathname === "/" || pathname === "/login" || pathname.startsWith("/super-admin")) {
+    return false;
+  }
+  return status === "ready";
 }
 ```
 
-One change from today's `AppHeader`: adding `"no-tenant"` to the status check. Today's
-`AppHeader` only hides on `loading`/`signed-out`, so a signed-in user with an unresolved
-tenant (an edge case — orphaned profile) briefly sees full nav chrome before `TenantGate`
-blocks the page content itself. No real data exposure (every page's own `TenantGate` still
-fail-closes), but it's a free tightening while this file is already being rewritten, called
-out explicitly rather than done silently.
+This is a strictly fail-closed generalization of today's `AppHeader` (which only checks
+`loading`/`signed-out`) — a signed-in user with an unresolved tenant (`"no-tenant"`, an edge
+case: orphaned profile) now also gets no nav chrome, closing a minor gap for free while this
+file is already being rewritten.
 
-Topbar: page title, global search (visual only this phase — no search backend exists),
-notifications bell (visual only — no notifications backend exists), user chip, sign-out.
-Sign-out is new: `AppHeader` never had one (flagged as a gap in the roadmap). Wire it to
+Topbar/header: page title, user chip, sign-out. **No search input, no notifications bell** —
+dropped from the build (not "visual only" as first drafted here): neither has a backend, and
+a search box that doesn't search or a bell with no notifications is a half-finished feature,
+not a visual match. Add them once there's something real behind them. Sign-out is new:
+`AppHeader` never had one (flagged as a gap in the roadmap). Wired to
 `supabase.auth.signOut()` then redirect to `/login`.
 
 ### Components
 
-Restyle in place (already accessibility-hardened, keep their APIs):
-`Button`, `Badge`, `Field`, `Textarea`, `Container`.
+Restyle in place (already accessibility-hardened, keep their APIs): **turns out to need zero
+code changes.** `Button`, `Badge`, `Field`, `Textarea`, `Container` already reference the
+token-driven Tailwind classes (`bg-primary`, `text-ink`, `border-line`, etc.), confirmed by
+reading all of them — only `app/tokens.css`/`tailwind.config.ts`'s values change, and every
+one of these picks up the new palette automatically. One accepted visual gap: `Badge` keeps
+its existing tinted-background-plus-border pill shape rather than switching to Console's
+flatter border-less pill, to avoid touching a component that otherwise needs nothing — a
+minor, easily-revisited style nuance, not a functional difference.
 
-Flesh out from unused scaffolding (real TSX already in the repo from the earlier handoff,
-just needs Console's visual values, not a rewrite):
-`AppShell`, `DataTable`, `Modal`, `Toast`, `Skeleton`.
+**Correction (caught during plan-writing, 2026-08-11): these are NOT already in this repo.**
+`AppShell`/`DataTable`/`Modal`/`Toast`/`Skeleton` only exist as TSX in the Claude Design MCP
+"TMS Wizzard Redesign" project's `handoff/components/` folder — that project was never
+imported into this codebase, only read via the design tool during brainstorming. They must be
+**built new**. Reusing the handoff's actual code isn't a shortcut here either: its `AppShell`
+implements the *light, collapsible* sidebar from that project's own visual direction (the one
+NOT chosen — Console's dark `ink-950` chrome sidebar was picked instead), so it's the wrong
+shape to adapt. Build these five directly from Console's mockup markup instead, which is
+already fully read and is the authoritative pixel spec regardless.
 
-New, from Console's spec (no existing equivalent):
-`Stat` (KPI tile), a job-detail `Drawer` (slide-over), kicker/section-label text style,
-status-pill variants matching Console's semantics (`--status-ontime`, `-atrisk`, `-late`,
-`-planned`, `-idle`; Phase 1's Jobs board only uses `planned`/`unassigned`/`completed` per
-the real status vocabulary, see below).
-
-**Table states**, generalized from the Jobs board prototype's four-state pattern (loaded /
-loading-skeleton / error-with-retry / empty-with-clear-filters) — applied to every page in
-this phase that renders a fetched table. This is new *presentation* around the existing
-fetch call, not a change to what's fetched or how errors are handled underneath, **except**
-Tracking (see below), which currently has no error state to make presentational at all.
+New, from Console's spec (no existing equivalent): `Stat` (KPI tile), `DataTable` (generic
+table with the loaded/loading-skeleton/error-with-retry/empty-with-action states from
+Console's job board prototype), `Modal` (generic dialog). **Correction (caught during
+plan-writing): no `Drawer`, no `AssignDialog`, no `Toast` stack.** The real Jobs page has no
+detail-view route, no assign-as-a-separate-step flow, and no filter/search state to clear —
+those are Console prototype inventions with no real-app equivalent, and Non-goals rules out
+adding new interaction affordances. `DataTable`'s first real consumer is `/dashboard`
+(Jobs keeps its current card-per-job shape — see the corrected `/jobs` section below for why);
+it remains available for Phase 2's genuinely flat-list pages. Jobs' existing single persistent
+message banner (info/error/success funneled through one string) is kept as-is, restyled, not
+converted to auto-dismissing toasts — that would change behavior (a toast disappears after a
+timeout; the banner persists), which Non-goals also rules out.
 
 ### Landing / Hero (added to active scope 2026-08-11)
 
@@ -246,22 +261,33 @@ Wrapped in `TenantGate` like every other data page (it currently isn't gated at 
 
 ### `/jobs` (Phase 1)
 
-Visual rebuild only. Create/edit form → `AppShell`'s content area with the new `Field`/
-`Button` styling; job list → `DataTable` with status `Badge` (using only the two real
-statuses, `planned`/`completed`, plus a derived "unassigned" visual state when
-`vehicle_id`/`driver_id` is null — **not** a third database status); nested stop cards → the
-same POD-capture sub-form, restyled; the prototype's "assign"/"cancel" actions become
-`Modal`s (using the newly-fleshed-out `Modal` component) instead of inline forms, matching
-Console's interaction pattern; job detail becomes the new `Drawer` instead of expanding
-inline. **No change to `saveJob`, `savePod`, `deleteJob`, validation schemas, or the
-delivered-cascade logic** — only the JSX/styling around them.
+Visual rebuild only. **Correction (caught during plan-writing, after reading the actual
+994-line file): the real page has no assign flow, no job-detail view, and no search/filter/
+tabs at all** — those are Console mockup inventions that don't exist in this app's real data
+model (vehicle/driver are just fields on the same create/edit form; every field, including
+all stops and their POD sub-forms, is already always visible on the job card, there's no
+separate detail route to open). Building an `AssignDialog`/`Drawer`/search-and-filter bar
+would be new functionality, not a restyle, so none of that is in scope. What actually
+happens: create/edit form → `Field`/`Button` styling (extracted to `JobForm`); nested stop +
+POD sub-form → extracted to `StopCard`, restyled; job list stays its current card-per-job
+shape (not converted to `DataTable` — that needs a flat-row model, and hiding the always-
+visible stops behind a table-row click would be a real behavior change), restyled onto
+tokens; `window.confirm` on delete → a real `Modal`-based `DeleteJobDialog` (same yes/no
+gate, just not a native browser dialog — this one substitution is a legitimate presentational
+upgrade, not new behavior). **No change to `saveJob`, `savePod`, `deleteJob`, validation
+schemas, or the delivered-cascade logic** — only the JSX/styling around them. See the
+implementation plan (`docs/superpowers/plans/2026-08-11-console-foundation-hero-dashboard-jobs.md`)
+for the exact file split.
 
 ### `/pod` (Phase 2)
 
 Visual rebuild: stop cards → `DataTable`/card pattern with the new tokens; upload widgets
 restyled but functionally identical (`upsert:false`, same storage path convention, same
-filename sanitization); `PodLink` component unchanged (already token-driven via CSS
-variables, not raw inline hex, so it inherits the new palette with minimal edits).
+filename sanitization). **Correction: `PodLink` is NOT token-driven** — it uses raw hardcoded
+hex (`#111827`, `#b91c1c`), not CSS variables (verified by reading it while building
+`StopCard` for Jobs in the active build, where its two color literals were already updated to
+the new palette's hex values). By the time Phase 2 picks this up, `PodLink` will already be on
+the new palette; nothing further needed there.
 
 ### `/tracking` (Phase 2)
 
@@ -310,31 +336,14 @@ edit/delete UI. Customers keeps no delete-guard.
 
 ## Files touched
 
-New:
-- `app/components/AppShell.tsx` (or restyled from the existing unused scaffold)
-- `components/Stat.tsx`, `components/Drawer.tsx` (or equivalent names matching existing
-  component file conventions)
-- Dashboard data-fetching logic (likely `app/dashboard/page.tsx` becomes `"use client"`, or a
-  server component + client sub-component split — decide in planning)
-
-Modified:
-- `app/tokens.css`, `tailwind.config.ts` (token re-key)
-- `app/layout.tsx` (Plex Mono weight 600, mount `AppShell` instead of `AppHeader`, remove
-  `AppHeader`)
-- `app/components/AppHeader.tsx` → deleted, replaced by `AppShell`
-- `app/dashboard/page.tsx`, `app/jobs/page.tsx`, `app/pod/page.tsx`, `app/tracking/page.tsx`,
-  `app/invoices/page.tsx`, `app/customers/page.tsx`, `app/subcontractors/page.tsx`
-- `components/Button.tsx`, `Badge.tsx`, `Field.tsx`, `Textarea.tsx`, `Container.tsx`
-  (restyled to new tokens, API unchanged)
-- `app/components/PodLink.tsx` (token values only)
-- `components/landing/LandingNav.tsx` (placeholder square → real logo mark SVG)
-- New: `app/icon.svg` (Next's file-convention favicon — confirmed there's no existing
-  `favicon.ico`/`icon.*` anywhere in `app/` or `public/` today, so this is a straight add, not
-  a replacement)
+Superseded by the implementation plan's File Structure section, which reflects everything
+actually decided during planning (extraction of `JobForm`/`StopCard`/`DeleteJobDialog`, the
+pure `lib/nav/` and `lib/dashboard/` logic, `TenantProvider`'s new `userEmail` field, etc.):
+see `docs/superpowers/plans/2026-08-11-console-foundation-hero-dashboard-jobs.md`.
 
 **Not touched in the active build** (Phase 2, deferred): `app/pod/page.tsx`,
 `app/tracking/page.tsx`, `app/invoices/page.tsx`, `app/customers/page.tsx`,
-`app/subcontractors/page.tsx` — their sections above stay as reference for later.
+`app/subcontractors/page.tsx` — their design sections above stay as reference for later.
 
 ## Verification
 
