@@ -42,9 +42,9 @@ export default function DataTable<T>({
       <table className="w-full min-w-[640px] border-collapse text-sm">
         <thead>
           <tr className="border-b border-line bg-surface-2">
-            {columns.map((col) => (
+            {columns.map((col, i) => (
               <th
-                key={col.header}
+                key={`${col.header}-${i}`}
                 className={cn(
                   "px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-ink-3",
                   col.align === "right" ? "text-right" : "text-left",
@@ -59,8 +59,8 @@ export default function DataTable<T>({
           {state === "loading"
             ? Array.from({ length: skeletonRows }).map((_, i) => (
                 <tr key={`skeleton-${i}`} className="border-b border-line last:border-0">
-                  {columns.map((col) => (
-                    <td key={col.header} className="px-4 py-3">
+                  {columns.map((col, i) => (
+                    <td key={`${col.header}-${i}`} className="px-4 py-3">
                       <span className="block h-3 w-3/4 animate-pulse rounded bg-surface-2" />
                     </td>
                   ))}
@@ -73,14 +73,26 @@ export default function DataTable<T>({
                 <tr
                   key={rowKey(row)}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  tabIndex={onRowClick ? 0 : undefined}
+                  role={onRowClick ? "button" : undefined}
+                  onKeyDown={
+                    onRowClick
+                      ? (e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            onRowClick(row);
+                          }
+                        }
+                      : undefined
+                  }
                   className={cn(
                     "border-b border-line last:border-0",
-                    onRowClick && "cursor-pointer hover:bg-surface-2",
+                    onRowClick && "cursor-pointer hover:bg-surface-2 focus-visible:bg-surface-2",
                   )}
                 >
-                  {columns.map((col) => (
+                  {columns.map((col, i) => (
                     <td
-                      key={col.header}
+                      key={`${col.header}-${i}`}
                       className={cn(
                         "px-4 py-3 align-middle",
                         col.align === "right" ? "text-right" : "text-left",
