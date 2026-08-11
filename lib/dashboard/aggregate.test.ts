@@ -43,4 +43,11 @@ describe("buildRevenueLast7Days", () => {
     const days = buildRevenueLast7Days([], today);
     expect(days.every((d) => d.total === 0)).toBe(true);
   });
+
+  it("buckets correctly even when 'today' is a realistic local time near local midnight, not a UTC-midnight test artifact", () => {
+    const today = new Date(2026, 7, 11, 0, 30, 0); // local Aug 11, 00:30 — the exact scenario that broke before this fix
+    const days = buildRevenueLast7Days([], today);
+    expect(days[6].date).toBe("2026-08-11");
+    expect(days[0].date).toBe("2026-08-05");
+  });
 });

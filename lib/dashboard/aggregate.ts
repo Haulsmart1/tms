@@ -30,6 +30,13 @@ export function buildNeedsAttention(
 
 export type RevenueDay = { date: string; label: string; total: number };
 
+function localDateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export function buildRevenueLast7Days(
   paidInvoices: { issueDate: string; total: number }[],
   today: Date,
@@ -38,7 +45,7 @@ export function buildRevenueLast7Days(
   for (let i = 6; i >= 0; i--) {
     const d = new Date(today);
     d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0, 10);
+    const key = localDateKey(d);
     const total = paidInvoices
       .filter((inv) => inv.issueDate === key)
       .reduce((sum, inv) => sum + inv.total, 0);
