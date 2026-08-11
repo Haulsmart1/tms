@@ -13,6 +13,7 @@ import { applyTenantFilter } from "../../lib/tenant/filter";
 type TenantContextValue = {
   status: TenantStatus;
   role: TenantRole;
+  userEmail: string | null;
   tenants: TenantOption[];
   activeTenantId: string | null;
   setActiveTenantId: (id: string | null) => void;
@@ -30,6 +31,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const supabase = createClient();
   const [data, setData] = useState<TenantContextData>(LOADING);
   const [userId, setUserId] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [activeTenantId, setActiveTenantIdState] = useState<string | null>(null);
 
   const resolve = useCallback(async () => {
@@ -37,11 +39,13 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       setUserId(null);
+      setUserEmail(null);
       setData({ ...LOADING, status: "signed-out" });
       setActiveTenantIdState(null);
       return;
     }
     setUserId(user.id);
+    setUserEmail(user.email ?? null);
     const { data: raw, error } = await supabase.rpc("get_tenant_context");
     if (error) {
       setData({ ...LOADING, status: "no-tenant" });
@@ -80,6 +84,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const value: TenantContextValue = {
     status: data.status,
     role: data.role,
+    userEmail,
     tenants: data.tenants,
     activeTenantId,
     setActiveTenantId,
