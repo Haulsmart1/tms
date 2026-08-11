@@ -20,7 +20,7 @@ export default function LandingNav() {
     <header className="sticky top-0 z-20 border-b border-line bg-surface">
       <Container className="flex h-14 items-center justify-between">
         <div className="flex items-center gap-2">
-          <Logo variant="tile" size={24} />
+          <Logo variant="tile" size={24} decorative />
           <span className="text-base font-semibold text-ink">TMS Wizzard</span>
         </div>
 

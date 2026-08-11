@@ -13,10 +13,15 @@ type Props = {
   theme?: "blue" | "white";
   size?: number;
   className?: string;
+  /** When true, renders aria-hidden and omits role/aria-label (for use next to adjacent text). */
+  decorative?: boolean;
 };
 
-export default function Logo({ variant = "tile", theme = "blue", size = 32, className }: Props) {
+export default function Logo({ variant = "tile", theme = "blue", size = 32, className, decorative = false }: Props) {
   const style: CSSProperties = { flexShrink: 0 };
+  const a11yProps = decorative
+    ? ({ "aria-hidden": true as const } as const)
+    : ({ role: "img" as const, "aria-label": "TMS Wizzard" } as const);
 
   if (variant === "tile") {
     return (
@@ -26,8 +31,7 @@ export default function Logo({ variant = "tile", theme = "blue", size = 32, clas
         viewBox="0 0 48 48"
         style={style}
         className={className}
-        role="img"
-        aria-label="TMS Wizzard"
+        {...a11yProps}
       >
         <rect width="48" height="48" rx="13" fill="#2953E3" />
         <circle cx="13" cy="35" r="5" fill="#FFFFFF" />
@@ -51,8 +55,7 @@ export default function Logo({ variant = "tile", theme = "blue", size = 32, clas
       viewBox="0 0 48 48"
       style={style}
       className={className}
-      role="img"
-      aria-label="TMS Wizzard"
+      {...a11yProps}
     >
       <circle cx="13" cy="35" r="5" fill={glyphColor} />
       <path
