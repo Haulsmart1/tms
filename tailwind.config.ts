@@ -61,6 +61,13 @@ const config: Config = {
         canvas: "var(--canvas)",
         surface: { DEFAULT: "var(--surface)", 2: "var(--surface-2)" },
         line: { DEFAULT: "var(--line)", strong: "var(--line-strong)" },
+        chrome: {
+          DEFAULT: "var(--chrome)",
+          raised: "var(--chrome-raised)",
+          border: "var(--chrome-border)",
+          text: "var(--chrome-text)",
+          "text-strong": "var(--chrome-text-strong)",
+        },
         ink: { DEFAULT: "var(--ink)", 2: "var(--ink-2)", 3: "var(--ink-3)", 4: "var(--ink-4)" },
         primary: {
           DEFAULT: "var(--primary)", hover: "var(--primary-hover)",
@@ -79,7 +86,7 @@ const config: Config = {
         danger: { DEFAULT: "var(--danger)", hover: "var(--danger-hover)", strong: "var(--danger-strong)", tint: "var(--danger-tint)", border: "var(--danger-border)" },
         focus: "var(--focus)",
       },
-      borderRadius: { sm: "6px", DEFAULT: "8px", md: "8px", lg: "12px", xl: "16px" },
+      borderRadius: { sm: "6px", DEFAULT: "8px", md: "10px", lg: "14px", xl: "16px" },
       spacing: { 4.5: "18px", 13: "52px", 15: "60px" },
     },
   },
