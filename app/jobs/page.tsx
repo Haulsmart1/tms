@@ -246,8 +246,9 @@ export default function JobsPage() {
 
   return (
     <TenantGate>
+      <div className="ds min-h-screen bg-canvas font-sans text-ink">
       <main className="mx-auto max-w-6xl px-6 py-8">
-        <h1 className="text-2xl font-semibold text-ink">Jobs</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">Jobs</h1>
         <p className="mt-1 text-sm text-ink-2">
           Create jobs, edit jobs, delete planned jobs, and complete POD from one screen.
         </p>
@@ -284,7 +285,7 @@ export default function JobsPage() {
                 : null;
 
             return (
-              <div key={job.id} className="rounded-lg border border-line bg-surface p-5">
+              <div key={job.id} className="rounded-lg border border-line bg-surface p-5 shadow-sm">
                 <div className="mb-3.5 flex flex-wrap items-start justify-between gap-4">
                   <div>
                     <h2 className="font-mono text-lg font-semibold text-ink">{job.reference}</h2>
@@ -313,7 +314,7 @@ export default function JobsPage() {
                   </div>
                   <div className="rounded-md bg-surface-2 p-3">
                     <div className="text-xs font-semibold text-ink-3">Sell</div>
-                    <div className="font-mono text-sm text-ink">{formatMoney(job.customer_price)}</div>
+                    <div className="font-mono text-sm slashed-zero text-ink">{formatMoney(job.customer_price)}</div>
                   </div>
                   <div className="rounded-md bg-surface-2 p-3">
                     <div className="text-xs font-semibold text-ink-3">Subcontractor</div>
@@ -321,11 +322,11 @@ export default function JobsPage() {
                   </div>
                   <div className="rounded-md bg-surface-2 p-3">
                     <div className="text-xs font-semibold text-ink-3">Buy</div>
-                    <div className="font-mono text-sm text-ink">{formatMoney(job.subcontractor_cost)}</div>
+                    <div className="font-mono text-sm slashed-zero text-ink">{formatMoney(job.subcontractor_cost)}</div>
                   </div>
                   <div className="rounded-md bg-surface-2 p-3">
                     <div className="text-xs font-semibold text-ink-3">Margin</div>
-                    <div className="font-mono text-sm text-ink">{formatMoney(margin)}</div>
+                    <div className="font-mono text-sm slashed-zero text-ink">{formatMoney(margin)}</div>
                   </div>
                 </div>
 
@@ -362,6 +363,7 @@ export default function JobsPage() {
           setDeleteTarget(null);
         }}
       />
+      </div>
     </TenantGate>
   );
 }

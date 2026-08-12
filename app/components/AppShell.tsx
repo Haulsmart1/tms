@@ -38,7 +38,7 @@ export default function AppShell() {
   // page scrolls — without it, the aside has an explicit height so flexbox's
   // stretch never grows it, and it scrolls away on any page taller than 100vh.
   return (
-    <aside className="sticky top-0 flex h-screen w-[220px] flex-none flex-col bg-chrome">
+    <aside className="ds sticky top-0 flex h-screen w-[220px] flex-none flex-col bg-chrome font-sans">
       <div className="flex flex-none items-center gap-2 border-b border-chrome-border px-4 py-4">
         <Logo variant="tile" size={28} />
         <span className="text-sm font-semibold text-chrome-text-strong">TMS Wizzard</span>
@@ -97,7 +97,7 @@ export default function AppShell() {
           type="button"
           onClick={signOut}
           aria-label="Sign out"
-          className="flex h-7 w-7 flex-none items-center justify-center rounded-md text-chrome-text hover:bg-chrome-raised hover:text-chrome-text-strong"
+          className="flex h-8 w-8 flex-none items-center justify-center rounded-md border border-chrome-border bg-chrome-raised text-chrome-text shadow-xs transition-colors hover:border-danger hover:bg-danger hover:text-white"
         >
           <LogOut size={15} aria-hidden />
         </button>

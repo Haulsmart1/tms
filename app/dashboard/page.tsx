@@ -176,8 +176,8 @@ export default function DashboardPage() {
 
   return (
     <TenantGate>
-      <main className="mx-auto max-w-6xl px-6 py-8">
-        <h1 className="text-2xl font-semibold text-ink">Dashboard</h1>
+      <main className="ds min-h-screen bg-canvas font-sans text-ink mx-auto max-w-6xl px-6 py-8">
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">Dashboard</h1>
 
         {state === "error" ? (
           <div className="mt-6 rounded-lg border border-danger-border bg-danger-tint p-4 text-sm text-danger-strong">
@@ -226,7 +226,7 @@ export default function DashboardPage() {
           </section>
 
           <section className="flex flex-col gap-4">
-            <div className="rounded-lg border border-line bg-surface p-4">
+            <div className="rounded-lg border border-line bg-surface p-4 shadow-sm">
               <h2 className="mb-2 text-sm font-semibold text-ink">Needs attention</h2>
               {attention.length === 0 ? (
                 <p className="text-sm text-ink-3">Nothing needs attention right now.</p>
@@ -244,7 +244,7 @@ export default function DashboardPage() {
               )}
             </div>
 
-            <div className="rounded-lg border border-line bg-surface p-4">
+            <div className="rounded-lg border border-line bg-surface p-4 shadow-sm">
               <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-3">
                 Revenue · last 7 days
               </h2>

@@ -38,7 +38,7 @@ export default function DataTable<T>({
   emptyAction,
 }: Props<T>) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-line bg-surface">
+    <div className="overflow-x-auto rounded-lg border border-line bg-surface shadow-sm">
       <table className="w-full min-w-[640px] border-collapse text-sm">
         <thead>
           <tr className="border-b border-line bg-surface-2">

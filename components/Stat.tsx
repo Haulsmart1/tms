@@ -31,12 +31,12 @@ export default function Stat({ label, value, sub, subTone = "neutral", onClick }
       type={onClick ? "button" : undefined}
       onClick={onClick}
       className={cn(
-        "flex min-w-0 flex-col items-start gap-1 rounded-lg border border-line bg-surface p-4 text-left",
-        onClick && "cursor-pointer hover:border-primary-tint-border hover:shadow-sm",
+        "flex min-w-0 flex-col items-start gap-1 rounded-lg border border-line bg-surface p-4 text-left shadow-sm",
+        onClick && "cursor-pointer hover:border-primary-tint-border hover:shadow-md",
       )}
     >
       <span className="text-xs font-medium text-ink-3">{label}</span>
-      <span className="font-mono text-2xl font-semibold tabular-nums text-ink">{value}</span>
+      <span className="font-mono text-2xl font-semibold tabular-nums slashed-zero text-ink">{value}</span>
       {sub ? (
         <span className={cn("inline-flex items-center gap-1.5 text-xs font-medium", subTextTone[subTone])}>
           <span aria-hidden className={cn("h-1.5 w-1.5 flex-shrink-0 rounded-full", dotTone[subTone])} />

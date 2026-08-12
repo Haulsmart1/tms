@@ -2,11 +2,6 @@
 
 import { useTenant } from "./TenantProvider";
 
-const selectStyle: React.CSSProperties = {
-  padding: "6px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.25)",
-  background: "#1e293b", color: "white", fontSize: 14,
-};
-
 export default function TenantSelector() {
   const { role, tenants, activeTenantId, setActiveTenantId } = useTenant();
 
@@ -15,7 +10,7 @@ export default function TenantSelector() {
   return (
     <select
       aria-label="Active tenant"
-      style={selectStyle}
+      className="h-9 w-full rounded-md border border-chrome-border bg-chrome-raised px-2.5 text-sm font-medium text-chrome-text-strong shadow-xs outline-none transition-colors hover:border-line-strong focus-visible:border-primary"
       value={activeTenantId ?? ""}
       onChange={(e) => setActiveTenantId(e.target.value === "" ? null : e.target.value)}
     >

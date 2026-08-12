@@ -71,8 +71,8 @@ export default function JobForm({
   onFieldChange, onStopChange, onAddStop, onRemoveStop, onSubmit, onCancelEdit,
 }: Props) {
   return (
-    <form onSubmit={onSubmit} className="grid gap-5 rounded-lg border border-line bg-surface p-6">
-      <h2 className="text-lg font-semibold text-ink">{editingJobId ? "Edit Job" : "Create Job"}</h2>
+    <form onSubmit={onSubmit} className="grid gap-5 rounded-lg border border-line bg-surface p-6 shadow-sm">
+      <h2 className="text-lg font-semibold tracking-tight text-ink">{editingJobId ? "Edit Job" : "Create Job"}</h2>
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <Field id="job-reference" label="Reference" value={form.reference} onChange={(e) => onFieldChange("reference", e.target.value)} />
