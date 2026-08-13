@@ -94,6 +94,9 @@ export default function DashboardPage() {
       // convention (see app/invoices/page.tsx).
       const overduePodStops = (overduePodStopsRaw ?? []).filter((r: any) =>
         isAwaitingPod({
+          // "delivery" is a literal, not a read: the query above already filters
+          // .eq("type", "delivery") and does not select the column. Re-select
+          // type if this block is ever reused without that server-side filter.
           type: "delivery",
           pod_status: r.pod_status ?? null,
           jobStatus: r.jobs?.status ?? null,

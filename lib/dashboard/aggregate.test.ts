@@ -18,6 +18,18 @@ describe("buildNeedsAttention", () => {
   it("returns an empty list when nothing is overdue", () => {
     expect(buildNeedsAttention([], [], now)).toEqual([]);
   });
+
+  it("drops a POD item whose planned_at is unusable rather than ranking it as freshest", () => {
+    const items = buildNeedsAttention(
+      [
+        { stopId: "good", jobRef: "J-1", plannedAt: "2026-08-11T08:00:00Z" },
+        { stopId: "bad", jobRef: "J-2", plannedAt: "not-a-date" },
+      ],
+      [],
+      new Date("2026-08-13T12:00:00Z"),
+    );
+    expect(items.map((i) => i.id)).toEqual(["pod-good"]);
+  });
 });
 
 describe("buildRevenueLast7Days", () => {
