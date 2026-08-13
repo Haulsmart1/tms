@@ -6,159 +6,159 @@ import { cookies } from "next/headers";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-async function createAuthenticatedClient() {
+async function authClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anon) throw new Error("Missing Supabase public env vars.");
 
-  if (!url || !anonKey) {
-    throw new Error("Supabase public environment variables are missing.");
-  }
-
-  const cookieStore = await cookies();
-
-  return createServerClient(url, anonKey, {
+  const store = await cookies();
+  return createServerClient(url, anon, {
     cookies: {
-      getAll() {
-        return cookieStore.getAll();
-      },
-      setAll(cookiesToSet) {
+      getAll: () => store.getAll(),
+      setAll(items) {
         try {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            cookieStore.set(name, value, options);
-          });
+          items.forEach(({ name, value, options }) =>
+            store.set(name, value, options)
+          );
         } catch {}
       },
     },
   });
 }
 
-function createAdminClient() {
+function adminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Missing Supabase server env vars.");
+  return createClient(url, key, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
 
-  if (!url || !serviceRoleKey) {
-    throw new Error("Supabase server environment variables are missing.");
+async function loadDriverBundle(
+  admin: ReturnType<typeof adminClient>,
+  tenantId: string,
+  driverId: string,
+  subcontractorId?: string
+) {
+  const jobsQuery = admin
+    .from("jobs")
+    .select(
+      "id,reference,customer_reference,status,job_date,scheduled_date,priority,notes,pod_status,vehicle_id,completed_at"
+    )
+    .eq("tenant_id", tenantId)
+    .eq("driver_id", driverId)
+    .order("job_date", { ascending: false })
+    .limit(100);
+
+  if (subcontractorId) {
+    jobsQuery.eq("subcontractor_id", subcontractorId);
   }
 
-  return createClient(url, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
+  const [driver, jobs, assignments] = await Promise.all([
+    admin
+      .from("drivers")
+      .select("*")
+      .eq("id", driverId)
+      .eq("tenant_id", tenantId)
+      .maybeSingle(),
+    jobsQuery,
+    admin
+      .from("vehicle_assignments")
+      .select("id,vehicle_id,driver_id,assigned_from,assigned_to,active,notes")
+      .eq("tenant_id", tenantId)
+      .eq("driver_id", driverId)
+      .eq("active", true),
+  ]);
+
+  const error = driver.error || jobs.error || assignments.error;
+  if (error) throw new Error(error.message);
+
+  return {
+    driver: driver.data,
+    jobs: jobs.data ?? [],
+    vehicleAssignments: assignments.data ?? [],
+  };
 }
 
 export async function GET() {
   try {
-    const userClient = await createAuthenticatedClient();
+    const client = await authClient();
 
     const {
       data: { user },
-      error: authError,
-    } = await userClient.auth.getUser();
+      error,
+    } = await client.auth.getUser();
 
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: "You must be signed in." },
-        { status: 401 }
-      );
+    if (error || !user) {
+      return NextResponse.json({ error: "You must be signed in." }, { status: 401 });
     }
 
-    const admin = createAdminClient();
+    const admin = adminClient();
 
-    const { data: portalUser, error: portalUserError } = await admin
+    const { data: direct, error: directError } = await admin
+      .from("driver_users")
+      .select("tenant_id,driver_id")
+      .eq("user_id", user.id)
+      .eq("active", true)
+      .maybeSingle();
+
+    if (directError) throw new Error(directError.message);
+
+    if (direct) {
+      return NextResponse.json({
+        portalType: "direct_driver",
+        ...(await loadDriverBundle(admin, direct.tenant_id, direct.driver_id)),
+      });
+    }
+
+    const { data: portalUser, error: portalError } = await admin
       .from("subcontractor_users")
-      .select("id, tenant_id, subcontractor_id, employee_id, role, active")
+      .select("tenant_id,subcontractor_id,employee_id")
       .eq("user_id", user.id)
       .eq("role", "driver")
       .eq("active", true)
       .maybeSingle();
 
-    if (portalUserError) {
-      throw new Error(portalUserError.message);
-    }
-
+    if (portalError) throw new Error(portalError.message);
     if (!portalUser) {
       return NextResponse.json(
-        { error: "No active subcontractor driver access was found." },
+        { error: "No active driver portal access was found." },
         { status: 403 }
       );
     }
 
-    const { data: driverLink, error: driverLinkError } = await admin
+    const { data: link, error: linkError } = await admin
       .from("subcontractor_drivers")
-      .select("id, driver_id, employee_id, active")
+      .select("driver_id")
       .eq("tenant_id", portalUser.tenant_id)
       .eq("subcontractor_id", portalUser.subcontractor_id)
       .eq("employee_id", portalUser.employee_id)
       .eq("active", true)
       .maybeSingle();
 
-    if (driverLinkError) {
-      throw new Error(driverLinkError.message);
-    }
-
-    if (!driverLink?.driver_id) {
+    if (linkError) throw new Error(linkError.message);
+    if (!link?.driver_id) {
       return NextResponse.json(
-        {
-          error:
-            "Your portal user is not linked to a driver record yet. Ask your subcontractor administrator to complete the driver setup.",
-        },
+        { error: "Subcontractor employee is not linked to a driver record yet." },
         { status: 409 }
       );
     }
 
-    const [driverResult, jobsResult, vehicleAssignmentsResult] = await Promise.all([
-      admin
-        .from("drivers")
-        .select("*")
-        .eq("id", driverLink.driver_id)
-        .eq("tenant_id", portalUser.tenant_id)
-        .maybeSingle(),
-
-      admin
-        .from("jobs")
-        .select(
-          "id, reference, customer_reference, status, job_date, scheduled_date, priority, notes, pod_status, vehicle_id, completed_at"
-        )
-        .eq("tenant_id", portalUser.tenant_id)
-        .eq("subcontractor_id", portalUser.subcontractor_id)
-        .eq("driver_id", driverLink.driver_id)
-        .order("job_date", { ascending: false })
-        .limit(100),
-
-      admin
-        .from("vehicle_assignments")
-        .select("id, vehicle_id, driver_id, assigned_from, assigned_to, active, notes")
-        .eq("tenant_id", portalUser.tenant_id)
-        .eq("driver_id", driverLink.driver_id)
-        .eq("active", true),
-    ]);
-
-    const firstError =
-      driverResult.error ||
-      jobsResult.error ||
-      vehicleAssignmentsResult.error;
-
-    if (firstError) {
-      throw new Error(firstError.message);
-    }
-
     return NextResponse.json({
-      portalUser,
-      driver: driverResult.data,
-      jobs: jobsResult.data ?? [],
-      vehicleAssignments: vehicleAssignmentsResult.data ?? [],
+      portalType: "subcontractor_driver",
+      ...(await loadDriverBundle(
+        admin,
+        portalUser.tenant_id,
+        link.driver_id,
+        portalUser.subcontractor_id
+      )),
     });
   } catch (error) {
-    console.error("Driver portal GET failed:", error);
-
     return NextResponse.json(
       {
         error:
-          error instanceof Error
-            ? error.message
-            : "Unable to load driver dashboard.",
+          error instanceof Error ? error.message : "Unable to load driver dashboard.",
       },
       { status: 500 }
     );
