@@ -7,18 +7,20 @@
    a light background: /tracking would render white-on-white.
 
    TO ACTIVATE A LEGACY PAGE: convert its inline colour literals to tokens, give
-   its root element `className="ds ... bg-canvas text-ink"` the way the five
-   pages below do, then add its path here. That is the whole procedure.
+   its root element `className="ds ... bg-canvas text-ink"` the way the pages
+   below do, then add its path here. That is the whole procedure. /pod was the
+   first page converted this way after the switch existed, and it took exactly
+   those three steps.
 
    This is an allowlist, not a denylist, so a brand new page defaults to
    pinned-dark and legacy-safe rather than half-themed.
 
-   TWO ENTRIES BELOW DO NOT SHOW A TOGGLE, and that is correct. AppShell is what
-   renders the toggle, and shouldShowShell() hides AppShell entirely on "/",
-   "/login" and every "/super-admin/*" path. So of the five routes here, only
-   /dashboard and /jobs actually offer the control. The others still need to be
-   listed, because this list ALSO decides whether ThemeScope pins a route dark,
-   and pinning the landing page or /login dark would be wrong.
+   THREE ENTRIES BELOW DO NOT SHOW A TOGGLE, and that is correct. AppShell is
+   what renders the toggle, and shouldShowShell() hides AppShell entirely on
+   "/", "/login" and every "/super-admin/*" path. So of the six routes here,
+   only /dashboard, /jobs and /pod actually offer the control. The others still
+   need to be listed, because this list ALSO decides whether ThemeScope pins a
+   route dark, and pinning the landing page or /login dark would be wrong.
 
    "/" is a further special case: it self-pins `.light` on its own root element
    (see app/page.tsx), because the public marketing page stays light whatever
@@ -38,6 +40,7 @@ export const THEMEABLE_ROUTES: readonly string[] = [
   "/login",                  // app/login/page.tsx
   "/dashboard",              // app/dashboard/page.tsx
   "/jobs",                   // app/jobs/page.tsx
+  "/pod",                    // app/pod/page.tsx
   "/super-admin/requests",   // app/super-admin/requests/page.tsx
 ];
 
