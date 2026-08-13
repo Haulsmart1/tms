@@ -45,4 +45,33 @@ describe("parseTokenBlocks", () => {
     const blocks = parseTokenBlocks(SAMPLE);
     expect(blocks[":focus-visible"]).toBeUndefined();
   });
+
+  it("throws on a nested block instead of silently dropping the outer selector's tokens", () => {
+    const NESTED = `
+    @media (prefers-color-scheme: dark) {
+      :root { --canvas: #000000; }
+    }
+    `;
+    expect(() => parseTokenBlocks(NESTED)).toThrow(/nest/i);
+  });
+
+  it("throws on unbalanced braces", () => {
+    const UNBALANCED = `
+    :root {
+      --canvas: #0F1626;
+    `;
+    expect(() => parseTokenBlocks(UNBALANCED)).toThrow();
+  });
+
+  it("does not mistake literal braces in comment prose for a nested block", () => {
+    const COMMENTED = `
+    /* the :root { ... } block below holds the dark theme */
+    :root {
+      --canvas: #0F1626;
+    }
+    `;
+    expect(() => parseTokenBlocks(COMMENTED)).not.toThrow();
+    const blocks = parseTokenBlocks(COMMENTED);
+    expect(blocks[":root"]["--canvas"]).toBe("#0F1626");
+  });
 });

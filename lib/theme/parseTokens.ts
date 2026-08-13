@@ -12,6 +12,36 @@ export function parseTokenBlocks(css: string): TokenBlocks {
   // mentions must not be read as declarations.
   const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
 
+  /* This parser cannot represent nesting, and its failure mode without a guard
+     is silent: an @media block's inner selector overwrites the outer one, so
+     blocks[":root"] comes back present but wrong, and the contrast test passes
+     while asserting nothing. A colour-token file is exactly where an
+     @media (prefers-color-scheme) block tends to appear, so fail loudly instead. */
+  let depth = 0;
+  for (const ch of withoutComments) {
+    if (ch === "{") {
+      depth++;
+      if (depth > 1) {
+        throw new Error(
+          "parseTokenBlocks: found a nested block (e.g. @media or @supports wrapping a " +
+            "selector). This parser only understands flat, non-nested selector blocks and " +
+            "would otherwise silently overwrite the outer selector's tokens with the inner " +
+            "block's, so it refuses to guess instead.",
+        );
+      }
+    } else if (ch === "}") {
+      depth--;
+    }
+  }
+  if (depth !== 0) {
+    throw new Error(
+      "parseTokenBlocks: unbalanced braces in the input CSS (depth ended at " +
+        depth +
+        ", expected 0). Refusing to parse, since the block matcher below would silently " +
+        "produce partial or misaligned results rather than fail.",
+    );
+  }
+
   const blocks: TokenBlocks = {};
   const blockPattern = /([^{}]+)\{([^{}]*)\}/g;
 
