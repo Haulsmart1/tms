@@ -45,12 +45,24 @@ The RLS design and migrations live under `docs/sql/` (`rls_01`..`rls_10`) and ar
 
 The UI deliberately runs **two styling systems side by side**, and understanding the seam matters before editing any page.
 
-- **Legacy pages (most of the app):** plain inline styles on a dark canvas (`#0f172a`) with Inter. A recurring pattern is a full-bleed truck photograph background with a dark translucent overlay panel and white rounded cards. Tailwind Preflight is disabled globally so these pages are not disturbed.
+- **Legacy pages (most of the app):** plain inline styles on a dark canvas with Inter. A recurring pattern is a full-bleed truck photograph background with a dark translucent overlay panel and white rounded cards. Tailwind Preflight is disabled globally so these pages are not disturbed.
 - **Design-system ("ds") pages:** newer pages opt in by putting `className="ds font-sans bg-canvas text-ink"` on their root element. The `ds` class re-applies a scoped CSS reset (borders, box-sizing, control fonts) via `:where()` rules, and `font-sans` switches to IBM Plex. Semantic tokens (`bg-canvas`, `text-ink`, `border-line`, `bg-surface`, `text-primary`, tone classes) are defined in `app/tokens.css` and consumed by `app/globals.css`.
 - **The failure modes are intentional and asymmetric:** omit `font-sans` and a ds page silently falls back to Inter; omit `ds` and borders vanish and layouts overflow (because Preflight is off). This is documented inline in `app/layout.tsx` and `app/globals.css`.
-- **ds pages today:** the landing page, `/login`, and `/super-admin/requests`. Everything else is inline-styled.
+- **ds pages today:** the landing page, `/login`, `/dashboard`, `/jobs` and `/super-admin/requests`. Everything else is inline-styled.
 
-A darker, lower-glare "operator theme" (for users working in warehouse / operating-room lighting) is a planned direction.
+### Theming: the default is inverted on purpose
+
+The app is used in dim control rooms, so **dark is the default theme** and light is opt-in.
+
+- `:root` in `app/tokens.css` holds the **dark** values. `.light` is the **opt-out**. This is the reverse of the usual convention, and it is deliberate: it means server-rendered HTML, a failed script, a slow hydration and a JS-disabled browser all render dark, so a flash of white is structurally impossible on the default path.
+- `.dark` duplicates `:root` exactly. That is not redundant: it lets a subtree pin itself dark against an ancestor `.light`, which is how the legacy pages stay dark while a user is in light mode. The landing page uses the mirror of this, pinning itself `light`.
+- **Do not use Tailwind `dark:` variants.** Under an inverted default they mean the opposite of what you would expect. Theme differences belong in the token values.
+- The preference is stored per **device** in `localStorage["tms-theme"]`, not per user: a shared control-room machine should stay dark whoever signs in. A synchronous script at the top of `<body>` applies it before first paint, which is why `<html>` carries `suppressHydrationWarning`.
+- **There is no Content-Security-Policy in this app today.** If one is added, it must allow that inline script by hash or nonce, or the light theme will silently stop working and everything will render dark.
+- **Which pages follow the theme** is controlled by one allowlist, `lib/nav/themeableRoutes.ts`. It drives both the toggle's visibility and the legacy dark pin. To move a legacy page onto the theme: convert its inline colour literals to tokens, give it a `ds ... bg-canvas` root, then add its path to that list.
+- Every token pair in both themes is contrast-checked by `lib/theme/contrast.test.ts`, which parses `app/tokens.css` itself and runs on every `npm test`. Four documented pre-existing gaps are listed there as floors that must not regress.
+
+See `docs/superpowers/specs/2026-08-13-dark-default-theme-design.md` for the full rationale.
 
 ## Page inventory
 
