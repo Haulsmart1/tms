@@ -79,6 +79,11 @@ const config: Config = {
           // under the dark default. Colours belong in app/tokens.css as
           // var()-backed keys. Do not reintroduce a hex ramp here.
         },
+        // Text/icon colour for a solid fill of the matching background. White
+        // in light, dark ink in dark, so a button is legible in both themes
+        // without a per-theme class. See --on-primary in app/tokens.css.
+        "on-primary": "var(--on-primary)",
+        "on-danger": "var(--on-danger)",
         accent: { DEFAULT: "var(--accent)", text: "var(--accent-text)", tint: "var(--accent-tint)", border: "var(--accent-border)" },
         success: { DEFAULT: "var(--success)", strong: "var(--success-strong)", tint: "var(--success-tint)", border: "var(--success-border)" },
         warning: { DEFAULT: "var(--warning)", strong: "var(--warning-strong)", tint: "var(--warning-tint)", border: "var(--warning-border)" },
