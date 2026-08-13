@@ -1,42 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
-import PodLink from "../components/PodLink";
+import Stat from "../../components/Stat";
+import Tabs from "../../components/Tabs";
+import PodQueue from "./PodQueue";
+import PodRail from "./PodRail";
+import PodForm from "./PodForm";
+import { splitDeliveryStops, type PodJob } from "../../lib/pod/queue";
+import { attentionItems, podKpis } from "../../lib/pod/kpis";
 
 const POD_BUCKET = "pod-files";
-
-const inputStyle: React.CSSProperties = {
-  padding: "12px 14px",
-  borderRadius: 10,
-  border: "1px solid #d1d5db",
-  fontSize: 14,
-  background: "white",
-  width: "100%",
-  boxSizing: "border-box"
-};
-
-const buttonStyle: React.CSSProperties = {
-  padding: "10px 14px",
-  borderRadius: 10,
-  border: "none",
-  background: "#111827",
-  color: "white",
-  fontWeight: 600,
-  cursor: "pointer"
-};
-
-const secondaryButtonStyle = {
-  padding: "10px 14px",
-  borderRadius: 10,
-  border: "1px solid #d1d5db",
-  background: "white",
-  color: "#111827",
-  fontWeight: 600,
-  cursor: "pointer"
-};
 
 export default function PodPage() {
   const supabase = createClient();
@@ -48,8 +24,40 @@ export default function PodPage() {
   const [uploadingField, setUploadingField] = useState("");
   const [forms, setForms] = useState<Record<string, any>>({});
 
+  const [tab, setTab] = useState<"awaiting" | "completed">("awaiting");
+  const [expandedStopId, setExpandedStopId] = useState<string | null>(null);
+  const [podJobs, setPodJobs] = useState<PodJob[]>([]);
+  /* The queue needs three states the old page had no concept of. Without
+     them DataTable's skeleton, error and empty branches are unreachable and
+     an empty queue renders a bare header with no explanation. */
+  const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  // One `now` per load, injected into every pure function, so the KPI tiles,
+  // the queue order and the attention list cannot disagree by a few
+  // milliseconds about what "overdue" means.
+  const now = useMemo(() => new Date(), [podJobs]);
+
+  const { awaiting, completed } = useMemo(
+    () => splitDeliveryStops(podJobs, now),
+    [podJobs, now],
+  );
+
+  const jobPrices = useMemo(
+    () => new Map(podJobs.map((j) => [j.id, j.customer_price ?? 0])),
+    [podJobs],
+  );
+
+  const kpis = useMemo(
+    () => podKpis(awaiting, completed, jobPrices, now),
+    [awaiting, completed, jobPrices, now],
+  );
+
+  const attention = useMemo(() => attentionItems(awaiting), [awaiting]);
+
   async function loadJobs() {
     setMessage("");
+    setLoading(true);
 
     const { data, error } = await tenant
       .filterByTenant(
@@ -60,7 +68,16 @@ export default function PodPage() {
         reference,
         status,
         scheduled_date,
+        customer_price,
         customers (
+          name
+        ),
+        vehicles (
+          registration,
+          make,
+          model
+        ),
+        drivers (
           name
         ),
         job_stops (
@@ -74,6 +91,7 @@ export default function PodPage() {
           status,
           pod_status,
           recipient_name,
+          planned_at,
           delivered_at,
           pod_notes,
           pod_photo_url,
@@ -86,6 +104,8 @@ export default function PodPage() {
 
     if (error) {
       setMessage(`Load error: ${error.message}`);
+      setLoadFailed(true);
+      setLoading(false);
       return;
     }
 
@@ -97,6 +117,20 @@ export default function PodPage() {
     }));
 
     setJobs(normalized);
+
+    const podJobs: PodJob[] = normalized.map((job: any) => ({
+      id: job.id,
+      reference: job.reference,
+      status: job.status,
+      scheduled_date: job.scheduled_date,
+      customer_name: job.customers?.name ?? null,
+      vehicle_registration: job.vehicles?.registration ?? null,
+      vehicle_model: [job.vehicles?.make, job.vehicles?.model].filter(Boolean).join(" ") || null,
+      driver_name: job.drivers?.name ?? null,
+      customer_price: job.customer_price === null ? null : Number(job.customer_price),
+      stops: job.job_stops ?? [],
+    }));
+    setPodJobs(podJobs);
 
     const nextForms: Record<string, any> = {};
     normalized.forEach((job: any) => {
@@ -112,6 +146,8 @@ export default function PodPage() {
     });
 
     setForms(nextForms);
+    setLoadFailed(false);
+    setLoading(false);
   }
 
   useEffect(() => {
@@ -233,258 +269,96 @@ export default function PodPage() {
     await loadJobs();
   }
 
+  const rows = tab === "awaiting" ? awaiting : completed;
+  const queueState = loading
+    ? "loading"
+    : loadFailed
+      ? "error"
+      : rows.length === 0
+        ? "empty"
+        : "ready";
+
   return (
     <TenantGate>
-    <main
-      style={{
-        minHeight: "100vh",
-        padding: 30,
-        backgroundImage:
-          "url('https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d')",
-        backgroundSize: "cover",
-        backgroundPosition: "center"
-      }}
-    >
-      <div
-        style={{
-          background: "rgba(0,0,0,0.60)",
-          padding: 30,
-          borderRadius: 20
-        }}
-      >
-        <div style={{ color: "white", marginBottom: 24 }}>
-          <h1 style={{ marginTop: 0, fontSize: 38 }}>POD</h1>
-          <p style={{ opacity: 0.85, marginBottom: 0 }}>
-            Edit POD, upload photos and delivery documents, and mark delivery stops complete.
-          </p>
-        </div>
+      <div className="ds min-h-screen bg-canvas font-sans text-ink">
+        <main className="mx-auto max-w-[1480px] px-6 py-8">
+          <div className="text-kicker uppercase text-ink-3">Proof of delivery</div>
+          <h1 className="mb-4 mt-0.5 text-xl font-semibold tracking-tight text-ink">
+            Delivery stops awaiting POD
+          </h1>
 
-        {message ? (
-          <div
-            style={{
-              marginBottom: 20,
-              background: "rgba(255,255,255,0.94)",
-              padding: 14,
-              borderRadius: 12,
-              color: "#111827"
-            }}
-          >
-            {message}
-          </div>
-        ) : null}
-
-        <div style={{ display: "grid", gap: 18 }}>
-          {jobs.map((job: any) => (
-            <div
-              key={job.id}
-              style={{
-                background: "rgba(255,255,255,0.95)",
-                borderRadius: 16,
-                padding: 22,
-                boxShadow: "0 10px 30px rgba(0,0,0,0.18)"
-              }}
-            >
-              <div style={{ marginBottom: 14 }}>
-                <h2 style={{ margin: "0 0 8px 0" }}>
-                  {job.reference} - {job.customers?.name || "No Customer"}
-                </h2>
-                <div style={{ color: "#4b5563" }}>
-                  Date: {job.scheduled_date || "-"} | Status: {job.status}
-                </div>
-              </div>
-
-              <div style={{ display: "grid", gap: 12 }}>
-                {(job.job_stops || []).map((stop: any) => {
-                  const form = forms[stop.id] || {
-                    recipient_name: "",
-                    pod_notes: "",
-                    pod_photo_url: "",
-                    pod_document_url: ""
-                  };
-
-                  return (
-                    <div
-                      key={stop.id}
-                      style={{
-                        border: "1px solid #e5e7eb",
-                        borderRadius: 14,
-                        padding: 16,
-                        background: "#f9fafb"
-                      }}
-                    >
-                      <div style={{ marginBottom: 8 }}>
-                        <strong>
-                          {stop.stop_order}. {stop.type}
-                        </strong>{" "}
-                        - {stop.address_line}
-                        {stop.city ? `, ${stop.city}` : ""}
-                        {stop.postcode ? `, ${stop.postcode}` : ""}
-                      </div>
-
-                      <div style={{ color: "#4b5563", marginBottom: 8 }}>
-                        Stop status: {stop.status || "-"} | POD: {stop.pod_status || "pending"}
-                      </div>
-
-                      {stop.delivered_at ? (
-                        <div style={{ color: "#4b5563", marginBottom: 6 }}>
-                          Delivered: {new Date(stop.delivered_at).toLocaleString("en-GB")}
-                        </div>
-                      ) : null}
-
-                      {stop.pod_updated_at ? (
-                        <div style={{ color: "#4b5563", marginBottom: 10 }}>
-                          POD updated: {new Date(stop.pod_updated_at).toLocaleString("en-GB")}
-                        </div>
-                      ) : null}
-
-                      {stop.type === "delivery" ? (
-                        <div
-                          style={{
-                            display: "grid",
-                            gap: 10,
-                            marginTop: 12,
-                            maxWidth: 760
-                          }}
-                        >
-                          <input
-                            style={inputStyle}
-                            placeholder="Recipient name"
-                            value={form.recipient_name}
-                            onChange={(e: any) =>
-                              updateForm(stop.id, "recipient_name", e.target.value)
-                            }
-                          />
-
-                          <textarea
-                            placeholder="POD notes"
-                            value={form.pod_notes}
-                            onChange={(e: any) =>
-                              updateForm(stop.id, "pod_notes", e.target.value)
-                            }
-                            rows={4}
-                            style={{
-                              ...inputStyle,
-                              resize: "vertical"
-                            }}
-                          />
-
-                          <div
-                            style={{
-                              display: "grid",
-                              gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-                              gap: 14
-                            }}
-                          >
-                            <div
-                              style={{
-                                background: "white",
-                                border: "1px solid #e5e7eb",
-                                borderRadius: 12,
-                                padding: 14
-                              }}
-                            >
-                              <label style={{ display: "block", marginBottom: 8 }}>
-                                <strong>Upload photo</strong>
-                              </label>
-                              <input
-                                type="file"
-                                accept="image/*"
-                                onChange={(e: any) =>
-                                  uploadFile(
-                                    e.target.files?.[0],
-                                    stop.id,
-                                    stop.tenant_id,
-                                    "pod_photo_url"
-                                  )
-                                }
-                              />
-                              {uploadingField === `${stop.id}-pod_photo_url` ? (
-                                <div style={{ marginTop: 8, color: "#6b7280" }}>
-                                  Uploading photo...
-                                </div>
-                              ) : null}
-                              {form.pod_photo_url ? (
-                                <div style={{ marginTop: 10 }}>
-                                  <PodLink value={form.pod_photo_url} label="View uploaded photo" />
-                                </div>
-                              ) : null}
-                            </div>
-
-                            <div
-                              style={{
-                                background: "white",
-                                border: "1px solid #e5e7eb",
-                                borderRadius: 12,
-                                padding: 14
-                              }}
-                            >
-                              <label style={{ display: "block", marginBottom: 8 }}>
-                                <strong>Upload delivery document</strong>
-                              </label>
-                              <input
-                                type="file"
-                                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp"
-                                onChange={(e: any) =>
-                                  uploadFile(
-                                    e.target.files?.[0],
-                                    stop.id,
-                                    stop.tenant_id,
-                                    "pod_document_url"
-                                  )
-                                }
-                              />
-                              {uploadingField === `${stop.id}-pod_document_url` ? (
-                                <div style={{ marginTop: 8, color: "#6b7280" }}>
-                                  Uploading document...
-                                </div>
-                              ) : null}
-                              {form.pod_document_url ? (
-                                <div style={{ marginTop: 10 }}>
-                                  <PodLink value={form.pod_document_url} label="View uploaded document" />
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
-
-                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                            <button
-                              type="button"
-                              style={secondaryButtonStyle}
-                              disabled={savingStopId === stop.id}
-                              onClick={() => savePod(stop.id, false)}
-                            >
-                              {savingStopId === stop.id ? "Saving..." : "Save POD Edit"}
-                            </button>
-
-                            <button
-                              type="button"
-                              style={buttonStyle}
-                              disabled={savingStopId === stop.id}
-                              onClick={() => savePod(stop.id, true)}
-                            >
-                              {savingStopId === stop.id ? "Saving..." : "Mark Delivered"}
-                            </button>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
+          {message ? (
+            <div className="mb-4 rounded-lg border border-line bg-surface-2 p-3 text-sm text-ink">
+              {message}
             </div>
-          ))}
-        </div>
+          ) : null}
+
+          <div className="grid gap-6 xl:grid-cols-[400px_1fr]">
+            {/* The QUEUE is first in the DOM and the rail second, so when the
+                two stack below 1280px the queue comes first: it is the work,
+                the rail is context. On xl the order classes swap them, putting
+                the rail into the 400px left column. DOM order also decides
+                keyboard and screen-reader order, which is the other reason the
+                queue leads. */}
+            <div className="min-w-0 xl:order-2">
+              <div className="mb-3 grid grid-cols-3 gap-2.5">
+                <Stat label="Awaiting POD" value={String(kpis.awaiting)} />
+                <Stat label="Delivered today" value={String(kpis.deliveredToday)} subTone="positive" />
+                <Stat
+                  label="Overdue > 48 h"
+                  value={String(kpis.overdue)}
+                  subTone="danger"
+                  sub={kpis.overdue > 0 ? "cannot invoice" : undefined}
+                />
+              </div>
+
+              <div className="mb-3">
+                <Tabs
+                  label="Proof of delivery views"
+                  activeId={tab}
+                  onChange={(id) => {
+                    setTab(id as "awaiting" | "completed");
+                    setExpandedStopId(null);
+                  }}
+                  tabs={[
+                    { id: "awaiting", label: "Awaiting", count: awaiting.length },
+                    { id: "completed", label: "Completed", count: completed.length },
+                  ]}
+                />
+              </div>
+
+              <PodQueue
+                rows={rows}
+                state={queueState}
+                expandedStopId={expandedStopId}
+                onRowClick={(r) => setExpandedStopId(expandedStopId === r.stopId ? null : r.stopId)}
+                onRetry={loadJobs}
+                emptyTitle={tab === "awaiting" ? "No PODs awaiting" : "Nothing completed yet"}
+                renderExpanded={(r) => (
+                  <PodForm
+                    stopId={r.stopId}
+                    values={forms[r.stopId] ?? {
+                      recipient_name: "", pod_notes: "", pod_photo_url: "", pod_document_url: "",
+                    }}
+                    saving={savingStopId === r.stopId}
+                    uploadingField={uploadingField}
+                    onChange={(field, value) => updateForm(r.stopId, field, value)}
+                    onUpload={(file, field) => {
+                      const stop = r.stops.find((s) => s.id === r.stopId);
+                      uploadFile(file, r.stopId, (stop as any)?.tenant_id, field);
+                    }}
+                    onSave={(markDelivered) => savePod(r.stopId, markDelivered)}
+                  />
+                )}
+              />
+            </div>
+
+            <div className="xl:order-1">
+              <PodRail kpis={kpis} attention={attention} />
+            </div>
+          </div>
+        </main>
       </div>
-    </main>
     </TenantGate>
   );
 }
-
-
-
-
-
-
-
-
-
