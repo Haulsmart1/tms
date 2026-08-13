@@ -100,6 +100,7 @@ const PAIRS: Pair[] = [
   { label: "chrome-text on chrome",       fg: "--chrome-text",       bg: "--chrome",        min: AA_TEXT },
   { label: "chrome-text-strong on chrome",fg: "--chrome-text-strong",bg: "--chrome",        min: AA_TEXT },
   { label: "chrome-text on chrome-raised",fg: "--chrome-text",       bg: "--chrome-raised", min: AA_TEXT },
+  { label: "chrome-link on chrome",       fg: "--chrome-link",       bg: "--chrome",        min: AA_TEXT },
   { label: "primary link on surface",     fg: "--primary",           bg: "--surface",       min: AA_TEXT },
   { label: "on-primary on primary",       fg: "--on-primary",        bg: "--primary",       min: AA_TEXT },
   { label: "on-primary on primary-hover", fg: "--on-primary",        bg: "--primary-hover", min: AA_TEXT },

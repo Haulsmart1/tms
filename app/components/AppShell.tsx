@@ -88,7 +88,7 @@ export default function AppShell() {
             {userEmail ?? "Signed in"}
           </span>
           {role === "super_admin" ? (
-            <Link href="/super-admin" className="block truncate text-xs font-medium text-primary-tint-border no-underline hover:text-white">
+            <Link href="/super-admin" className="block truncate text-xs font-medium text-chrome-link no-underline hover:text-white">
               Super Admin
             </Link>
           ) : null}

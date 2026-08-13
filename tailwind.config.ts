@@ -67,6 +67,7 @@ const config: Config = {
           border: "var(--chrome-border)",
           text: "var(--chrome-text)",
           "text-strong": "var(--chrome-text-strong)",
+          link: "var(--chrome-link)",
         },
         ink: { DEFAULT: "var(--ink)", 2: "var(--ink-2)", 3: "var(--ink-3)", 4: "var(--ink-4)" },
         primary: {

@@ -45,6 +45,11 @@
   --chrome-border: #26324A;
   --chrome-text: #9AA7BD;
   --chrome-text-strong: #E8EEF9;
+  /* Link colour inside the chrome sidebar. Chrome is dark in BOTH themes, so
+     this needs a light blue in both, which is why it cannot reuse
+     --primary-tint-border: that token is tuned as a border on a dark tint and
+     measures 3.60:1 as text here, below the 4.5:1 text minimum. */
+  --chrome-link: #A9C0FB;
   /* text, capped at a dimmed #D6DEEC rather than near-white. Pure white on a
      near-black surface causes halation (glyphs appear to bleed), which is worst
      in exactly the dim rooms this theme is for. */
@@ -101,6 +106,11 @@
   --chrome-border: #26324A;
   --chrome-text: #9AA7BD;
   --chrome-text-strong: #E8EEF9;
+  /* Link colour inside the chrome sidebar. Chrome is dark in BOTH themes, so
+     this needs a light blue in both, which is why it cannot reuse
+     --primary-tint-border: that token is tuned as a border on a dark tint and
+     measures 3.60:1 as text here, below the 4.5:1 text minimum. */
+  --chrome-link: #A9C0FB;
   --ink: #D6DEEC;
   --ink-2: #9AA7BD;
   --ink-3: #7787A0;
@@ -149,6 +159,7 @@
   --chrome-border: #242F47;
   --chrome-text: #C9CFDD;
   --chrome-text-strong: #FFFFFF;
+  --chrome-link: #C3D1F8;
   --ink: #0B1220;
   --ink-2: #5B6474;
   --ink-3: #737D8F;
