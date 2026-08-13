@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import AppShell from "./components/AppShell";
+import ThemeScope from "./components/ThemeScope";
 import { TenantProvider } from "./components/TenantProvider";
 import { THEME_SCRIPT } from "../lib/theme/themeScript";
 import "./globals.css";
@@ -72,7 +73,7 @@ export default function RootLayout({
         <TenantProvider>
           <div style={{ display: "flex", minHeight: "100vh" }}>
             <AppShell />
-            <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
+            <ThemeScope>{children}</ThemeScope>
           </div>
         </TenantProvider>
       </body>
