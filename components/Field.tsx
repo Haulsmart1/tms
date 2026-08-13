@@ -12,6 +12,8 @@ type Props = InputHTMLAttributes<HTMLInputElement> & {
   error?: string;
   /** Classes for the wrapping <div>, e.g. "sm:col-span-2". `className` targets the <input>. */
   wrapperClassName?: string;
+  /** Renders the label as an uppercase Console kicker instead of body text. */
+  kickerLabel?: boolean;
 };
 
 export default function Field({
@@ -21,13 +23,21 @@ export default function Field({
   error,
   className,
   wrapperClassName,
+  kickerLabel,
   ...props
 }: Props) {
   const hintId = hint ? `${id}-hint` : undefined;
   const errorId = error ? `${id}-error` : undefined;
   return (
     <div className={cn("grid gap-1.5", wrapperClassName)}>
-      <label htmlFor={id} className="text-sm font-medium text-ink-2">
+      <label
+        htmlFor={id}
+        className={
+          kickerLabel
+            ? "text-kicker uppercase text-ink-3"
+            : "text-sm font-medium text-ink-2"
+        }
+      >
         {label}
       </label>
       <input
