@@ -46,8 +46,15 @@ export const metadata: Metadata = {
 };
 
 export default function HomePage() {
+  // `light` pins the public marketing page to the light palette regardless
+  // of the console's theme. It is a sales asset viewed by prospects on
+  // ordinary monitors in daylight, and its light design shipped in July.
+  // Because the light values are a class rather than a media query, this
+  // needs no JavaScript and no separate mechanism. /login is deliberately
+  // NOT pinned: it is the first console screen an operator sees in a dim
+  // room.
   return (
-    <div className="ds min-h-screen bg-canvas font-sans text-ink">
+    <div className="ds light min-h-screen bg-canvas font-sans text-ink">
       {/* A PLAIN script tag, not next/script. next/script defaults to
           afterInteractive and injects client-side, so the structured data was
           absent from the server-rendered HTML entirely and no crawler ever saw
