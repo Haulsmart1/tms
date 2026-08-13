@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { contrastRatio } from "./contrast";
+import { contrastRatio, relativeLuminance } from "./contrast";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseTokenBlocks } from "./parseTokens";
@@ -9,10 +9,14 @@ describe("contrastRatio", () => {
     expect(contrastRatio("#000000", "#FFFFFF")).toBeCloseTo(21, 2);
   });
 
+  // Self-contrast is 1 by construction (same luminance both sides of the
+  // ratio), so this pins the contract rather than exercising the maths.
   it("returns 1:1 for a colour against itself", () => {
     expect(contrastRatio("#2953E3", "#2953E3")).toBeCloseTo(1, 5);
   });
 
+  // Symmetry cannot fail given the Math.max/Math.min ordering in
+  // contrastRatio, so this pins the contract rather than exercising the maths.
   it("is order-independent, since WCAG ratios are symmetric", () => {
     expect(contrastRatio("#0B1220", "#F2F4F8")).toBeCloseTo(
       contrastRatio("#F2F4F8", "#0B1220"), 5,
@@ -25,6 +29,34 @@ describe("contrastRatio", () => {
 
   it("matches a known third-party value: #2953E3 on white is 6.10:1", () => {
     expect(contrastRatio("#2953E3", "#FFFFFF")).toBeCloseTo(6.10, 2);
+  });
+
+  // Independent third-party cross-check at a mid-range value, to guard
+  // against a wrong sRGB linearisation constant. #767676 on white is the
+  // well-known WCAG boundary value, independently confirmed at 4.542225 by a
+  // from-scratch implementation.
+  it("matches a known WCAG boundary value: #767676 on white is 4.54:1", () => {
+    expect(contrastRatio("#767676", "#FFFFFF")).toBeCloseTo(4.54, 2);
+  });
+
+  it("throws on 8-digit hex with alpha instead of silently scoring it as opaque", () => {
+    expect(() => contrastRatio("#0B1220E6", "#FFFFFF")).toThrow();
+  });
+
+  it("throws on non-hex colour forms rather than returning NaN", () => {
+    expect(() => contrastRatio("rgba(0,0,0,.45)", "#FFFFFF")).toThrow();
+    expect(() => contrastRatio("white", "#000000")).toThrow();
+    expect(() => contrastRatio("", "#FFFFFF")).toThrow();
+  });
+
+  it("still accepts whitespace-padded and shorthand hex", () => {
+    expect(contrastRatio("#FFF ", "#000000")).toBeCloseTo(21, 2);
+    expect(contrastRatio("#abc", "#000000")).toBeGreaterThan(1);
+  });
+
+  it("relativeLuminance is 1 for white and 0 for black", () => {
+    expect(relativeLuminance("#FFFFFF")).toBeCloseTo(1, 10);
+    expect(relativeLuminance("#000000")).toBeCloseTo(0, 10);
   });
 });
 
