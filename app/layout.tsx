@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import AppShell from "./components/AppShell";
 import { TenantProvider } from "./components/TenantProvider";
+import { THEME_SCRIPT } from "../lib/theme/themeScript";
 import "./globals.css";
 
 /* DESIGN-SYSTEM SEAM, read before editing.
@@ -57,10 +58,17 @@ export default function RootLayout({
           margin: 0,
           fontFamily:
             'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-          background: "#0f172a",
-          color: "#0f172a",
+          /* Hardcoded, NOT var(--canvas), deliberately. This paints behind the
+             ~14 legacy inline-styled pages, which cannot follow a theme, so it
+             must not change when a user switches to light. Retinted from
+             #0f172a to match the new dark canvas. */
+          background: "#0F1626",
+          color: "#0F1626",
         }}
       >
+        {/* MUST stay the first child and MUST stay synchronous. See
+            lib/theme/themeScript.ts for why. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <TenantProvider>
           <div style={{ display: "flex", minHeight: "100vh" }}>
             <AppShell />
