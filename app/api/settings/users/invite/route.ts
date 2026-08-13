@@ -6,654 +6,345 @@ import { cookies } from "next/headers";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ALLOWED_INVITE_ROLES = new Set([
-  "admin",
-  "staff",
-  "driver",
-]);
+const ALLOWED_INVITE_ROLES = new Set(["admin", "staff", "driver"]);
 
 function getSiteUrl(): string {
-  return (
-    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/, "") ||
-    "https://tmswizard.cloud"
-  );
+  return process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/, "") || "https://tmswizard.cloud";
 }
 
 async function createAuthenticatedClient() {
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL;
-
-  const anonKey =
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!supabaseUrl || !anonKey) {
-    throw new Error(
-      "Supabase public environment variables are missing."
-    );
-  }
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anon) throw new Error("Supabase public environment variables are missing.");
 
   const cookieStore = await cookies();
-
-  return createServerClient(
-    supabaseUrl,
-    anonKey,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(
-              ({
-                name,
-                value,
-                options,
-              }) => {
-                cookieStore.set(
-                  name,
-                  value,
-                  options
-                );
-              }
-            );
-          } catch {
-            // Existing session cookies are sufficient here.
-          }
-        },
+  return createServerClient(url, anon, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
       },
-    }
-  );
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            cookieStore.set(name, value, options)
+          );
+        } catch {}
+      },
+    },
+  });
 }
 
 function createAdminClient() {
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceRole) throw new Error("Supabase server environment variables are missing.");
 
-  const serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error(
-      "Supabase server environment variables are missing."
-    );
-  }
-
-  return createClient(
-    supabaseUrl,
-    serviceRoleKey,
-    {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    }
-  );
+  return createClient(url, serviceRole, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
 }
 
-function isValidEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-    email
-  );
+function isValidEmail(email: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+async function requireTenantAdmin(request: NextRequest, tenantId: string) {
+  const userClient = await createAuthenticatedClient();
+  const {
+    data: { user },
+    error,
+  } = await userClient.auth.getUser();
+
+  if (error || !user) {
+    return { error: NextResponse.json({ error: "You must be signed in." }, { status: 401 }) };
+  }
+
+  const admin = createAdminClient();
+  const { data: membership, error: membershipError } = await admin
+    .from("memberships")
+    .select("id, role")
+    .eq("tenant_id", tenantId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (membershipError) {
+    return { error: NextResponse.json({ error: "Unable to verify your tenant permissions." }, { status: 500 }) };
+  }
+
+  if (!membership) {
+    return { error: NextResponse.json({ error: "You do not belong to the selected tenant." }, { status: 403 }) };
+  }
+
+  if (!["admin", "super_admin"].includes(membership.role)) {
+    return { error: NextResponse.json({ error: "Only a tenant admin can manage users." }, { status: 403 }) };
+  }
+
+  return { admin, user };
 }
 
 async function findAuthUserByEmail(
   admin: ReturnType<typeof createAdminClient>,
   email: string
 ) {
-  const perPage = 1000;
   let page = 1;
+  const perPage = 1000;
 
   while (true) {
-    const {
-      data,
-      error,
-    } = await admin.auth.admin.listUsers({
-      page,
-      perPage,
-    });
-
-    if (error) {
-      throw new Error(
-        `Unable to check existing Auth users: ${error.message}`
-      );
-    }
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
+    if (error) throw new Error(`Unable to check existing Auth users: ${error.message}`);
 
     const match = data.users.find(
-      (candidate) =>
-        candidate.email
-          ?.trim()
-          .toLowerCase() === email
+      (candidate) => candidate.email?.trim().toLowerCase() === email
     );
-
-    if (match) {
-      return match;
-    }
-
-    if (data.users.length < perPage) {
-      return null;
-    }
-
+    if (match) return match;
+    if (data.users.length < perPage) return null;
     page += 1;
   }
 }
 
-export async function POST(
-  request: NextRequest
-) {
+export async function GET(request: NextRequest) {
   try {
-    // ========================================================
-    // 1. Authenticate current TMS user
-    // ========================================================
-
-    const authenticatedClient =
-      await createAuthenticatedClient();
-
-    const {
-      data: { user: currentUser },
-      error: authError,
-    } =
-      await authenticatedClient.auth.getUser();
-
-    if (
-      authError ||
-      !currentUser
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "You must be signed in to invite users.",
-        },
-        {
-          status: 401,
-        }
-      );
-    }
-
-    // ========================================================
-    // 2. Validate request
-    // ========================================================
-
-    const body =
-      (await request.json()) as {
-        email?: string;
-        role?: string;
-        tenantId?: string;
-      };
-
-    const email =
-      body.email
-        ?.trim()
-        .toLowerCase() ?? "";
-
-    const tenantId =
-      body.tenantId?.trim() ?? "";
-
-    const role =
-      body.role
-        ?.trim()
-        .toLowerCase() || "staff";
-
-    if (
-      !email ||
-      !isValidEmail(email)
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Enter a valid email address.",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
-
+    const tenantId = request.nextUrl.searchParams.get("tenantId")?.trim();
     if (!tenantId) {
-      return NextResponse.json(
-        {
-          error:
-            "A tenant must be selected.",
-        },
-        {
-          status: 400,
-        }
-      );
+      return NextResponse.json({ error: "A tenant must be selected." }, { status: 400 });
     }
 
-    if (
-      !ALLOWED_INVITE_ROLES.has(role)
-    ) {
-      return NextResponse.json(
-        {
-          error: "Invalid role.",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
+    const access = await requireTenantAdmin(request, tenantId);
+    if ("error" in access) return access.error;
 
-    const admin =
-      createAdminClient();
+    const { admin } = access;
 
-    // ========================================================
-    // 3. Verify inviter is an admin of selected tenant
-    //
-    // memberships is intentionally service-role protected.
-    // ========================================================
-
-    const {
-      data: inviterMembership,
-      error: inviterMembershipError,
-    } = await admin
+    const { data: memberships, error: membershipsError } = await admin
       .from("memberships")
-      .select(
-        "id, tenant_id, user_id, role"
-      )
-      .eq(
-        "tenant_id",
-        tenantId
-      )
-      .eq(
-        "user_id",
-        currentUser.id
-      )
-      .maybeSingle();
+      .select("id, user_id, tenant_id, role, created_at")
+      .eq("tenant_id", tenantId)
+      .order("created_at", { ascending: true });
 
-    if (
-      inviterMembershipError
-    ) {
-      console.error(
-        "Inviter membership lookup failed:",
-        inviterMembershipError
-      );
-
-      return NextResponse.json(
-        {
-          error:
-            "Unable to verify your tenant permissions.",
-        },
-        {
-          status: 500,
-        }
-      );
+    if (membershipsError) {
+      throw new Error(`Unable to load tenant memberships: ${membershipsError.message}`);
     }
 
-    if (!inviterMembership) {
-      return NextResponse.json(
-        {
-          error:
-            "You do not belong to the selected tenant.",
-        },
-        {
-          status: 403,
-        }
-      );
+    const userIds = Array.from(
+      new Set((memberships ?? []).map((m) => m.user_id).filter((v): v is string => Boolean(v)))
+    );
+
+    if (userIds.length === 0) {
+      return NextResponse.json({ users: [] });
     }
 
-    if (
-      ![
-        "admin",
-        "super_admin",
-      ].includes(
-        inviterMembership.role
-      )
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Only a tenant admin can invite users.",
-        },
-        {
-          status: 403,
-        }
-      );
+    const [publicUsersResult, profilesResult] = await Promise.all([
+      admin.from("users").select("id, email, created_at").in("id", userIds),
+      admin.from("profiles").select("id, full_name, phone, tenant_id, company_id, role_id").in("id", userIds),
+    ]);
+
+    if (publicUsersResult.error) {
+      throw new Error(`Unable to load user emails: ${publicUsersResult.error.message}`);
     }
 
-    // ========================================================
-    // 4. Find existing Supabase Auth user
-    // ========================================================
+    if (profilesResult.error) {
+      throw new Error(`Unable to load user profiles: ${profilesResult.error.message}`);
+    }
 
-    const existingAuthUser =
-      await findAuthUserByEmail(
-        admin,
-        email
-      );
+    const publicUsersById = new Map((publicUsersResult.data ?? []).map((row) => [row.id, row]));
+    const profilesById = new Map((profilesResult.data ?? []).map((row) => [row.id, row]));
+
+    const users = (memberships ?? []).map((membership) => {
+      const publicUser = membership.user_id ? publicUsersById.get(membership.user_id) : undefined;
+      const profile = membership.user_id ? profilesById.get(membership.user_id) : undefined;
+
+      return {
+        membership_id: membership.id,
+        user_id: membership.user_id,
+        tenant_id: membership.tenant_id,
+        role: membership.role,
+        membership_created_at: membership.created_at,
+        email: publicUser?.email ?? null,
+        full_name: profile?.full_name ?? null,
+        phone: profile?.phone ?? null,
+        company_id: profile?.company_id ?? null,
+        role_id: profile?.role_id ?? null,
+      };
+    });
+
+    return NextResponse.json({ users });
+  } catch (error) {
+    console.error("Users GET API failed:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Unable to load users." },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = (await request.json()) as {
+      email?: string;
+      role?: string;
+      tenantId?: string;
+    };
+
+    const email = body.email?.trim().toLowerCase() ?? "";
+    const tenantId = body.tenantId?.trim() ?? "";
+    const role = body.role?.trim().toLowerCase() || "staff";
+
+    if (!email || !isValidEmail(email)) {
+      return NextResponse.json({ error: "Enter a valid email address." }, { status: 400 });
+    }
+    if (!tenantId) {
+      return NextResponse.json({ error: "A tenant must be selected." }, { status: 400 });
+    }
+    if (!ALLOWED_INVITE_ROLES.has(role)) {
+      return NextResponse.json({ error: "Invalid role." }, { status: 400 });
+    }
+
+    const access = await requireTenantAdmin(request, tenantId);
+    if ("error" in access) return access.error;
+
+    const { admin, user: currentUser } = access;
+    const existingAuthUser = await findAuthUserByEmail(admin, email);
 
     let invitedUserId: string;
     let inviteSent = false;
 
     if (existingAuthUser) {
-      invitedUserId =
-        existingAuthUser.id;
+      invitedUserId = existingAuthUser.id;
     } else {
-      // ======================================================
-      // 5. Send real Supabase invitation
-      // ======================================================
+      const redirectTo = `${getSiteUrl()}/api/auth/callback?next=/dashboard`;
 
-      const redirectTo =
-        `${getSiteUrl()}` +
-        "/api/auth/callback" +
-        "?next=/dashboard";
-
-      const {
-        data: inviteData,
-        error: inviteError,
-      } =
-        await admin.auth.admin
-          .inviteUserByEmail(
-            email,
-            {
-              redirectTo,
-
-              data: {
-                tenant_id:
-                  tenantId,
-
-                role,
-
-                invited_by:
-                  currentUser.id,
-              },
-            }
-          );
+      const { data: inviteData, error: inviteError } =
+        await admin.auth.admin.inviteUserByEmail(email, {
+          redirectTo,
+          data: {
+            tenant_id: tenantId,
+            role,
+            invited_by: currentUser.id,
+          },
+        });
 
       if (inviteError) {
-        console.error(
-          "Supabase invitation failed:",
-          inviteError
-        );
-
-        return NextResponse.json(
-          {
-            error:
-              inviteError.message,
-          },
-          {
-            status: 400,
-          }
-        );
+        return NextResponse.json({ error: inviteError.message }, { status: 400 });
       }
 
       if (!inviteData.user?.id) {
         return NextResponse.json(
-          {
-            error:
-              "Supabase created the invitation but did not return a user ID.",
-          },
-          {
-            status: 500,
-          }
+          { error: "Supabase created the invitation but did not return a user ID." },
+          { status: 500 }
         );
       }
 
-      invitedUserId =
-        inviteData.user.id;
-
+      invitedUserId = inviteData.user.id;
       inviteSent = true;
     }
 
-    // ========================================================
-    // 6. IMPORTANT:
-    // Ensure PUBLIC.USERS exists before MEMBERSHIPS.
-    //
-    // memberships.user_id FK -> public.users.id
-    // ========================================================
-
-    const {
-      data: publicUser,
-      error: publicUserReadError,
-    } = await admin
+    const { data: publicUser, error: publicUserReadError } = await admin
       .from("users")
-      .select(
-        "id, email"
-      )
-      .eq(
-        "id",
-        invitedUserId
-      )
+      .select("id, email")
+      .eq("id", invitedUserId)
       .maybeSingle();
 
-    if (
-      publicUserReadError
-    ) {
-      throw new Error(
-        `Unable to check public user record: ${publicUserReadError.message}`
-      );
+    if (publicUserReadError) {
+      throw new Error(`Unable to check public user record: ${publicUserReadError.message}`);
     }
 
     if (!publicUser) {
-      const {
-        error: publicUserInsertError,
-      } = await admin
+      const { error: insertError } = await admin
         .from("users")
-        .insert({
-          id: invitedUserId,
-          email,
-        });
+        .insert({ id: invitedUserId, email });
 
-      if (
-        publicUserInsertError
-      ) {
-        throw new Error(
-          `Unable to create public user record: ${publicUserInsertError.message}`
-        );
+      if (insertError) {
+        throw new Error(`Unable to create public user record: ${insertError.message}`);
       }
-    } else if (
-      publicUser.email !== email
-    ) {
-      const {
-        error: publicUserUpdateError,
-      } = await admin
+    } else if (publicUser.email !== email) {
+      const { error: updateError } = await admin
         .from("users")
-        .update({
-          email,
-        })
-        .eq(
-          "id",
-          invitedUserId
-        );
+        .update({ email })
+        .eq("id", invitedUserId);
 
-      if (
-        publicUserUpdateError
-      ) {
-        throw new Error(
-          `Unable to update public user email: ${publicUserUpdateError.message}`
-        );
+      if (updateError) {
+        throw new Error(`Unable to update public user email: ${updateError.message}`);
       }
     }
 
-    // ========================================================
-    // 7. Ensure profile exists
-    // ========================================================
-
-    const {
-      data: existingProfile,
-      error: profileReadError,
-    } = await admin
+    const { data: existingProfile, error: profileReadError } = await admin
       .from("profiles")
-      .select(
-        "id, tenant_id"
-      )
-      .eq(
-        "id",
-        invitedUserId
-      )
+      .select("id, tenant_id")
+      .eq("id", invitedUserId)
       .maybeSingle();
 
-    if (
-      profileReadError
-    ) {
-      throw new Error(
-        `Unable to check profile: ${profileReadError.message}`
-      );
+    if (profileReadError) {
+      throw new Error(`Unable to check profile: ${profileReadError.message}`);
     }
 
     if (!existingProfile) {
-      const {
-        error: profileInsertError,
-      } = await admin
+      const { error: profileInsertError } = await admin
         .from("profiles")
-        .insert({
-          id: invitedUserId,
-          tenant_id: tenantId,
-        });
+        .insert({ id: invitedUserId, tenant_id: tenantId });
 
-      if (
-        profileInsertError
-      ) {
-        throw new Error(
-          `Unable to create profile: ${profileInsertError.message}`
-        );
+      if (profileInsertError) {
+        throw new Error(`Unable to create profile: ${profileInsertError.message}`);
       }
-    } else if (
-      !existingProfile.tenant_id
-    ) {
-      const {
-        error: profileUpdateError,
-      } = await admin
+    } else if (!existingProfile.tenant_id) {
+      const { error: profileUpdateError } = await admin
         .from("profiles")
-        .update({
-          tenant_id:
-            tenantId,
-        })
-        .eq(
-          "id",
-          invitedUserId
-        );
+        .update({ tenant_id: tenantId })
+        .eq("id", invitedUserId);
 
-      if (
-        profileUpdateError
-      ) {
-        throw new Error(
-          `Unable to link profile to tenant: ${profileUpdateError.message}`
-        );
+      if (profileUpdateError) {
+        throw new Error(`Unable to link profile to tenant: ${profileUpdateError.message}`);
       }
     }
 
-    // ========================================================
-    // 8. Ensure membership exists
-    //
-    // Now safe because public.users exists.
-    // ========================================================
-
-    const {
-      data: existingMembership,
-      error: existingMembershipError,
-    } = await admin
+    const { data: existingMembership, error: existingMembershipError } = await admin
       .from("memberships")
-      .select(
-        "id, role"
-      )
-      .eq(
-        "tenant_id",
-        tenantId
-      )
-      .eq(
-        "user_id",
-        invitedUserId
-      )
+      .select("id, role")
+      .eq("tenant_id", tenantId)
+      .eq("user_id", invitedUserId)
       .maybeSingle();
 
-    if (
-      existingMembershipError
-    ) {
-      throw new Error(
-        `Unable to check membership: ${existingMembershipError.message}`
-      );
+    if (existingMembershipError) {
+      throw new Error(`Unable to check membership: ${existingMembershipError.message}`);
     }
 
-    if (
-      existingMembership
-    ) {
-      const {
-        error:
-          membershipUpdateError,
-      } = await admin
+    if (existingMembership) {
+      const { error: membershipUpdateError } = await admin
         .from("memberships")
-        .update({
-          role,
-        })
-        .eq(
-          "id",
-          existingMembership.id
-        );
+        .update({ role })
+        .eq("id", existingMembership.id);
 
-      if (
-        membershipUpdateError
-      ) {
-        throw new Error(
-          `Unable to update membership: ${membershipUpdateError.message}`
-        );
+      if (membershipUpdateError) {
+        throw new Error(`Unable to update membership: ${membershipUpdateError.message}`);
       }
     } else {
-      const {
-        error:
-          membershipInsertError,
-      } = await admin
+      const { error: membershipInsertError } = await admin
         .from("memberships")
         .insert({
-          tenant_id:
-            tenantId,
-
-          user_id:
-            invitedUserId,
-
+          tenant_id: tenantId,
+          user_id: invitedUserId,
           role,
         });
 
-      if (
-        membershipInsertError
-      ) {
-        throw new Error(
-          `Unable to create tenant membership: ${membershipInsertError.message}`
-        );
+      if (membershipInsertError) {
+        throw new Error(`Unable to create tenant membership: ${membershipInsertError.message}`);
       }
     }
 
-    // ========================================================
-    // 9. Success
-    // ========================================================
-
-    return NextResponse.json(
-      {
-        ok: true,
-
-        message: inviteSent
-          ? `Invite sent to ${email}.`
-          : `${email} already had a TMS account and has now been added to this tenant.`,
-
-        inviteSent,
-
-        userId:
-          invitedUserId,
-
-        tenantId,
-
-        role,
-      },
-      {
-        status: 200,
-      }
-    );
+    return NextResponse.json({
+      ok: true,
+      message: inviteSent
+        ? `Invite sent to ${email}.`
+        : `${email} already had a TMS account and has now been added to this tenant.`,
+      inviteSent,
+      userId: invitedUserId,
+      tenantId,
+      role,
+    });
   } catch (error) {
-    console.error(
-      "User invite API failed:",
-      error
-    );
+    console.error("User invite API failed:", error);
 
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unable to invite user.",
-      },
-      {
-        status: 500,
-      }
+      { error: error instanceof Error ? error.message : "Unable to invite user." },
+      { status: 500 }
     );
   }
 }

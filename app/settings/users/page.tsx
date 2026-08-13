@@ -1,56 +1,74 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { createClient } from "../../../lib/supabase/browser";
 import { useTenant } from "../../components/TenantProvider";
 import TenantGate from "../../components/TenantGate";
 
-type ProfileRow = {
-  id: string;
-  email?: string | null;
-  full_name?: string | null;
-  tenant_id?: string | null;
+type TenantUser = {
+  membership_id: string;
+  user_id: string | null;
+  tenant_id: string;
+  role: string;
+  membership_created_at: string | null;
+  email: string | null;
+  full_name: string | null;
+  phone: string | null;
+  company_id: string | null;
+  role_id: string | null;
 };
 
 export default function UsersPage() {
-  const supabase = useMemo(() => createClient(), []);
   const tenant = useTenant();
+  const canInvite = tenant.role === "admin" || tenant.role === "super_admin";
 
-  const canInvite =
-    tenant.role === "admin" || tenant.role === "super_admin";
-
-  const [users, setUsers] = useState<ProfileRow[]>([]);
+  const [users, setUsers] = useState<TenantUser[]>([]);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("staff");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [inviting, setInviting] = useState(false);
 
-  async function loadUsers() {
-    setLoading(true);
-
-    const { data, error } = await tenant.filterByTenant(
-      supabase
-        .from("profiles")
-        .select("id, email, full_name, tenant_id")
-        .order("full_name", { ascending: true })
-    );
-
-    if (error) {
-      setMessage(error.message);
+  const loadUsers = useCallback(async () => {
+    if (!tenant.activeTenantId) {
       setUsers([]);
-    } else {
-      setUsers((data as ProfileRow[]) || []);
+      setLoading(false);
+      return;
     }
 
-    setLoading(false);
-  }
+    setLoading(true);
+
+    try {
+      const response = await fetch(
+        `/api/settings/users/invite?tenantId=${encodeURIComponent(
+          tenant.activeTenantId
+        )}`,
+        { cache: "no-store" }
+      );
+
+      const body = (await response.json()) as {
+        users?: TenantUser[];
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(body.error || "Unable to load tenant users.");
+      }
+
+      setUsers(body.users ?? []);
+    } catch (error) {
+      setUsers([]);
+      setMessage(
+        error instanceof Error ? error.message : "Unable to load tenant users."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [tenant.activeTenantId]);
 
   useEffect(() => {
     void loadUsers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenant.activeTenantId]);
+  }, [loadUsers]);
 
   async function inviteUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -76,9 +94,7 @@ export default function UsersPage() {
     try {
       const response = await fetch("/api/settings/users/invite", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: email.trim(),
           role,
@@ -98,13 +114,10 @@ export default function UsersPage() {
       setMessage(body.message || "Invite sent.");
       setEmail("");
       setRole("staff");
-
       await loadUsers();
     } catch (error) {
       setMessage(
-        error instanceof Error
-          ? error.message
-          : "Unable to invite user."
+        error instanceof Error ? error.message : "Unable to invite user."
       );
     } finally {
       setInviting(false);
@@ -171,16 +184,26 @@ export default function UsersPage() {
               <div style={cardStyle}>No users found for this tenant.</div>
             ) : (
               users.map((user) => (
-                <div key={user.id} style={cardStyle}>
-                  <strong>
-                    {user.full_name || user.email || "TMS User"}
-                  </strong>
+                <div key={user.membership_id} style={cardStyle}>
+                  <div style={userHeaderStyle}>
+                    <div>
+                      <strong style={{ fontSize: 18 }}>
+                        {user.full_name || user.email || "TMS User"}
+                      </strong>
 
-                  {user.email ? (
-                    <div style={{ marginTop: 6, color: "#64748b" }}>
-                      {user.email}
+                      {user.email ? (
+                        <div style={mutedStyle}>{user.email}</div>
+                      ) : null}
+
+                      {user.phone ? (
+                        <div style={mutedStyle}>{user.phone}</div>
+                      ) : null}
                     </div>
-                  ) : null}
+
+                    <span style={roleBadgeStyle}>
+                      {formatRole(user.role)}
+                    </span>
+                  </div>
                 </div>
               ))
             )}
@@ -189,6 +212,12 @@ export default function UsersPage() {
       </main>
     </TenantGate>
   );
+}
+
+function formatRole(role: string) {
+  return role
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 const pageStyle = {
@@ -206,9 +235,7 @@ const overlayStyle = {
   borderRadius: 20,
 };
 
-const titleStyle = {
-  color: "white",
-};
+const titleStyle = { color: "white" };
 
 const cardStyle = {
   background: "white",
@@ -224,10 +251,7 @@ const formGridStyle = {
   alignItems: "end",
 };
 
-const fieldStyle = {
-  display: "grid",
-  gap: 6,
-};
+const fieldStyle = { display: "grid", gap: 6 };
 
 const labelStyle = {
   fontSize: 12,
@@ -258,7 +282,25 @@ const messageStyle = {
   marginBottom: 20,
 };
 
-const gridStyle = {
-  display: "grid",
+const gridStyle = { display: "grid", gap: 12 };
+
+const userHeaderStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
   gap: 12,
+};
+
+const mutedStyle = {
+  marginTop: 5,
+  color: "#64748b",
+};
+
+const roleBadgeStyle = {
+  padding: "6px 10px",
+  borderRadius: 999,
+  background: "#e0e7ff",
+  color: "#3730a3",
+  fontSize: 12,
+  fontWeight: 800,
 };
