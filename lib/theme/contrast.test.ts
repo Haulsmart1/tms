@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { contrastRatio } from "./contrast";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { parseTokenBlocks } from "./parseTokens";
 
 describe("contrastRatio", () => {
   it("returns 21:1 for black on white, the WCAG maximum", () => {
@@ -23,4 +26,102 @@ describe("contrastRatio", () => {
   it("matches a known third-party value: #2953E3 on white is 6.10:1", () => {
     expect(contrastRatio("#2953E3", "#FFFFFF")).toBeCloseTo(6.10, 2);
   });
+});
+
+const css = readFileSync(resolve(process.cwd(), "app/tokens.css"), "utf8");
+const blocks = parseTokenBlocks(css);
+
+/* Both themes must declare EVERY token. The previous .dark scaffold overrode
+   only some of them and silently inherited light values for the rest, which is
+   how the focus ring ended up at 2.85:1 on a dark surface. Parity is asserted
+   structurally so that failure mode cannot recur. */
+describe("token block structure", () => {
+  it("declares :root (dark default), .dark (the pin) and .light (the opt-out)", () => {
+    expect(blocks[":root"]).toBeDefined();
+    expect(blocks[".dark"]).toBeDefined();
+    expect(blocks[".light"]).toBeDefined();
+  });
+
+  it("declares the same token names in every block, with no partial overrides", () => {
+    const root = Object.keys(blocks[":root"]).sort();
+    expect(Object.keys(blocks[".light"]).sort()).toEqual(root);
+    expect(Object.keys(blocks[".dark"]).sort()).toEqual(root);
+  });
+
+  it("gives .dark values identical to :root, since it exists only to let a subtree resist an ancestor .light", () => {
+    expect(blocks[".dark"]).toEqual(blocks[":root"]);
+  });
+});
+
+type Pair = { fg: string; bg: string; min: number; label: string };
+
+const AA_TEXT = 4.5;
+const AA_NON_TEXT = 3;
+
+/* The same pairs are asserted against both themes: a token's job does not
+   change between them, only its value does. */
+const PAIRS: Pair[] = [
+  { label: "ink on surface",              fg: "--ink",               bg: "--surface",       min: AA_TEXT },
+  { label: "ink on canvas",               fg: "--ink",               bg: "--canvas",        min: AA_TEXT },
+  { label: "ink on surface-2",            fg: "--ink",               bg: "--surface-2",     min: AA_TEXT },
+  { label: "ink-2 on surface",            fg: "--ink-2",             bg: "--surface",       min: AA_TEXT },
+  { label: "chrome-text on chrome",       fg: "--chrome-text",       bg: "--chrome",        min: AA_TEXT },
+  { label: "chrome-text-strong on chrome",fg: "--chrome-text-strong",bg: "--chrome",        min: AA_TEXT },
+  { label: "chrome-text on chrome-raised",fg: "--chrome-text",       bg: "--chrome-raised", min: AA_TEXT },
+  { label: "primary link on surface",     fg: "--primary",           bg: "--surface",       min: AA_TEXT },
+  { label: "on-primary on primary",       fg: "--on-primary",        bg: "--primary",       min: AA_TEXT },
+  { label: "on-primary on primary-hover", fg: "--on-primary",        bg: "--primary-hover", min: AA_TEXT },
+  { label: "on-primary on primary-active",fg: "--on-primary",        bg: "--primary-active",min: AA_TEXT },
+  { label: "on-danger on danger",         fg: "--on-danger",         bg: "--danger",        min: AA_TEXT },
+  { label: "success-strong on tint",      fg: "--success-strong",    bg: "--success-tint",  min: AA_TEXT },
+  { label: "warning-strong on tint",      fg: "--warning-strong",    bg: "--warning-tint",  min: AA_TEXT },
+  { label: "danger-strong on tint",       fg: "--danger-strong",     bg: "--danger-tint",   min: AA_TEXT },
+  { label: "primary-deep on tint",        fg: "--primary-deep",      bg: "--primary-tint",  min: AA_TEXT },
+  { label: "accent-text on tint",         fg: "--accent-text",       bg: "--accent-tint",   min: AA_TEXT },
+  { label: "focus on canvas",             fg: "--focus",             bg: "--canvas",        min: AA_NON_TEXT },
+  { label: "focus on surface",            fg: "--focus",             bg: "--surface",       min: AA_NON_TEXT },
+  { label: "focus on chrome",             fg: "--focus",             bg: "--chrome",        min: AA_NON_TEXT },
+];
+
+describe.each([
+  [":root", "dark (default)"],
+  [".light", "light (opt-out)"],
+] as const)("%s contrast: %s", (selector, _themeLabel) => {
+  const block = blocks[selector];
+  it.each(PAIRS.map((p) => [p.label, p] as const))(
+    "%s",
+    (_label, pair) => {
+      const fg = block[pair.fg];
+      const bg = block[pair.bg];
+      expect(fg, `${pair.fg} missing from ${selector}`).toBeDefined();
+      expect(bg, `${pair.bg} missing from ${selector}`).toBeDefined();
+      expect(contrastRatio(fg, bg)).toBeGreaterThanOrEqual(pair.min);
+    },
+  );
+});
+
+/* KNOWN GAPS, documented in the spec rather than fixed.
+
+   Three of these are pre-existing in the already-shipped light theme and are
+   NOT caused by the dark work; fixing them means changing shipped light values,
+   which is its own decision. The fourth is a dark token that no component uses.
+
+   These assert the ratio does not get WORSE, so the gaps stay documented and
+   cannot silently regress further. Raising any of them to its AA minimum and
+   moving the pair into PAIRS above is a welcome future change. */
+const KNOWN_GAPS = [
+  { selector: ".light", fg: "--ink-3",       bg: "--surface", floor: 4.15, note: "needs 4.5 as body text" },
+  { selector: ".light", fg: "--ink-4",       bg: "--surface", floor: 2.63, note: "needs 4.5; unused by any component" },
+  { selector: ".light", fg: "--line-strong", bg: "--surface", floor: 1.84, note: "needs 3 as a UI component boundary" },
+  { selector: ":root",  fg: "--ink-4",       bg: "--surface", floor: 3.11, note: "needs 4.5; unused by any component" },
+] as const;
+
+describe("known contrast gaps (documented, must not regress)", () => {
+  it.each(KNOWN_GAPS.map((g) => [`${g.selector} ${g.fg} on ${g.bg} (${g.note})`, g] as const))(
+    "%s",
+    (_label, gap) => {
+      const block = blocks[gap.selector];
+      expect(contrastRatio(block[gap.fg], block[gap.bg])).toBeGreaterThanOrEqual(gap.floor);
+    },
+  );
 });
