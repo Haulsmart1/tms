@@ -53,7 +53,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${plexSans.variable} ${plexMono.variable}`}>
+    /* suppressHydrationWarning is required, not cosmetic: the inline theme
+       script below mutates <html>'s className during parsing, before React
+       hydrates, so the server-rendered class list and the client's differ by
+       design. Without this, every load with a stored light preference logs a
+       hydration error. It suppresses the warning for THIS element's attributes
+       only, not for its subtree, so a genuine mismatch further down still
+       surfaces. */
+    <html lang="en" className={`${plexSans.variable} ${plexMono.variable}`} suppressHydrationWarning>
       <body
         style={{
           margin: 0,
