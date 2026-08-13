@@ -6,293 +6,576 @@ import { cookies } from "next/headers";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ALLOWED_INVITE_ROLES = new Set(["admin", "staff", "driver"]);
+const ALLOWED_INVITE_ROLES = new Set([
+  "admin",
+  "staff",
+  "driver",
+]);
 
-function getSiteUrl() {
+function getSiteUrl(): string {
   return (
     process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/, "") ||
     "https://tmswizard.cloud"
   );
 }
 
-async function createUserClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+async function createAuthenticatedClient() {
+  const supabaseUrl =
+    process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+  const anonKey =
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !anonKey) {
-    throw new Error("Supabase public environment variables are missing.");
+    throw new Error(
+      "Supabase public environment variables are missing."
+    );
   }
 
   const cookieStore = await cookies();
 
-  return createServerClient(supabaseUrl, anonKey, {
-    cookies: {
-      getAll() {
-        return cookieStore.getAll();
+  return createServerClient(
+    supabaseUrl,
+    anonKey,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(
+              ({
+                name,
+                value,
+                options,
+              }) => {
+                cookieStore.set(
+                  name,
+                  value,
+                  options
+                );
+              }
+            );
+          } catch {
+            // Existing session cookies are enough
+            // for this API route.
+          }
+        },
       },
-      setAll(cookiesToSet) {
-        try {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            cookieStore.set(name, value, options);
-          });
-        } catch {
-          // Route can still authenticate from existing cookies.
-        }
-      },
-    },
-  });
+    }
+  );
 }
 
 function createAdminClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseUrl =
+    process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+  const serviceRoleKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error("Supabase server environment variables are missing.");
+    throw new Error(
+      "Supabase server environment variables are missing."
+    );
   }
 
-  return createClient(supabaseUrl, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
+  return createClient(
+    supabaseUrl,
+    serviceRoleKey,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    }
+  );
 }
 
-export async function POST(request: NextRequest) {
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+    email
+  );
+}
+
+export async function POST(
+  request: NextRequest
+) {
   try {
-    const userClient = await createUserClient();
+    // --------------------------------------------------------
+    // 1. Authenticate the caller using their normal session.
+    // --------------------------------------------------------
+
+    const authenticatedClient =
+      await createAuthenticatedClient();
 
     const {
       data: { user },
       error: authError,
-    } = await userClient.auth.getUser();
+    } =
+      await authenticatedClient.auth.getUser();
 
     if (authError || !user) {
       return NextResponse.json(
-        { error: "You must be signed in to invite users." },
-        { status: 401 }
+        {
+          error:
+            "You must be signed in to invite users.",
+        },
+        {
+          status: 401,
+        }
       );
     }
 
-    const body = (await request.json()) as {
-      email?: string;
-      role?: string;
-      tenantId?: string;
-    };
+    // --------------------------------------------------------
+    // 2. Validate request body.
+    // --------------------------------------------------------
 
-    const email = body.email?.trim().toLowerCase();
-    const tenantId = body.tenantId?.trim();
-    const role = body.role?.trim().toLowerCase() || "staff";
+    const body =
+      (await request.json()) as {
+        email?: string;
+        role?: string;
+        tenantId?: string;
+      };
 
-    if (!email || !email.includes("@")) {
+    const email =
+      body.email
+        ?.trim()
+        .toLowerCase() ?? "";
+
+    const tenantId =
+      body.tenantId?.trim() ?? "";
+
+    const role =
+      body.role
+        ?.trim()
+        .toLowerCase() || "staff";
+
+    if (!email || !isValidEmail(email)) {
       return NextResponse.json(
-        { error: "Enter a valid email address." },
-        { status: 400 }
+        {
+          error:
+            "Enter a valid email address.",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
     if (!tenantId) {
       return NextResponse.json(
-        { error: "A tenant must be selected." },
-        { status: 400 }
-      );
-    }
-
-    if (!ALLOWED_INVITE_ROLES.has(role)) {
-      return NextResponse.json(
-        { error: "Invalid role." },
-        { status: 400 }
-      );
-    }
-
-    // The inviter must already be an admin/super_admin in this exact tenant.
-    const { data: inviterMembership, error: membershipError } =
-      await userClient
-        .from("memberships")
-        .select("id, role")
-        .eq("tenant_id", tenantId)
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-    if (membershipError) {
-      return NextResponse.json(
-        { error: membershipError.message },
-        { status: 500 }
+        {
+          error:
+            "A tenant must be selected.",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
     if (
-      !inviterMembership ||
-      !["admin", "super_admin"].includes(inviterMembership.role)
+      !ALLOWED_INVITE_ROLES.has(role)
     ) {
       return NextResponse.json(
-        { error: "Only a tenant admin can invite users." },
-        { status: 403 }
-      );
-    }
-
-    const admin = createAdminClient();
-    const redirectTo =
-      `${getSiteUrl()}/api/auth/callback?next=/dashboard`;
-
-    const { data: inviteData, error: inviteError } =
-      await admin.auth.admin.inviteUserByEmail(email, {
-        redirectTo,
-        data: {
-          tenant_id: tenantId,
-          role,
-          invited_by: user.id,
+        {
+          error: "Invalid role.",
         },
-      });
-
-    if (inviteError) {
-      const lowerMessage = inviteError.message.toLowerCase();
-
-      if (
-        lowerMessage.includes("already") &&
-        (lowerMessage.includes("registered") ||
-          lowerMessage.includes("exists"))
-      ) {
-        return NextResponse.json(
-          {
-            error:
-              "That email already has a TMS account. Add the existing user to this tenant instead of sending a new-user invite.",
-          },
-          { status: 409 }
-        );
-      }
-
-      return NextResponse.json(
-        { error: inviteError.message },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
-    const invitedUser = inviteData.user;
+    // --------------------------------------------------------
+    // 3. Create service-role client.
+    //
+    // memberships is deliberately not readable directly by
+    // authenticated users, so the server performs the check.
+    // --------------------------------------------------------
 
-    if (!invitedUser?.id) {
-      return NextResponse.json(
-        { error: "Supabase sent the invite but did not return a user ID." },
-        { status: 500 }
+    const admin =
+      createAdminClient();
+
+    // --------------------------------------------------------
+    // 4. Verify caller belongs to this tenant and is admin.
+    // --------------------------------------------------------
+
+    const {
+      data: inviterMembership,
+      error: inviterMembershipError,
+    } = await admin
+      .from("memberships")
+      .select(
+        "id, tenant_id, user_id, role"
+      )
+      .eq("tenant_id", tenantId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (inviterMembershipError) {
+      console.error(
+        "Invite membership lookup failed:",
+        inviterMembershipError
       );
-    }
 
-    // Avoid duplicate membership rows if this endpoint is retried.
-    const { data: existingMembership, error: existingMembershipError } =
-      await admin
-        .from("memberships")
-        .select("id")
-        .eq("tenant_id", tenantId)
-        .eq("user_id", invitedUser.id)
-        .maybeSingle();
-
-    if (existingMembershipError) {
       return NextResponse.json(
         {
           error:
-            `Invite was sent, but membership lookup failed: ${existingMembershipError.message}`,
+            "Unable to verify your tenant permissions.",
         },
-        { status: 500 }
+        {
+          status: 500,
+        }
       );
     }
 
-    if (!existingMembership) {
-      const { error: insertMembershipError } = await admin
-        .from("memberships")
-        .insert({
-          tenant_id: tenantId,
-          user_id: invitedUser.id,
-          role,
+    if (!inviterMembership) {
+      return NextResponse.json(
+        {
+          error:
+            "You do not belong to the selected tenant.",
+        },
+        {
+          status: 403,
+        }
+      );
+    }
+
+    if (
+      ![
+        "admin",
+        "super_admin",
+      ].includes(
+        inviterMembership.role
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Only a tenant admin can invite users.",
+        },
+        {
+          status: 403,
+        }
+      );
+    }
+
+    // --------------------------------------------------------
+    // 5. Check whether the email already belongs to an Auth
+    // user.
+    //
+    // Supabase's admin list endpoint is paginated, so search
+    // through the returned users.
+    // --------------------------------------------------------
+
+    let existingAuthUserId:
+      | string
+      | null = null;
+
+    let page = 1;
+    const perPage = 1000;
+
+    while (
+      existingAuthUserId === null
+    ) {
+      const {
+        data: userPage,
+        error: listUsersError,
+      } =
+        await admin.auth.admin.listUsers({
+          page,
+          perPage,
         });
 
-      if (insertMembershipError) {
+      if (listUsersError) {
+        throw new Error(
+          `Unable to check existing users: ${listUsersError.message}`
+        );
+      }
+
+      const matchingUser =
+        userPage.users.find(
+          (candidate) =>
+            candidate.email
+              ?.trim()
+              .toLowerCase() === email
+        );
+
+      if (matchingUser) {
+        existingAuthUserId =
+          matchingUser.id;
+        break;
+      }
+
+      if (
+        userPage.users.length <
+        perPage
+      ) {
+        break;
+      }
+
+      page += 1;
+    }
+
+    let invitedUserId: string;
+    let inviteWasSent = false;
+
+    // --------------------------------------------------------
+    // 6A. Existing Auth account:
+    // do not send another new-user invitation.
+    // --------------------------------------------------------
+
+    if (existingAuthUserId) {
+      invitedUserId =
+        existingAuthUserId;
+    } else {
+      // ------------------------------------------------------
+      // 6B. New Auth account:
+      // send a real Supabase invitation.
+      // ------------------------------------------------------
+
+      const redirectTo =
+        `${getSiteUrl()}` +
+        "/api/auth/callback" +
+        "?next=/dashboard";
+
+      const {
+        data: inviteData,
+        error: inviteError,
+      } =
+        await admin.auth.admin
+          .inviteUserByEmail(
+            email,
+            {
+              redirectTo,
+
+              data: {
+                tenant_id:
+                  tenantId,
+
+                role,
+
+                invited_by:
+                  user.id,
+              },
+            }
+          );
+
+      if (inviteError) {
+        console.error(
+          "Supabase invite failed:",
+          inviteError
+        );
+
         return NextResponse.json(
           {
             error:
-              `Invite was sent, but tenant membership could not be created: ${insertMembershipError.message}`,
+              inviteError.message,
           },
-          { status: 500 }
+          {
+            status: 400,
+          }
+        );
+      }
+
+      if (!inviteData.user?.id) {
+        return NextResponse.json(
+          {
+            error:
+              "Supabase sent the invitation but did not return a user ID.",
+          },
+          {
+            status: 500,
+          }
+        );
+      }
+
+      invitedUserId =
+        inviteData.user.id;
+
+      inviteWasSent = true;
+    }
+
+    // --------------------------------------------------------
+    // 7. Check existing tenant membership.
+    // --------------------------------------------------------
+
+    const {
+      data: existingMembership,
+      error:
+        existingMembershipError,
+    } = await admin
+      .from("memberships")
+      .select("id, role")
+      .eq(
+        "tenant_id",
+        tenantId
+      )
+      .eq(
+        "user_id",
+        invitedUserId
+      )
+      .maybeSingle();
+
+    if (
+      existingMembershipError
+    ) {
+      throw new Error(
+        `Unable to check invited user's membership: ${existingMembershipError.message}`
+      );
+    }
+
+    // --------------------------------------------------------
+    // 8. Create or update membership.
+    // --------------------------------------------------------
+
+    if (existingMembership) {
+      const {
+        error:
+          updateMembershipError,
+      } = await admin
+        .from("memberships")
+        .update({
+          role,
+        })
+        .eq(
+          "id",
+          existingMembership.id
+        );
+
+      if (
+        updateMembershipError
+      ) {
+        throw new Error(
+          `Unable to update tenant membership: ${updateMembershipError.message}`
         );
       }
     } else {
-      const { error: updateMembershipError } = await admin
+      const {
+        error:
+          insertMembershipError,
+      } = await admin
         .from("memberships")
-        .update({ role })
-        .eq("id", existingMembership.id);
+        .insert({
+          tenant_id: tenantId,
+          user_id:
+            invitedUserId,
+          role,
+        });
 
-      if (updateMembershipError) {
-        return NextResponse.json(
-          {
-            error:
-              `Invite was sent, but membership role could not be updated: ${updateMembershipError.message}`,
-          },
-          { status: 500 }
+      if (
+        insertMembershipError
+      ) {
+        throw new Error(
+          `Unable to create tenant membership: ${insertMembershipError.message}`
         );
       }
     }
 
-    // Keep profiles compatible with the existing app without overriding
-    // an already-linked tenant for a user who may belong to multiple tenants.
-    const { data: profile, error: profileReadError } = await admin
+    // --------------------------------------------------------
+    // 9. Ensure profiles row exists / has a tenant.
+    //
+    // Do not overwrite an existing tenant_id because a user
+    // may eventually belong to more than one tenant.
+    // --------------------------------------------------------
+
+    const {
+      data: existingProfile,
+      error: profileReadError,
+    } = await admin
       .from("profiles")
-      .select("id, tenant_id")
-      .eq("id", invitedUser.id)
+      .select(
+        "id, tenant_id"
+      )
+      .eq(
+        "id",
+        invitedUserId
+      )
       .maybeSingle();
 
     if (profileReadError) {
-      return NextResponse.json(
-        {
-          error:
-            `Invite and membership succeeded, but profile lookup failed: ${profileReadError.message}`,
-        },
-        { status: 500 }
+      throw new Error(
+        `Unable to check invited user's profile: ${profileReadError.message}`
       );
     }
 
-    if (!profile) {
-      const { error: profileInsertError } = await admin
+    if (!existingProfile) {
+      const {
+        error:
+          profileInsertError,
+      } = await admin
         .from("profiles")
         .insert({
-          id: invitedUser.id,
+          id: invitedUserId,
           tenant_id: tenantId,
         });
 
-      if (profileInsertError) {
-        return NextResponse.json(
-          {
-            error:
-              `Invite and membership succeeded, but profile creation failed: ${profileInsertError.message}`,
-          },
-          { status: 500 }
+      if (
+        profileInsertError
+      ) {
+        throw new Error(
+          `Unable to create invited user's profile: ${profileInsertError.message}`
         );
       }
-    } else if (!profile.tenant_id) {
-      const { error: profileUpdateError } = await admin
+    } else if (
+      !existingProfile.tenant_id
+    ) {
+      const {
+        error:
+          profileUpdateError,
+      } = await admin
         .from("profiles")
-        .update({ tenant_id: tenantId })
-        .eq("id", invitedUser.id);
+        .update({
+          tenant_id: tenantId,
+        })
+        .eq(
+          "id",
+          invitedUserId
+        );
 
-      if (profileUpdateError) {
-        return NextResponse.json(
-          {
-            error:
-              `Invite and membership succeeded, but profile tenant linking failed: ${profileUpdateError.message}`,
-          },
-          { status: 500 }
+      if (
+        profileUpdateError
+      ) {
+        throw new Error(
+          `Unable to link invited user's profile to the tenant: ${profileUpdateError.message}`
         );
       }
     }
 
-    return NextResponse.json({
-      ok: true,
-      message: `Invite sent to ${email}.`,
-      userId: invitedUser.id,
-      tenantId,
-      role,
-    });
+    // --------------------------------------------------------
+    // 10. Return success.
+    // --------------------------------------------------------
+
+    return NextResponse.json(
+      {
+        ok: true,
+
+        message: inviteWasSent
+          ? `Invite sent to ${email}.`
+          : `${email} already had a TMS account and has now been added to this tenant.`,
+
+        userId:
+          invitedUserId,
+
+        tenantId,
+
+        role,
+
+        inviteSent:
+          inviteWasSent,
+      },
+      {
+        status: 200,
+      }
+    );
   } catch (error) {
-    console.error("User invite API failed:", error);
+    console.error(
+      "User invite API failed:",
+      error
+    );
 
     return NextResponse.json(
       {
@@ -301,7 +584,9 @@ export async function POST(request: NextRequest) {
             ? error.message
             : "Unable to invite user.",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }
