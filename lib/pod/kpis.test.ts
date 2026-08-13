@@ -53,6 +53,40 @@ describe("podKpis", () => {
     const k = podKpis([row()], [], new Map(), NOW);
     expect(k.valueAwaiting).toBe(0);
   });
+
+  it("counts a late-evening UTC delivery as the operator's today, whatever the server timezone", () => {
+    // 23:30 UTC on the 12th is 00:30 on the 13th in UK summer time. Comparing
+    // raw local fields made this flip depending on the server's TZ, so the tile
+    // undercounted late drops on a UTC host while passing on a UK laptop.
+    const completed = [row({ stopId: "c1", deliveredAt: "2026-08-12T23:30:00Z" })];
+    const k = podKpis([], completed, new Map(), new Date("2026-08-13T09:00:00Z"));
+    expect(k.deliveredToday).toBe(1);
+  });
+
+  it("does not count a delivery from the operator's previous day", () => {
+    const completed = [row({ stopId: "c1", deliveredAt: "2026-08-11T22:00:00Z" })];
+    const k = podKpis([], completed, new Map(), new Date("2026-08-13T09:00:00Z"));
+    expect(k.deliveredToday).toBe(0);
+  });
+
+  it("ignores an unparseable delivered_at rather than counting it", () => {
+    const completed = [row({ stopId: "c1", deliveredAt: "not-a-date" })];
+    expect(podKpis([], completed, new Map(), NOW).deliveredToday).toBe(0);
+  });
+
+  it("puts a job's whole value in overdue when any of its stops is overdue", () => {
+    // A two-drop job with one overdue stop and one not. The money is at risk
+    // once either drop is stuck, and must not be counted twice.
+    const prices = new Map([["j1", 500]]);
+    const rows = [
+      row({ stopId: "s1", jobId: "j1", isOverdue: true }),
+      row({ stopId: "s2", jobId: "j1", isOverdue: false }),
+    ];
+    const k = podKpis(rows, [], prices, NOW);
+    expect(k.valueOverdue).toBe(500);
+    expect(k.valueRecent).toBe(0);
+    expect(k.valueAwaiting).toBe(500);
+  });
 });
 
 describe("attentionItems", () => {

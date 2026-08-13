@@ -9,13 +9,33 @@ export type PodKpis = {
   valueRecent: number;
 };
 
-function isSameLocalDay(iso: string, now: Date): boolean {
+/* The operator's timezone, not the server's.
+
+   This used to compare getFullYear/getMonth/getDate, which resolve in whatever
+   timezone the runtime happens to be set to. Vercel and most containers run as
+   UTC, so a delivery at 23:30 UTC on the 12th counts as the 13th to a UK
+   dispatcher but as the 12th to the server, and "Delivered today" quietly
+   undercounts every late-evening drop. The bug is invisible on a developer
+   machine set to UK time, which is exactly why it needs pinning here.
+
+   Hardcoded rather than per-tenant because tenants have no timezone field
+   today. When one is added, this is the single place that has to change. */
+export const OPERATOR_TIME_ZONE = "Europe/London";
+
+/* en-CA formats as YYYY-MM-DD, which compares correctly as a plain string. */
+function operatorDateKey(d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: OPERATOR_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+function isSameOperatorDay(iso: string, now: Date): boolean {
   const d = new Date(iso);
-  return (
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
-  );
+  if (Number.isNaN(d.getTime())) return false;
+  return operatorDateKey(d) === operatorDateKey(now);
 }
 
 /* jobPrices maps jobId to customer_price. Value is summed per JOB, not per
@@ -43,7 +63,7 @@ export function podKpis(
 
   return {
     awaiting: awaiting.length,
-    deliveredToday: completed.filter((r) => r.deliveredAt && isSameLocalDay(r.deliveredAt, now)).length,
+    deliveredToday: completed.filter((r) => r.deliveredAt && isSameOperatorDay(r.deliveredAt, now)).length,
     overdue: awaiting.filter((r) => r.isOverdue).length,
     valueAwaiting: valueOverdue + valueRecent,
     valueOverdue,
