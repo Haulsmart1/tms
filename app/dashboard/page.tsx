@@ -176,92 +176,99 @@ export default function DashboardPage() {
 
   return (
     <TenantGate>
-      <main className="ds min-h-screen bg-canvas font-sans text-ink mx-auto max-w-6xl px-6 py-8">
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">Dashboard</h1>
+      {/* The full-bleed element carries `ds` and the background so the canvas
+          reaches the sidebar; the inner <main> carries only the width
+          constraint. Putting both on one element paints the canvas only inside
+          max-w-6xl and leaves the page background showing either side. Same
+          shape as app/jobs/page.tsx:249-250. */}
+      <div className="ds min-h-screen bg-canvas font-sans text-ink">
+        <main className="mx-auto max-w-6xl px-6 py-8">
+          <h1 className="text-2xl font-semibold tracking-tight text-ink">Dashboard</h1>
 
-        {state === "error" ? (
-          <div className="mt-6 rounded-lg border border-danger-border bg-danger-tint p-4 text-sm text-danger-strong">
-            Couldn't load the dashboard. Refresh to try again.
-          </div>
-        ) : null}
-
-        <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-5">
-          <Stat label="Jobs today" value={state === "loading" ? "—" : String(kpis.jobsToday)} />
-          <Stat
-            label="Unassigned"
-            value={state === "loading" ? "—" : String(kpis.unassigned)}
-            sub={kpis.unassigned > 0 ? "needs a vehicle/driver" : undefined}
-            subTone="warning"
-          />
-          <Stat label="On the road" value={state === "loading" ? "—" : String(kpis.onTheRoad)} sub="rostered today" />
-          <Stat
-            label="PODs awaiting"
-            value={state === "loading" ? "—" : String(kpis.podsAwaiting)}
-            sub={kpis.podsAwaiting > 0 ? "open delivery stops" : undefined}
-            subTone="warning"
-          />
-          <Stat
-            label="Overdue invoices"
-            value={state === "loading" ? "—" : money(kpis.overdueInvoicesTotal)}
-            sub={kpis.overdueInvoicesTotal > 0 ? "past due" : undefined}
-            subTone="danger"
-          />
-        </div>
-
-        <div className="mt-6 grid gap-4 lg:grid-cols-[1.6fr_1fr]">
-          <section>
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-ink">Today's jobs</h2>
-              <Link href="/jobs" className="text-sm font-semibold text-primary hover:underline">
-                View all
-              </Link>
+          {state === "error" ? (
+            <div className="mt-6 rounded-lg border border-danger-border bg-danger-tint p-4 text-sm text-danger-strong">
+              Couldn't load the dashboard. Refresh to try again.
             </div>
-            <DataTable
-              columns={jobColumns}
-              rows={todayJobs}
-              rowKey={(r) => r.id}
-              state={state === "loading" ? "loading" : state === "error" ? "error" : todayJobs.length ? "ready" : "empty"}
-              emptyTitle="No jobs scheduled today"
+          ) : null}
+
+          <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-5">
+            <Stat label="Jobs today" value={state === "loading" ? "—" : String(kpis.jobsToday)} />
+            <Stat
+              label="Unassigned"
+              value={state === "loading" ? "—" : String(kpis.unassigned)}
+              sub={kpis.unassigned > 0 ? "needs a vehicle/driver" : undefined}
+              subTone="warning"
             />
-          </section>
+            <Stat label="On the road" value={state === "loading" ? "—" : String(kpis.onTheRoad)} sub="rostered today" />
+            <Stat
+              label="PODs awaiting"
+              value={state === "loading" ? "—" : String(kpis.podsAwaiting)}
+              sub={kpis.podsAwaiting > 0 ? "open delivery stops" : undefined}
+              subTone="warning"
+            />
+            <Stat
+              label="Overdue invoices"
+              value={state === "loading" ? "—" : money(kpis.overdueInvoicesTotal)}
+              sub={kpis.overdueInvoicesTotal > 0 ? "past due" : undefined}
+              subTone="danger"
+            />
+          </div>
 
-          <section className="flex flex-col gap-4">
-            <div className="rounded-lg border border-line bg-surface p-4 shadow-sm">
-              <h2 className="mb-2 text-sm font-semibold text-ink">Needs attention</h2>
-              {attention.length === 0 ? (
-                <p className="text-sm text-ink-3">Nothing needs attention right now.</p>
-              ) : (
-                <ul className="flex flex-col gap-2">
-                  {attention.slice(0, 5).map((item) => (
-                    <li key={item.id}>
-                      <Link href={item.href} className="block rounded-md px-2 py-1.5 -mx-2 hover:bg-surface-2">
-                        <span className="block text-sm font-medium text-ink">{item.title}</span>
-                        <span className="block text-xs text-ink-3">{item.meta}</span>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            <div className="rounded-lg border border-line bg-surface p-4 shadow-sm">
-              <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-3">
-                Revenue · last 7 days
-              </h2>
-              <div className="flex h-16 items-end gap-1.5">
-                {revenue.map((d) => (
-                  <div key={d.date} className="flex-1" title={`${d.label}: ${money(d.total)}`}>
-                    <div
-                      className="w-full rounded-t bg-primary"
-                      style={{ height: `${Math.max(4, (d.total / maxRevenue) * 100)}%` }}
-                    />
-                  </div>
-                ))}
+          <div className="mt-6 grid gap-4 lg:grid-cols-[1.6fr_1fr]">
+            <section>
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-ink">Today's jobs</h2>
+                <Link href="/jobs" className="text-sm font-semibold text-primary hover:underline">
+                  View all
+                </Link>
               </div>
-            </div>
-          </section>
-        </div>
-      </main>
+              <DataTable
+                columns={jobColumns}
+                rows={todayJobs}
+                rowKey={(r) => r.id}
+                state={state === "loading" ? "loading" : state === "error" ? "error" : todayJobs.length ? "ready" : "empty"}
+                emptyTitle="No jobs scheduled today"
+              />
+            </section>
+
+            <section className="flex flex-col gap-4">
+              <div className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+                <h2 className="mb-2 text-sm font-semibold text-ink">Needs attention</h2>
+                {attention.length === 0 ? (
+                  <p className="text-sm text-ink-3">Nothing needs attention right now.</p>
+                ) : (
+                  <ul className="flex flex-col gap-2">
+                    {attention.slice(0, 5).map((item) => (
+                      <li key={item.id}>
+                        <Link href={item.href} className="block rounded-md px-2 py-1.5 -mx-2 hover:bg-surface-2">
+                          <span className="block text-sm font-medium text-ink">{item.title}</span>
+                          <span className="block text-xs text-ink-3">{item.meta}</span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+                <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-3">
+                  Revenue · last 7 days
+                </h2>
+                <div className="flex h-16 items-end gap-1.5">
+                  {revenue.map((d) => (
+                    <div key={d.date} className="flex-1" title={`${d.label}: ${money(d.total)}`}>
+                      <div
+                        className="w-full rounded-t bg-primary"
+                        style={{ height: `${Math.max(4, (d.total / maxRevenue) * 100)}%` }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+          </div>
+        </main>
+      </div>
     </TenantGate>
   );
 }
