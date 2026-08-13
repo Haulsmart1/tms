@@ -171,6 +171,15 @@ component is untestable by construction.
 
 `now` is injected rather than read inside, so the tests are not time-dependent.
 
+**The overdue rule must be shared with the dashboard, not reimplemented.**
+`lib/dashboard/aggregate.ts` already derives `ageHours` from `job_stops.planned_at` and feeds
+the dashboard's own "needs attention" list. If `/pod` invents a second rule, the two pages will
+disagree about the same stop, which is the kind of inconsistency nobody reports and everybody
+quietly stops trusting. Extract the age and overdue-threshold calculation into one shared
+function that both consume, and add a test asserting both pages classify the same stop
+identically. Keep the extraction minimal: move the rule, do not restructure the dashboard's
+aggregation while passing through.
+
 ### Data
 
 One query change, additive and read-only, through the same `filterByTenant`:
@@ -209,10 +218,17 @@ realistic worst-case data: a long customer name, a four-stop job, a long driver 
 
 ## Known risks
 
-- **`job_stops.planned_at` is unverified.** The August spec references it but the POD query does
-  not select it, and the "Overdue > 48h" tile and waiting times depend on it. Verify it exists
-  before relying on it. If it does not, stop and raise it rather than silently substituting
-  `jobs.scheduled_date`, which means something different.
+- **`job_stops.planned_at` is verified to exist** (checked 2026-08-13, after the rest of this
+  spec was written). `app/dashboard/page.tsx:67` already selects it in production. Two caveats
+  the check turned up, both of which the implementation must handle:
+  - It is **not a real planned time**. `app/jobs/page.tsx:193` writes it as
+    `` `${form.scheduled_date}T08:00:00` ``, a derived 8am stamp on the job's scheduled date.
+    Waiting times are therefore accurate to the day, not the hour, and should not be presented
+    as though they were more precise than that.
+  - It is **nullable**, whenever a job has no `scheduled_date`. Stops with a null `planned_at`
+    are excluded from the overdue count, the attention list and the revenue-overdue split, and
+    sort last in the queue with no waiting time shown. This matches the dashboard, which
+    already does `.filter((r) => r.planned_at)` at `app/dashboard/page.tsx:115`.
 - **Completed work leaves the default view.** This is the change dispatchers will notice. It is
   reachable via the Completed tab, but it is a workflow change and worth telling them rather
   than shipping silently.
