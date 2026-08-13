@@ -1,975 +1,1683 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { CSSProperties, FormEvent } from "react";
 import { createClient } from "../../lib/supabase/browser";
 
-const TENANT_ID = "2f7cc0dc-b7fd-4556-92be-445e4b42ddcd";
+type JobStatus =
+  | "draft"
+  | "booked"
+  | "planned"
+  | "allocated"
+  | "collecting"
+  | "collected"
+  | "in_transit"
+  | "delivered"
+  | "completed"
+  | "invoiced"
+  | "cancelled";
 
-const emptyStop = (type: any) => ({
-  type,
-  address_line: "",
+type Customer = {
+  id: string;
+  name: string;
+};
+
+type Vehicle = {
+  id: string;
+  registration?: string | null;
+  registration_number?: string | null;
+  reg?: string | null;
+};
+
+type Driver = {
+  id: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  name?: string | null;
+};
+
+type Subcontractor = {
+  id: string;
+  name: string;
+};
+
+type Job = {
+  id: string;
+  tenant_id: string;
+  reference: string;
+  customer_id: string | null;
+  vehicle_id: string | null;
+  driver_id: string | null;
+  subcontractor_id: string | null;
+  status: JobStatus;
+  job_date: string | null;
+  customer_reference?: string | null;
+  customer_price: number | null;
+  subcontractor_cost: number | null;
+  notes: string | null;
+  created_at?: string;
+};
+
+type Stop = {
+  id?: string;
+  job_id?: string;
+  stop_type: "collection" | "delivery";
+  sequence: number;
+  company_name: string;
+  address_line1: string;
+  address_line2: string;
+  city: string;
+  postcode: string;
+  contact_name: string;
+  phone: string;
+  planned_date: string;
+  planned_time: string;
+  instructions: string;
+};
+
+type JobForm = {
+  reference: string;
+  customer_reference: string;
+  customer_id: string;
+  vehicle_id: string;
+  driver_id: string;
+  subcontractor_id: string;
+  status: JobStatus;
+  job_date: string;
+  customer_price: string;
+  subcontractor_cost: string;
+  notes: string;
+};
+
+const EMPTY_STOP: Stop = {
+  stop_type: "collection",
+  sequence: 1,
+  company_name: "",
+  address_line1: "",
+  address_line2: "",
   city: "",
-  postcode: ""
-});
-
-function formatMoney(value: any) {
-  if (value === null || value === undefined || value === "") {
-    return "-";
-  }
-
-  return new Intl.NumberFormat("en-GB", {
-    style: "currency",
-    currency: "GBP"
-  }).format(Number(value));
-}
-
-const inputStyle: React.CSSProperties = {
-  padding: "12px 14px",
-  borderRadius: 10,
-  border: "1px solid #d1d5db",
-  fontSize: 14,
-  background: "white",
-  minWidth: 160,
-  boxSizing: "border-box"
+  postcode: "",
+  contact_name: "",
+  phone: "",
+  planned_date: "",
+  planned_time: "",
+  instructions: "",
 };
 
-const buttonStyle: React.CSSProperties = {
-  padding: "10px 14px",
-  borderRadius: 10,
-  border: "none",
-  background: "#111827",
-  color: "white",
-  fontWeight: 600,
-  cursor: "pointer"
+const EMPTY_FORM: JobForm = {
+  reference: "",
+  customer_reference: "",
+  customer_id: "",
+  vehicle_id: "",
+  driver_id: "",
+  subcontractor_id: "",
+  status: "booked",
+  job_date: new Date().toISOString().slice(0, 10),
+  customer_price: "",
+  subcontractor_cost: "",
+  notes: "",
 };
 
-const secondaryButtonStyle = {
-  padding: "10px 14px",
-  borderRadius: 10,
-  border: "1px solid #d1d5db",
-  background: "white",
-  color: "#111827",
-  fontWeight: 600,
-  cursor: "pointer"
-};
-
-const deleteButtonStyle = {
-  padding: "10px 14px",
-  borderRadius: 10,
-  border: "none",
-  background: "#dc2626",
-  color: "white",
-  fontWeight: 600,
-  cursor: "pointer"
-};
+const STATUS_OPTIONS: JobStatus[] = [
+  "draft",
+  "booked",
+  "planned",
+  "allocated",
+  "collecting",
+  "collected",
+  "in_transit",
+  "delivered",
+  "completed",
+  "invoiced",
+  "cancelled",
+];
 
 export default function JobsPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
-  const [jobs, setJobs] = useState<any[]>([]);
-  const [vehicles, setVehicles] = useState<any[]>([]);
-  const [drivers, setDrivers] = useState<any[]>([]);
-  const [customers, setCustomers] = useState<any[]>([]);
-  const [subcontractors, setSubcontractors] = useState<any[]>([]);
+  const [tenantId, setTenantId] = useState<string | null>(null);
+
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [subcontractors, setSubcontractors] = useState<Subcontractor[]>([]);
+
+  const [form, setForm] = useState<JobForm>(EMPTY_FORM);
+
+  const [collectionStops, setCollectionStops] = useState<Stop[]>([
+    { ...EMPTY_STOP, stop_type: "collection", sequence: 1 },
+  ]);
+
+  const [deliveryStops, setDeliveryStops] = useState<Stop[]>([
+    { ...EMPTY_STOP, stop_type: "delivery", sequence: 1 },
+  ]);
+
+  const [editingJobId, setEditingJobId] = useState<string | null>(null);
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [editingJobId, setEditingJobId] = useState(null);
-  const [podForms, setPodForms] = useState<Record<string, any>>({});
+  const [search, setSearch] = useState("");
 
-  const [form, setForm] = useState({
-    reference: "",
-    scheduled_date: "",
-    customer_id: "",
-    vehicle_id: "",
-    driver_id: "",
-    customer_price: "",
-    subcontractor_id: "",
-    subcontractor_cost: "",
-    stops: [emptyStop("collection"), emptyStop("delivery")]
-  });
+  const getAuthenticatedTenant = useCallback(async () => {
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
 
-  async function loadData() {
-    setMessage("");
-
-    const { data: jobsData, error: jobsError } = await supabase
-      .from("jobs")
-      .select(`
-        id,
-        reference,
-        status,
-        scheduled_date,
-        customer_id,
-        vehicle_id,
-        driver_id,
-        customer_price,
-        subcontractor_id,
-        subcontractor_cost,
-        customers (
-          name
-        ),
-        vehicles (
-          registration
-        ),
-        drivers (
-          name
-        ),
-        subcontractors (
-          name,
-          vehicle_reg,
-          driver_name
-        ),
-        job_stops (
-          id,
-          stop_order,
-          type,
-          address_line,
-          city,
-          postcode,
-          status,
-          pod_status,
-          recipient_name,
-          delivered_at,
-          pod_notes,
-          pod_photo_url
-        )
-      `)
-      .eq("tenant_id", TENANT_ID)
-      .order("created_at", { ascending: false });
-
-    const { data: vehicleData, error: vehicleError } = await supabase
-      .from("vehicles")
-      .select("id, registration")
-      .eq("tenant_id", TENANT_ID)
-      .eq("active", true)
-      .order("registration", { ascending: true });
-
-    const { data: driverData, error: driverError } = await supabase
-      .from("drivers")
-      .select("id, name")
-      .eq("tenant_id", TENANT_ID)
-      .eq("active", true)
-      .order("name", { ascending: true });
-
-    const { data: customerData, error: customerError } = await supabase
-      .from("customers")
-      .select("id, name")
-      .eq("tenant_id", TENANT_ID)
-      .eq("active", true)
-      .order("name", { ascending: true });
-
-    const { data: subcontractorData, error: subcontractorError } = await supabase
-      .from("subcontractors")
-      .select("id, name, vehicle_reg, driver_name")
-      .eq("tenant_id", TENANT_ID)
-      .eq("active", true)
-      .order("name", { ascending: true });
-
-    if (jobsError) {
-      setMessage(`Jobs load error: ${jobsError.message}`);
-      return;
+    if (userError) {
+      throw userError;
     }
 
-    if (vehicleError) {
-      setMessage(`Vehicles load error: ${vehicleError.message}`);
-      return;
+    if (!user) {
+      window.location.href = "/";
+      return null;
     }
 
-    if (driverError) {
-      setMessage(`Drivers load error: ${driverError.message}`);
-      return;
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("tenant_id")
+      .eq("id", user.id)
+      .single();
+
+    if (profileError) {
+      throw profileError;
     }
 
-    if (customerError) {
-      setMessage(`Customers load error: ${customerError.message}`);
-      return;
+    if (!profile?.tenant_id) {
+      throw new Error(
+        "Your user account is not linked to a TMS Wizzard tenant."
+      );
     }
 
-    if (subcontractorError) {
-      setMessage(`Subcontractors load error: ${subcontractorError.message}`);
-      return;
-    }
+    return profile.tenant_id as string;
+  }, [supabase]);
 
-    const normalizedJobs = (jobsData || []).map((job: any) => ({
-      ...job,
-      job_stops: [...(job.job_stops || [])].sort(
-        (a, b) => a.stop_order - b.stop_order
-      )
-    }));
+  const loadData = useCallback(
+    async (resolvedTenantId: string) => {
+      setLoading(true);
+      setMessage("");
 
-    setJobs(normalizedJobs);
-    setVehicles(vehicleData || []);
-    setDrivers(driverData || []);
-    setCustomers(customerData || []);
-    setSubcontractors(subcontractorData || []);
-  }
+      try {
+        const [
+          jobsResult,
+          customersResult,
+          vehiclesResult,
+          driversResult,
+          subcontractorsResult,
+        ] = await Promise.all([
+          supabase
+            .from("jobs")
+            .select("*")
+            .eq("tenant_id", resolvedTenantId)
+            .order("created_at", { ascending: false }),
+
+          supabase
+            .from("customers")
+            .select("*")
+            .eq("tenant_id", resolvedTenantId)
+            .order("name"),
+
+          supabase
+            .from("vehicles")
+            .select("*")
+            .eq("tenant_id", resolvedTenantId),
+
+          supabase
+            .from("drivers")
+            .select("*")
+            .eq("tenant_id", resolvedTenantId),
+
+          supabase
+            .from("subcontractors")
+            .select("*")
+            .eq("tenant_id", resolvedTenantId)
+            .order("name"),
+        ]);
+
+        const firstError =
+          jobsResult.error ||
+          customersResult.error ||
+          vehiclesResult.error ||
+          driversResult.error ||
+          subcontractorsResult.error;
+
+        if (firstError) {
+          throw firstError;
+        }
+
+        setJobs((jobsResult.data ?? []) as Job[]);
+        setCustomers((customersResult.data ?? []) as Customer[]);
+        setVehicles((vehiclesResult.data ?? []) as Vehicle[]);
+        setDrivers((driversResult.data ?? []) as Driver[]);
+        setSubcontractors(
+          (subcontractorsResult.data ?? []) as Subcontractor[]
+        );
+      } catch (error) {
+        setMessage(
+          error instanceof Error ? error.message : "Unable to load jobs."
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [supabase]
+  );
 
   useEffect(() => {
-    loadData();
-  }, []);
+    async function initialise() {
+      try {
+        const resolvedTenantId = await getAuthenticatedTenant();
+
+        if (!resolvedTenantId) {
+          return;
+        }
+
+        setTenantId(resolvedTenantId);
+        await loadData(resolvedTenantId);
+      } catch (error) {
+        setLoading(false);
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "Unable to initialise the jobs page."
+        );
+      }
+    }
+
+    void initialise();
+  }, [getAuthenticatedTenant, loadData]);
+
+  function updateForm<K extends keyof JobForm>(
+    field: K,
+    value: JobForm[K]
+  ) {
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
+  function updateStop(
+    type: "collection" | "delivery",
+    index: number,
+    field: keyof Stop,
+    value: string | number
+  ) {
+    const setter =
+      type === "collection" ? setCollectionStops : setDeliveryStops;
+
+    setter((current) =>
+      current.map((stop, stopIndex) =>
+        stopIndex === index
+          ? {
+              ...stop,
+              [field]: value,
+            }
+          : stop
+      )
+    );
+  }
+
+  function addStop(type: "collection" | "delivery") {
+    const setter =
+      type === "collection" ? setCollectionStops : setDeliveryStops;
+
+    setter((current) => [
+      ...current,
+      {
+        ...EMPTY_STOP,
+        stop_type: type,
+        sequence: current.length + 1,
+      },
+    ]);
+  }
+
+  function removeStop(type: "collection" | "delivery", index: number) {
+    const setter =
+      type === "collection" ? setCollectionStops : setDeliveryStops;
+
+    setter((current) => {
+      if (current.length === 1) {
+        return current;
+      }
+
+      return current
+        .filter((_, stopIndex) => stopIndex !== index)
+        .map((stop, stopIndex) => ({
+          ...stop,
+          sequence: stopIndex + 1,
+        }));
+    });
+  }
 
   function resetForm() {
     setEditingJobId(null);
     setForm({
-      reference: "",
-      scheduled_date: "",
-      customer_id: "",
-      vehicle_id: "",
-      driver_id: "",
-      customer_price: "",
-      subcontractor_id: "",
-      subcontractor_cost: "",
-      stops: [emptyStop("collection"), emptyStop("delivery")]
-    });
-  }
-
-  function addStop(type: any) {
-    setForm((current: any) => ({
-      ...current,
-      stops: [...current.stops, emptyStop(type)]
-    }));
-  }
-
-  function updateStop(index: any, field: any, value: any) {
-    setForm((current: any) => ({
-      ...current,
-      stops: current.stops.map((stop: any, stopIndex: any) =>
-        stopIndex === index ? { ...stop, [field]: value } : stop
-      )
-    }));
-  }
-
-  function removeStop(index: any) {
-    setForm((current: any) => {
-      const nextStops = current.stops.filter((_: any, stopIndex: any) => stopIndex !== index);
-
-      return {
-        ...current,
-        stops: nextStops.length > 0 ? nextStops : [emptyStop("collection"), emptyStop("delivery")]
-      };
-    });
-  }
-
-  function startEdit(job: any) {
-    setEditingJobId(job.id);
-    setForm({
-      reference: job.reference || "",
-      scheduled_date: job.scheduled_date || "",
-      customer_id: job.customer_id || "",
-      vehicle_id: job.vehicle_id || "",
-      driver_id: job.driver_id || "",
-      customer_price:
-        job.customer_price === null || job.customer_price === undefined
-          ? ""
-          : String(job.customer_price),
-      subcontractor_id: job.subcontractor_id || "",
-      subcontractor_cost:
-        job.subcontractor_cost === null || job.subcontractor_cost === undefined
-          ? ""
-          : String(job.subcontractor_cost),
-      stops:
-        job.job_stops && job.job_stops.length > 0
-          ? job.job_stops.map((stop: any) => ({
-            type: stop.type,
-            address_line: stop.address_line || "",
-            city: stop.city || "",
-            postcode: stop.postcode || ""
-          }))
-          : [emptyStop("collection"), emptyStop("delivery")]
+      ...EMPTY_FORM,
+      job_date: new Date().toISOString().slice(0, 10),
     });
 
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    setCollectionStops([
+      {
+        ...EMPTY_STOP,
+        stop_type: "collection",
+        sequence: 1,
+      },
+    ]);
+
+    setDeliveryStops([
+      {
+        ...EMPTY_STOP,
+        stop_type: "delivery",
+        sequence: 1,
+      },
+    ]);
   }
 
-  function updatePodForm(stopId: any, field: any, value: any) {
-    setPodForms((current: any) => ({
-      ...current,
-      [stopId]: {
-        recipient_name: current[stopId]?.recipient_name || "",
-        pod_notes: current[stopId]?.pod_notes || "",
-        pod_photo_url: current[stopId]?.pod_photo_url || "",
-        [field]: value
-      }
+  async function saveStops(jobId: string) {
+    const stops = [...collectionStops, ...deliveryStops].map((stop) => ({
+      tenant_id: tenantId,
+      job_id: jobId,
+      stop_type: stop.stop_type,
+      sequence: stop.sequence,
+      company_name: stop.company_name || null,
+      address_line1: stop.address_line1 || null,
+      address_line2: stop.address_line2 || null,
+      city: stop.city || null,
+      postcode: stop.postcode || null,
+      contact_name: stop.contact_name || null,
+      phone: stop.phone || null,
+      planned_date: stop.planned_date || null,
+      planned_time: stop.planned_time || null,
+      instructions: stop.instructions || null,
     }));
-  }
-
-  async function saveJob(event: any) {
-    event.preventDefault();
-    setLoading(true);
-    setMessage("");
-
-    const reference = form.reference.trim();
-
-    if (!reference) {
-      setLoading(false);
-      setMessage("Reference is required.");
-      return;
-    }
-
-    const validStops = form.stops
-      .map((stop: any) => ({
-        ...stop,
-        address_line: stop.address_line.trim(),
-        city: stop.city.trim(),
-        postcode: stop.postcode.trim()
-      }))
-      .filter((stop: any) => stop.address_line);
-
-    if (validStops.length === 0) {
-      setLoading(false);
-      setMessage("Add at least one stop.");
-      return;
-    }
-
-    const customerPrice =
-      form.customer_price === "" ? null : Number(form.customer_price);
-
-    const subcontractorCost =
-      form.subcontractor_cost === "" ? null : Number(form.subcontractor_cost);
-
-    const payload = {
-      tenant_id: TENANT_ID,
-      reference,
-      scheduled_date: form.scheduled_date || null,
-      customer_id: form.customer_id || null,
-      vehicle_id: form.vehicle_id || null,
-      driver_id: form.driver_id || null,
-      customer_price: customerPrice,
-      subcontractor_id: form.subcontractor_id || null,
-      subcontractor_cost: subcontractorCost
-    };
-
-    let jobId = editingJobId;
 
     if (editingJobId) {
-      const { error: updateError } = await supabase
-        .from("jobs")
-        .update(payload)
-        .eq("id", editingJobId)
-        .eq("tenant_id", TENANT_ID);
-
-      if (updateError) {
-        setLoading(false);
-        setMessage(`Update job error: ${updateError.message}`);
-        return;
-      }
-
       const { error: deleteStopsError } = await supabase
         .from("job_stops")
         .delete()
-        .eq("job_id", editingJobId)
-        .eq("tenant_id", TENANT_ID);
+        .eq("job_id", jobId)
+        .eq("tenant_id", tenantId);
 
       if (deleteStopsError) {
-        setLoading(false);
-        setMessage(`Delete old stops error: ${deleteStopsError.message}`);
-        return;
+        throw deleteStopsError;
       }
-    } else {
-      const { data: insertedJob, error: jobError } = await supabase
-        .from("jobs")
-        .insert([
-          {
-            ...payload,
-            status: "planned"
-          }
-        ])
-        .select("id")
-        .single();
-
-      if (jobError) {
-        setLoading(false);
-        setMessage(`Create job error: ${jobError.message}`);
-        return;
-      }
-
-      jobId = insertedJob.id;
     }
 
-    const stopsToInsert = validStops.map((stop, index) => ({
-      tenant_id: TENANT_ID,
-      job_id: jobId,
-      stop_order: index + 1,
-      type: stop.type,
-      address_line: stop.address_line,
-      city: stop.city || null,
-      postcode: stop.postcode || null,
-      planned_at: form.scheduled_date ? `${form.scheduled_date}T08:00:00` : null,
-      status: "planned",
-      pod_status: "pending"
-    }));
+    const { error } = await supabase.from("job_stops").insert(stops);
 
-    const { error: stopsError } = await supabase
-      .from("job_stops")
-      .insert(stopsToInsert);
+    if (error) {
+      throw error;
+    }
+  }
 
-    setLoading(false);
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
 
-    if (stopsError) {
-      setMessage(`Stops error: ${stopsError.message}`);
+    if (!tenantId) {
+      setMessage("No tenant is available for this user.");
       return;
     }
 
-    setMessage(editingJobId ? "Job updated." : "Job created.");
-    resetForm();
-    await loadData();
+    if (!form.reference.trim()) {
+      setMessage("Please enter a job reference.");
+      return;
+    }
+
+    if (!form.customer_id) {
+      setMessage("Please select a customer.");
+      return;
+    }
+
+    setSaving(true);
+    setMessage("");
+
+    try {
+      const payload = {
+        tenant_id: tenantId,
+        reference: form.reference.trim(),
+        customer_reference: form.customer_reference.trim() || null,
+        customer_id: form.customer_id || null,
+        vehicle_id: form.vehicle_id || null,
+        driver_id: form.driver_id || null,
+        subcontractor_id: form.subcontractor_id || null,
+        status: form.status,
+        job_date: form.job_date || null,
+        customer_price: form.customer_price
+          ? Number(form.customer_price)
+          : null,
+        subcontractor_cost: form.subcontractor_cost
+          ? Number(form.subcontractor_cost)
+          : null,
+        notes: form.notes.trim() || null,
+      };
+
+      let jobId = editingJobId;
+
+      if (editingJobId) {
+        const { error } = await supabase
+          .from("jobs")
+          .update(payload)
+          .eq("id", editingJobId)
+          .eq("tenant_id", tenantId);
+
+        if (error) {
+          throw error;
+        }
+      } else {
+        const { data, error } = await supabase
+          .from("jobs")
+          .insert(payload)
+          .select("id")
+          .single();
+
+        if (error) {
+          throw error;
+        }
+
+        jobId = data.id;
+      }
+
+      if (!jobId) {
+        throw new Error("Unable to determine the saved job ID.");
+      }
+
+      await saveStops(jobId);
+
+      setMessage(editingJobId ? "Job updated." : "Job created.");
+      resetForm();
+      await loadData(tenantId);
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Unable to save job."
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
-  async function deleteJob(jobId: any, jobStatus: any) {
-    if (jobStatus !== "planned") {
-      setMessage("Only planned jobs can be deleted right now.");
+  async function editJob(job: Job) {
+    if (!tenantId) {
+      return;
+    }
+
+    setMessage("");
+    setEditingJobId(job.id);
+
+    setForm({
+      reference: job.reference ?? "",
+      customer_reference: job.customer_reference ?? "",
+      customer_id: job.customer_id ?? "",
+      vehicle_id: job.vehicle_id ?? "",
+      driver_id: job.driver_id ?? "",
+      subcontractor_id: job.subcontractor_id ?? "",
+      status: job.status ?? "booked",
+      job_date: job.job_date ?? "",
+      customer_price:
+        job.customer_price === null ? "" : String(job.customer_price),
+      subcontractor_cost:
+        job.subcontractor_cost === null
+          ? ""
+          : String(job.subcontractor_cost),
+      notes: job.notes ?? "",
+    });
+
+    const { data, error } = await supabase
+      .from("job_stops")
+      .select("*")
+      .eq("job_id", job.id)
+      .eq("tenant_id", tenantId)
+      .order("sequence");
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+
+    const stops = (data ?? []) as Stop[];
+
+    const collections = stops.filter(
+      (stop) => stop.stop_type === "collection"
+    );
+
+    const deliveries = stops.filter(
+      (stop) => stop.stop_type === "delivery"
+    );
+
+    setCollectionStops(
+      collections.length
+        ? collections
+        : [{ ...EMPTY_STOP, stop_type: "collection", sequence: 1 }]
+    );
+
+    setDeliveryStops(
+      deliveries.length
+        ? deliveries
+        : [{ ...EMPTY_STOP, stop_type: "delivery", sequence: 1 }]
+    );
+
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  }
+
+  async function deleteJob(job: Job) {
+    if (!tenantId) {
       return;
     }
 
     const confirmed = window.confirm(
-      "Delete this job and all linked stops?"
+      `Delete job ${job.reference}? This cannot be undone.`
     );
 
     if (!confirmed) {
       return;
     }
 
-    const { error } = await supabase
-      .from("jobs")
-      .delete()
-      .eq("id", jobId)
-      .eq("tenant_id", TENANT_ID);
+    setMessage("");
 
-    if (error) {
-      setMessage(`Delete job error: ${error.message}`);
-      return;
-    }
+    try {
+      const { error: stopError } = await supabase
+        .from("job_stops")
+        .delete()
+        .eq("job_id", job.id)
+        .eq("tenant_id", tenantId);
 
-    if (editingJobId === jobId) {
-      resetForm();
-    }
-
-    setMessage("Job deleted.");
-    await loadData();
-  }
-
-  async function savePod(jobId: any, stopId: any) {
-    const podForm = podForms[stopId] || {
-      recipient_name: "",
-      pod_notes: "",
-      pod_photo_url: ""
-    };
-
-    const { error: stopError } = await supabase
-      .from("job_stops")
-      .update({
-        recipient_name: podForm.recipient_name.trim() || null,
-        pod_notes: podForm.pod_notes.trim() || null,
-        pod_photo_url: podForm.pod_photo_url.trim() || null,
-        delivered_at: new Date().toISOString(),
-        pod_status: "delivered",
-        status: "completed"
-      })
-      .eq("id", stopId)
-      .eq("tenant_id", TENANT_ID);
-
-    if (stopError) {
-      setMessage(`POD save error: ${stopError.message}`);
-      return;
-    }
-
-    const { data: deliveryStops, error: deliveryStopsError } = await supabase
-      .from("job_stops")
-      .select("id, pod_status, type")
-      .eq("tenant_id", TENANT_ID)
-      .eq("job_id", jobId)
-      .eq("type", "delivery");
-
-    if (deliveryStopsError) {
-      setMessage(`Delivery stop check error: ${deliveryStopsError.message}`);
-      await loadData();
-      return;
-    }
-
-    const allDelivered =
-      (deliveryStops || []).length > 0 &&
-      deliveryStops.every((stop: any) => stop.pod_status === "delivered");
-
-    if (allDelivered) {
-      const { error: jobUpdateError } = await supabase
-        .from("jobs")
-        .update({ status: "completed" })
-        .eq("id", jobId)
-        .eq("tenant_id", TENANT_ID);
-
-      if (jobUpdateError) {
-        setMessage(`Job completion error: ${jobUpdateError.message}`);
-        await loadData();
-        return;
+      if (stopError) {
+        throw stopError;
       }
+
+      const { error: jobError } = await supabase
+        .from("jobs")
+        .delete()
+        .eq("id", job.id)
+        .eq("tenant_id", tenantId);
+
+      if (jobError) {
+        throw jobError;
+      }
+
+      setMessage(`Job ${job.reference} deleted.`);
+      await loadData(tenantId);
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Unable to delete job."
+      );
+    }
+  }
+
+  function customerName(customerId: string | null) {
+    return (
+      customers.find((customer) => customer.id === customerId)?.name ??
+      "Unassigned"
+    );
+  }
+
+  function vehicleName(vehicleId: string | null) {
+    const vehicle = vehicles.find((item) => item.id === vehicleId);
+
+    if (!vehicle) {
+      return "Unassigned";
     }
 
-    setMessage("POD saved.");
-    await loadData();
+    return (
+      vehicle.registration ??
+      vehicle.registration_number ??
+      vehicle.reg ??
+      "Vehicle"
+    );
   }
+
+  function driverName(driverId: string | null) {
+    const driver = drivers.find((item) => item.id === driverId);
+
+    if (!driver) {
+      return "Unassigned";
+    }
+
+    if (driver.name) {
+      return driver.name;
+    }
+
+    return [driver.first_name, driver.last_name].filter(Boolean).join(" ");
+  }
+
+  function subcontractorName(subcontractorId: string | null) {
+    return (
+      subcontractors.find(
+        (subcontractor) => subcontractor.id === subcontractorId
+      )?.name ?? "None"
+    );
+  }
+
+  const filteredJobs = useMemo(() => {
+    const query = search.trim().toLowerCase();
+
+    if (!query) {
+      return jobs;
+    }
+
+    return jobs.filter((job) => {
+      return [
+        job.reference,
+        job.customer_reference,
+        customerName(job.customer_id),
+        vehicleName(job.vehicle_id),
+        driverName(job.driver_id),
+        job.status,
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query));
+    });
+  }, [jobs, search, customers, vehicles, drivers]);
+
+  const revenueTotal = jobs.reduce(
+    (total, job) => total + Number(job.customer_price ?? 0),
+    0
+  );
+
+  const costTotal = jobs.reduce(
+    (total, job) => total + Number(job.subcontractor_cost ?? 0),
+    0
+  );
+
+  const marginTotal = revenueTotal - costTotal;
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        padding: 30,
-        backgroundImage:
-          "url('https://images.unsplash.com/photo-1553413077-190dd305871c')",
-        backgroundSize: "cover",
-        backgroundPosition: "center"
-      }}
-    >
-      <div
-        style={{
-          background: "rgba(0,0,0,0.60)",
-          padding: 30,
-          borderRadius: 20
-        }}
-      >
-        <div style={{ color: "white", marginBottom: 24 }}>
-          <h1 style={{ marginTop: 0, fontSize: 38 }}>Jobs</h1>
-          <p style={{ opacity: 0.85, marginBottom: 0 }}>
-            Create jobs, edit jobs, delete planned jobs, and complete POD from one screen.
-          </p>
-        </div>
-
-        <form
-          onSubmit={saveJob}
-          style={{
-            display: "grid",
-            gap: 16,
-            marginBottom: 24,
-            maxWidth: 1100,
-            background: "rgba(255,255,255,0.95)",
-            padding: 24,
-            borderRadius: 16,
-            boxShadow: "0 10px 30px rgba(0,0,0,0.18)"
-          }}
-        >
-          <h2 style={{ margin: 0 }}>
-            {editingJobId ? "Edit Job" : "Create Job"}
-          </h2>
-
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <input
-              style={inputStyle}
-              placeholder="Reference"
-              value={form.reference}
-              onChange={(e: any) =>
-                setForm({ ...form, reference: e.target.value })
-              }
-            />
-
-            <input
-              style={inputStyle}
-              type="date"
-              value={form.scheduled_date}
-              onChange={(e: any) =>
-                setForm({ ...form, scheduled_date: e.target.value })
-              }
-            />
-
-            <select
-              style={inputStyle}
-              value={form.customer_id}
-              onChange={(e: any) =>
-                setForm({ ...form, customer_id: e.target.value })
-              }
-            >
-              <option value="">Select customer</option>
-              {customers.map((customer: any) => (
-                <option key={customer.id} value={customer.id}>
-                  {customer.name}
-                </option>
-              ))}
-            </select>
-
-            <select
-              style={inputStyle}
-              value={form.vehicle_id}
-              onChange={(e: any) =>
-                setForm({ ...form, vehicle_id: e.target.value })
-              }
-            >
-              <option value="">Select vehicle</option>
-              {vehicles.map((vehicle: any) => (
-                <option key={vehicle.id} value={vehicle.id}>
-                  {vehicle.registration}
-                </option>
-              ))}
-            </select>
-
-            <select
-              style={inputStyle}
-              value={form.driver_id}
-              onChange={(e: any) =>
-                setForm({ ...form, driver_id: e.target.value })
-              }
-            >
-              <option value="">Select driver</option>
-              {drivers.map((driver: any) => (
-                <option key={driver.id} value={driver.id}>
-                  {driver.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <input
-              style={inputStyle}
-              type="number"
-              step="0.01"
-              placeholder="Customer price"
-              value={form.customer_price}
-              onChange={(e: any) =>
-                setForm({ ...form, customer_price: e.target.value })
-              }
-            />
-
-            <select
-              style={inputStyle}
-              value={form.subcontractor_id}
-              onChange={(e: any) =>
-                setForm({ ...form, subcontractor_id: e.target.value })
-              }
-            >
-              <option value="">Select subcontractor</option>
-              {subcontractors.map((subcontractor: any) => (
-                <option key={subcontractor.id} value={subcontractor.id}>
-                  {subcontractor.name} - {subcontractor.vehicle_reg || "No Reg"} - {subcontractor.driver_name || "No Driver"}
-                </option>
-              ))}
-            </select>
-
-            <input
-              style={inputStyle}
-              type="number"
-              step="0.01"
-              placeholder="Subcontractor cost"
-              value={form.subcontractor_cost}
-              onChange={(e: any) =>
-                setForm({ ...form, subcontractor_cost: e.target.value })
-              }
-            />
-          </div>
-
+    <main style={styles.page}>
+      <div style={styles.container}>
+        <header style={styles.pageHeader}>
           <div>
-            <h3 style={{ margin: "6px 0 10px 0" }}>Collection Stops</h3>
-            {form.stops.map((stop, index) =>
-              stop.type === "collection" ? (
-                <div
-                  key={`collection-${index}`}
-                  style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}
-                >
-                  <input
-                    style={inputStyle}
-                    placeholder="Collection address"
-                    value={stop.address_line}
-                    onChange={(e: any) =>
-                      updateStop(index, "address_line", e.target.value)
-                    }
-                  />
-                  <input
-                    style={inputStyle}
-                    placeholder="City"
-                    value={stop.city}
-                    onChange={(e: any) => updateStop(index, "city", e.target.value)}
-                  />
-                  <input
-                    style={inputStyle}
-                    placeholder="Postcode"
-                    value={stop.postcode}
-                    onChange={(e: any) =>
-                      updateStop(index, "postcode", e.target.value)
-                    }
-                  />
-                  <button type="button" style={secondaryButtonStyle} onClick={() => removeStop(index)}>
-                    Remove
-                  </button>
-                </div>
-              ) : null
-            )}
-            <button type="button" style={secondaryButtonStyle} onClick={() => addStop("collection")}>
-              + Add Collection Stop
-            </button>
+            <p style={styles.eyebrow}>Transport Operations</p>
+            <h1 style={styles.title}>Jobs</h1>
+            <p style={styles.subtitle}>
+              Create, allocate and manage transport jobs from booking through to
+              delivery and invoicing.
+            </p>
           </div>
 
-          <div>
-            <h3 style={{ margin: "6px 0 10px 0" }}>Delivery Stops</h3>
-            {form.stops.map((stop, index) =>
-              stop.type === "delivery" ? (
-                <div
-                  key={`delivery-${index}`}
-                  style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}
-                >
-                  <input
-                    style={inputStyle}
-                    placeholder="Delivery address"
-                    value={stop.address_line}
-                    onChange={(e: any) =>
-                      updateStop(index, "address_line", e.target.value)
-                    }
-                  />
-                  <input
-                    style={inputStyle}
-                    placeholder="City"
-                    value={stop.city}
-                    onChange={(e: any) => updateStop(index, "city", e.target.value)}
-                  />
-                  <input
-                    style={inputStyle}
-                    placeholder="Postcode"
-                    value={stop.postcode}
-                    onChange={(e: any) =>
-                      updateStop(index, "postcode", e.target.value)
-                    }
-                  />
-                  <button type="button" style={secondaryButtonStyle} onClick={() => removeStop(index)}>
-                    Remove
-                  </button>
-                </div>
-              ) : null
-            )}
-            <button type="button" style={secondaryButtonStyle} onClick={() => addStop("delivery")}>
-              + Add Delivery Stop
-            </button>
-          </div>
+          <button type="button" onClick={resetForm} style={styles.secondaryButton}>
+            New Job
+          </button>
+        </header>
 
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button type="submit" style={buttonStyle} disabled={loading}>
-              {loading ? "Saving..." : editingJobId ? "Update Job" : "Add Job"}
-            </button>
+        {message ? <div style={styles.message}>{message}</div> : null}
+
+        <section style={styles.statsGrid}>
+          <StatCard label="Active Jobs" value={String(jobs.length)} />
+          <StatCard
+            label="Revenue"
+            value={`£${revenueTotal.toFixed(2)}`}
+          />
+          <StatCard label="Costs" value={`£${costTotal.toFixed(2)}`} />
+          <StatCard
+            label="Margin"
+            value={`£${marginTotal.toFixed(2)}`}
+          />
+        </section>
+
+        <form onSubmit={handleSubmit} style={styles.formCard}>
+          <div style={styles.formHeader}>
+            <div>
+              <h2 style={styles.sectionTitle}>
+                {editingJobId ? "Edit Job" : "Create Job"}
+              </h2>
+
+              <p style={styles.sectionText}>
+                Add the booking, allocation, stops and commercial information.
+              </p>
+            </div>
 
             {editingJobId ? (
-              <button type="button" style={secondaryButtonStyle} onClick={resetForm}>
+              <button
+                type="button"
+                onClick={resetForm}
+                style={styles.textButton}
+              >
                 Cancel Edit
               </button>
             ) : null}
           </div>
+
+          <div style={styles.formGrid}>
+            <Field label="Job Reference">
+              <input
+                value={form.reference}
+                onChange={(event) =>
+                  updateForm("reference", event.target.value)
+                }
+                required
+                placeholder="TMS-2026-001"
+                style={styles.input}
+              />
+            </Field>
+
+            <Field label="Customer Reference">
+              <input
+                value={form.customer_reference}
+                onChange={(event) =>
+                  updateForm("customer_reference", event.target.value)
+                }
+                placeholder="PO / Customer reference"
+                style={styles.input}
+              />
+            </Field>
+
+            <Field label="Job Date">
+              <input
+                type="date"
+                value={form.job_date}
+                onChange={(event) =>
+                  updateForm("job_date", event.target.value)
+                }
+                style={styles.input}
+              />
+            </Field>
+
+            <Field label="Status">
+              <select
+                value={form.status}
+                onChange={(event) =>
+                  updateForm("status", event.target.value as JobStatus)
+                }
+                style={styles.input}
+              >
+                {STATUS_OPTIONS.map((status) => (
+                  <option key={status} value={status}>
+                    {formatStatus(status)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="Customer">
+              <select
+                value={form.customer_id}
+                onChange={(event) =>
+                  updateForm("customer_id", event.target.value)
+                }
+                required
+                style={styles.input}
+              >
+                <option value="">Select customer</option>
+
+                {customers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="Vehicle">
+              <select
+                value={form.vehicle_id}
+                onChange={(event) =>
+                  updateForm("vehicle_id", event.target.value)
+                }
+                style={styles.input}
+              >
+                <option value="">Unassigned</option>
+
+                {vehicles.map((vehicle) => (
+                  <option key={vehicle.id} value={vehicle.id}>
+                    {vehicle.registration ??
+                      vehicle.registration_number ??
+                      vehicle.reg ??
+                      vehicle.id}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="Driver">
+              <select
+                value={form.driver_id}
+                onChange={(event) =>
+                  updateForm("driver_id", event.target.value)
+                }
+                style={styles.input}
+              >
+                <option value="">Unassigned</option>
+
+                {drivers.map((driver) => (
+                  <option key={driver.id} value={driver.id}>
+                    {driver.name ??
+                      [driver.first_name, driver.last_name]
+                        .filter(Boolean)
+                        .join(" ") ??
+                      driver.id}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="Subcontractor">
+              <select
+                value={form.subcontractor_id}
+                onChange={(event) =>
+                  updateForm("subcontractor_id", event.target.value)
+                }
+                style={styles.input}
+              >
+                <option value="">Own fleet / none</option>
+
+                {subcontractors.map((subcontractor) => (
+                  <option key={subcontractor.id} value={subcontractor.id}>
+                    {subcontractor.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+
+          <StopsSection
+            title="Collections"
+            type="collection"
+            stops={collectionStops}
+            onAdd={() => addStop("collection")}
+            onRemove={(index) => removeStop("collection", index)}
+            onUpdate={(index, field, value) =>
+              updateStop("collection", index, field, value)
+            }
+          />
+
+          <StopsSection
+            title="Deliveries"
+            type="delivery"
+            stops={deliveryStops}
+            onAdd={() => addStop("delivery")}
+            onRemove={(index) => removeStop("delivery", index)}
+            onUpdate={(index, field, value) =>
+              updateStop("delivery", index, field, value)
+            }
+          />
+
+          <div style={styles.formGrid}>
+            <Field label="Customer Price">
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.customer_price}
+                onChange={(event) =>
+                  updateForm("customer_price", event.target.value)
+                }
+                placeholder="0.00"
+                style={styles.input}
+              />
+            </Field>
+
+            <Field label="Subcontractor / Job Cost">
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.subcontractor_cost}
+                onChange={(event) =>
+                  updateForm("subcontractor_cost", event.target.value)
+                }
+                placeholder="0.00"
+                style={styles.input}
+              />
+            </Field>
+
+            <Field label="Estimated Margin">
+              <div style={styles.readOnlyField}>
+                £
+                {(
+                  Number(form.customer_price || 0) -
+                  Number(form.subcontractor_cost || 0)
+                ).toFixed(2)}
+              </div>
+            </Field>
+          </div>
+
+          <Field label="Job Notes">
+            <textarea
+              value={form.notes}
+              onChange={(event) => updateForm("notes", event.target.value)}
+              placeholder="Special instructions, booking information or operational notes..."
+              rows={4}
+              style={{
+                ...styles.input,
+                resize: "vertical",
+              }}
+            />
+          </Field>
+
+          <div style={styles.formActions}>
+            {editingJobId ? (
+              <button
+                type="button"
+                onClick={resetForm}
+                style={styles.secondaryButton}
+              >
+                Cancel
+              </button>
+            ) : null}
+
+            <button
+              type="submit"
+              disabled={saving}
+              style={{
+                ...styles.primaryButton,
+                opacity: saving ? 0.65 : 1,
+              }}
+            >
+              {saving
+                ? "Saving..."
+                : editingJobId
+                  ? "Update Job"
+                  : "Create Job"}
+            </button>
+          </div>
         </form>
 
-        {message ? (
-          <div
-            style={{
-              marginBottom: 20,
-              background: "rgba(255,255,255,0.94)",
-              padding: 14,
-              borderRadius: 12,
-              color: "#111827"
-            }}
-          >
-            {message}
+        <section style={styles.jobsCard}>
+          <div style={styles.jobsHeader}>
+            <div>
+              <h2 style={styles.sectionTitle}>Current Jobs</h2>
+              <p style={styles.sectionText}>
+                {filteredJobs.length} job
+                {filteredJobs.length === 1 ? "" : "s"}
+              </p>
+            </div>
+
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search jobs..."
+              style={styles.search}
+            />
           </div>
-        ) : null}
 
-        <div style={{ display: "grid", gap: 18 }}>
-          {jobs.map((job: any) => {
-            const margin =
-              job.customer_price != null && job.subcontractor_cost != null
-                ? Number(job.customer_price) - Number(job.subcontractor_cost)
-                : null;
+          {loading ? (
+            <div style={styles.emptyState}>Loading jobs...</div>
+          ) : filteredJobs.length === 0 ? (
+            <div style={styles.emptyState}>
+              No jobs match your current search.
+            </div>
+          ) : (
+            <div style={styles.tableWrapper}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <th style={styles.th}>Reference</th>
+                    <th style={styles.th}>Customer</th>
+                    <th style={styles.th}>Date</th>
+                    <th style={styles.th}>Status</th>
+                    <th style={styles.th}>Vehicle / Driver</th>
+                    <th style={styles.th}>Subcontractor</th>
+                    <th style={styles.th}>Revenue</th>
+                    <th style={styles.th}>Margin</th>
+                    <th style={styles.th}>Actions</th>
+                  </tr>
+                </thead>
 
-            return (
-              <div
-                key={job.id}
-                style={{
-                  background: "rgba(255,255,255,0.95)",
-                  padding: 22,
-                  borderRadius: 16,
-                  boxShadow: "0 10px 30px rgba(0,0,0,0.18)"
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: 20,
-                    flexWrap: "wrap",
-                    marginBottom: 14
-                  }}
-                >
-                  <div>
-                    <h2 style={{ margin: "0 0 8px 0" }}>{job.reference}</h2>
-                    <div style={{ color: "#4b5563" }}>
-                      Date: {job.scheduled_date || "-"} | Status: {job.status}
-                    </div>
-                  </div>
+                <tbody>
+                  {filteredJobs.map((job) => {
+                    const revenue = Number(job.customer_price ?? 0);
+                    const cost = Number(job.subcontractor_cost ?? 0);
+                    const margin = revenue - cost;
 
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <button
-                      type="button"
-                      style={secondaryButtonStyle}
-                      onClick={() => startEdit(job)}
-                    >
-                      Edit
-                    </button>
+                    return (
+                      <tr key={job.id}>
+                        <td style={styles.td}>
+                          <strong>{job.reference}</strong>
 
-                    <button
-                      type="button"
-                      style={deleteButtonStyle}
-                      onClick={() => deleteJob(job.id, job.status)}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
+                          {job.customer_reference ? (
+                            <div style={styles.muted}>
+                              {job.customer_reference}
+                            </div>
+                          ) : null}
+                        </td>
 
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                    gap: 12,
-                    marginBottom: 18
-                  }}
-                >
-                  <div style={{ background: "#f9fafb", padding: 12, borderRadius: 12 }}>
-                    <strong>Customer</strong>
-                    <div>{job.customers?.name || "-"}</div>
-                  </div>
-                  <div style={{ background: "#f9fafb", padding: 12, borderRadius: 12 }}>
-                    <strong>Vehicle</strong>
-                    <div>{job.vehicles?.registration || "-"}</div>
-                  </div>
-                  <div style={{ background: "#f9fafb", padding: 12, borderRadius: 12 }}>
-                    <strong>Driver</strong>
-                    <div>{job.drivers?.name || "-"}</div>
-                  </div>
-                  <div style={{ background: "#f9fafb", padding: 12, borderRadius: 12 }}>
-                    <strong>Sell</strong>
-                    <div>{formatMoney(job.customer_price)}</div>
-                  </div>
-                  <div style={{ background: "#f9fafb", padding: 12, borderRadius: 12 }}>
-                    <strong>Subcontractor</strong>
-                    <div>{job.subcontractors?.name || "-"}</div>
-                  </div>
-                  <div style={{ background: "#f9fafb", padding: 12, borderRadius: 12 }}>
-                    <strong>Buy</strong>
-                    <div>{formatMoney(job.subcontractor_cost)}</div>
-                  </div>
-                  <div style={{ background: "#f9fafb", padding: 12, borderRadius: 12 }}>
-                    <strong>Margin</strong>
-                    <div>{formatMoney(margin)}</div>
-                  </div>
-                </div>
+                        <td style={styles.td}>
+                          {customerName(job.customer_id)}
+                        </td>
 
-                <div>
-                  <h3 style={{ marginBottom: 10 }}>Stops / POD</h3>
+                        <td style={styles.td}>
+                          {job.job_date
+                            ? new Date(
+                                `${job.job_date}T00:00:00`
+                              ).toLocaleDateString("en-GB")
+                            : "—"}
+                        </td>
 
-                  {job.job_stops?.length ? (
-                    <div style={{ display: "grid", gap: 10 }}>
-                      {job.job_stops.map((stop: any) => (
-                        <div
-                          key={stop.id}
-                          style={{
-                            border: "1px solid #e5e7eb",
-                            padding: 14,
-                            borderRadius: 12,
-                            background: "#f9fafb"
-                          }}
-                        >
-                          <div>
-                            <strong>
-                              {stop.stop_order}. {stop.type}
-                            </strong>{" "}
-                            - {stop.address_line}
-                            {stop.city ? `, ${stop.city}` : ""}
-                            {stop.postcode ? `, ${stop.postcode}` : ""}
+                        <td style={styles.td}>
+                          <span style={statusBadge(job.status)}>
+                            {formatStatus(job.status)}
+                          </span>
+                        </td>
+
+                        <td style={styles.td}>
+                          <div>{vehicleName(job.vehicle_id)}</div>
+                          <div style={styles.muted}>
+                            {driverName(job.driver_id)}
                           </div>
+                        </td>
 
-                          <div style={{ marginTop: 6, color: "#4b5563" }}>
-                            Stop status: {stop.status || "-"} | POD: {stop.pod_status || "pending"}
+                        <td style={styles.td}>
+                          {subcontractorName(job.subcontractor_id)}
+                        </td>
+
+                        <td style={styles.td}>
+                          £{revenue.toFixed(2)}
+                        </td>
+
+                        <td style={styles.td}>
+                          £{margin.toFixed(2)}
+                        </td>
+
+                        <td style={styles.td}>
+                          <div style={styles.rowActions}>
+                            <button
+                              type="button"
+                              onClick={() => void editJob(job)}
+                              style={styles.smallButton}
+                            >
+                              Edit
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => void deleteJob(job)}
+                              style={styles.deleteButton}
+                            >
+                              Delete
+                            </button>
                           </div>
-
-                          {stop.delivered_at ? (
-                            <div style={{ marginTop: 6, color: "#4b5563" }}>
-                              Delivered at: {new Date(stop.delivered_at).toLocaleString("en-GB")}
-                            </div>
-                          ) : null}
-
-                          {stop.recipient_name ? (
-                            <div style={{ marginTop: 6 }}>
-                              Recipient: {stop.recipient_name}
-                            </div>
-                          ) : null}
-
-                          {stop.pod_notes ? (
-                            <div style={{ marginTop: 6 }}>
-                              Notes: {stop.pod_notes}
-                            </div>
-                          ) : null}
-
-                          {stop.pod_photo_url ? (
-                            <div style={{ marginTop: 6 }}>
-                              Photo:{" "}
-                              <a
-                                href={stop.pod_photo_url}
-                                target="_blank"
-                                rel="noreferrer"
-                                style={{ color: "#111827", fontWeight: 600 }}
-                              >
-                                View POD
-                              </a>
-                            </div>
-                          ) : null}
-
-                          {stop.type === "delivery" && stop.pod_status !== "delivered" ? (
-                            <div style={{ display: "grid", gap: 10, marginTop: 12, maxWidth: 720 }}>
-                              <input
-                                style={inputStyle}
-                                placeholder="Recipient name"
-                                value={podForms[stop.id]?.recipient_name || ""}
-                                onChange={(e: any) =>
-                                  updatePodForm(stop.id, "recipient_name", e.target.value)
-                                }
-                              />
-                              <input
-                                style={inputStyle}
-                                placeholder="POD photo URL"
-                                value={podForms[stop.id]?.pod_photo_url || ""}
-                                onChange={(e: any) =>
-                                  updatePodForm(stop.id, "pod_photo_url", e.target.value)
-                                }
-                              />
-                              <input
-                                style={inputStyle}
-                                placeholder="POD notes"
-                                value={podForms[stop.id]?.pod_notes || ""}
-                                onChange={(e: any) =>
-                                  updatePodForm(stop.id, "pod_notes", e.target.value)
-                                }
-                              />
-                              <div>
-                                <button
-                                  type="button"
-                                  style={buttonStyle}
-                                  onClick={() => savePod(job.id, stop.id)}
-                                >
-                                  Mark Delivered
-                                </button>
-                              </div>
-                            </div>
-                          ) : null}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div>No stops yet.</div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       </div>
     </main>
   );
 }
 
+function StopsSection({
+  title,
+  type,
+  stops,
+  onAdd,
+  onRemove,
+  onUpdate,
+}: {
+  title: string;
+  type: "collection" | "delivery";
+  stops: Stop[];
+  onAdd: () => void;
+  onRemove: (index: number) => void;
+  onUpdate: (
+    index: number,
+    field: keyof Stop,
+    value: string | number
+  ) => void;
+}) {
+  return (
+    <section style={styles.stopSection}>
+      <div style={styles.stopSectionHeader}>
+        <div>
+          <h3 style={styles.stopTitle}>{title}</h3>
+          <p style={styles.sectionText}>
+            Add one or more {type} stops in route order.
+          </p>
+        </div>
 
+        <button
+          type="button"
+          onClick={onAdd}
+          style={styles.secondaryButton}
+        >
+          + Add {type === "collection" ? "Collection" : "Delivery"}
+        </button>
+      </div>
 
+      <div style={styles.stopList}>
+        {stops.map((stop, index) => (
+          <div key={`${type}-${index}`} style={styles.stopCard}>
+            <div style={styles.stopCardHeader}>
+              <strong>
+                {type === "collection" ? "Collection" : "Delivery"}{" "}
+                {index + 1}
+              </strong>
 
+              {stops.length > 1 ? (
+                <button
+                  type="button"
+                  onClick={() => onRemove(index)}
+                  style={styles.textDangerButton}
+                >
+                  Remove
+                </button>
+              ) : null}
+            </div>
 
+            <div style={styles.formGrid}>
+              <Field label="Company / Site">
+                <input
+                  value={stop.company_name}
+                  onChange={(event) =>
+                    onUpdate(index, "company_name", event.target.value)
+                  }
+                  style={styles.input}
+                />
+              </Field>
 
+              <Field label="Address Line 1">
+                <input
+                  value={stop.address_line1}
+                  onChange={(event) =>
+                    onUpdate(index, "address_line1", event.target.value)
+                  }
+                  style={styles.input}
+                />
+              </Field>
+
+              <Field label="Address Line 2">
+                <input
+                  value={stop.address_line2}
+                  onChange={(event) =>
+                    onUpdate(index, "address_line2", event.target.value)
+                  }
+                  style={styles.input}
+                />
+              </Field>
+
+              <Field label="Town / City">
+                <input
+                  value={stop.city}
+                  onChange={(event) =>
+                    onUpdate(index, "city", event.target.value)
+                  }
+                  style={styles.input}
+                />
+              </Field>
+
+              <Field label="Postcode">
+                <input
+                  value={stop.postcode}
+                  onChange={(event) =>
+                    onUpdate(
+                      index,
+                      "postcode",
+                      event.target.value.toUpperCase()
+                    )
+                  }
+                  style={styles.input}
+                />
+              </Field>
+
+              <Field label="Contact">
+                <input
+                  value={stop.contact_name}
+                  onChange={(event) =>
+                    onUpdate(index, "contact_name", event.target.value)
+                  }
+                  style={styles.input}
+                />
+              </Field>
+
+              <Field label="Telephone">
+                <input
+                  value={stop.phone}
+                  onChange={(event) =>
+                    onUpdate(index, "phone", event.target.value)
+                  }
+                  style={styles.input}
+                />
+              </Field>
+
+              <Field label="Planned Date">
+                <input
+                  type="date"
+                  value={stop.planned_date}
+                  onChange={(event) =>
+                    onUpdate(index, "planned_date", event.target.value)
+                  }
+                  style={styles.input}
+                />
+              </Field>
+
+              <Field label="Planned Time">
+                <input
+                  type="time"
+                  value={stop.planned_time}
+                  onChange={(event) =>
+                    onUpdate(index, "planned_time", event.target.value)
+                  }
+                  style={styles.input}
+                />
+              </Field>
+            </div>
+
+            <Field label="Instructions">
+              <textarea
+                value={stop.instructions}
+                onChange={(event) =>
+                  onUpdate(index, "instructions", event.target.value)
+                }
+                rows={2}
+                style={{
+                  ...styles.input,
+                  resize: "vertical",
+                }}
+              />
+            </Field>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label style={styles.field}>
+      <span style={styles.label}>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div style={styles.statCard}>
+      <span style={styles.statLabel}>{label}</span>
+      <strong style={styles.statValue}>{value}</strong>
+    </div>
+  );
+}
+
+function formatStatus(status: string) {
+  return status
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function statusBadge(status: JobStatus): CSSProperties {
+  return {
+    display: "inline-flex",
+    padding: "6px 10px",
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: 700,
+    background:
+      status === "completed" ||
+      status === "delivered" ||
+      status === "invoiced"
+        ? "#dcfce7"
+        : status === "cancelled"
+          ? "#fee2e2"
+          : status === "in_transit" ||
+              status === "collecting" ||
+              status === "collected"
+            ? "#dbeafe"
+            : "#f1f5f9",
+    color:
+      status === "completed" ||
+      status === "delivered" ||
+      status === "invoiced"
+        ? "#166534"
+        : status === "cancelled"
+          ? "#991b1b"
+          : status === "in_transit" ||
+              status === "collecting" ||
+              status === "collected"
+            ? "#1d4ed8"
+            : "#334155",
+  };
+}
+
+const styles: Record<string, CSSProperties> = {
+  page: {
+    minHeight: "100vh",
+    background: "#f8fafc",
+    padding: "32px 20px 60px",
+  },
+
+  container: {
+    maxWidth: 1450,
+    margin: "0 auto",
+  },
+
+  pageHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 24,
+    marginBottom: 24,
+    flexWrap: "wrap",
+  },
+
+  eyebrow: {
+    margin: "0 0 6px",
+    color: "#2563eb",
+    fontSize: 13,
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: "0.08em",
+  },
+
+  title: {
+    margin: 0,
+    fontSize: "clamp(32px, 5vw, 48px)",
+    color: "#0f172a",
+    letterSpacing: "-0.04em",
+  },
+
+  subtitle: {
+    margin: "8px 0 0",
+    color: "#64748b",
+    fontSize: 16,
+    maxWidth: 760,
+    lineHeight: 1.6,
+  },
+
+  message: {
+    padding: "13px 16px",
+    borderRadius: 12,
+    background: "#eff6ff",
+    border: "1px solid #bfdbfe",
+    color: "#1e40af",
+    marginBottom: 20,
+  },
+
+  statsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+    gap: 16,
+    marginBottom: 24,
+  },
+
+  statCard: {
+    background: "#ffffff",
+    border: "1px solid #e2e8f0",
+    borderRadius: 18,
+    padding: 20,
+    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.05)",
+  },
+
+  statLabel: {
+    color: "#64748b",
+    fontSize: 13,
+    fontWeight: 700,
+  },
+
+  statValue: {
+    display: "block",
+    marginTop: 6,
+    fontSize: 27,
+    color: "#0f172a",
+  },
+
+  formCard: {
+    background: "#ffffff",
+    border: "1px solid #e2e8f0",
+    borderRadius: 20,
+    padding: 24,
+    boxShadow: "0 12px 32px rgba(15, 23, 42, 0.06)",
+    marginBottom: 28,
+  },
+
+  formHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 20,
+    marginBottom: 22,
+  },
+
+  sectionTitle: {
+    margin: 0,
+    fontSize: 22,
+    color: "#0f172a",
+  },
+
+  sectionText: {
+    margin: "5px 0 0",
+    color: "#64748b",
+    fontSize: 14,
+  },
+
+  formGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: 16,
+    marginBottom: 18,
+  },
+
+  field: {
+    display: "grid",
+    gap: 7,
+  },
+
+  label: {
+    fontSize: 13,
+    color: "#334155",
+    fontWeight: 700,
+  },
+
+  input: {
+    width: "100%",
+    boxSizing: "border-box",
+    border: "1px solid #cbd5e1",
+    borderRadius: 11,
+    padding: "11px 12px",
+    fontSize: 14,
+    color: "#0f172a",
+    background: "#ffffff",
+    outline: "none",
+  },
+
+  readOnlyField: {
+    border: "1px solid #cbd5e1",
+    borderRadius: 11,
+    padding: "11px 12px",
+    minHeight: 18,
+    background: "#f8fafc",
+    fontWeight: 700,
+  },
+
+  stopSection: {
+    marginTop: 24,
+    paddingTop: 22,
+    borderTop: "1px solid #e2e8f0",
+  },
+
+  stopSectionHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 16,
+    flexWrap: "wrap",
+    marginBottom: 16,
+  },
+
+  stopTitle: {
+    margin: 0,
+    fontSize: 18,
+    color: "#0f172a",
+  },
+
+  stopList: {
+    display: "grid",
+    gap: 14,
+  },
+
+  stopCard: {
+    padding: 18,
+    border: "1px solid #e2e8f0",
+    borderRadius: 16,
+    background: "#f8fafc",
+  },
+
+  stopCardHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+    color: "#0f172a",
+  },
+
+  formActions: {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: 12,
+    marginTop: 22,
+  },
+
+  primaryButton: {
+    border: "none",
+    borderRadius: 11,
+    background: "#2563eb",
+    color: "#ffffff",
+    padding: "12px 20px",
+    fontWeight: 800,
+    cursor: "pointer",
+    fontSize: 14,
+  },
+
+  secondaryButton: {
+    border: "1px solid #cbd5e1",
+    borderRadius: 11,
+    background: "#ffffff",
+    color: "#0f172a",
+    padding: "11px 16px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+
+  textButton: {
+    border: "none",
+    background: "transparent",
+    color: "#2563eb",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+
+  textDangerButton: {
+    border: "none",
+    background: "transparent",
+    color: "#dc2626",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+
+  jobsCard: {
+    background: "#ffffff",
+    border: "1px solid #e2e8f0",
+    borderRadius: 20,
+    padding: 24,
+    boxShadow: "0 12px 32px rgba(15, 23, 42, 0.06)",
+  },
+
+  jobsHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 18,
+    flexWrap: "wrap",
+    marginBottom: 20,
+  },
+
+  search: {
+    width: 280,
+    maxWidth: "100%",
+    border: "1px solid #cbd5e1",
+    borderRadius: 11,
+    padding: "11px 13px",
+    fontSize: 14,
+  },
+
+  tableWrapper: {
+    overflowX: "auto",
+  },
+
+  table: {
+    width: "100%",
+    borderCollapse: "collapse",
+    minWidth: 1050,
+  },
+
+  th: {
+    textAlign: "left",
+    padding: "12px 10px",
+    borderBottom: "1px solid #e2e8f0",
+    fontSize: 12,
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+  },
+
+  td: {
+    padding: "14px 10px",
+    borderBottom: "1px solid #f1f5f9",
+    fontSize: 14,
+    verticalAlign: "top",
+    color: "#0f172a",
+  },
+
+  muted: {
+    marginTop: 3,
+    color: "#94a3b8",
+    fontSize: 12,
+  },
+
+  rowActions: {
+    display: "flex",
+    gap: 7,
+  },
+
+  smallButton: {
+    border: "1px solid #bfdbfe",
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    borderRadius: 8,
+    padding: "7px 10px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+
+  deleteButton: {
+    border: "1px solid #fecaca",
+    background: "#fef2f2",
+    color: "#b91c1c",
+    borderRadius: 8,
+    padding: "7px 10px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+
+  emptyState: {
+    padding: "50px 20px",
+    textAlign: "center",
+    color: "#64748b",
+  },
+};
 
 
 
