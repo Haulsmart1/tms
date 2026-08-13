@@ -1,72 +1,308 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CSSProperties, FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import type {
+  CSSProperties,
+  FormEvent,
+} from "react";
 import { createClient } from "../../lib/supabase/browser";
+
+type Driver = {
+  id: string;
+  tenant_id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  licence_number: string | null;
+  active: boolean | null;
+  driver_type: string | null;
+  licence_expiry: string | null;
+  tachograph_card_number: string | null;
+  tachograph_expiry: string | null;
+
+  date_of_birth: string | null;
+  address_line_1: string | null;
+  address_line_2: string | null;
+  city: string | null;
+  postcode: string | null;
+  employee_number: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_phone: string | null;
+  depot: string | null;
+  notes: string | null;
+
+  licence_issue_date: string | null;
+  licence_check_date: string | null;
+  licence_check_due: string | null;
+  licence_check_reference: string | null;
+  licence_status: string | null;
+  licence_categories: string[] | null;
+  points_total: number | null;
+  disqualified: boolean | null;
+  disqualified_until: string | null;
+  licence_restriction_notes: string | null;
+
+  tachograph_required: boolean | null;
+  tachograph_issue_date: string | null;
+  tachograph_last_download: string | null;
+  tachograph_next_download_due: string | null;
+  tachograph_status: string | null;
+
+  cpc_required: boolean | null;
+  cpc_qualified: boolean | null;
+  cpc_expiry: string | null;
+  cpc_training_hours: number | null;
+  cpc_notes: string | null;
+
+  adr_required: boolean | null;
+  adr_qualified: boolean | null;
+  adr_certificate_number: string | null;
+  adr_classes: string[] | null;
+  adr_expiry: string | null;
+  adr_notes: string | null;
+
+  last_medical_date: string | null;
+  next_medical_due: string | null;
+  medical_restrictions: string | null;
+
+  right_to_work_checked_at: string | null;
+  right_to_work_expiry: string | null;
+  right_to_work_reference: string | null;
+};
 
 type Vehicle = {
   id: string;
-  tenant_id: string;
   registration: string | null;
-  vehicle_type: string | null;
   make: string | null;
   model: string | null;
   active: boolean | null;
   vor: boolean | null;
-  vor_since: string | null;
-  vor_reason: string | null;
-  returned_to_service_at: string | null;
 };
 
-type MaintenanceRecord = {
+type VehicleAssignment = {
   id: string;
-  vehicle_id: string | null;
-  maintenance_type: string;
-  due_date: string | null;
-  completed_date: string | null;
-  status: string;
-  cost: number | null;
+  vehicle_id: string;
+  driver_id: string;
+  assigned_from: string;
+  active: boolean;
   notes: string | null;
-  created_at: string;
 };
 
-type MaintenanceRecordWithVehicle = MaintenanceRecord & {
-  vehicle: Vehicle | null;
+type LicenceCheck = {
+  id: string;
+  driver_id: string;
+  checked_at: string;
+  next_check_due: string | null;
+  licence_number: string | null;
+  licence_status: string | null;
+  licence_expiry: string | null;
+  points_total: number;
+  disqualified: boolean;
+  check_reference: string | null;
+  check_code: string | null;
+  notes: string | null;
 };
 
-export default function MaintenancePage() {
+type Endorsement = {
+  id: string;
+  driver_id: string;
+  code: string;
+  points: number;
+  offence_date: string | null;
+  conviction_date: string | null;
+  endorsement_expiry: string | null;
+  active: boolean;
+  description: string | null;
+  notes: string | null;
+};
+
+type Training = {
+  id: string;
+  driver_id: string;
+  training_type: string;
+  course_name: string | null;
+  provider: string | null;
+  certificate_number: string | null;
+  completed_date: string | null;
+  expiry_date: string | null;
+  training_hours: number | null;
+  status: string | null;
+  notes: string | null;
+};
+
+type DriverForm = {
+  name: string;
+  phone: string;
+  email: string;
+  employee_number: string;
+  driver_type: string;
+
+  date_of_birth: string;
+  start_date: string;
+  address_line_1: string;
+  address_line_2: string;
+  city: string;
+  postcode: string;
+  depot: string;
+
+  emergency_contact_name: string;
+  emergency_contact_phone: string;
+
+  licence_number: string;
+  licence_issue_date: string;
+  licence_expiry: string;
+  licence_check_date: string;
+  licence_check_due: string;
+  licence_check_reference: string;
+  licence_status: string;
+  licence_categories: string;
+  points_total: string;
+  disqualified: boolean;
+  disqualified_until: string;
+  licence_restriction_notes: string;
+
+  tachograph_required: boolean;
+  tachograph_card_number: string;
+  tachograph_issue_date: string;
+  tachograph_expiry: string;
+  tachograph_last_download: string;
+  tachograph_next_download_due: string;
+
+  cpc_required: boolean;
+  cpc_qualified: boolean;
+  cpc_expiry: string;
+  cpc_training_hours: string;
+  cpc_notes: string;
+
+  adr_required: boolean;
+  adr_qualified: boolean;
+  adr_certificate_number: string;
+  adr_classes: string;
+  adr_expiry: string;
+  adr_notes: string;
+
+  last_medical_date: string;
+  next_medical_due: string;
+  medical_restrictions: string;
+
+  right_to_work_checked_at: string;
+  right_to_work_expiry: string;
+  right_to_work_reference: string;
+
+  notes: string;
+  active: boolean;
+};
+
+const EMPTY_FORM: DriverForm = {
+  name: "",
+  phone: "",
+  email: "",
+  employee_number: "",
+  driver_type: "employee",
+
+  date_of_birth: "",
+  start_date: "",
+  address_line_1: "",
+  address_line_2: "",
+  city: "",
+  postcode: "",
+  depot: "",
+
+  emergency_contact_name: "",
+  emergency_contact_phone: "",
+
+  licence_number: "",
+  licence_issue_date: "",
+  licence_expiry: "",
+  licence_check_date: "",
+  licence_check_due: "",
+  licence_check_reference: "",
+  licence_status: "valid",
+  licence_categories: "",
+  points_total: "0",
+  disqualified: false,
+  disqualified_until: "",
+  licence_restriction_notes: "",
+
+  tachograph_required: true,
+  tachograph_card_number: "",
+  tachograph_issue_date: "",
+  tachograph_expiry: "",
+  tachograph_last_download: "",
+  tachograph_next_download_due: "",
+
+  cpc_required: true,
+  cpc_qualified: false,
+  cpc_expiry: "",
+  cpc_training_hours: "0",
+  cpc_notes: "",
+
+  adr_required: false,
+  adr_qualified: false,
+  adr_certificate_number: "",
+  adr_classes: "",
+  adr_expiry: "",
+  adr_notes: "",
+
+  last_medical_date: "",
+  next_medical_due: "",
+  medical_restrictions: "",
+
+  right_to_work_checked_at: "",
+  right_to_work_expiry: "",
+  right_to_work_reference: "",
+
+  notes: "",
+  active: true,
+};
+
+export default function DriversPage() {
   const supabase = useMemo(() => createClient(), []);
 
   const [tenantId, setTenantId] = useState<string | null>(null);
 
+  const [drivers, setDrivers] = useState<Driver[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [records, setRecords] = useState<MaintenanceRecordWithVehicle[]>([]);
+  const [assignments, setAssignments] = useState<VehicleAssignment[]>([]);
+  const [checks, setChecks] = useState<LicenceCheck[]>([]);
+  const [endorsements, setEndorsements] = useState<Endorsement[]>([]);
+  const [training, setTraining] = useState<Training[]>([]);
 
+  const [form, setForm] = useState<DriverForm>(EMPTY_FORM);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
+
+  const [vehicleToAssign, setVehicleToAssign] = useState("");
+  const [assignmentNotes, setAssignmentNotes] = useState("");
+
+  const [checkCode, setCheckCode] = useState("");
+  const [checkNotes, setCheckNotes] = useState("");
+
+  const [endorsementCode, setEndorsementCode] = useState("");
+  const [endorsementPoints, setEndorsementPoints] = useState("");
+  const [endorsementDescription, setEndorsementDescription] = useState("");
+  const [endorsementExpiry, setEndorsementExpiry] = useState("");
+
+  const [trainingType, setTrainingType] = useState("");
+  const [trainingCourse, setTrainingCourse] = useState("");
+  const [trainingProvider, setTrainingProvider] = useState("");
+  const [trainingExpiry, setTrainingExpiry] = useState("");
+  const [trainingHours, setTrainingHours] = useState("");
+
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [vorSaving, setVorSaving] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
-  const [vehicleId, setVehicleId] = useState("");
-  const [maintenanceType, setMaintenanceType] = useState("");
-  const [dueDate, setDueDate] = useState("");
-  const [completedDate, setCompletedDate] = useState("");
-  const [status, setStatus] = useState("due");
-  const [cost, setCost] = useState("");
-  const [notes, setNotes] = useState("");
-  const [vorReason, setVorReason] = useState("");
-
-  const selectedVehicle =
-    vehicles.find((vehicle) => vehicle.id === vehicleId) ?? null;
-
-  const vorVehicles = vehicles.filter(
-    (vehicle) => vehicle.vor === true || vehicle.active === false
-  );
-
-  const resolveTenantId = useCallback(async (): Promise<string | null> => {
+  const resolveTenant = useCallback(async () => {
     const {
       data: { user },
       error: userError,
@@ -81,20 +317,18 @@ export default function MaintenancePage() {
       return null;
     }
 
-    const { data: profile, error: profileError } = await supabase
+    const { data: profile, error } = await supabase
       .from("profiles")
       .select("tenant_id")
       .eq("id", user.id)
       .single();
 
-    if (profileError) {
-      throw profileError;
+    if (error) {
+      throw error;
     }
 
     if (!profile?.tenant_id) {
-      throw new Error(
-        "Your account is not linked to a TMS Wizzard tenant."
-      );
+      throw new Error("User is not linked to a tenant.");
     }
 
     return profile.tenant_id as string;
@@ -106,77 +340,78 @@ export default function MaintenancePage() {
       setErrorMessage("");
 
       try {
-        const [vehicleResult, maintenanceResult] = await Promise.all([
+        const [
+          driversResult,
+          vehiclesResult,
+          assignmentsResult,
+          checksResult,
+          endorsementsResult,
+          trainingResult,
+        ] = await Promise.all([
           supabase
-            .from("vehicles")
-            .select(
-              `
-              id,
-              tenant_id,
-              registration,
-              vehicle_type,
-              make,
-              model,
-              active,
-              vor,
-              vor_since,
-              vor_reason,
-              returned_to_service_at
-              `
-            )
+            .from("drivers")
+            .select("*")
             .eq("tenant_id", currentTenantId)
-            .order("registration", { ascending: true }),
+            .order("name"),
 
           supabase
-            .from("maintenance_records")
-            .select(
-              `
-              id,
-              vehicle_id,
-              maintenance_type,
-              due_date,
-              completed_date,
-              status,
-              cost,
-              notes,
-              created_at
-              `
-            )
+            .from("vehicles")
+            .select("id, registration, make, model, active, vor")
+            .eq("tenant_id", currentTenantId)
+            .order("registration"),
+
+          supabase
+            .from("vehicle_assignments")
+            .select("*")
+            .eq("tenant_id", currentTenantId)
+            .eq("active", true),
+
+          supabase
+            .from("driver_licence_checks")
+            .select("*")
+            .eq("tenant_id", currentTenantId)
+            .order("checked_at", { ascending: false }),
+
+          supabase
+            .from("driver_licence_endorsements")
+            .select("*")
+            .eq("tenant_id", currentTenantId)
+            .order("created_at", { ascending: false }),
+
+          supabase
+            .from("driver_training")
+            .select("*")
+            .eq("tenant_id", currentTenantId)
             .order("created_at", { ascending: false }),
         ]);
 
-        if (vehicleResult.error) {
-          throw vehicleResult.error;
+        const error =
+          driversResult.error ||
+          vehiclesResult.error ||
+          assignmentsResult.error ||
+          checksResult.error ||
+          endorsementsResult.error ||
+          trainingResult.error;
+
+        if (error) {
+          throw error;
         }
 
-        if (maintenanceResult.error) {
-          throw maintenanceResult.error;
-        }
-
-        const tenantVehicles = (vehicleResult.data ?? []) as Vehicle[];
-
-        const vehicleMap = new Map(
-          tenantVehicles.map((vehicle) => [vehicle.id, vehicle])
+        setDrivers((driversResult.data ?? []) as Driver[]);
+        setVehicles((vehiclesResult.data ?? []) as Vehicle[]);
+        setAssignments(
+          (assignmentsResult.data ?? []) as VehicleAssignment[]
         );
-
-        const tenantMaintenance = (maintenanceResult.data ?? [])
-          .map(
-            (record): MaintenanceRecordWithVehicle => ({
-              ...(record as MaintenanceRecord),
-              vehicle: record.vehicle_id
-                ? vehicleMap.get(record.vehicle_id) ?? null
-                : null,
-            })
-          )
-          .filter((record) => record.vehicle !== null);
-
-        setVehicles(tenantVehicles);
-        setRecords(tenantMaintenance);
+        setChecks((checksResult.data ?? []) as LicenceCheck[]);
+        setEndorsements(
+          (endorsementsResult.data ?? []) as Endorsement[]
+        );
+        setTraining((trainingResult.data ?? []) as Training[]);
       } catch (error) {
         setErrorMessage(
           error instanceof Error
             ? error.message
-            : "Unable to load maintenance information."
+            : "Unable to load driver data."
         );
       } finally {
         setLoading(false);
@@ -188,37 +423,35 @@ export default function MaintenancePage() {
   useEffect(() => {
     async function initialise() {
       try {
-        const resolvedTenantId = await resolveTenantId();
+        const id = await resolveTenant();
 
-        if (!resolvedTenantId) {
+        if (!id) {
           return;
         }
 
-        setTenantId(resolvedTenantId);
-        await loadData(resolvedTenantId);
+        setTenantId(id);
+        await loadData(id);
       } catch (error) {
         setErrorMessage(
           error instanceof Error
             ? error.message
-            : "Unable to initialise maintenance."
+            : "Unable to initialise drivers."
         );
-
         setLoading(false);
       }
     }
 
     void initialise();
-  }, [resolveTenantId, loadData]);
+  }, [resolveTenant, loadData]);
 
-  function resetForm() {
-    setVehicleId("");
-    setMaintenanceType("");
-    setDueDate("");
-    setCompletedDate("");
-    setStatus("due");
-    setCost("");
-    setNotes("");
-    setVorReason("");
+  function updateForm<K extends keyof DriverForm>(
+    field: K,
+    value: DriverForm[K]
+  ) {
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
   }
 
   function clearMessages() {
@@ -226,76 +459,199 @@ export default function MaintenancePage() {
     setErrorMessage("");
   }
 
-  async function createRecord(event: FormEvent<HTMLFormElement>) {
+  function resetForm() {
+    setEditingId(null);
+    setForm(EMPTY_FORM);
+  }
+
+  function editDriver(driver: Driver) {
+    setEditingId(driver.id);
+    setSelectedDriverId(driver.id);
+
+    setForm({
+      name: driver.name ?? "",
+      phone: driver.phone ?? "",
+      email: driver.email ?? "",
+      employee_number: driver.employee_number ?? "",
+      driver_type: driver.driver_type ?? "employee",
+
+      date_of_birth: driver.date_of_birth ?? "",
+      start_date: driver.start_date ?? "",
+      address_line_1: driver.address_line_1 ?? "",
+      address_line_2: driver.address_line_2 ?? "",
+      city: driver.city ?? "",
+      postcode: driver.postcode ?? "",
+      depot: driver.depot ?? "",
+
+      emergency_contact_name: driver.emergency_contact_name ?? "",
+      emergency_contact_phone: driver.emergency_contact_phone ?? "",
+
+      licence_number: driver.licence_number ?? "",
+      licence_issue_date: driver.licence_issue_date ?? "",
+      licence_expiry: driver.licence_expiry ?? "",
+      licence_check_date: driver.licence_check_date ?? "",
+      licence_check_due: driver.licence_check_due ?? "",
+      licence_check_reference: driver.licence_check_reference ?? "",
+      licence_status: driver.licence_status ?? "valid",
+      licence_categories: (driver.licence_categories ?? []).join(", "),
+      points_total: String(driver.points_total ?? 0),
+      disqualified: driver.disqualified ?? false,
+      disqualified_until: driver.disqualified_until ?? "",
+      licence_restriction_notes:
+        driver.licence_restriction_notes ?? "",
+
+      tachograph_required: driver.tachograph_required ?? true,
+      tachograph_card_number: driver.tachograph_card_number ?? "",
+      tachograph_issue_date: driver.tachograph_issue_date ?? "",
+      tachograph_expiry: driver.tachograph_expiry ?? "",
+      tachograph_last_download: driver.tachograph_last_download ?? "",
+      tachograph_next_download_due:
+        driver.tachograph_next_download_due ?? "",
+
+      cpc_required: driver.cpc_required ?? true,
+      cpc_qualified: driver.cpc_qualified ?? false,
+      cpc_expiry: driver.cpc_expiry ?? "",
+      cpc_training_hours: String(driver.cpc_training_hours ?? 0),
+      cpc_notes: driver.cpc_notes ?? "",
+
+      adr_required: driver.adr_required ?? false,
+      adr_qualified: driver.adr_qualified ?? false,
+      adr_certificate_number: driver.adr_certificate_number ?? "",
+      adr_classes: (driver.adr_classes ?? []).join(", "),
+      adr_expiry: driver.adr_expiry ?? "",
+      adr_notes: driver.adr_notes ?? "",
+
+      last_medical_date: driver.last_medical_date ?? "",
+      next_medical_due: driver.next_medical_due ?? "",
+      medical_restrictions: driver.medical_restrictions ?? "",
+
+      right_to_work_checked_at: driver.right_to_work_checked_at ?? "",
+      right_to_work_expiry: driver.right_to_work_expiry ?? "",
+      right_to_work_reference: driver.right_to_work_reference ?? "",
+
+      notes: driver.notes ?? "",
+      active: driver.active ?? true,
+    });
+
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  }
+
+  async function saveDriver(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    clearMessages();
-
     if (!tenantId) {
-      setErrorMessage("Tenant not loaded.");
       return;
     }
 
-    if (!vehicleId) {
-      setErrorMessage("Please select a vehicle.");
-      return;
-    }
-
-    if (!maintenanceType.trim()) {
-      setErrorMessage("Please enter a maintenance type.");
-      return;
-    }
-
+    clearMessages();
     setSaving(true);
 
     try {
       const payload = {
-        vehicle_id: vehicleId,
-        maintenance_type: maintenanceType.trim(),
-        due_date: dueDate || null,
-        completed_date: completedDate || null,
-        status,
-        cost: cost.trim() !== "" ? Number(cost) : null,
-        notes: notes.trim() || null,
+        tenant_id: tenantId,
+        name: form.name.trim(),
+        phone: form.phone.trim() || null,
+        email: form.email.trim() || null,
+        employee_number: form.employee_number.trim() || null,
+        driver_type: form.driver_type || null,
+
+        date_of_birth: form.date_of_birth || null,
+        start_date: form.start_date || null,
+        address_line_1: form.address_line_1.trim() || null,
+        address_line_2: form.address_line_2.trim() || null,
+        city: form.city.trim() || null,
+        postcode: form.postcode.trim().toUpperCase() || null,
+        depot: form.depot.trim() || null,
+
+        emergency_contact_name:
+          form.emergency_contact_name.trim() || null,
+        emergency_contact_phone:
+          form.emergency_contact_phone.trim() || null,
+
+        licence_number: form.licence_number.trim() || null,
+        licence_issue_date: form.licence_issue_date || null,
+        licence_expiry: form.licence_expiry || null,
+        licence_check_date: form.licence_check_date || null,
+        licence_check_due: form.licence_check_due || null,
+        licence_check_reference:
+          form.licence_check_reference.trim() || null,
+        licence_status: form.licence_status || null,
+        licence_categories: splitCsv(form.licence_categories),
+        points_total: Number(form.points_total || 0),
+        disqualified: form.disqualified,
+        disqualified_until: form.disqualified_until || null,
+        licence_restriction_notes:
+          form.licence_restriction_notes.trim() || null,
+
+        tachograph_required: form.tachograph_required,
+        tachograph_card_number:
+          form.tachograph_card_number.trim() || null,
+        tachograph_issue_date: form.tachograph_issue_date || null,
+        tachograph_expiry: form.tachograph_expiry || null,
+        tachograph_last_download:
+          form.tachograph_last_download || null,
+        tachograph_next_download_due:
+          form.tachograph_next_download_due || null,
+
+        cpc_required: form.cpc_required,
+        cpc_qualified: form.cpc_qualified,
+        cpc_expiry: form.cpc_expiry || null,
+        cpc_training_hours: Number(form.cpc_training_hours || 0),
+        cpc_notes: form.cpc_notes.trim() || null,
+
+        adr_required: form.adr_required,
+        adr_qualified: form.adr_qualified,
+        adr_certificate_number:
+          form.adr_certificate_number.trim() || null,
+        adr_classes: splitCsv(form.adr_classes),
+        adr_expiry: form.adr_expiry || null,
+        adr_notes: form.adr_notes.trim() || null,
+
+        last_medical_date: form.last_medical_date || null,
+        next_medical_due: form.next_medical_due || null,
+        medical_restrictions:
+          form.medical_restrictions.trim() || null,
+
+        right_to_work_checked_at:
+          form.right_to_work_checked_at || null,
+        right_to_work_expiry:
+          form.right_to_work_expiry || null,
+        right_to_work_reference:
+          form.right_to_work_reference.trim() || null,
+
+        notes: form.notes.trim() || null,
+        active: form.active,
       };
 
-      const { error } = await supabase
-        .from("maintenance_records")
-        .insert(payload);
-
-      if (error) {
-        throw error;
-      }
-
-      if (status === "vor") {
-        const reason =
-          vorReason.trim() ||
-          notes.trim() ||
-          maintenanceType.trim();
-
-        const { error: vehicleError } = await supabase
-          .from("vehicles")
-          .update({
-            vor: true,
-            active: false,
-            vor_since: new Date().toISOString(),
-            vor_reason: reason,
-          })
-          .eq("id", vehicleId)
+      if (editingId) {
+        const { error } = await supabase
+          .from("drivers")
+          .update(payload)
+          .eq("id", editingId)
           .eq("tenant_id", tenantId);
 
-        if (vehicleError) {
-          throw new Error(
-            `Maintenance record saved, but VOR update failed: ${vehicleError.message}`
-          );
+        if (error) {
+          throw error;
         }
-      }
 
-      setMessage(
-        status === "vor"
-          ? "Maintenance record saved and vehicle marked VOR."
-          : "Maintenance record added."
-      );
+        setMessage("Driver updated.");
+      } else {
+        const { data, error } = await supabase
+          .from("drivers")
+          .insert(payload)
+          .select("id")
+          .single();
+
+        if (error) {
+          throw error;
+        }
+
+        setSelectedDriverId(data.id);
+        setMessage("Driver created.");
+      }
 
       resetForm();
       await loadData(tenantId);
@@ -303,1002 +659,1556 @@ export default function MaintenancePage() {
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : "Unable to save maintenance record."
+          : "Unable to save driver."
       );
     } finally {
       setSaving(false);
     }
   }
 
-  async function deleteMaintenanceRecord(recordId: string) {
-    if (!tenantId) {
-      return;
-    }
-
-    const confirmed = window.confirm(
-      "Delete this maintenance record? This cannot be undone."
-    );
-
-    if (!confirmed) {
+  async function assignVehicle() {
+    if (!selectedDriverId || !vehicleToAssign) {
+      setErrorMessage("Select a driver and vehicle.");
       return;
     }
 
     clearMessages();
-    setDeletingId(recordId);
 
     try {
-      const { error } = await supabase
-        .from("maintenance_records")
-        .delete()
-        .eq("id", recordId);
+      const { error } = await supabase.rpc(
+        "assign_driver_to_vehicle",
+        {
+          p_vehicle_id: vehicleToAssign,
+          p_driver_id: selectedDriverId,
+          p_notes: assignmentNotes.trim() || null,
+        }
+      );
 
       if (error) {
         throw error;
       }
 
-      setMessage("Maintenance record deleted.");
-      await loadData(tenantId);
+      setMessage("Vehicle assigned.");
+      setVehicleToAssign("");
+      setAssignmentNotes("");
+
+      if (tenantId) {
+        await loadData(tenantId);
+      }
     } catch (error) {
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : "Unable to delete maintenance record."
+          : "Unable to assign vehicle."
       );
-    } finally {
-      setDeletingId(null);
     }
   }
 
-  async function placeVehicleVor(vehicle: Vehicle) {
-    if (!tenantId) {
-      return;
-    }
-
-    clearMessages();
-
-    const reason = vorReason.trim();
-
-    if (!reason) {
-      setErrorMessage(
-        "Please enter a VOR reason before taking the vehicle off the road."
-      );
-      return;
-    }
-
-    const confirmed = window.confirm(
-      `Mark ${
-        vehicle.registration ?? "this vehicle"
-      } as VOR?\n\nThe vehicle will be unavailable for operations.`
-    );
+  async function unassignVehicle(vehicleId: string) {
+    const confirmed = window.confirm("Unassign this vehicle?");
 
     if (!confirmed) {
       return;
     }
 
-    setVorSaving(true);
+    try {
+      const { error } = await supabase.rpc("unassign_vehicle", {
+        p_vehicle_id: vehicleId,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setMessage("Vehicle unassigned.");
+
+      if (tenantId) {
+        await loadData(tenantId);
+      }
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to unassign vehicle."
+      );
+    }
+  }
+
+  async function recordLicenceCheck(driver: Driver) {
+    if (!tenantId) {
+      return;
+    }
+
+    const checkedAt = new Date().toISOString().slice(0, 10);
+
+    const nextDue =
+      form.licence_check_due ||
+      addMonths(checkedAt, 6);
 
     try {
-      const now = new Date().toISOString();
-
       const { error } = await supabase
-        .from("vehicles")
+        .from("driver_licence_checks")
+        .insert({
+          tenant_id: tenantId,
+          driver_id: driver.id,
+          checked_at: checkedAt,
+          next_check_due: nextDue,
+          licence_number: driver.licence_number,
+          licence_status: driver.licence_status,
+          licence_expiry: driver.licence_expiry,
+          points_total: driver.points_total ?? 0,
+          disqualified: driver.disqualified ?? false,
+          check_reference:
+            form.licence_check_reference || null,
+          check_code: checkCode.trim() || null,
+          notes: checkNotes.trim() || null,
+        });
+
+      if (error) {
+        throw error;
+      }
+
+      const { error: updateError } = await supabase
+        .from("drivers")
         .update({
-          vor: true,
-          active: false,
-          vor_since: now,
-          vor_reason: reason,
+          licence_check_date: checkedAt,
+          licence_check_due: nextDue,
         })
-        .eq("id", vehicle.id)
+        .eq("id", driver.id)
         .eq("tenant_id", tenantId);
 
-      if (error) {
-        throw error;
+      if (updateError) {
+        throw updateError;
       }
 
-      setMessage(`${vehicle.registration ?? "Vehicle"} is now VOR.`);
-      setVorReason("");
+      setCheckCode("");
+      setCheckNotes("");
+      setMessage("Licence check recorded.");
 
       await loadData(tenantId);
     } catch (error) {
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : "Unable to mark vehicle VOR."
+          : "Unable to record licence check."
       );
-    } finally {
-      setVorSaving(false);
     }
   }
 
-  async function returnVehicleToService(vehicle: Vehicle) {
-    if (!tenantId) {
+  async function addEndorsement() {
+    if (!tenantId || !selectedDriverId || !endorsementCode.trim()) {
       return;
     }
-
-    clearMessages();
-
-    const confirmed = window.confirm(
-      `Return ${vehicle.registration ?? "this vehicle"} to service?`
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
-    setVorSaving(true);
 
     try {
-      const now = new Date().toISOString();
+      const points = Number(endorsementPoints || 0);
 
       const { error } = await supabase
-        .from("vehicles")
-        .update({
-          vor: false,
+        .from("driver_licence_endorsements")
+        .insert({
+          tenant_id: tenantId,
+          driver_id: selectedDriverId,
+          code: endorsementCode.trim().toUpperCase(),
+          points,
+          description: endorsementDescription.trim() || null,
+          endorsement_expiry: endorsementExpiry || null,
           active: true,
-          vor_since: null,
-          vor_reason: null,
-          returned_to_service_at: now,
-        })
-        .eq("id", vehicle.id)
-        .eq("tenant_id", tenantId);
+        });
 
       if (error) {
         throw error;
       }
 
-      setMessage(
-        `${vehicle.registration ?? "Vehicle"} returned to service.`
-      );
+      const activePoints = endorsements
+        .filter(
+          (item) =>
+            item.driver_id === selectedDriverId &&
+            item.active
+        )
+        .reduce((total, item) => total + item.points, 0);
+
+      await supabase
+        .from("drivers")
+        .update({
+          points_total: activePoints + points,
+        })
+        .eq("id", selectedDriverId)
+        .eq("tenant_id", tenantId);
+
+      setEndorsementCode("");
+      setEndorsementPoints("");
+      setEndorsementDescription("");
+      setEndorsementExpiry("");
+      setMessage("Endorsement added.");
 
       await loadData(tenantId);
     } catch (error) {
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : "Unable to return vehicle to service."
+          : "Unable to add endorsement."
       );
-    } finally {
-      setVorSaving(false);
     }
   }
 
-  function vehicleLabel(vehicle: Vehicle) {
-    const description = [
-      vehicle.registration || "No registration",
-      vehicle.vehicle_type,
-      [vehicle.make, vehicle.model].filter(Boolean).join(" ") || null,
-      vehicle.vor || vehicle.active === false ? "VOR" : "In Service",
-    ].filter(Boolean);
+  async function deleteEndorsement(endorsement: Endorsement) {
+    if (!tenantId) {
+      return;
+    }
 
-    return description.join(" • ");
+    if (!window.confirm(`Remove endorsement ${endorsement.code}?`)) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from("driver_licence_endorsements")
+        .delete()
+        .eq("id", endorsement.id);
+
+      if (error) {
+        throw error;
+      }
+
+      const remainingPoints = endorsements
+        .filter(
+          (item) =>
+            item.driver_id === endorsement.driver_id &&
+            item.id !== endorsement.id &&
+            item.active
+        )
+        .reduce((total, item) => total + item.points, 0);
+
+      await supabase
+        .from("drivers")
+        .update({
+          points_total: remainingPoints,
+        })
+        .eq("id", endorsement.driver_id)
+        .eq("tenant_id", tenantId);
+
+      setMessage("Endorsement removed.");
+
+      await loadData(tenantId);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to remove endorsement."
+      );
+    }
   }
+
+  async function addTraining() {
+    if (!tenantId || !selectedDriverId || !trainingType.trim()) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from("driver_training")
+        .insert({
+          tenant_id: tenantId,
+          driver_id: selectedDriverId,
+          training_type: trainingType.trim(),
+          course_name: trainingCourse.trim() || null,
+          provider: trainingProvider.trim() || null,
+          expiry_date: trainingExpiry || null,
+          training_hours:
+            trainingHours !== ""
+              ? Number(trainingHours)
+              : null,
+          status: "valid",
+        });
+
+      if (error) {
+        throw error;
+      }
+
+      setTrainingType("");
+      setTrainingCourse("");
+      setTrainingProvider("");
+      setTrainingExpiry("");
+      setTrainingHours("");
+
+      setMessage("Training record added.");
+
+      await loadData(tenantId);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to add training."
+      );
+    }
+  }
+
+  const filteredDrivers = drivers.filter((driver) => {
+    const query = search.trim().toLowerCase();
+
+    if (!query) {
+      return true;
+    }
+
+    return [
+      driver.name,
+      driver.employee_number,
+      driver.licence_number,
+      driver.phone,
+      driver.email,
+    ]
+      .filter(Boolean)
+      .some((value) =>
+        String(value).toLowerCase().includes(query)
+      );
+  });
+
+  const selectedDriver =
+    drivers.find((driver) => driver.id === selectedDriverId) ?? null;
+
+  const selectedAssignment =
+    assignments.find(
+      (assignment) =>
+        assignment.driver_id === selectedDriverId
+    ) ?? null;
+
+  const selectedVehicle =
+    vehicles.find(
+      (vehicle) =>
+        vehicle.id === selectedAssignment?.vehicle_id
+    ) ?? null;
+
+  const selectedChecks = checks.filter(
+    (check) => check.driver_id === selectedDriverId
+  );
+
+  const selectedEndorsements = endorsements.filter(
+    (item) => item.driver_id === selectedDriverId
+  );
+
+  const selectedTraining = training.filter(
+    (item) => item.driver_id === selectedDriverId
+  );
 
   return (
     <main style={styles.page}>
-      <div style={styles.overlay}>
+      <div style={styles.container}>
         <header style={styles.header}>
           <div>
             <p style={styles.eyebrow}>Fleet Compliance</p>
-
-            <h1 style={styles.title}>Maintenance Records</h1>
-
+            <h1 style={styles.title}>Drivers</h1>
             <p style={styles.subtitle}>
-              Manage maintenance, defects and vehicle off-road status.
+              Driver records, licence checks, tachograph, CPC, ADR,
+              medical compliance and vehicle allocation.
             </p>
-          </div>
-
-          <div style={styles.headerStats}>
-            <div style={styles.stat}>
-              <span style={styles.statLabel}>Fleet</span>
-              <strong style={styles.statValue}>{vehicles.length}</strong>
-            </div>
-
-            <div style={styles.stat}>
-              <span style={styles.statLabel}>VOR</span>
-
-              <strong
-                style={{
-                  ...styles.statValue,
-                  color: vorVehicles.length > 0 ? "#dc2626" : "#16a34a",
-                }}
-              >
-                {vorVehicles.length}
-              </strong>
-            </div>
           </div>
         </header>
 
         {errorMessage ? (
-          <div style={styles.errorMessage}>{errorMessage}</div>
+          <div style={styles.error}>{errorMessage}</div>
         ) : null}
 
         {message ? (
-          <div style={styles.successMessage}>{message}</div>
+          <div style={styles.success}>{message}</div>
         ) : null}
 
-        {vorVehicles.length > 0 ? (
-          <section style={styles.vorPanel}>
-            <div style={styles.sectionHeading}>
-              <div>
-                <h2 style={styles.sectionTitle}>Vehicles Off Road</h2>
+        <form onSubmit={saveDriver} style={styles.card}>
+          <div style={styles.sectionHeader}>
+            <h2 style={styles.sectionTitle}>
+              {editingId ? "Edit Driver" : "Add Driver"}
+            </h2>
 
-                <p style={styles.sectionDescription}>
-                  These vehicles should not be allocated to jobs.
-                </p>
-              </div>
-
-              <span style={styles.vorBadge}>
-                {vorVehicles.length} VOR
-              </span>
-            </div>
-
-            <div style={styles.vorGrid}>
-              {vorVehicles.map((vehicle) => (
-                <div key={vehicle.id} style={styles.vorCard}>
-                  <div>
-                    <strong style={styles.vehicleRegistration}>
-                      {vehicle.registration ?? "Vehicle"}
-                    </strong>
-
-                    <div style={styles.vehicleDescription}>
-                      {[
-                        vehicle.make,
-                        vehicle.model,
-                        vehicle.vehicle_type,
-                      ]
-                        .filter(Boolean)
-                        .join(" • ") || "No description"}
-                    </div>
-                  </div>
-
-                  <div style={styles.vorReasonBox}>
-                    <span style={styles.smallLabel}>VOR reason</span>
-
-                    <strong>
-                      {vehicle.vor_reason || "Not recorded"}
-                    </strong>
-
-                    {vehicle.vor_since ? (
-                      <span style={styles.smallText}>
-                        Since {formatDateTime(vehicle.vor_since)}
-                      </span>
-                    ) : null}
-                  </div>
-
-                  <button
-                    type="button"
-                    disabled={vorSaving}
-                    onClick={() =>
-                      void returnVehicleToService(vehicle)
-                    }
-                    style={styles.returnButton}
-                  >
-                    Return to Service
-                  </button>
-                </div>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        <section style={styles.formCard}>
-          <div style={styles.sectionHeading}>
-            <div>
-              <h2 style={styles.sectionTitle}>
-                Add Maintenance Record
-              </h2>
-
-              <p style={styles.sectionDescription}>
-                Record inspections, repairs, servicing or defects.
-              </p>
-            </div>
+            {editingId ? (
+              <button
+                type="button"
+                onClick={resetForm}
+                style={styles.secondaryButton}
+              >
+                Cancel
+              </button>
+            ) : null}
           </div>
 
-          <form onSubmit={createRecord} style={styles.form}>
-            <label style={styles.field}>
-              <span style={styles.label}>Vehicle</span>
-
-              <select
-                value={vehicleId}
-                onChange={(event) => {
-                  setVehicleId(event.target.value);
-                  setVorReason("");
-                }}
-                style={styles.input}
+          <Section title="Driver Profile">
+            <div style={styles.grid}>
+              <TextField
+                label="Full Name"
+                value={form.name}
+                onChange={(value) => updateForm("name", value)}
                 required
-              >
-                <option value="">Select vehicle</option>
-
-                {vehicles.map((vehicle) => (
-                  <option key={vehicle.id} value={vehicle.id}>
-                    {vehicleLabel(vehicle)}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {selectedVehicle ? (
-              <div
-                style={
-                  selectedVehicle.vor ||
-                  selectedVehicle.active === false
-                    ? styles.selectedVehicleVor
-                    : styles.selectedVehicleActive
-                }
-              >
-                <div>
-                  <span style={styles.smallLabel}>
-                    Vehicle Status
-                  </span>
-
-                  <strong style={styles.selectedVehicleTitle}>
-                    {selectedVehicle.registration ?? "Vehicle"}
-                  </strong>
-
-                  <span style={styles.smallText}>
-                    {selectedVehicle.vor ||
-                    selectedVehicle.active === false
-                      ? "Vehicle Off Road"
-                      : "Available for Service"}
-                  </span>
-                </div>
-
-                {selectedVehicle.vor ||
-                selectedVehicle.active === false ? (
-                  <button
-                    type="button"
-                    disabled={vorSaving}
-                    onClick={() =>
-                      void returnVehicleToService(selectedVehicle)
-                    }
-                    style={styles.returnButton}
-                  >
-                    Return to Service
-                  </button>
-                ) : (
-                  <div style={styles.vorControl}>
-                    <input
-                      type="text"
-                      value={vorReason}
-                      onChange={(event) =>
-                        setVorReason(event.target.value)
-                      }
-                      placeholder="Reason for VOR"
-                      style={styles.input}
-                    />
-
-                    <button
-                      type="button"
-                      disabled={vorSaving}
-                      onClick={() =>
-                        void placeVehicleVor(selectedVehicle)
-                      }
-                      style={styles.vorButton}
-                    >
-                      VOR Vehicle
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : null}
-
-            <div style={styles.formGrid}>
-              <label style={styles.field}>
-                <span style={styles.label}>
-                  Maintenance Type
-                </span>
-
-                <input
-                  type="text"
-                  placeholder="e.g. PMI, tyres, brakes, service"
-                  value={maintenanceType}
-                  onChange={(event) =>
-                    setMaintenanceType(event.target.value)
-                  }
-                  style={styles.input}
-                  required
-                />
-              </label>
-
-              <label style={styles.field}>
-                <span style={styles.label}>Status</span>
-
-                <select
-                  value={status}
-                  onChange={(event) =>
-                    setStatus(event.target.value)
-                  }
-                  style={styles.input}
-                >
-                  <option value="due">Due</option>
-                  <option value="scheduled">Scheduled</option>
-                  <option value="in_progress">In Progress</option>
-                  <option value="completed">Completed</option>
-                  <option value="overdue">Overdue</option>
-                  <option value="vor">VOR</option>
-                </select>
-              </label>
-
-              <label style={styles.field}>
-                <span style={styles.label}>Due Date</span>
-
-                <input
-                  type="date"
-                  value={dueDate}
-                  onChange={(event) =>
-                    setDueDate(event.target.value)
-                  }
-                  style={styles.input}
-                />
-              </label>
-
-              <label style={styles.field}>
-                <span style={styles.label}>
-                  Completed Date
-                </span>
-
-                <input
-                  type="date"
-                  value={completedDate}
-                  onChange={(event) =>
-                    setCompletedDate(event.target.value)
-                  }
-                  style={styles.input}
-                />
-              </label>
-
-              <label style={styles.field}>
-                <span style={styles.label}>Cost</span>
-
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  placeholder="0.00"
-                  value={cost}
-                  onChange={(event) =>
-                    setCost(event.target.value)
-                  }
-                  style={styles.input}
-                />
-              </label>
-            </div>
-
-            {status === "vor" &&
-            selectedVehicle &&
-            !selectedVehicle.vor ? (
-              <label style={styles.field}>
-                <span style={styles.label}>VOR Reason</span>
-
-                <input
-                  type="text"
-                  value={vorReason}
-                  onChange={(event) =>
-                    setVorReason(event.target.value)
-                  }
-                  placeholder="Why is the vehicle off road?"
-                  style={styles.input}
-                />
-              </label>
-            ) : null}
-
-            <label style={styles.field}>
-              <span style={styles.label}>Notes</span>
-
-              <textarea
-                value={notes}
-                onChange={(event) =>
-                  setNotes(event.target.value)
-                }
-                placeholder="Maintenance notes..."
-                rows={4}
-                style={{
-                  ...styles.input,
-                  resize: "vertical",
-                }}
               />
-            </label>
 
-            <button
-              type="submit"
-              disabled={saving}
-              style={{
-                ...styles.primaryButton,
-                opacity: saving ? 0.65 : 1,
-              }}
-            >
-              {saving
-                ? "Saving..."
-                : "Add Maintenance Record"}
-            </button>
-          </form>
-        </section>
+              <TextField
+                label="Employee / Driver Number"
+                value={form.employee_number}
+                onChange={(value) =>
+                  updateForm("employee_number", value)
+                }
+              />
 
-        <section style={styles.recordsSection}>
-          <div style={styles.sectionHeading}>
-            <div>
-              <h2 style={styles.sectionTitle}>
-                Maintenance History
-              </h2>
+              <TextField
+                label="Phone"
+                value={form.phone}
+                onChange={(value) => updateForm("phone", value)}
+              />
 
-              <p style={styles.sectionDescription}>
-                {records.length} maintenance record
-                {records.length === 1 ? "" : "s"}
-              </p>
+              <TextField
+                label="Email"
+                value={form.email}
+                onChange={(value) => updateForm("email", value)}
+                type="email"
+              />
+
+              <TextField
+                label="Date of Birth"
+                value={form.date_of_birth}
+                onChange={(value) =>
+                  updateForm("date_of_birth", value)
+                }
+                type="date"
+              />
+
+              <TextField
+                label="Start Date"
+                value={form.start_date}
+                onChange={(value) =>
+                  updateForm("start_date", value)
+                }
+                type="date"
+              />
+
+              <TextField
+                label="Depot / Base"
+                value={form.depot}
+                onChange={(value) => updateForm("depot", value)}
+              />
+
+              <SelectField
+                label="Driver Type"
+                value={form.driver_type}
+                onChange={(value) =>
+                  updateForm("driver_type", value)
+                }
+                options={[
+                  ["employee", "Employee"],
+                  ["agency", "Agency"],
+                  ["subcontractor", "Subcontractor"],
+                  ["owner_driver", "Owner Driver"],
+                ]}
+              />
             </div>
+
+            <div style={styles.grid}>
+              <TextField
+                label="Address Line 1"
+                value={form.address_line_1}
+                onChange={(value) =>
+                  updateForm("address_line_1", value)
+                }
+              />
+
+              <TextField
+                label="Address Line 2"
+                value={form.address_line_2}
+                onChange={(value) =>
+                  updateForm("address_line_2", value)
+                }
+              />
+
+              <TextField
+                label="City"
+                value={form.city}
+                onChange={(value) => updateForm("city", value)}
+              />
+
+              <TextField
+                label="Postcode"
+                value={form.postcode}
+                onChange={(value) =>
+                  updateForm("postcode", value.toUpperCase())
+                }
+              />
+            </div>
+          </Section>
+
+          <Section title="Driving Licence">
+            <div style={styles.grid}>
+              <TextField
+                label="Licence Number"
+                value={form.licence_number}
+                onChange={(value) =>
+                  updateForm("licence_number", value)
+                }
+              />
+
+              <TextField
+                label="Issue Date"
+                value={form.licence_issue_date}
+                onChange={(value) =>
+                  updateForm("licence_issue_date", value)
+                }
+                type="date"
+              />
+
+              <TextField
+                label="Licence Expiry"
+                value={form.licence_expiry}
+                onChange={(value) =>
+                  updateForm("licence_expiry", value)
+                }
+                type="date"
+              />
+
+              <TextField
+                label="Last Licence Check"
+                value={form.licence_check_date}
+                onChange={(value) =>
+                  updateForm("licence_check_date", value)
+                }
+                type="date"
+              />
+
+              <TextField
+                label="Next Licence Check Due"
+                value={form.licence_check_due}
+                onChange={(value) =>
+                  updateForm("licence_check_due", value)
+                }
+                type="date"
+              />
+
+              <TextField
+                label="Check Reference"
+                value={form.licence_check_reference}
+                onChange={(value) =>
+                  updateForm("licence_check_reference", value)
+                }
+              />
+
+              <TextField
+                label="Categories (comma separated)"
+                value={form.licence_categories}
+                onChange={(value) =>
+                  updateForm("licence_categories", value)
+                }
+                placeholder="B, C, C+E"
+              />
+
+              <TextField
+                label="Points"
+                value={form.points_total}
+                onChange={(value) =>
+                  updateForm("points_total", value)
+                }
+                type="number"
+              />
+
+              <SelectField
+                label="Licence Status"
+                value={form.licence_status}
+                onChange={(value) =>
+                  updateForm("licence_status", value)
+                }
+                options={[
+                  ["valid", "Valid"],
+                  ["expired", "Expired"],
+                  ["suspended", "Suspended"],
+                  ["revoked", "Revoked"],
+                ]}
+              />
+            </div>
+
+            <CheckboxField
+              label="Driver is disqualified"
+              checked={form.disqualified}
+              onChange={(value) =>
+                updateForm("disqualified", value)
+              }
+            />
+          </Section>
+
+          <Section title="Tachograph">
+            <CheckboxField
+              label="Tachograph required"
+              checked={form.tachograph_required}
+              onChange={(value) =>
+                updateForm("tachograph_required", value)
+              }
+            />
+
+            <div style={styles.grid}>
+              <TextField
+                label="Tacho Card Number"
+                value={form.tachograph_card_number}
+                onChange={(value) =>
+                  updateForm("tachograph_card_number", value)
+                }
+              />
+
+              <TextField
+                label="Card Issue Date"
+                value={form.tachograph_issue_date}
+                onChange={(value) =>
+                  updateForm("tachograph_issue_date", value)
+                }
+                type="date"
+              />
+
+              <TextField
+                label="Card Expiry"
+                value={form.tachograph_expiry}
+                onChange={(value) =>
+                  updateForm("tachograph_expiry", value)
+                }
+                type="date"
+              />
+
+              <TextField
+                label="Last Tacho Download"
+                value={form.tachograph_last_download}
+                onChange={(value) =>
+                  updateForm("tachograph_last_download", value)
+                }
+                type="date"
+              />
+
+              <TextField
+                label="Next Download Due"
+                value={form.tachograph_next_download_due}
+                onChange={(value) =>
+                  updateForm("tachograph_next_download_due", value)
+                }
+                type="date"
+              />
+            </div>
+          </Section>
+
+          <Section title="CPC & ADR">
+            <div style={styles.grid}>
+              <CheckboxField
+                label="CPC Required"
+                checked={form.cpc_required}
+                onChange={(value) =>
+                  updateForm("cpc_required", value)
+                }
+              />
+
+              <CheckboxField
+                label="CPC Qualified"
+                checked={form.cpc_qualified}
+                onChange={(value) =>
+                  updateForm("cpc_qualified", value)
+                }
+              />
+
+              <TextField
+                label="CPC Expiry"
+                value={form.cpc_expiry}
+                onChange={(value) =>
+                  updateForm("cpc_expiry", value)
+                }
+                type="date"
+              />
+
+              <TextField
+                label="CPC Training Hours"
+                value={form.cpc_training_hours}
+                onChange={(value) =>
+                  updateForm("cpc_training_hours", value)
+                }
+                type="number"
+              />
+
+              <CheckboxField
+                label="ADR Required"
+                checked={form.adr_required}
+                onChange={(value) =>
+                  updateForm("adr_required", value)
+                }
+              />
+
+              <CheckboxField
+                label="ADR Qualified"
+                checked={form.adr_qualified}
+                onChange={(value) =>
+                  updateForm("adr_qualified", value)
+                }
+              />
+
+              <TextField
+                label="ADR Certificate"
+                value={form.adr_certificate_number}
+                onChange={(value) =>
+                  updateForm("adr_certificate_number", value)
+                }
+              />
+
+              <TextField
+                label="ADR Classes"
+                value={form.adr_classes}
+                onChange={(value) =>
+                  updateForm("adr_classes", value)
+                }
+                placeholder="2, 3, 4.1, 6.1"
+              />
+
+              <TextField
+                label="ADR Expiry"
+                value={form.adr_expiry}
+                onChange={(value) =>
+                  updateForm("adr_expiry", value)
+                }
+                type="date"
+              />
+            </div>
+          </Section>
+
+          <Section title="Medical & Right to Work">
+            <div style={styles.grid}>
+              <TextField
+                label="Last Medical"
+                value={form.last_medical_date}
+                onChange={(value) =>
+                  updateForm("last_medical_date", value)
+                }
+                type="date"
+              />
+
+              <TextField
+                label="Next Medical Due"
+                value={form.next_medical_due}
+                onChange={(value) =>
+                  updateForm("next_medical_due", value)
+                }
+                type="date"
+              />
+
+              <TextField
+                label="Right to Work Checked"
+                value={form.right_to_work_checked_at}
+                onChange={(value) =>
+                  updateForm("right_to_work_checked_at", value)
+                }
+                type="date"
+              />
+
+              <TextField
+                label="Right to Work Expiry"
+                value={form.right_to_work_expiry}
+                onChange={(value) =>
+                  updateForm("right_to_work_expiry", value)
+                }
+                type="date"
+              />
+
+              <TextField
+                label="Right to Work Reference"
+                value={form.right_to_work_reference}
+                onChange={(value) =>
+                  updateForm("right_to_work_reference", value)
+                }
+              />
+            </div>
+          </Section>
+
+          <Section title="Emergency Contact & Notes">
+            <div style={styles.grid}>
+              <TextField
+                label="Emergency Contact"
+                value={form.emergency_contact_name}
+                onChange={(value) =>
+                  updateForm("emergency_contact_name", value)
+                }
+              />
+
+              <TextField
+                label="Emergency Phone"
+                value={form.emergency_contact_phone}
+                onChange={(value) =>
+                  updateForm("emergency_contact_phone", value)
+                }
+              />
+            </div>
+
+            <textarea
+              value={form.notes}
+              onChange={(event) =>
+                updateForm("notes", event.target.value)
+              }
+              rows={4}
+              placeholder="Driver notes..."
+              style={styles.input}
+            />
+          </Section>
+
+          <button
+            type="submit"
+            disabled={saving}
+            style={styles.primaryButton}
+          >
+            {saving
+              ? "Saving..."
+              : editingId
+                ? "Update Driver"
+                : "Add Driver"}
+          </button>
+        </form>
+
+        <section style={styles.card}>
+          <div style={styles.sectionHeader}>
+            <h2 style={styles.sectionTitle}>Driver Records</h2>
+
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search drivers..."
+              style={styles.search}
+            />
           </div>
 
           {loading ? (
-            <div style={styles.empty}>
-              Loading maintenance records...
-            </div>
-          ) : records.length === 0 ? (
-            <div style={styles.empty}>
-              No maintenance records found.
-            </div>
+            <div style={styles.empty}>Loading drivers...</div>
           ) : (
-            <div style={styles.recordGrid}>
-              {records.map((record) => (
-                <article
-                  key={record.id}
-                  style={styles.recordCard}
-                >
-                  <div style={styles.recordHeader}>
-                    <div>
-                      <h3 style={styles.recordTitle}>
-                        {record.maintenance_type}
-                      </h3>
+            <div style={styles.driverGrid}>
+              {filteredDrivers.map((driver) => {
+                const warnings = getDriverWarnings(driver);
 
-                      <p style={styles.recordVehicle}>
-                        {record.vehicle?.registration ||
-                          [
-                            record.vehicle?.make,
-                            record.vehicle?.model,
-                          ]
-                            .filter(Boolean)
-                            .join(" ") ||
-                          "Vehicle"}
-                      </p>
-                    </div>
+                const assignment = assignments.find(
+                  (item) => item.driver_id === driver.id
+                );
 
-                    <span
-                      style={maintenanceStatusStyle(
-                        record.status
-                      )}
-                    >
-                      {formatStatus(record.status)}
-                    </span>
-                  </div>
+                const vehicle = vehicles.find(
+                  (item) => item.id === assignment?.vehicle_id
+                );
 
-                  <div style={styles.recordDetails}>
-                    <RecordItem
-                      label="Due"
-                      value={record.due_date || "—"}
-                    />
-
-                    <RecordItem
-                      label="Completed"
-                      value={
-                        record.completed_date || "—"
-                      }
-                    />
-
-                    <RecordItem
-                      label="Cost"
-                      value={
-                        record.cost !== null
-                          ? `£${Number(
-                              record.cost
-                            ).toFixed(2)}`
-                          : "—"
-                      }
-                    />
-                  </div>
-
-                  {record.notes ? (
-                    <div style={styles.notesBox}>
-                      {record.notes}
-                    </div>
-                  ) : null}
-
-                  {record.vehicle?.vor ? (
-                    <div style={styles.recordVorWarning}>
-                      Vehicle currently VOR
-                    </div>
-                  ) : null}
-
-                  <button
-                    type="button"
-                    disabled={deletingId === record.id}
-                    onClick={() =>
-                      void deleteMaintenanceRecord(
-                        record.id
-                      )
-                    }
+                return (
+                  <article
+                    key={driver.id}
                     style={{
-                      ...styles.deleteButton,
-                      opacity:
-                        deletingId === record.id
-                          ? 0.6
-                          : 1,
+                      ...styles.driverCard,
+                      ...(selectedDriverId === driver.id
+                        ? styles.selectedDriverCard
+                        : {}),
                     }}
+                    onClick={() => setSelectedDriverId(driver.id)}
                   >
-                    {deletingId === record.id
-                      ? "Deleting..."
-                      : "Delete Record"}
-                  </button>
-                </article>
-              ))}
+                    <div style={styles.driverCardHeader}>
+                      <div>
+                        <h3 style={styles.driverName}>
+                          {driver.name}
+                        </h3>
+
+                        <span style={styles.muted}>
+                          {driver.employee_number || driver.driver_type || ""}
+                        </span>
+                      </div>
+
+                      <span
+                        style={
+                          driver.active
+                            ? styles.activeBadge
+                            : styles.inactiveBadge
+                        }
+                      >
+                        {driver.active ? "Active" : "Inactive"}
+                      </span>
+                    </div>
+
+                    <div style={styles.driverDetails}>
+                      <Info label="Licence" value={driver.licence_number} />
+                      <Info
+                        label="Points"
+                        value={String(driver.points_total ?? 0)}
+                      />
+                      <Info
+                        label="Vehicle"
+                        value={vehicle?.registration ?? "Unassigned"}
+                      />
+                    </div>
+
+                    <div style={styles.warningList}>
+                      {warnings.length === 0 ? (
+                        <span style={styles.goodBadge}>
+                          ✓ Compliance current
+                        </span>
+                      ) : (
+                        warnings.map((warning) => (
+                          <span
+                            key={warning}
+                            style={styles.warningBadge}
+                          >
+                            ⚠ {warning}
+                          </span>
+                        ))
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        editDriver(driver);
+                      }}
+                      style={styles.secondaryButton}
+                    >
+                      Edit Driver
+                    </button>
+                  </article>
+                );
+              })}
             </div>
           )}
         </section>
+
+        {selectedDriver ? (
+          <>
+            <section style={styles.card}>
+              <h2 style={styles.sectionTitle}>
+                {selectedDriver.name} — Vehicle Assignment
+              </h2>
+
+              {selectedVehicle ? (
+                <div style={styles.assignmentBox}>
+                  <div>
+                    <span style={styles.muted}>Current Vehicle</span>
+                    <strong style={styles.vehicleRegistration}>
+                      {selectedVehicle.registration}
+                    </strong>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void unassignVehicle(selectedVehicle.id)
+                    }
+                    style={styles.dangerButton}
+                  >
+                    Unassign
+                  </button>
+                </div>
+              ) : (
+                <div style={styles.grid}>
+                  <SelectField
+                    label="Assign Vehicle"
+                    value={vehicleToAssign}
+                    onChange={setVehicleToAssign}
+                    options={[
+                      ["", "Select vehicle"],
+                      ...vehicles
+                        .filter(
+                          (vehicle) =>
+                            vehicle.active !== false &&
+                            vehicle.vor !== true
+                        )
+                        .map(
+                          (vehicle) =>
+                            [
+                              vehicle.id,
+                              `${vehicle.registration ?? "Vehicle"} ${
+                                vehicle.make ?? ""
+                              } ${vehicle.model ?? ""}`,
+                            ] as [string, string]
+                        ),
+                    ]}
+                  />
+
+                  <TextField
+                    label="Assignment Notes"
+                    value={assignmentNotes}
+                    onChange={setAssignmentNotes}
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => void assignVehicle()}
+                    style={styles.primaryButton}
+                  >
+                    Assign Vehicle
+                  </button>
+                </div>
+              )}
+            </section>
+
+            <section style={styles.card}>
+              <h2 style={styles.sectionTitle}>Licence Checks</h2>
+
+              <div style={styles.grid}>
+                <TextField
+                  label="Check Code"
+                  value={checkCode}
+                  onChange={setCheckCode}
+                />
+
+                <TextField
+                  label="Notes"
+                  value={checkNotes}
+                  onChange={setCheckNotes}
+                />
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    void recordLicenceCheck(selectedDriver)
+                  }
+                  style={styles.primaryButton}
+                >
+                  Record Licence Check
+                </button>
+              </div>
+
+              <div style={styles.list}>
+                {selectedChecks.map((check) => (
+                  <div key={check.id} style={styles.listItem}>
+                    <strong>
+                      Checked {formatDate(check.checked_at)}
+                    </strong>
+
+                    <span>
+                      Points: {check.points_total} • Next due:{" "}
+                      {formatDate(check.next_check_due)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section style={styles.card}>
+              <h2 style={styles.sectionTitle}>
+                Licence Endorsements / Points
+              </h2>
+
+              <div style={styles.grid}>
+                <TextField
+                  label="Code"
+                  value={endorsementCode}
+                  onChange={setEndorsementCode}
+                  placeholder="SP30"
+                />
+
+                <TextField
+                  label="Points"
+                  value={endorsementPoints}
+                  onChange={setEndorsementPoints}
+                  type="number"
+                />
+
+                <TextField
+                  label="Description"
+                  value={endorsementDescription}
+                  onChange={setEndorsementDescription}
+                />
+
+                <TextField
+                  label="Expiry"
+                  value={endorsementExpiry}
+                  onChange={setEndorsementExpiry}
+                  type="date"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => void addEndorsement()}
+                  style={styles.primaryButton}
+                >
+                  Add Endorsement
+                </button>
+              </div>
+
+              <div style={styles.list}>
+                {selectedEndorsements.map((item) => (
+                  <div key={item.id} style={styles.listItem}>
+                    <div>
+                      <strong>
+                        {item.code} — {item.points} points
+                      </strong>
+
+                      <div style={styles.muted}>
+                        {item.description || "No description"}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void deleteEndorsement(item)
+                      }
+                      style={styles.dangerButton}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section style={styles.card}>
+              <h2 style={styles.sectionTitle}>
+                Training & Qualifications
+              </h2>
+
+              <div style={styles.grid}>
+                <TextField
+                  label="Training Type"
+                  value={trainingType}
+                  onChange={setTrainingType}
+                  placeholder="CPC / ADR / HIAB"
+                />
+
+                <TextField
+                  label="Course"
+                  value={trainingCourse}
+                  onChange={setTrainingCourse}
+                />
+
+                <TextField
+                  label="Provider"
+                  value={trainingProvider}
+                  onChange={setTrainingProvider}
+                />
+
+                <TextField
+                  label="Hours"
+                  value={trainingHours}
+                  onChange={setTrainingHours}
+                  type="number"
+                />
+
+                <TextField
+                  label="Expiry"
+                  value={trainingExpiry}
+                  onChange={setTrainingExpiry}
+                  type="date"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => void addTraining()}
+                  style={styles.primaryButton}
+                >
+                  Add Training
+                </button>
+              </div>
+
+              <div style={styles.list}>
+                {selectedTraining.map((item) => (
+                  <div key={item.id} style={styles.listItem}>
+                    <div>
+                      <strong>{item.training_type}</strong>
+                      <div style={styles.muted}>
+                        {item.course_name || ""}
+                        {item.provider
+                          ? ` • ${item.provider}`
+                          : ""}
+                      </div>
+                    </div>
+
+                    <span>
+                      {item.expiry_date
+                        ? `Expires ${formatDate(item.expiry_date)}`
+                        : "No expiry"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </>
+        ) : null}
       </div>
     </main>
   );
 }
 
-function RecordItem({
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section style={styles.section}>
+      <h3 style={styles.subheading}>{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+function TextField({
+  label,
+  value,
+  onChange,
+  type = "text",
+  placeholder,
+  required,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  placeholder?: string;
+  required?: boolean;
+}) {
+  return (
+    <label style={styles.field}>
+      <span style={styles.label}>{label}</span>
+
+      <input
+        type={type}
+        value={value}
+        required={required}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        style={styles.input}
+      />
+    </label>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: [string, string][];
+}) {
+  return (
+    <label style={styles.field}>
+      <span style={styles.label}>{label}</span>
+
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        style={styles.input}
+      >
+        {options.map(([optionValue, text]) => (
+          <option key={optionValue} value={optionValue}>
+            {text}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function CheckboxField({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <label style={styles.checkbox}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+
+      {label}
+    </label>
+  );
+}
+
+function Info({
   label,
   value,
 }: {
   label: string;
-  value: string;
+  value: string | null | undefined;
 }) {
   return (
     <div>
       <span style={styles.smallLabel}>{label}</span>
-
-      <strong style={styles.recordValue}>{value}</strong>
+      <strong style={styles.infoValue}>{value || "—"}</strong>
     </div>
   );
 }
 
-function formatStatus(value: string) {
+function splitCsv(value: string): string[] {
   return value
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (character) =>
-      character.toUpperCase()
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function addMonths(date: string, months: number): string {
+  const result = new Date(`${date}T00:00:00`);
+  result.setMonth(result.getMonth() + months);
+  return result.toISOString().slice(0, 10);
+}
+
+function formatDate(value: string | null | undefined): string {
+  if (!value) {
+    return "—";
+  }
+
+  return new Date(`${value}T00:00:00`).toLocaleDateString("en-GB");
+}
+
+function getDriverWarnings(driver: Driver): string[] {
+  const warnings: string[] = [];
+
+  checkDateWarning(driver.licence_expiry, "Licence", warnings);
+  checkDateWarning(driver.licence_check_due, "Licence check", warnings);
+
+  if (driver.tachograph_required) {
+    checkDateWarning(
+      driver.tachograph_expiry,
+      "Tacho card",
+      warnings
     );
+
+    checkDateWarning(
+      driver.tachograph_next_download_due,
+      "Tacho download",
+      warnings
+    );
+  }
+
+  if (driver.cpc_required) {
+    if (!driver.cpc_qualified) {
+      warnings.push("CPC not qualified");
+    }
+
+    checkDateWarning(driver.cpc_expiry, "CPC", warnings);
+  }
+
+  if (driver.adr_required) {
+    if (!driver.adr_qualified) {
+      warnings.push("ADR qualification required");
+    }
+
+    checkDateWarning(driver.adr_expiry, "ADR", warnings);
+  }
+
+  checkDateWarning(driver.next_medical_due, "Medical", warnings);
+
+  checkDateWarning(
+    driver.right_to_work_expiry,
+    "Right to work",
+    warnings
+  );
+
+  if ((driver.points_total ?? 0) >= 6) {
+    warnings.push(`${driver.points_total} licence points`);
+  }
+
+  if (driver.disqualified) {
+    warnings.push("Driver disqualified");
+  }
+
+  return warnings;
 }
 
-function formatDateTime(value: string) {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
+function checkDateWarning(
+  date: string | null,
+  label: string,
+  warnings: string[]
+) {
+  if (!date) {
+    return;
   }
 
-  return date.toLocaleString("en-GB", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+  const today = new Date();
+  const target = new Date(`${date}T23:59:59`);
+  const days = Math.ceil(
+    (target.getTime() - today.getTime()) /
+      (1000 * 60 * 60 * 24)
+  );
 
-function maintenanceStatusStyle(
-  status: string
-): CSSProperties {
-  const base: CSSProperties = {
-    display: "inline-flex",
-    borderRadius: 999,
-    padding: "6px 10px",
-    fontSize: 12,
-    fontWeight: 800,
-    whiteSpace: "nowrap",
-  };
-
-  if (status === "completed") {
-    return {
-      ...base,
-      background: "#dcfce7",
-      color: "#166534",
-    };
+  if (days < 0) {
+    warnings.push(`${label} overdue`);
+  } else if (days <= 30) {
+    warnings.push(`${label} due in ${days} days`);
   }
-
-  if (status === "vor" || status === "overdue") {
-    return {
-      ...base,
-      background: "#fee2e2",
-      color: "#991b1b",
-    };
-  }
-
-  if (status === "in_progress") {
-    return {
-      ...base,
-      background: "#dbeafe",
-      color: "#1d4ed8",
-    };
-  }
-
-  return {
-    ...base,
-    background: "#fef3c7",
-    color: "#92400e",
-  };
 }
 
 const styles: Record<string, CSSProperties> = {
   page: {
     minHeight: "100vh",
-    padding: 30,
-    boxSizing: "border-box",
-    backgroundImage:
-      "url('https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d')",
-    backgroundSize: "cover",
-    backgroundPosition: "center",
-    backgroundAttachment: "fixed",
+    background: "#f8fafc",
+    padding: "32px 20px 60px",
   },
 
-  overlay: {
-    maxWidth: 1400,
+  container: {
+    maxWidth: 1450,
     margin: "0 auto",
-    background: "rgba(2,6,23,0.72)",
-    padding: 28,
-    borderRadius: 22,
-    backdropFilter: "blur(3px)",
   },
 
   header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    flexWrap: "wrap",
-    gap: 20,
     marginBottom: 24,
   },
 
   eyebrow: {
     margin: "0 0 6px",
-    color: "#93c5fd",
-    fontSize: 12,
+    color: "#2563eb",
     fontWeight: 900,
     textTransform: "uppercase",
-    letterSpacing: "0.1em",
+    fontSize: 12,
+    letterSpacing: "0.08em",
   },
 
   title: {
-    color: "#ffffff",
     margin: 0,
-    fontSize: "clamp(30px, 5vw, 46px)",
-    letterSpacing: "-0.03em",
+    fontSize: 46,
+    color: "#0f172a",
   },
 
   subtitle: {
-    color: "#cbd5e1",
-    margin: "7px 0 0",
-  },
-
-  headerStats: {
-    display: "flex",
-    gap: 10,
-  },
-
-  stat: {
-    minWidth: 90,
-    background: "rgba(255,255,255,0.95)",
-    borderRadius: 13,
-    padding: "12px 16px",
-  },
-
-  statLabel: {
-    display: "block",
-    fontSize: 11,
-    fontWeight: 800,
     color: "#64748b",
-    textTransform: "uppercase",
+    maxWidth: 800,
   },
 
-  statValue: {
-    display: "block",
-    marginTop: 4,
-    fontSize: 25,
-    color: "#0f172a",
-  },
-
-  successMessage: {
-    background: "#dcfce7",
-    color: "#166534",
-    border: "1px solid #86efac",
-    padding: 13,
-    borderRadius: 11,
-    marginBottom: 18,
-    fontWeight: 700,
-  },
-
-  errorMessage: {
-    background: "#fee2e2",
-    color: "#991b1b",
-    border: "1px solid #fecaca",
-    padding: 13,
-    borderRadius: 11,
-    marginBottom: 18,
-    fontWeight: 700,
-  },
-
-  formCard: {
-    background: "rgba(255,255,255,0.97)",
-    padding: 22,
-    borderRadius: 17,
-    boxShadow: "0 10px 35px rgba(0,0,0,0.2)",
-    marginBottom: 22,
-  },
-
-  form: {
-    display: "grid",
-    gap: 16,
-  },
-
-  formGrid: {
-    display: "grid",
-    gridTemplateColumns:
-      "repeat(auto-fit, minmax(210px, 1fr))",
-    gap: 14,
-  },
-
-  field: {
-    display: "grid",
-    gap: 7,
-  },
-
-  label: {
-    fontSize: 13,
-    fontWeight: 800,
-    color: "#334155",
-  },
-
-  input: {
-    width: "100%",
-    padding: "12px 14px",
-    borderRadius: 10,
-    border: "1px solid #cbd5e1",
-    boxSizing: "border-box",
-    fontSize: 14,
+  card: {
     background: "#ffffff",
-    color: "#0f172a",
+    border: "1px solid #e2e8f0",
+    borderRadius: 18,
+    padding: 22,
+    marginBottom: 22,
+    boxShadow: "0 8px 28px rgba(15,23,42,0.06)",
   },
 
-  primaryButton: {
-    width: "100%",
-    background: "#2563eb",
-    color: "#ffffff",
-    border: "none",
-    borderRadius: 10,
-    padding: 13,
-    cursor: "pointer",
-    fontWeight: 800,
-    fontSize: 14,
+  section: {
+    paddingTop: 18,
+    marginTop: 18,
+    borderTop: "1px solid #e2e8f0",
   },
 
-  sectionHeading: {
+  sectionHeader: {
     display: "flex",
+    alignItems: "center",
     justifyContent: "space-between",
-    alignItems: "flex-start",
     gap: 15,
-    marginBottom: 16,
+    flexWrap: "wrap",
   },
 
   sectionTitle: {
     margin: 0,
     color: "#0f172a",
-    fontSize: 21,
+    fontSize: 22,
   },
 
-  sectionDescription: {
-    margin: "5px 0 0",
-    color: "#64748b",
-    fontSize: 13,
+  subheading: {
+    margin: "0 0 14px",
+    color: "#0f172a",
   },
 
-  selectedVehicleActive: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    flexWrap: "wrap",
+  grid: {
+    display: "grid",
+    gridTemplateColumns:
+      "repeat(auto-fit, minmax(210px, 1fr))",
     gap: 14,
-    padding: 16,
-    borderRadius: 13,
-    background: "#f0fdf4",
-    border: "1px solid #86efac",
+    marginBottom: 14,
   },
 
-  selectedVehicleVor: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: 14,
-    padding: 16,
-    borderRadius: 13,
-    background: "#fef2f2",
-    border: "1px solid #fecaca",
+  field: {
+    display: "grid",
+    gap: 6,
   },
 
-  selectedVehicleTitle: {
-    display: "block",
-    fontSize: 18,
-    marginTop: 3,
-  },
-
-  vorControl: {
-    display: "flex",
-    gap: 8,
-    flex: "1 1 400px",
-    justifyContent: "flex-end",
-  },
-
-  vorButton: {
-    flexShrink: 0,
-    border: "none",
-    borderRadius: 10,
-    padding: "11px 15px",
-    color: "#ffffff",
-    background: "#dc2626",
+  label: {
     fontWeight: 800,
-    cursor: "pointer",
-  },
-
-  returnButton: {
-    border: "none",
-    borderRadius: 10,
-    padding: "11px 15px",
-    color: "#ffffff",
-    background: "#16a34a",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-
-  vorPanel: {
-    background: "#fff7f7",
-    border: "2px solid #ef4444",
-    padding: 20,
-    borderRadius: 17,
-    marginBottom: 22,
-  },
-
-  vorBadge: {
-    borderRadius: 999,
-    background: "#dc2626",
-    color: "#ffffff",
-    padding: "6px 11px",
-    fontWeight: 900,
+    color: "#334155",
     fontSize: 12,
   },
 
-  vorGrid: {
+  input: {
+    width: "100%",
+    boxSizing: "border-box",
+    border: "1px solid #cbd5e1",
+    borderRadius: 10,
+    padding: "11px 12px",
+    fontSize: 14,
+  },
+
+  checkbox: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    margin: "9px 0",
+    fontWeight: 700,
+  },
+
+  primaryButton: {
+    border: "none",
+    borderRadius: 10,
+    background: "#2563eb",
+    color: "#ffffff",
+    padding: "12px 16px",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+
+  secondaryButton: {
+    border: "1px solid #cbd5e1",
+    borderRadius: 9,
+    background: "#ffffff",
+    padding: "9px 12px",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+
+  dangerButton: {
+    border: "1px solid #fecaca",
+    borderRadius: 9,
+    background: "#fef2f2",
+    color: "#b91c1c",
+    padding: "9px 12px",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+
+  search: {
+    border: "1px solid #cbd5e1",
+    borderRadius: 10,
+    padding: "10px 12px",
+    width: 280,
+    maxWidth: "100%",
+  },
+
+  driverGrid: {
     display: "grid",
     gridTemplateColumns:
-      "repeat(auto-fit, minmax(270px, 1fr))",
+      "repeat(auto-fit, minmax(300px, 1fr))",
+    gap: 14,
+    marginTop: 18,
+  },
+
+  driverCard: {
+    border: "1px solid #e2e8f0",
+    borderRadius: 14,
+    padding: 16,
+    cursor: "pointer",
+    background: "#f8fafc",
+  },
+
+  selectedDriverCard: {
+    border: "2px solid #2563eb",
+    background: "#eff6ff",
+  },
+
+  driverCardHeader: {
+    display: "flex",
+    justifyContent: "space-between",
     gap: 12,
   },
 
-  vorCard: {
-    background: "#ffffff",
-    border: "1px solid #fecaca",
-    borderRadius: 13,
-    padding: 15,
+  driverName: {
+    margin: 0,
+  },
+
+  driverDetails: {
     display: "grid",
-    gap: 13,
-  },
-
-  vehicleRegistration: {
-    fontSize: 19,
-  },
-
-  vehicleDescription: {
-    color: "#64748b",
-    fontSize: 13,
-    marginTop: 3,
-  },
-
-  vorReasonBox: {
-    display: "grid",
-    gap: 3,
-    padding: 11,
-    background: "#fef2f2",
-    borderRadius: 9,
+    gridTemplateColumns: "repeat(3, 1fr)",
+    gap: 10,
+    margin: "16px 0",
   },
 
   smallLabel: {
@@ -1307,104 +2217,113 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 10,
     fontWeight: 900,
     textTransform: "uppercase",
-    letterSpacing: "0.05em",
   },
 
-  smallText: {
+  infoValue: {
     display: "block",
+    marginTop: 4,
+  },
+
+  muted: {
     color: "#64748b",
     fontSize: 12,
-    marginTop: 3,
   },
 
-  recordsSection: {
-    background: "rgba(255,255,255,0.97)",
-    padding: 22,
-    borderRadius: 17,
-    boxShadow: "0 10px 35px rgba(0,0,0,0.2)",
+  warningList: {
+    display: "flex",
+    gap: 6,
+    flexWrap: "wrap",
+    marginBottom: 14,
   },
 
-  recordGrid: {
+  warningBadge: {
+    background: "#fef3c7",
+    color: "#92400e",
+    padding: "5px 8px",
+    borderRadius: 999,
+    fontSize: 11,
+    fontWeight: 800,
+  },
+
+  goodBadge: {
+    background: "#dcfce7",
+    color: "#166534",
+    padding: "5px 8px",
+    borderRadius: 999,
+    fontSize: 11,
+    fontWeight: 800,
+  },
+
+  activeBadge: {
+    background: "#dcfce7",
+    color: "#166534",
+    padding: "5px 8px",
+    borderRadius: 999,
+    fontSize: 11,
+    fontWeight: 800,
+  },
+
+  inactiveBadge: {
+    background: "#e2e8f0",
+    color: "#475569",
+    padding: "5px 8px",
+    borderRadius: 999,
+    fontSize: 11,
+    fontWeight: 800,
+  },
+
+  assignmentBox: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    background: "#f0fdf4",
+    border: "1px solid #86efac",
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 16,
+  },
+
+  vehicleRegistration: {
+    display: "block",
+    fontSize: 22,
+    marginTop: 4,
+  },
+
+  list: {
     display: "grid",
-    gridTemplateColumns:
-      "repeat(auto-fit, minmax(300px, 1fr))",
-    gap: 14,
+    gap: 8,
+    marginTop: 16,
   },
 
-  recordCard: {
+  listItem: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 14,
+    alignItems: "center",
+    padding: 12,
     border: "1px solid #e2e8f0",
-    borderRadius: 14,
-    padding: 17,
+    borderRadius: 10,
     background: "#f8fafc",
   },
 
-  recordHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 12,
-    marginBottom: 15,
+  success: {
+    marginBottom: 18,
+    padding: 12,
+    borderRadius: 10,
+    background: "#dcfce7",
+    color: "#166534",
   },
 
-  recordTitle: {
-    margin: 0,
-    color: "#0f172a",
-  },
-
-  recordVehicle: {
-    margin: "4px 0 0",
-    color: "#64748b",
-    fontSize: 13,
-  },
-
-  recordDetails: {
-    display: "grid",
-    gridTemplateColumns:
-      "repeat(3, minmax(0, 1fr))",
-    gap: 10,
-  },
-
-  recordValue: {
-    display: "block",
-    marginTop: 3,
-    fontSize: 13,
-  },
-
-  notesBox: {
-    marginTop: 14,
-    padding: 11,
-    borderRadius: 9,
-    background: "#ffffff",
-    border: "1px solid #e2e8f0",
-    color: "#475569",
-    fontSize: 13,
-  },
-
-  recordVorWarning: {
-    marginTop: 12,
-    padding: 9,
-    textAlign: "center",
-    borderRadius: 8,
+  error: {
+    marginBottom: 18,
+    padding: 12,
+    borderRadius: 10,
     background: "#fee2e2",
     color: "#991b1b",
-    fontSize: 12,
-    fontWeight: 900,
-  },
-
-  deleteButton: {
-    width: "100%",
-    marginTop: 12,
-    border: "1px solid #fecaca",
-    borderRadius: 9,
-    padding: "9px 12px",
-    background: "#fef2f2",
-    color: "#b91c1c",
-    fontWeight: 800,
-    cursor: "pointer",
   },
 
   empty: {
-    padding: 35,
+    padding: 40,
     textAlign: "center",
     color: "#64748b",
   },
