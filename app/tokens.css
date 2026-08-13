@@ -1,77 +1,214 @@
 /* TMS Wizzard design tokens, imported once from app/globals.css.
-   Light is the default; .dark is a scaffold for later (apply class on <html>). */
+
+   ============================================================================
+   READ THIS BEFORE EDITING: THE DEFAULT IS INVERTED ON PURPOSE.
+   ============================================================================
+
+   `:root` holds the DARK theme. `.light` is the OPT-OUT. This is the reverse of
+   the usual convention, where `:root` is light and `.dark` is the opt-in.
+
+   Why: this console is used in dim control rooms, so dark is the product
+   default (see docs/superpowers/specs/2026-08-13-dark-default-theme-design.md).
+   Putting dark in `:root` means server-rendered HTML, a failed theme script, a
+   slow hydration and a JS-disabled browser ALL render dark. A flash of white
+   becomes structurally impossible on the default path rather than merely
+   unlikely. If light lived in `:root`, every load would paint light first.
+
+   `.dark` duplicates `:root` exactly. That looks redundant and is not: it lets
+   a SUBTREE pin itself dark against an ancestor `.light`. That is how the ~14
+   legacy inline-styled pages stay dark while a user is in light mode. See
+   app/components/ThemeScope.tsx and lib/nav/themeableRoutes.ts.
+
+   DO NOT USE TAILWIND `dark:` VARIANTS. Under an inverted default they mean the
+   opposite of what you would expect: `dark:bg-surface` applies when a `.dark`
+   class is present, which here means "a legacy pinned subtree", not "the user
+   is in dark mode" (they are, by default, with no class at all). There are no
+   `dark:` variants in the codebase today. Theme differences belong in the token
+   values below, where every consumer picks them up for free.
+
+   BOTH BLOCKS MUST DECLARE EVERY TOKEN. The previous dark scaffold overrode
+   only some of them and inherited light values for the rest, which is how the
+   focus ring ended up at 2.85:1 on a dark surface, below the 3:1 minimum.
+   lib/theme/contrast.test.ts asserts full parity and every contrast pair, and
+   reads THIS FILE, so it fails the build if a value here regresses. */
+
 :root {
   /* surfaces */
-  --canvas: #F2F4F8;         /* was #F4F6F8 */
+  --canvas: #0F1626;
+  --surface: #161F31;
+  --surface-2: #131B2B;
+  --line: #26324A;
+  --line-strong: #586B90;
+  /* chrome, the sidebar surface */
+  --chrome: #0C1220;
+  --chrome-raised: #1A2438;
+  --chrome-border: #26324A;
+  --chrome-text: #9AA7BD;
+  --chrome-text-strong: #E8EEF9;
+  /* Link colour inside the chrome sidebar. Chrome is dark in BOTH themes, so
+     this needs a light blue in both, which is why it cannot reuse
+     --primary-tint-border: that token is tuned as a border on a dark tint and
+     measures 3.60:1 as text here, below the 4.5:1 text minimum. */
+  --chrome-link: #A9C0FB;
+  /* text, capped at a dimmed #D6DEEC rather than near-white. Pure white on a
+     near-black surface causes halation (glyphs appear to bleed), which is worst
+     in exactly the dim rooms this theme is for. */
+  --ink: #D6DEEC;
+  --ink-2: #9AA7BD;
+  --ink-3: #7787A0;
+  --ink-4: #5E6C85;
+  /* brand */
+  --primary: #7FA0F7;
+  --primary-hover: #9AB4F9;
+  --primary-active: #6489EF;
+  --primary-tint: #1C2C55;
+  --primary-tint-border: #4E6AB4;
+  --primary-deep: #A9C0FB;
+  /* Text/icon colour for a solid --primary fill. Exists because Button.tsx
+     hardcodes text-white, which measures 2.97:1 on the dark primary: an AA
+     failure on the most-clicked control in the app. */
+  --on-primary: #0F1626;
+  /* accent and warning deliberately share one amber in dark. In light they are
+     four distinct values because a light surface needs a separately darkened
+     "-strong" shade to clear 4.5:1, and accent sits a step apart from warning.
+     Against a dark surface a single mid amber already clears AA in every one of
+     those roles, so splitting it would be a difference nobody could see. */
+  /* accent */
+  --accent: #EFB458;
+  --accent-text: #EFB458;
+  --accent-tint: #33280F;
+  --accent-border: #A07E26;
+  /* semantic status */
+  --success: #6FD79B;        --success-strong: #6FD79B;
+  --success-tint: #14301F;   --success-border: #357A4F;
+  --warning: #EFB458;        --warning-strong: #EFB458;
+  --warning-tint: #33280F;   --warning-border: #8A6C1F;
+  --danger: #F08A8A;         --danger-hover: #F5A5A5;   --danger-strong: #F08A8A;
+  --danger-tint: #3A1C1C;    --danger-border: #B04C4C;
+  /* Text/icon colour for a solid --danger fill, same reason as --on-primary. */
+  --on-danger: #2A0F0F;
+  --focus: #7FA0F7;
+  /* elevation, black-based rather than navy. The light theme's
+     rgba(11,18,32,...) shadows are invisible on a dark canvas. In dark,
+     elevation reads from the border first and the shadow second. */
+  --shadow-xs: 0 1px 2px rgba(0,0,0,.45);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.45), 0 2px 8px -2px rgba(0,0,0,.55);
+  --shadow-md: 0 4px 16px -4px rgba(0,0,0,.60), 0 2px 4px -2px rgba(0,0,0,.50);
+  --shadow-lg: 0 16px 40px -8px rgba(0,0,0,.70);
+}
+
+/* Identical to :root. Lets a subtree pin itself dark against an ancestor
+   .light, see the header comment. Keep these values in sync with :root;
+   lib/theme/contrast.test.ts asserts the two blocks are deep-equal. */
+.dark {
+  --canvas: #0F1626;
+  --surface: #161F31;
+  --surface-2: #131B2B;
+  --line: #26324A;
+  --line-strong: #586B90;
+  --chrome: #0C1220;
+  --chrome-raised: #1A2438;
+  --chrome-border: #26324A;
+  --chrome-text: #9AA7BD;
+  --chrome-text-strong: #E8EEF9;
+  /* Link colour inside the chrome sidebar. Chrome is dark in BOTH themes, so
+     this needs a light blue in both, which is why it cannot reuse
+     --primary-tint-border: that token is tuned as a border on a dark tint and
+     measures 3.60:1 as text here, below the 4.5:1 text minimum. */
+  --chrome-link: #A9C0FB;
+  --ink: #D6DEEC;
+  --ink-2: #9AA7BD;
+  --ink-3: #7787A0;
+  --ink-4: #5E6C85;
+  --primary: #7FA0F7;
+  --primary-hover: #9AB4F9;
+  --primary-active: #6489EF;
+  --primary-tint: #1C2C55;
+  --primary-tint-border: #4E6AB4;
+  --primary-deep: #A9C0FB;
+  --on-primary: #0F1626;
+  /* accent and warning deliberately share one amber in dark. In light they are
+     four distinct values because a light surface needs a separately darkened
+     "-strong" shade to clear 4.5:1, and accent sits a step apart from warning.
+     Against a dark surface a single mid amber already clears AA in every one of
+     those roles, so splitting it would be a difference nobody could see. */
+  --accent: #EFB458;
+  --accent-text: #EFB458;
+  --accent-tint: #33280F;
+  --accent-border: #A07E26;
+  --success: #6FD79B;        --success-strong: #6FD79B;
+  --success-tint: #14301F;   --success-border: #357A4F;
+  --warning: #EFB458;        --warning-strong: #EFB458;
+  --warning-tint: #33280F;   --warning-border: #8A6C1F;
+  --danger: #F08A8A;         --danger-hover: #F5A5A5;   --danger-strong: #F08A8A;
+  --danger-tint: #3A1C1C;    --danger-border: #B04C4C;
+  --on-danger: #2A0F0F;
+  --focus: #7FA0F7;
+  --shadow-xs: 0 1px 2px rgba(0,0,0,.45);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.45), 0 2px 8px -2px rgba(0,0,0,.55);
+  --shadow-md: 0 4px 16px -4px rgba(0,0,0,.60), 0 2px 4px -2px rgba(0,0,0,.50);
+  --shadow-lg: 0 16px 40px -8px rgba(0,0,0,.70);
+}
+
+/* The light opt-out. Applied to <html> by the inline script in app/layout.tsx
+   when localStorage["tms-theme"] is "light", and to the landing page's root
+   element permanently (app/page.tsx), since the public marketing page stays
+   light regardless of the console's setting.
+
+   Values are the palette that shipped 2026-08-11, unchanged apart from the two
+   new --on-* tokens. Three known contrast gaps here are pre-existing and are
+   documented in lib/theme/contrast.test.ts rather than fixed. */
+.light {
+  --canvas: #F2F4F8;
   --surface: #FFFFFF;
-  --surface-2: #EDF0F5;      /* was #F8FAFC */
-  --line: #E4E7EE;           /* was #E2E8F0 */
-  --line-strong: #B9BFCC;    /* was #CBD5E1 */
-  /* chrome — new: the dark sidebar/topbar surface AppShell uses, AppHeader never had one */
+  --surface-2: #EDF0F5;
+  --line: #E4E7EE;
+  --line-strong: #B9BFCC;
+  /* Chrome is dark in BOTH themes, so these look like they should equal the
+     dark block's. They deliberately do not: these are the values that shipped
+     on 2026-08-11 and this branch does not change already-shipped light
+     colours. The dark block's chrome text is capped below pure white for
+     halation reasons that apply mainly to dim rooms, where the dark theme is
+     what people use. Bringing light's chrome into line is a reasonable future
+     change, but it is a change to shipped colours and belongs in its own
+     decision, not smuggled in here. */
   --chrome: #0B1220;
   --chrome-raised: #1A2438;
   --chrome-border: #242F47;
   --chrome-text: #C9CFDD;
   --chrome-text-strong: #FFFFFF;
-  /* text */
-  --ink: #0B1220;            /* was #0F172A */
-  --ink-2: #5B6474;          /* was #475569 */
-  --ink-3: #737D8F;          /* was #64748B */
-  --ink-4: #98A0B0;          /* was #94A3B8 */
-  /* brand */
-  --primary: #2953E3;        /* was #2D54DE — the finalized logo blue */
+  --chrome-link: #C3D1F8;
+  --ink: #0B1220;
+  --ink-2: #5B6474;
+  --ink-3: #737D8F;
+  --ink-4: #98A0B0;
+  --primary: #2953E3;
   --primary-hover: #1E41BD;
   --primary-active: #1A3595;
   --primary-tint: #F0F4FE;
   --primary-tint-border: #C3D1F8;
   --primary-deep: #1E41BD;
-  /* accent — unchanged, Console doesn't define one; kept for existing amber usage */
+  --on-primary: #FFFFFF;
   --accent: #D97706;
   --accent-text: #B45309;
   --accent-tint: #FFFBEB;
   --accent-border: #FDE68A;
-  /* semantic status */
   --success: #0F8547;        --success-strong: #0C6B3A;
   --success-tint: #DCF3E5;   --success-border: #B7E4C7;
   --warning: #B25E09;        --warning-strong: #8F4B06;
   --warning-tint: #FCEFDC;   --warning-border: #F5D9AE;
   --danger: #D23E3E;         --danger-hover: #AB2F2F;   --danger-strong: #AB2F2F;
   --danger-tint: #FBE5E5;    --danger-border: #F3C2C2;
+  --on-danger: #FFFFFF;
   --focus: #2953E3;
-  /* elevation — same shape, rgba base moved from #0F172A to #0B1220 */
   --shadow-xs: 0 1px 2px rgba(11,18,32,.05);
   --shadow-sm: 0 1px 2px rgba(11,18,32,.05), 0 2px 8px -2px rgba(11,18,32,.08);
   --shadow-md: 0 4px 16px -4px rgba(11,18,32,.12), 0 2px 4px -2px rgba(11,18,32,.06);
   --shadow-lg: 0 16px 40px -8px rgba(11,18,32,.22);
 }
 
-/* Dark scaffold from the handoff. Tune against real screens before shipping.
-   Activated by putting class="dark" on <html> (darkMode: "class" in the
-   config).
-
-   INCOMPLETE, measured: this overrides 27 of the 37 tokens. NOT overridden:
-   --accent, --success, --warning, --danger, --danger-hover, --focus, and the
-   four --shadow-* values. Against this scaffold's own #111A2C surface,
-   --focus (#2D54DE) is 2.84:1 and --danger-hover (#B91C1C) is 2.69:1, both
-   below the 3:1 non-text minimum; --danger/--warning/--success sit near 3.5:1
-   so they are non-text only; the shadows stay navy and are invisible on the
-   #0B1220 canvas. --focus matters most because the focus ring is global and
-   reaches every page in the app. Fix these before enabling dark mode. */
-.dark {
-  --canvas: #0B1220;   --surface: #111A2C;  --surface-2: #0E1626;
-  --line: #223049;     --line-strong: #33435F;
-  --ink: #E7ECF5;      --ink-2: #A6B3C9;    --ink-3: #7E8CA6;  --ink-4: #55637D;
-  --primary: #6C92F6;  --primary-hover: #86A6F8; --primary-active: #4470F0;
-  --primary-tint: #182448; --primary-tint-border: #2A3A6B; --primary-deep: #C5D6FD;
-  --accent-tint: #2A2110; --accent-border: #6B4E12; --accent-text: #F5B454;
-  --success-tint: #0E2418; --success-border: #1E4D32; --success-strong: #7ADFA4;
-  --warning-tint: #2A2110; --warning-border: #6B4E12; --warning-strong: #F5B454;
-  --danger-tint: #2C1516;  --danger-border: #5C2626; --danger-strong: #F09090;
-}
-
-/* Deliberately GLOBAL, not scoped to .ds. From Task 2, when globals.css is
-   imported into the root layout, this gives every focusable element on the
-   legacy pages a visible focus ring too. That is an accepted accessibility
-   improvement, and the handoff says never remove outlines without a
-   replacement. It is the one rule here that intentionally affects other pages. */
+/* Deliberately GLOBAL, not scoped to .ds, so every focusable element on the
+   legacy pages gets a visible ring too. Never remove an outline without a
+   replacement. --focus is now themed in both blocks above, which fixes the
+   2.85:1 ring the old dark scaffold left unthemed. */
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

@@ -4,9 +4,14 @@ import { useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useTenant } from "./TenantProvider";
 
+/* Hardcoded rather than tokenised, deliberately. This panel renders on every
+   route including the legacy ones, before tenant status resolves, so it must
+   not follow the light toggle: a bright full-screen flash on every load is the
+   exact thing the dark default exists to prevent. Values track :root's --canvas
+   and --ink in app/tokens.css; update them together. */
 const panelStyle: React.CSSProperties = {
   minHeight: "100vh", display: "grid", placeItems: "center",
-  background: "#0f172a", color: "white", padding: 30, textAlign: "center",
+  background: "#0F1626", color: "#D6DEEC", padding: 30, textAlign: "center",
 };
 
 export default function TenantGate({ children }: { children: ReactNode }) {

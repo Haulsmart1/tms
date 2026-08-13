@@ -43,21 +43,21 @@ function StopRow({
         label="Address"
         value={stop.address_line}
         onChange={(e) => onChange("address_line", e.target.value)}
-        wrapperClassName="min-w-[220px] flex-1"
+        wrapperClassName="min-w-0 flex-1 basis-[220px]"
       />
       <Field
         id={`stop-${stop.type}-${index}-city`}
         label="City"
         value={stop.city}
         onChange={(e) => onChange("city", e.target.value)}
-        wrapperClassName="w-40"
+        wrapperClassName="w-40 min-w-0"
       />
       <Field
         id={`stop-${stop.type}-${index}-postcode`}
         label="Postcode"
         value={stop.postcode}
         onChange={(e) => onChange("postcode", e.target.value)}
-        wrapperClassName="w-32"
+        wrapperClassName="w-32 min-w-0"
       />
       <Button type="button" variant="secondary" onClick={onRemove}>
         Remove
@@ -77,10 +77,14 @@ export default function JobForm({
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <Field id="job-reference" label="Reference" value={form.reference} onChange={(e) => onFieldChange("reference", e.target.value)} />
         <Field id="job-date" label="Scheduled date" type="date" value={form.scheduled_date} onChange={(e) => onFieldChange("scheduled_date", e.target.value)} />
-        <label className="grid gap-1.5">
+        <label className="grid min-w-0 gap-1.5">
           <span className="text-sm font-medium text-ink-2">Customer</span>
+          {/* w-full so the select fills its grid track, min-w-0 so it may
+              shrink below its longest <option>. Without min-w-0 a long
+              option widens the select past its track and it overlaps the
+              field beside it. */}
           <select
-            className="h-10 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+            className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
             value={form.customer_id}
             onChange={(e) => onFieldChange("customer_id", e.target.value)}
           >
@@ -88,10 +92,10 @@ export default function JobForm({
             {customers.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
           </select>
         </label>
-        <label className="grid gap-1.5">
+        <label className="grid min-w-0 gap-1.5">
           <span className="text-sm font-medium text-ink-2">Vehicle</span>
           <select
-            className="h-10 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+            className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
             value={form.vehicle_id}
             onChange={(e) => onFieldChange("vehicle_id", e.target.value)}
           >
@@ -99,10 +103,10 @@ export default function JobForm({
             {vehicles.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
           </select>
         </label>
-        <label className="grid gap-1.5">
+        <label className="grid min-w-0 gap-1.5">
           <span className="text-sm font-medium text-ink-2">Driver</span>
           <select
-            className="h-10 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+            className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
             value={form.driver_id}
             onChange={(e) => onFieldChange("driver_id", e.target.value)}
           >
@@ -111,10 +115,10 @@ export default function JobForm({
           </select>
         </label>
         <Field id="job-price" label="Customer price" type="number" step="0.01" value={form.customer_price} onChange={(e) => onFieldChange("customer_price", e.target.value)} />
-        <label className="grid gap-1.5">
+        <label className="grid min-w-0 gap-1.5">
           <span className="text-sm font-medium text-ink-2">Subcontractor</span>
           <select
-            className="h-10 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+            className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
             value={form.subcontractor_id}
             onChange={(e) => onFieldChange("subcontractor_id", e.target.value)}
           >

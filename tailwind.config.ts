@@ -67,19 +67,24 @@ const config: Config = {
           border: "var(--chrome-border)",
           text: "var(--chrome-text)",
           "text-strong": "var(--chrome-text-strong)",
+          link: "var(--chrome-link)",
         },
         ink: { DEFAULT: "var(--ink)", 2: "var(--ink-2)", 3: "var(--ink-3)", 4: "var(--ink-4)" },
         primary: {
           DEFAULT: "var(--primary)", hover: "var(--primary-hover)",
           active: "var(--primary-active)", tint: "var(--primary-tint)",
           "tint-border": "var(--primary-tint-border)", deep: "var(--primary-deep)",
-          // Literal hex ramp from the handoff. WARNING: these are NOT themed.
-          // They will not change when the CSS variables swap for dark mode,
-          // and 50/200/600/700/800 duplicate token values above. Prefer the
-          // var()-backed keys (primary, primary-tint, primary-hover, ...).
-          50: "#EEF4FF", 100: "#DFE9FE", 200: "#C5D6FD", 300: "#9DB8FB", 400: "#6C92F6",
-          500: "#4470F0", 600: "#2D54DE", 700: "#2444BE", 800: "#21399A", 900: "#20337A", 950: "#16204A",
+          // A literal hex ramp (primary-50..950) lived here and was removed on
+          // 2026-08-13: unused by any component, and raw hex cannot follow a
+          // theme swap, so anything reaching for it would have silently broken
+          // under the dark default. Colours belong in app/tokens.css as
+          // var()-backed keys. Do not reintroduce a hex ramp here.
         },
+        // Text/icon colour for a solid fill of the matching background. White
+        // in light, dark ink in dark, so a button is legible in both themes
+        // without a per-theme class. See --on-primary in app/tokens.css.
+        "on-primary": "var(--on-primary)",
+        "on-danger": "var(--on-danger)",
         accent: { DEFAULT: "var(--accent)", text: "var(--accent-text)", tint: "var(--accent-tint)", border: "var(--accent-border)" },
         success: { DEFAULT: "var(--success)", strong: "var(--success-strong)", tint: "var(--success-tint)", border: "var(--success-border)" },
         warning: { DEFAULT: "var(--warning)", strong: "var(--warning-strong)", tint: "var(--warning-tint)", border: "var(--warning-border)" },

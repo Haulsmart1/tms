@@ -13,6 +13,8 @@ import Logo from "../../components/Logo";
 import { NAV_GROUPS } from "../../lib/nav/navConfig";
 import { shouldShowShell } from "../../lib/nav/shouldShowShell";
 import { createClient } from "../../lib/supabase/browser";
+import ThemeToggle from "./ThemeToggle";
+import { isThemeableRoute } from "../../lib/nav/themeableRoutes";
 
 const ICONS: Record<string, LucideIcon> = {
   LayoutDashboard, ClipboardList, CircleCheck, MapPin, Receipt, Building2, Users,
@@ -63,7 +65,7 @@ export default function AppShell() {
                   className={
                     "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-semibold no-underline " +
                     (active
-                      ? "bg-primary text-white"
+                      ? "bg-primary text-on-primary"
                       : "text-chrome-text hover:bg-chrome-raised hover:text-chrome-text-strong")
                   }
                 >
@@ -79,7 +81,7 @@ export default function AppShell() {
       <div className="flex flex-none items-center gap-2.5 border-t border-chrome-border p-3.5">
         <span
           aria-hidden
-          className="inline-flex h-[30px] w-[30px] flex-none items-center justify-center rounded-full bg-primary text-xs font-semibold text-white"
+          className="inline-flex h-[30px] w-[30px] flex-none items-center justify-center rounded-full bg-primary text-xs font-semibold text-on-primary"
         >
           {initials}
         </span>
@@ -88,16 +90,21 @@ export default function AppShell() {
             {userEmail ?? "Signed in"}
           </span>
           {role === "super_admin" ? (
-            <Link href="/super-admin" className="block truncate text-xs font-medium text-primary-tint-border no-underline hover:text-white">
+            <Link href="/super-admin" className="block truncate text-xs font-medium text-chrome-link no-underline hover:text-white">
               Super Admin
             </Link>
           ) : null}
         </span>
+        {/* Hidden on legacy routes. AppShell renders everywhere, so an
+            unguarded toggle on /pod would turn the sidebar light while the
+            pinned page body stayed dark: visibly broken, not just
+            inconsistent. See lib/nav/themeableRoutes.ts. */}
+        {isThemeableRoute(pathname) ? <ThemeToggle /> : null}
         <button
           type="button"
           onClick={signOut}
           aria-label="Sign out"
-          className="flex h-8 w-8 flex-none items-center justify-center rounded-md border border-chrome-border bg-chrome-raised text-chrome-text shadow-xs transition-colors hover:border-danger hover:bg-danger hover:text-white"
+          className="flex h-8 w-8 flex-none items-center justify-center rounded-md border border-chrome-border bg-chrome-raised text-chrome-text shadow-xs transition-colors hover:border-danger hover:bg-danger hover:text-on-danger"
         >
           <LogOut size={15} aria-hidden />
         </button>
