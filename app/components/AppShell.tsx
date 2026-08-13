@@ -13,6 +13,8 @@ import Logo from "../../components/Logo";
 import { NAV_GROUPS } from "../../lib/nav/navConfig";
 import { shouldShowShell } from "../../lib/nav/shouldShowShell";
 import { createClient } from "../../lib/supabase/browser";
+import ThemeToggle from "./ThemeToggle";
+import { isThemeableRoute } from "../../lib/nav/themeableRoutes";
 
 const ICONS: Record<string, LucideIcon> = {
   LayoutDashboard, ClipboardList, CircleCheck, MapPin, Receipt, Building2, Users,
@@ -93,6 +95,11 @@ export default function AppShell() {
             </Link>
           ) : null}
         </span>
+        {/* Hidden on legacy routes. AppShell renders everywhere, so an
+            unguarded toggle on /pod would turn the sidebar light while the
+            pinned page body stayed dark: visibly broken, not just
+            inconsistent. See lib/nav/themeableRoutes.ts. */}
+        {isThemeableRoute(pathname) ? <ThemeToggle /> : null}
         <button
           type="button"
           onClick={signOut}
