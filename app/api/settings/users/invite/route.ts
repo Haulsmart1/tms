@@ -59,8 +59,7 @@ async function createAuthenticatedClient() {
               }
             );
           } catch {
-            // Existing session cookies are enough
-            // for this API route.
+            // Existing session cookies are sufficient here.
           }
         },
       },
@@ -99,24 +98,68 @@ function isValidEmail(email: string): boolean {
   );
 }
 
+async function findAuthUserByEmail(
+  admin: ReturnType<typeof createAdminClient>,
+  email: string
+) {
+  const perPage = 1000;
+  let page = 1;
+
+  while (true) {
+    const {
+      data,
+      error,
+    } = await admin.auth.admin.listUsers({
+      page,
+      perPage,
+    });
+
+    if (error) {
+      throw new Error(
+        `Unable to check existing Auth users: ${error.message}`
+      );
+    }
+
+    const match = data.users.find(
+      (candidate) =>
+        candidate.email
+          ?.trim()
+          .toLowerCase() === email
+    );
+
+    if (match) {
+      return match;
+    }
+
+    if (data.users.length < perPage) {
+      return null;
+    }
+
+    page += 1;
+  }
+}
+
 export async function POST(
   request: NextRequest
 ) {
   try {
-    // --------------------------------------------------------
-    // 1. Authenticate the caller using their normal session.
-    // --------------------------------------------------------
+    // ========================================================
+    // 1. Authenticate current TMS user
+    // ========================================================
 
     const authenticatedClient =
       await createAuthenticatedClient();
 
     const {
-      data: { user },
+      data: { user: currentUser },
       error: authError,
     } =
       await authenticatedClient.auth.getUser();
 
-    if (authError || !user) {
+    if (
+      authError ||
+      !currentUser
+    ) {
       return NextResponse.json(
         {
           error:
@@ -128,9 +171,9 @@ export async function POST(
       );
     }
 
-    // --------------------------------------------------------
-    // 2. Validate request body.
-    // --------------------------------------------------------
+    // ========================================================
+    // 2. Validate request
+    // ========================================================
 
     const body =
       (await request.json()) as {
@@ -152,7 +195,10 @@ export async function POST(
         ?.trim()
         .toLowerCase() || "staff";
 
-    if (!email || !isValidEmail(email)) {
+    if (
+      !email ||
+      !isValidEmail(email)
+    ) {
       return NextResponse.json(
         {
           error:
@@ -189,19 +235,14 @@ export async function POST(
       );
     }
 
-    // --------------------------------------------------------
-    // 3. Create service-role client.
-    //
-    // memberships is deliberately not readable directly by
-    // authenticated users, so the server performs the check.
-    // --------------------------------------------------------
-
     const admin =
       createAdminClient();
 
-    // --------------------------------------------------------
-    // 4. Verify caller belongs to this tenant and is admin.
-    // --------------------------------------------------------
+    // ========================================================
+    // 3. Verify inviter is an admin of selected tenant
+    //
+    // memberships is intentionally service-role protected.
+    // ========================================================
 
     const {
       data: inviterMembership,
@@ -211,13 +252,21 @@ export async function POST(
       .select(
         "id, tenant_id, user_id, role"
       )
-      .eq("tenant_id", tenantId)
-      .eq("user_id", user.id)
+      .eq(
+        "tenant_id",
+        tenantId
+      )
+      .eq(
+        "user_id",
+        currentUser.id
+      )
       .maybeSingle();
 
-    if (inviterMembershipError) {
+    if (
+      inviterMembershipError
+    ) {
       console.error(
-        "Invite membership lookup failed:",
+        "Inviter membership lookup failed:",
         inviterMembershipError
       );
 
@@ -263,79 +312,26 @@ export async function POST(
       );
     }
 
-    // --------------------------------------------------------
-    // 5. Check whether the email already belongs to an Auth
-    // user.
-    //
-    // Supabase's admin list endpoint is paginated, so search
-    // through the returned users.
-    // --------------------------------------------------------
+    // ========================================================
+    // 4. Find existing Supabase Auth user
+    // ========================================================
 
-    let existingAuthUserId:
-      | string
-      | null = null;
-
-    let page = 1;
-    const perPage = 1000;
-
-    while (
-      existingAuthUserId === null
-    ) {
-      const {
-        data: userPage,
-        error: listUsersError,
-      } =
-        await admin.auth.admin.listUsers({
-          page,
-          perPage,
-        });
-
-      if (listUsersError) {
-        throw new Error(
-          `Unable to check existing users: ${listUsersError.message}`
-        );
-      }
-
-      const matchingUser =
-        userPage.users.find(
-          (candidate) =>
-            candidate.email
-              ?.trim()
-              .toLowerCase() === email
-        );
-
-      if (matchingUser) {
-        existingAuthUserId =
-          matchingUser.id;
-        break;
-      }
-
-      if (
-        userPage.users.length <
-        perPage
-      ) {
-        break;
-      }
-
-      page += 1;
-    }
+    const existingAuthUser =
+      await findAuthUserByEmail(
+        admin,
+        email
+      );
 
     let invitedUserId: string;
-    let inviteWasSent = false;
+    let inviteSent = false;
 
-    // --------------------------------------------------------
-    // 6A. Existing Auth account:
-    // do not send another new-user invitation.
-    // --------------------------------------------------------
-
-    if (existingAuthUserId) {
+    if (existingAuthUser) {
       invitedUserId =
-        existingAuthUserId;
+        existingAuthUser.id;
     } else {
-      // ------------------------------------------------------
-      // 6B. New Auth account:
-      // send a real Supabase invitation.
-      // ------------------------------------------------------
+      // ======================================================
+      // 5. Send real Supabase invitation
+      // ======================================================
 
       const redirectTo =
         `${getSiteUrl()}` +
@@ -359,14 +355,14 @@ export async function POST(
                 role,
 
                 invited_by:
-                  user.id,
+                  currentUser.id,
               },
             }
           );
 
       if (inviteError) {
         console.error(
-          "Supabase invite failed:",
+          "Supabase invitation failed:",
           inviteError
         );
 
@@ -385,7 +381,7 @@ export async function POST(
         return NextResponse.json(
           {
             error:
-              "Supabase sent the invitation but did not return a user ID.",
+              "Supabase created the invitation but did not return a user ID.",
           },
           {
             status: 500,
@@ -396,91 +392,82 @@ export async function POST(
       invitedUserId =
         inviteData.user.id;
 
-      inviteWasSent = true;
+      inviteSent = true;
     }
 
-    // --------------------------------------------------------
-    // 7. Check existing tenant membership.
-    // --------------------------------------------------------
+    // ========================================================
+    // 6. IMPORTANT:
+    // Ensure PUBLIC.USERS exists before MEMBERSHIPS.
+    //
+    // memberships.user_id FK -> public.users.id
+    // ========================================================
 
     const {
-      data: existingMembership,
-      error:
-        existingMembershipError,
+      data: publicUser,
+      error: publicUserReadError,
     } = await admin
-      .from("memberships")
-      .select("id, role")
-      .eq(
-        "tenant_id",
-        tenantId
+      .from("users")
+      .select(
+        "id, email"
       )
       .eq(
-        "user_id",
+        "id",
         invitedUserId
       )
       .maybeSingle();
 
     if (
-      existingMembershipError
+      publicUserReadError
     ) {
       throw new Error(
-        `Unable to check invited user's membership: ${existingMembershipError.message}`
+        `Unable to check public user record: ${publicUserReadError.message}`
       );
     }
 
-    // --------------------------------------------------------
-    // 8. Create or update membership.
-    // --------------------------------------------------------
-
-    if (existingMembership) {
+    if (!publicUser) {
       const {
-        error:
-          updateMembershipError,
+        error: publicUserInsertError,
       } = await admin
-        .from("memberships")
-        .update({
-          role,
-        })
-        .eq(
-          "id",
-          existingMembership.id
-        );
-
-      if (
-        updateMembershipError
-      ) {
-        throw new Error(
-          `Unable to update tenant membership: ${updateMembershipError.message}`
-        );
-      }
-    } else {
-      const {
-        error:
-          insertMembershipError,
-      } = await admin
-        .from("memberships")
+        .from("users")
         .insert({
-          tenant_id: tenantId,
-          user_id:
-            invitedUserId,
-          role,
+          id: invitedUserId,
+          email,
         });
 
       if (
-        insertMembershipError
+        publicUserInsertError
       ) {
         throw new Error(
-          `Unable to create tenant membership: ${insertMembershipError.message}`
+          `Unable to create public user record: ${publicUserInsertError.message}`
+        );
+      }
+    } else if (
+      publicUser.email !== email
+    ) {
+      const {
+        error: publicUserUpdateError,
+      } = await admin
+        .from("users")
+        .update({
+          email,
+        })
+        .eq(
+          "id",
+          invitedUserId
+        );
+
+      if (
+        publicUserUpdateError
+      ) {
+        throw new Error(
+          `Unable to update public user email: ${publicUserUpdateError.message}`
         );
       }
     }
 
-    // --------------------------------------------------------
-    // 9. Ensure profiles row exists / has a tenant.
-    //
-    // Do not overwrite an existing tenant_id because a user
-    // may eventually belong to more than one tenant.
-    // --------------------------------------------------------
+    // ========================================================
+    // 7. Ensure profile exists
+    // ========================================================
 
     const {
       data: existingProfile,
@@ -496,16 +483,17 @@ export async function POST(
       )
       .maybeSingle();
 
-    if (profileReadError) {
+    if (
+      profileReadError
+    ) {
       throw new Error(
-        `Unable to check invited user's profile: ${profileReadError.message}`
+        `Unable to check profile: ${profileReadError.message}`
       );
     }
 
     if (!existingProfile) {
       const {
-        error:
-          profileInsertError,
+        error: profileInsertError,
       } = await admin
         .from("profiles")
         .insert({
@@ -517,19 +505,19 @@ export async function POST(
         profileInsertError
       ) {
         throw new Error(
-          `Unable to create invited user's profile: ${profileInsertError.message}`
+          `Unable to create profile: ${profileInsertError.message}`
         );
       }
     } else if (
       !existingProfile.tenant_id
     ) {
       const {
-        error:
-          profileUpdateError,
+        error: profileUpdateError,
       } = await admin
         .from("profiles")
         .update({
-          tenant_id: tenantId,
+          tenant_id:
+            tenantId,
         })
         .eq(
           "id",
@@ -540,22 +528,104 @@ export async function POST(
         profileUpdateError
       ) {
         throw new Error(
-          `Unable to link invited user's profile to the tenant: ${profileUpdateError.message}`
+          `Unable to link profile to tenant: ${profileUpdateError.message}`
         );
       }
     }
 
-    // --------------------------------------------------------
-    // 10. Return success.
-    // --------------------------------------------------------
+    // ========================================================
+    // 8. Ensure membership exists
+    //
+    // Now safe because public.users exists.
+    // ========================================================
+
+    const {
+      data: existingMembership,
+      error: existingMembershipError,
+    } = await admin
+      .from("memberships")
+      .select(
+        "id, role"
+      )
+      .eq(
+        "tenant_id",
+        tenantId
+      )
+      .eq(
+        "user_id",
+        invitedUserId
+      )
+      .maybeSingle();
+
+    if (
+      existingMembershipError
+    ) {
+      throw new Error(
+        `Unable to check membership: ${existingMembershipError.message}`
+      );
+    }
+
+    if (
+      existingMembership
+    ) {
+      const {
+        error:
+          membershipUpdateError,
+      } = await admin
+        .from("memberships")
+        .update({
+          role,
+        })
+        .eq(
+          "id",
+          existingMembership.id
+        );
+
+      if (
+        membershipUpdateError
+      ) {
+        throw new Error(
+          `Unable to update membership: ${membershipUpdateError.message}`
+        );
+      }
+    } else {
+      const {
+        error:
+          membershipInsertError,
+      } = await admin
+        .from("memberships")
+        .insert({
+          tenant_id:
+            tenantId,
+
+          user_id:
+            invitedUserId,
+
+          role,
+        });
+
+      if (
+        membershipInsertError
+      ) {
+        throw new Error(
+          `Unable to create tenant membership: ${membershipInsertError.message}`
+        );
+      }
+    }
+
+    // ========================================================
+    // 9. Success
+    // ========================================================
 
     return NextResponse.json(
       {
         ok: true,
 
-        message: inviteWasSent
+        message: inviteSent
           ? `Invite sent to ${email}.`
           : `${email} already had a TMS account and has now been added to this tenant.`,
+
+        inviteSent,
 
         userId:
           invitedUserId,
@@ -563,9 +633,6 @@ export async function POST(
         tenantId,
 
         role,
-
-        inviteSent:
-          inviteWasSent,
       },
       {
         status: 200,
