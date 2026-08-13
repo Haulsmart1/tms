@@ -87,6 +87,14 @@
   --danger-tint: #3A1C1C;    --danger-border: #B04C4C;
   /* Text/icon colour for a solid --danger fill, same reason as --on-primary. */
   --on-danger: #2A0F0F;
+  /* Console type additions. Identical in every block: these are type, not
+     colour, and do not vary by theme. They live here rather than only in
+     tailwind.config.ts so the parity test covers them, and so a future theme
+     cannot forget one. */
+  --text-kicker: 600 11px/16px var(--font-sans);
+  --tracking-kicker: .08em;
+  --text-data-md: 500 13px/18px var(--font-mono);
+  --text-data-sm: 500 12px/16px var(--font-mono);
   --focus: #7FA0F7;
   /* elevation, black-based rather than navy. The light theme's
      rgba(11,18,32,...) shadows are invisible on a dark canvas. In dark,
@@ -143,6 +151,14 @@
   --danger: #F08A8A;         --danger-hover: #F5A5A5;   --danger-strong: #F08A8A;
   --danger-tint: #3A1C1C;    --danger-border: #B04C4C;
   --on-danger: #2A0F0F;
+  /* Console type additions. Identical in every block: these are type, not
+     colour, and do not vary by theme. They live here rather than only in
+     tailwind.config.ts so the parity test covers them, and so a future theme
+     cannot forget one. */
+  --text-kicker: 600 11px/16px var(--font-sans);
+  --tracking-kicker: .08em;
+  --text-data-md: 500 13px/18px var(--font-mono);
+  --text-data-sm: 500 12px/16px var(--font-mono);
   --focus: #7FA0F7;
   --shadow-xs: 0 1px 2px rgba(0,0,0,.45);
   --shadow-sm: 0 1px 2px rgba(0,0,0,.45), 0 2px 8px -2px rgba(0,0,0,.55);
@@ -200,6 +216,14 @@
   --danger: #D23E3E;         --danger-hover: #AB2F2F;   --danger-strong: #AB2F2F;
   --danger-tint: #FBE5E5;    --danger-border: #F3C2C2;
   --on-danger: #FFFFFF;
+  /* Console type additions. Identical in every block: these are type, not
+     colour, and do not vary by theme. They live here rather than only in
+     tailwind.config.ts so the parity test covers them, and so a future theme
+     cannot forget one. */
+  --text-kicker: 600 11px/16px var(--font-sans);
+  --tracking-kicker: .08em;
+  --text-data-md: 500 13px/18px var(--font-mono);
+  --text-data-sm: 500 12px/16px var(--font-mono);
   --focus: #2953E3;
   --shadow-xs: 0 1px 2px rgba(11,18,32,.05);
   --shadow-sm: 0 1px 2px rgba(11,18,32,.05), 0 2px 8px -2px rgba(11,18,32,.08);

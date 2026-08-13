@@ -47,6 +47,9 @@ const config: Config = {
       lg: ["18px", "26px"],
       xl: ["24px", "32px"],
       "2xl": ["30px", "36px"],
+      kicker: ["11px", { lineHeight: "16px", letterSpacing: "0.08em", fontWeight: "600" }],
+      data: ["13px", { lineHeight: "18px", fontWeight: "500" }],
+      "data-sm": ["12px", { lineHeight: "16px", fontWeight: "500" }],
     },
     boxShadow: {
       // DEFAULT is required: this object REPLACES Tailwind's shadow scale
