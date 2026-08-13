@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { contrastRatio, relativeLuminance } from "./contrast";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseTokenBlocks } from "./parseTokens";
 
 describe("contrastRatio", () => {
@@ -60,7 +60,11 @@ describe("contrastRatio", () => {
   });
 });
 
-const css = readFileSync(resolve(process.cwd(), "app/tokens.css"), "utf8");
+// Resolved relative to this file, not process.cwd(), so the test does not
+// depend on the directory vitest happens to be invoked from (e.g. running
+// vitest from a subdirectory would otherwise throw ENOENT).
+const TOKENS_PATH = fileURLToPath(new URL("../../app/tokens.css", import.meta.url));
+const css = readFileSync(TOKENS_PATH, "utf8");
 const blocks = parseTokenBlocks(css);
 
 /* Both themes must declare EVERY token. The previous .dark scaffold overrode
@@ -92,11 +96,22 @@ const AA_NON_TEXT = 3;
 
 /* The same pairs are asserted against both themes: a token's job does not
    change between them, only its value does. */
+/* DELIBERATELY NOT ASSERTED: badge borders against --surface.
+   components/Badge.tsx renders a tinted pill with a coloured border, and those
+   borders measure roughly 1.2 to 1.6:1 against the card in light, 1.3 to 3.3:1
+   in dark. That is not a WCAG failure. 1.4.11 governs visual information
+   REQUIRED to identify a component or its state, and a badge is not an
+   interactive component: its state is carried by its text, which passes 4.5:1
+   in both themes (asserted above as the "*-strong on tint" pairs). The border
+   is decorative reinforcement. The dark borders were nonetheless strengthened
+   relative to light because status scanning is the main job of the jobs board,
+   which is a legibility improvement, not a conformance one. */
 const PAIRS: Pair[] = [
   { label: "ink on surface",              fg: "--ink",               bg: "--surface",       min: AA_TEXT },
   { label: "ink on canvas",               fg: "--ink",               bg: "--canvas",        min: AA_TEXT },
   { label: "ink on surface-2",            fg: "--ink",               bg: "--surface-2",     min: AA_TEXT },
   { label: "ink-2 on surface",            fg: "--ink-2",             bg: "--surface",       min: AA_TEXT },
+  { label: "ink-2 on canvas",             fg: "--ink-2",             bg: "--canvas",        min: AA_TEXT },
   { label: "chrome-text on chrome",       fg: "--chrome-text",       bg: "--chrome",        min: AA_TEXT },
   { label: "chrome-text-strong on chrome",fg: "--chrome-text-strong",bg: "--chrome",        min: AA_TEXT },
   { label: "chrome-text on chrome-raised",fg: "--chrome-text",       bg: "--chrome-raised", min: AA_TEXT },
@@ -111,6 +126,8 @@ const PAIRS: Pair[] = [
   { label: "danger-strong on tint",       fg: "--danger-strong",     bg: "--danger-tint",   min: AA_TEXT },
   { label: "primary-deep on tint",        fg: "--primary-deep",      bg: "--primary-tint",  min: AA_TEXT },
   { label: "accent-text on tint",         fg: "--accent-text",       bg: "--accent-tint",   min: AA_TEXT },
+  { label: "success-strong on surface",   fg: "--success-strong",    bg: "--surface",       min: AA_TEXT },
+  { label: "danger-strong on surface",    fg: "--danger-strong",     bg: "--surface",       min: AA_TEXT },
   { label: "focus on canvas",             fg: "--focus",             bg: "--canvas",        min: AA_NON_TEXT },
   { label: "focus on surface",            fg: "--focus",             bg: "--surface",       min: AA_NON_TEXT },
   { label: "focus on chrome",             fg: "--focus",             bg: "--chrome",        min: AA_NON_TEXT },
@@ -128,9 +145,36 @@ describe.each([
       const bg = block[pair.bg];
       expect(fg, `${pair.fg} missing from ${selector}`).toBeDefined();
       expect(bg, `${pair.bg} missing from ${selector}`).toBeDefined();
-      expect(contrastRatio(fg, bg)).toBeGreaterThanOrEqual(pair.min);
+      const ratio = contrastRatio(fg, bg);
+      expect(
+        ratio,
+        `${pair.label} in ${selector}: ${pair.fg} on ${pair.bg} measures ${ratio.toFixed(2)}:1, needs ${pair.min}:1`,
+      ).toBeGreaterThanOrEqual(pair.min);
     },
   );
+});
+
+/* Pairs asserted against the dark default only. Their light-theme counterparts
+   are pre-existing shipped failures recorded in KNOWN_GAPS below, which this
+   branch deliberately does not fix, so they cannot go in PAIRS (which runs
+   against both themes). */
+const DARK_ONLY_PAIRS: Pair[] = [
+  { label: "line-strong on surface (input and control borders)", fg: "--line-strong", bg: "--surface", min: AA_NON_TEXT },
+];
+
+describe(":root only contrast", () => {
+  it.each(DARK_ONLY_PAIRS.map((p) => [p.label, p] as const))("%s", (_label, pair) => {
+    const block = blocks[":root"];
+    const fg = block[pair.fg];
+    const bg = block[pair.bg];
+    expect(fg, `${pair.fg} missing from :root`).toBeDefined();
+    expect(bg, `${pair.bg} missing from :root`).toBeDefined();
+    const ratio = contrastRatio(fg, bg);
+    expect(
+      ratio,
+      `${pair.label} in :root: ${pair.fg} on ${pair.bg} measures ${ratio.toFixed(2)}:1, needs ${pair.min}:1`,
+    ).toBeGreaterThanOrEqual(pair.min);
+  });
 });
 
 /* KNOWN GAPS, documented in the spec rather than fixed.
@@ -153,10 +197,10 @@ describe.each([
      .light --line-strong  1.844191
      :root  --ink-4        3.106927 */
 const KNOWN_GAPS = [
-  { selector: ".light", fg: "--ink-3",       bg: "--surface", floor: 4.15, note: "needs 4.5 as body text" },
-  { selector: ".light", fg: "--ink-4",       bg: "--surface", floor: 2.62, note: "needs 4.5; unused by any component" },
-  { selector: ".light", fg: "--line-strong", bg: "--surface", floor: 1.84, note: "needs 3 as a UI component boundary" },
-  { selector: ":root",  fg: "--ink-4",       bg: "--surface", floor: 3.10, note: "needs 4.5; unused by any component" },
+  { selector: ".light", fg: "--ink-3",       bg: "--surface", floor: 4.15, target: 4.5, note: "needs 4.5 as body text" },
+  { selector: ".light", fg: "--ink-4",       bg: "--surface", floor: 2.62, target: 4.5, note: "needs 4.5; unused by any component" },
+  { selector: ".light", fg: "--line-strong", bg: "--surface", floor: 1.84, target: 3,   note: "needs 3 as a UI component boundary" },
+  { selector: ":root",  fg: "--ink-4",       bg: "--surface", floor: 3.10, target: 4.5, note: "needs 4.5; unused by any component" },
 ] as const;
 
 describe("known contrast gaps (documented, must not regress)", () => {
@@ -164,7 +208,14 @@ describe("known contrast gaps (documented, must not regress)", () => {
     "%s",
     (_label, gap) => {
       const block = blocks[gap.selector];
-      expect(contrastRatio(block[gap.fg], block[gap.bg])).toBeGreaterThanOrEqual(gap.floor);
+      const ratio = contrastRatio(block[gap.fg], block[gap.bg]);
+      expect(ratio).toBeGreaterThanOrEqual(gap.floor);
+      // If this trips, it's good news: the gap has been fixed. Move the pair
+      // from KNOWN_GAPS into PAIRS above instead of raising this floor.
+      expect(
+        ratio,
+        `${gap.selector} ${gap.fg} on ${gap.bg}: this gap has been fixed (now ${ratio.toFixed(2)}:1, target was ${gap.target}:1). Move it from KNOWN_GAPS into PAIRS.`,
+      ).toBeLessThan(gap.target);
     },
   );
 });
