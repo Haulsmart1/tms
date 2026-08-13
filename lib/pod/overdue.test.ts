@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { podAgeHours, isAwaitingPod, isPodOverdue, POD_OVERDUE_HOURS } from "./overdue";
+import { buildNeedsAttention } from "../dashboard/aggregate";
 
 const NOW = new Date("2026-08-13T12:00:00Z");
 
@@ -65,5 +66,17 @@ describe("isPodOverdue", () => {
 describe("POD_OVERDUE_HOURS", () => {
   it("is 48", () => {
     expect(POD_OVERDUE_HOURS).toBe(48);
+  });
+});
+
+describe("dashboard and POD agree about the same stop", () => {
+  it("computes the same age for a stop as buildNeedsAttention reports", () => {
+    const plannedAt = "2026-08-11T08:00:00Z";
+    const [item] = buildNeedsAttention(
+      [{ stopId: "s1", jobRef: "J-1", plannedAt }],
+      [],
+      NOW,
+    );
+    expect(item.ageHours).toBeCloseTo(podAgeHours(plannedAt, NOW)!, 10);
   });
 });

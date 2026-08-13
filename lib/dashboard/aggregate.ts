@@ -1,3 +1,5 @@
+import { podAgeHours } from "../pod/overdue";
+
 export type AttentionItem = {
   id: string;
   title: string;
@@ -15,7 +17,10 @@ export function buildNeedsAttention(
     id: `pod-${p.stopId}`,
     title: `${p.jobRef} — POD awaiting`,
     meta: `since ${new Date(p.plannedAt).toLocaleDateString("en-GB")}`,
-    ageHours: (now.getTime() - new Date(p.plannedAt).getTime()) / 36e5,
+    // Shared with /pod so the two pages cannot disagree. Non-null asserted
+    // because the caller filters null planned_at before mapping (see
+    // app/dashboard/page.tsx and isAwaitingPod).
+    ageHours: podAgeHours(p.plannedAt, now)!,
     href: "/pod",
   }));
   const invoiceItems: AttentionItem[] = overdueInvoices.map((i) => ({
