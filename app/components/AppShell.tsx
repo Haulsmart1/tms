@@ -63,7 +63,7 @@ export default function AppShell() {
                   className={
                     "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-semibold no-underline " +
                     (active
-                      ? "bg-primary text-white"
+                      ? "bg-primary text-on-primary"
                       : "text-chrome-text hover:bg-chrome-raised hover:text-chrome-text-strong")
                   }
                 >
@@ -79,7 +79,7 @@ export default function AppShell() {
       <div className="flex flex-none items-center gap-2.5 border-t border-chrome-border p-3.5">
         <span
           aria-hidden
-          className="inline-flex h-[30px] w-[30px] flex-none items-center justify-center rounded-full bg-primary text-xs font-semibold text-white"
+          className="inline-flex h-[30px] w-[30px] flex-none items-center justify-center rounded-full bg-primary text-xs font-semibold text-on-primary"
         >
           {initials}
         </span>
@@ -97,7 +97,7 @@ export default function AppShell() {
           type="button"
           onClick={signOut}
           aria-label="Sign out"
-          className="flex h-8 w-8 flex-none items-center justify-center rounded-md border border-chrome-border bg-chrome-raised text-chrome-text shadow-xs transition-colors hover:border-danger hover:bg-danger hover:text-white"
+          className="flex h-8 w-8 flex-none items-center justify-center rounded-md border border-chrome-border bg-chrome-raised text-chrome-text shadow-xs transition-colors hover:border-danger hover:bg-danger hover:text-on-danger"
         >
           <LogOut size={15} aria-hidden />
         </button>

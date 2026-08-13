@@ -14,10 +14,14 @@ const base =
   "transition-colors disabled:cursor-not-allowed disabled:opacity-60";
 
 const variants: Record<Variant, string> = {
-  primary: "bg-primary text-white hover:bg-primary-hover",
+  // text-on-primary / text-on-danger, not text-white: under the dark default
+  // --primary is a light blue and white on it measures 2.54:1, an AA failure on
+  // the most-clicked control in the app. The token is #FFFFFF in light and dark
+  // ink in dark, so both themes are correct with no per-theme class.
+  primary: "bg-primary text-on-primary hover:bg-primary-hover",
   secondary: "bg-surface text-ink border border-line-strong hover:bg-surface-2",
   ghost: "bg-transparent text-ink hover:bg-surface-2",
-  danger: "bg-danger text-white hover:bg-danger-hover",
+  danger: "bg-danger text-on-danger hover:bg-danger-hover",
 };
 
 const sizes: Record<Size, string> = {
