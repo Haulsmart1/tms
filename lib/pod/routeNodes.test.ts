@@ -52,4 +52,28 @@ describe("routeNodes", () => {
     expect(nodes).toEqual([{ id: "only", state: "current" }]);
     expect(arrowState).toBe("pending");
   });
+
+  it("marks a delivered focused stop done, not current, so the node and the arrow agree", () => {
+    // Every row on the Completed tab focuses a delivered stop. Checking focused
+    // before delivered made the node say in-progress while the arrow said
+    // delivered.
+    const stops = [
+      stop({ id: "a", stop_order: 1, type: "collection", pod_status: "delivered" }),
+      stop({ id: "b", stop_order: 2, pod_status: "delivered" }),
+    ];
+    const { nodes, arrowState } = routeNodes(stops, "b", false);
+    expect(nodes).toEqual([
+      { id: "a", state: "done" },
+      { id: "b", state: "done" },
+    ]);
+    expect(arrowState).toBe("delivered");
+  });
+
+  it("still marks an undelivered focused stop current", () => {
+    const stops = [
+      stop({ id: "a", stop_order: 1, pod_status: "delivered" }),
+      stop({ id: "b", stop_order: 2 }),
+    ];
+    expect(routeNodes(stops, "b", false).nodes[1]).toEqual({ id: "b", state: "current" });
+  });
 });
