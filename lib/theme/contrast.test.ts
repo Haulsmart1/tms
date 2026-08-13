@@ -141,11 +141,21 @@ describe.each([
    These assert the ratio does not get WORSE, so the gaps stay documented and
    cannot silently regress further. Raising any of them to its AA minimum and
    moving the pair into PAIRS above is a welcome future change. */
+/* Floors are the measured ratio truncated DOWN to two decimals, never rounded.
+   Rounding a floor to the nearest value makes it unsatisfiable whenever the
+   measurement rounds up: --ink-4 on .light measures 2.628180 and a floor of
+   2.63 can never be met. Both floors below that would have rounded up were
+   originally written that way and failed for exactly this reason. Truncate.
+   Exact measurements at the time of writing, for reference:
+     .light --ink-3        4.150979
+     .light --ink-4        2.628180
+     .light --line-strong  1.844191
+     :root  --ink-4        3.106927 */
 const KNOWN_GAPS = [
   { selector: ".light", fg: "--ink-3",       bg: "--surface", floor: 4.15, note: "needs 4.5 as body text" },
-  { selector: ".light", fg: "--ink-4",       bg: "--surface", floor: 2.63, note: "needs 4.5; unused by any component" },
+  { selector: ".light", fg: "--ink-4",       bg: "--surface", floor: 2.62, note: "needs 4.5; unused by any component" },
   { selector: ".light", fg: "--line-strong", bg: "--surface", floor: 1.84, note: "needs 3 as a UI component boundary" },
-  { selector: ":root",  fg: "--ink-4",       bg: "--surface", floor: 3.11, note: "needs 4.5; unused by any component" },
+  { selector: ":root",  fg: "--ink-4",       bg: "--surface", floor: 3.10, note: "needs 4.5; unused by any component" },
 ] as const;
 
 describe("known contrast gaps (documented, must not regress)", () => {
