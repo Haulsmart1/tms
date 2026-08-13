@@ -138,7 +138,12 @@ The two new tokens, `--on-primary` and `--on-danger`, exist because `Button.tsx`
 ### Contrast verification
 
 Measured, not estimated. Every pair below was computed with the WCAG relative-luminance
-formula. The full script is committed as `scripts/contrast-check.mjs` so it can be rerun.
+formula. **Correction (2026-08-13, during implementation): this shipped as a Vitest test at
+`lib/theme/contrast.test.ts`, not the standalone script named below.** `vitest.config.ts` only
+includes `lib/**/*.test.ts`, so a test there runs on every `npm test` with no separate command
+to remember, and it parses `app/tokens.css` itself rather than holding a second copy of the hex
+values, so a token edited to a failing colour breaks the build. Same intent, stronger
+mechanism. See the plan's "Deviation from the spec" section.
 
 Dark theme, passing:
 
@@ -281,7 +286,9 @@ three places someone would actually be looking:
 - `app/components/AppShell.tsx`: theme toggle in the footer, guarded by `isThemeableRoute`.
 - `app/components/TenantGate.tsx`: panel retinted.
 - `lib/nav/themeableRoutes.ts` and its test: new.
-- `scripts/contrast-check.mjs`: new, committed.
+- `lib/theme/contrast.test.ts`, plus `lib/theme/contrast.ts` and `lib/theme/parseTokens.ts`:
+  new. This is where the contrast verification landed, rather than the standalone script
+  originally named here.
 - `tailwind.config.ts`: dead `primary-50..950` ramp removed (already done, see Known gaps).
 - `README.md`: contributor section.
 
@@ -291,8 +298,8 @@ Not touched: the 14 legacy pages, every query, guard, and validation schema.
 
 - `npm run typecheck` and `npm run build` clean.
 - `npm test`, including a new test for `isThemeableRoute` mirroring `shouldShowShell.test.ts`.
-- `scripts/contrast-check.mjs` passes for both themes, with the Known gaps list as its only
-  documented exceptions.
+- `lib/theme/contrast.test.ts` passes for both themes, with the Known gaps list as its only
+  documented exceptions. It runs as part of `npm test`.
 - Manual: hard reload each themed page in both modes, watching for a flash. Reload with
   JavaScript disabled and confirm dark renders.
 - Manual: confirm the toggle is absent on a legacy route, and that switching to light on

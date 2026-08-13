@@ -75,7 +75,7 @@ Status tags: [OK] functional against live data, [PARTIAL] real data but view-onl
 - **`/api/request-access`** [OK]: lead intake for the landing form; honeypot + per-IP rate limit + Zod validation, stores the lead, then notifies via Microsoft Teams and Resend.
 
 ### Operations
-- **`/dashboard`** [LAUNCHER]: grid of navigation cards into the app. Static links, no data yet.
+- **`/dashboard`** [OK]: tenant-scoped KPI tiles (jobs today, unassigned, on the road, PODs awaiting, overdue invoices), a today's-jobs table, a needs-attention list and a 7-day revenue chart. Read-only; no write path.
 - **`/jobs`** [OK]: create / edit / delete jobs with collection and delivery stops; inline POD capture and "mark delivered"; margin display. The heaviest operational page.
 - **`/pod`** [OK]: dedicated proof-of-delivery workflow; upload photos and delivery documents to private storage, record recipient / notes, mark stops delivered. Served via signed URLs.
 - **`/tracking`** [PARTIAL]: read-only view of vehicles and their latest GPS locations.
@@ -178,7 +178,7 @@ docs/
 - **Payments:** complete the Square subscription flow (pay-by-link first, then card entry).
 - **Analytics dashboards:** make `/dashboard` and `/super-admin` data-driven; add cross-tenant "which tenant is performing best" views on top of the admin tenant selector; charts and SQL-view aggregation at scale.
 - **Admin management:** turn the read-only super-admin companies / users pages into full management, and finish the per-page permissions model (revoke path, controlled state).
-- **Operator theme:** a darker, low-glare theme for warehouse / operating-room conditions.
+- **Design-system rollout:** move the remaining ~14 legacy inline-styled pages onto the design system so they follow the theme. The dark-default "operator theme" itself shipped on 2026-08-13 (see Design system above); what is left is converting those pages' hardcoded colour literals to tokens and adding each path to `lib/nav/themeableRoutes.ts`.
 - **User invite flow:** complete first-user-becomes-admin provisioning and settings guards.
 
 ## Notes on maturity

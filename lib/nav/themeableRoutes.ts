@@ -13,14 +13,32 @@
    This is an allowlist, not a denylist, so a brand new page defaults to
    pinned-dark and legacy-safe rather than half-themed.
 
+   TWO ENTRIES BELOW DO NOT SHOW A TOGGLE, and that is correct. AppShell is what
+   renders the toggle, and shouldShowShell() hides AppShell entirely on "/",
+   "/login" and every "/super-admin/*" path. So of the five routes here, only
+   /dashboard and /jobs actually offer the control. The others still need to be
+   listed, because this list ALSO decides whether ThemeScope pins a route dark,
+   and pinning the landing page or /login dark would be wrong.
+
+   "/" is a further special case: it self-pins `.light` on its own root element
+   (see app/page.tsx), because the public marketing page stays light whatever
+   the console is set to. Listing it here is therefore belt-and-braces rather
+   than load-bearing, since the nearer `.light` would win over ThemeScope's
+   `.dark` anyway. Removing it would render identically; it is kept so the list
+   reads as "every tokenised page" rather than "every page ThemeScope must skip".
+
+   Deliberately NO line numbers in the annotations below. They were wrong twice
+   during this branch alone, because the referenced lines move whenever anything
+   is added above them.
+
    When every route is listed, this file and app/components/ThemeScope.tsx can
    both be deleted in one commit. */
 export const THEMEABLE_ROUTES: readonly string[] = [
-  "/",                       // app/page.tsx:50          (pinned light, see spec)
-  "/login",                  // app/login/page.tsx:62
-  "/dashboard",              // app/dashboard/page.tsx:184
-  "/jobs",                   // app/jobs/page.tsx:249
-  "/super-admin/requests",   // app/super-admin/requests/page.tsx:79
+  "/",                       // app/page.tsx                      (self-pins .light)
+  "/login",                  // app/login/page.tsx
+  "/dashboard",              // app/dashboard/page.tsx
+  "/jobs",                   // app/jobs/page.tsx
+  "/super-admin/requests",   // app/super-admin/requests/page.tsx
 ];
 
 export function isThemeableRoute(pathname: string): boolean {
