@@ -40,7 +40,13 @@ export default function Field({
              thing identifying an empty input, and on the surface-2 form card
              the fill differentiation is 1.045:1. #64748B measures 4.76:1.
              placeholder likewise: ink-4 was 2.56:1, ink-3 is 4.76:1. */
-          "h-10 rounded-md border bg-surface px-3 text-base text-ink placeholder:text-ink-3",
+          /* w-full min-w-0: the input is a grid item of the wrapper above, so it
+             inherits min-width:auto, which resolves to an <input>'s intrinsic ~20
+             character width (about 194px). In a wrapper narrower than that (the job
+             form's w-40 City and w-32 Postcode) it refused to shrink and overflowed
+             into the next field. min-w-0 removes that floor, w-full makes it fill
+             the wrapper. */
+          "h-10 w-full min-w-0 rounded-md border bg-surface px-3 text-base text-ink placeholder:text-ink-3",
           error ? "border-danger" : "border-ink-3",
           className,
         )}

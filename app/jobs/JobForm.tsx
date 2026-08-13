@@ -81,8 +81,8 @@ export default function JobForm({
           <span className="text-sm font-medium text-ink-2">Customer</span>
           {/* w-full so the select fills its grid track, min-w-0 so it may
               shrink below its longest <option>. Without min-w-0 a long
-              subcontractor name widens the select past its track and it
-              overlaps the field beside it. */}
+              option widens the select past its track and it overlaps the
+              field beside it. */}
           <select
             className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
             value={form.customer_id}
