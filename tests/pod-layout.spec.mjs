@@ -22,6 +22,15 @@ import { chromium } from "playwright";
 const TARGET = process.env.POD_URL || "http://localhost:3000/pod";
 const WIDTHS = [1920, 1440, 1280, 900, 375];
 
+/* Optional one-shot sign-in URL, normally the callback link minted by
+   scripts/dev-login.mjs. Visited ONCE before measuring.
+
+   It has to be once: that token is single-use, exactly like a real magic link.
+   So this runs in a single browser context and resizes the viewport between
+   widths, rather than opening a fresh page per width, because a fresh page
+   means a fresh context, an empty cookie jar, and a token already spent. */
+const AUTH_URL = process.env.POD_AUTH_URL || "";
+
 /* Inject pathologically long free text before measuring. Seed data is usually
    too tidy to catch a truncation failure, and the entire point of the
    fixed-width columns is that overlong text truncates instead of pushing into
@@ -92,10 +101,24 @@ const isMain = import.meta.url === `file://${process.argv[1]?.replace(/\\/g, "/"
 if (isMain) {
   const stress = process.env.POD_NO_STRESS !== "1";
   const browser = await chromium.launch();
+  // ONE context for the whole run, so the session cookie survives every width.
+  const context = await browser.newContext({ viewport: { width: WIDTHS[0], height: 900 } });
+  const page = await context.newPage();
   let failures = 0;
 
+  if (AUTH_URL) {
+    await page.goto(AUTH_URL, { waitUntil: "networkidle" });
+    const landed = new URL(page.url()).pathname.replace(/\/$/, "");
+    if (landed === "/login") {
+      console.log("ABORT  sign-in link rejected (expired, already used, or bad token).");
+      console.log("       Mint a fresh one: node scripts/dev-login.mjs <email> /pod");
+      await browser.close();
+      process.exit(2);
+    }
+  }
+
   for (const width of WIDTHS) {
-    const page = await browser.newPage({ viewport: { width, height: 900 } });
+    await page.setViewportSize({ width, height: 900 });
     await page.goto(TARGET, { waitUntil: "networkidle" });
 
     const problem = await assertOnRealPage(page);
@@ -138,7 +161,6 @@ if (isMain) {
       if (collisions.length) console.log("  collision:", collisions.slice(0, 5));
       if (bodyScrolls) console.log("  page scrolls horizontally");
     }
-    await page.close();
   }
 
   await browser.close();
