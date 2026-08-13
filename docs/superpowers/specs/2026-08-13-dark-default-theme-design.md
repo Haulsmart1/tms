@@ -249,11 +249,12 @@ Following this project's convention of documenting rather than silently absorbin
   If it is ever used for text, it needs raising first.
 - **`JobForm.tsx` uses `border-ink-3` for input borders**, not `border-line-strong`. That
   measures 4.52:1 in dark, so it is fine, but it is an inconsistency worth knowing about.
-- **The `primary-50..950` literal hex ramp in `tailwind.config.ts:80-81` is not themed** and
-  never will be, since it is raw hex. It is currently unused by any component (verified).
-  Recommend deleting it in this change as a two-line removal of a live trap: it duplicates
-  five token values and would silently break theming for anyone who used it. Called out
-  explicitly rather than folded in silently, so it can be vetoed.
+- **The `primary-50..950` literal hex ramp in `tailwind.config.ts` was removed** (approved by
+  Ethan, 2026-08-13, and done ahead of the implementation plan since it is independent of
+  everything else here). Raw hex cannot follow a theme swap, so it was a live trap: it
+  duplicated five token values and would have silently broken theming for anyone who reached
+  for it. Verified unreferenced across `app/`, `components/` and `lib/` before removal. A
+  comment in its place records why, so it is not reintroduced.
 
 ## Contributor documentation
 
@@ -281,7 +282,7 @@ three places someone would actually be looking:
 - `app/components/TenantGate.tsx`: panel retinted.
 - `lib/nav/themeableRoutes.ts` and its test: new.
 - `scripts/contrast-check.mjs`: new, committed.
-- `tailwind.config.ts`: remove the dead `primary-50..950` ramp (see Known gaps).
+- `tailwind.config.ts`: dead `primary-50..950` ramp removed (already done, see Known gaps).
 - `README.md`: contributor section.
 
 Not touched: the 14 legacy pages, every query, guard, and validation schema.
@@ -303,8 +304,5 @@ Not touched: the 14 legacy pages, every query, guard, and validation schema.
 
 ## Open questions
 
-One, and it does not block implementation: whether to delete the dead `primary-50..950` ramp
-from `tailwind.config.ts` as part of this change, or leave it. Recommended for removal under
-Known gaps; the rest of the spec is unaffected either way.
-
-All five product decisions are settled and recorded under Decisions.
+None. All five product decisions are recorded under Decisions, and the one item that was open
+at review time (the dead `primary-50..950` ramp) was approved for removal and is done.
