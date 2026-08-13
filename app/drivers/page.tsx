@@ -281,6 +281,10 @@ export default function DriversPage() {
 
   const [vehicleToAssign, setVehicleToAssign] = useState("");
   const [assignmentNotes, setAssignmentNotes] = useState("");
+  const [assignmentSaving, setAssignmentSaving] = useState(false);
+  const [assignmentDebug, setAssignmentDebug] = useState(
+    "Assignment debug: waiting for button click."
+  );
 
   const [checkCode, setCheckCode] = useState("");
   const [checkNotes, setCheckNotes] = useState("");
@@ -667,40 +671,127 @@ export default function DriversPage() {
   }
 
   async function assignVehicle() {
-    if (!selectedDriverId || !vehicleToAssign) {
-      setErrorMessage("Select a driver and vehicle.");
+    const driverId = selectedDriverId;
+    const vehicleId = vehicleToAssign;
+
+    console.log("[vehicle-assignment] button handler started", {
+      driverId,
+      vehicleId,
+      tenantId,
+      assignmentNotes,
+    });
+
+    setAssignmentDebug(
+      `CLICK RECEIVED\nDriver: ${driverId ?? "NONE"}\nVehicle: ${
+        vehicleId || "NONE"
+      }\nTenant: ${tenantId ?? "NONE"}`
+    );
+
+    if (!driverId) {
+      const message = "No driver is selected.";
+      console.error("[vehicle-assignment]", message);
+      setErrorMessage(message);
+      setAssignmentDebug(`FAILED BEFORE RPC\n${message}`);
+      window.alert(message);
+      return;
+    }
+
+    if (!vehicleId) {
+      const message = "No vehicle is selected.";
+      console.error("[vehicle-assignment]", message);
+      setErrorMessage(message);
+      setAssignmentDebug(`FAILED BEFORE RPC\n${message}`);
+      window.alert(message);
+      return;
+    }
+
+    if (!tenantId) {
+      const message = "Tenant has not loaded.";
+      console.error("[vehicle-assignment]", message);
+      setErrorMessage(message);
+      setAssignmentDebug(`FAILED BEFORE RPC\n${message}`);
+      window.alert(message);
       return;
     }
 
     clearMessages();
+    setAssignmentSaving(true);
 
     try {
-      const { error } = await supabase.rpc(
+      setAssignmentDebug(
+        `CALLING RPC\nDriver: ${driverId}\nVehicle: ${vehicleId}\nTenant: ${tenantId}`
+      );
+
+      console.log(
+        "[vehicle-assignment] calling assign_driver_to_vehicle RPC"
+      );
+
+      const { data, error } = await supabase.rpc(
         "assign_driver_to_vehicle",
         {
-          p_vehicle_id: vehicleToAssign,
-          p_driver_id: selectedDriverId,
+          p_vehicle_id: vehicleId,
+          p_driver_id: driverId,
           p_notes: assignmentNotes.trim() || null,
         }
       );
 
+      console.log("[vehicle-assignment] RPC response", {
+        data,
+        error,
+      });
+
       if (error) {
+        const details = [
+          `Message: ${error.message}`,
+          `Code: ${error.code ?? "unknown"}`,
+          `Details: ${error.details ?? "none"}`,
+          `Hint: ${error.hint ?? "none"}`,
+        ].join("\n");
+
+        setAssignmentDebug(`RPC FAILED\n${details}`);
+
+        window.alert(`Vehicle assignment failed.\n\n${details}`);
+
         throw error;
       }
 
-      setMessage("Vehicle assigned.");
+      setAssignmentDebug(
+        `RPC SUCCESS\nAssignment ID: ${String(
+          data ?? "returned without an ID"
+        )}\nReloading assignment data...`
+      );
+
+      setMessage("Vehicle assigned successfully.");
+
+      await loadData(tenantId);
+
+      setAssignmentDebug(
+        `SUCCESS\nAssignment ID: ${String(
+          data ?? "not returned"
+        )}\nDriver: ${driverId}\nVehicle: ${vehicleId}`
+      );
+
       setVehicleToAssign("");
       setAssignmentNotes("");
 
-      if (tenantId) {
-        await loadData(tenantId);
-      }
+      window.alert("Vehicle assigned successfully.");
     } catch (error) {
-      setErrorMessage(
+      console.error("[vehicle-assignment] exception", error);
+
+      const errorText =
         error instanceof Error
           ? error.message
-          : "Unable to assign vehicle."
+          : "Unable to assign vehicle.";
+
+      setErrorMessage(errorText);
+
+      setAssignmentDebug((current) =>
+        current.startsWith("RPC FAILED")
+          ? current
+          : `ASSIGNMENT EXCEPTION\n${errorText}`
       );
+    } finally {
+      setAssignmentSaving(false);
     }
   }
 
@@ -1620,11 +1711,30 @@ export default function DriversPage() {
 
                   <button
                     type="button"
-                    onClick={() => void assignVehicle()}
-                    style={styles.primaryButton}
+                    disabled={assignmentSaving}
+                    onClick={() => {
+                      console.log(
+                        "[vehicle-assignment] Assign Vehicle button onClick fired"
+                      );
+                      setAssignmentDebug(
+                        "BUTTON onClick FIRED — entering assignment handler..."
+                      );
+                      void assignVehicle();
+                    }}
+                    style={{
+                      ...styles.primaryButton,
+                      opacity: assignmentSaving ? 0.65 : 1,
+                      cursor: assignmentSaving ? "wait" : "pointer",
+                    }}
                   >
-                    Assign Vehicle
+                    {assignmentSaving
+                      ? "Assigning..."
+                      : "Assign Vehicle"}
                   </button>
+
+                  <pre style={styles.assignmentDebug}>
+                    {assignmentDebug}
+                  </pre>
                 </div>
               )}
             </section>
@@ -2304,6 +2414,20 @@ const styles: Record<string, CSSProperties> = {
     border: "1px solid #e2e8f0",
     borderRadius: 10,
     background: "#f8fafc",
+  },
+
+  assignmentDebug: {
+    gridColumn: "1 / -1",
+    margin: 0,
+    padding: 12,
+    borderRadius: 10,
+    border: "1px solid #cbd5e1",
+    background: "#0f172a",
+    color: "#e2e8f0",
+    fontSize: 12,
+    lineHeight: 1.5,
+    whiteSpace: "pre-wrap",
+    overflowWrap: "anywhere",
   },
 
   success: {
