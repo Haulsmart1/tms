@@ -52,6 +52,11 @@ function firstCollectionCity(stops: PodStop[]): string | null {
   return c?.city ?? null;
 }
 
+/* Fallbacks are deliberately not uniform. An em-dash reads correctly in a
+   narrow mono column (reference, city), a phrase reads better in a wide prose
+   cell ("No customer"), and an empty string is right for the postcode because
+   it is appended to other text rather than standing alone. The rest of this
+   codebase is inconsistent here too; this at least is inconsistent on purpose. */
 function toRow(job: PodJob, stop: PodStop, now: Date): QueueRow {
   return {
     stopId: stop.id,
@@ -101,7 +106,11 @@ export function splitDeliveryStops(
 
   // Oldest first. Unknown age sorts last: an undated stop is not urgent, it is
   // unmeasured, and putting it at the top would push real problems down.
+  // The equal-nulls branch is load-bearing, not defensive: without it the
+  // comparator returns 1 in both directions for two null ages, never 0, which
+  // is not a strict weak ordering and leaves the result implementation-defined.
   awaiting.sort((a, b) => {
+    if (a.ageHours === null && b.ageHours === null) return 0;
     if (a.ageHours === null) return 1;
     if (b.ageHours === null) return -1;
     return b.ageHours - a.ageHours;
@@ -113,7 +122,13 @@ export function splitDeliveryStops(
 
 export function waitingLabel(ageHours: number | null): string {
   if (ageHours === null) return "—";
-  if (ageHours < 1) return `${Math.max(0, Math.floor(ageHours * 60))} m`;
+  // A negative age means planned_at is in the future: the job is scheduled for
+  // a later date, so the stop is in the queue but not actually late yet.
+  // Clamping this to "0 m" made it indistinguishable from a stop that became
+  // due seconds ago, which is a real misread for a dispatcher scanning the
+  // queue rather than a cosmetic nit.
+  if (ageHours < 0) return "not due";
+  if (ageHours < 1) return `${Math.floor(ageHours * 60)} m`;
   if (ageHours < 24) return `${Math.floor(ageHours)} h`;
   return `${Math.floor(ageHours / 24)} d ${Math.floor(ageHours % 24)} h`;
 }

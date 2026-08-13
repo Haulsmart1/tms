@@ -105,4 +105,27 @@ describe("waitingLabel", () => {
   it("returns a dash when the age is unknown", () => {
     expect(waitingLabel(null)).toBe("—");
   });
+
+  it("distinguishes a not-yet-due stop from one that just became due", () => {
+    // planned_at can be in the future: it is derived from the job's
+    // scheduled_date. Clamping to "0 m" made these two cases identical.
+    expect(waitingLabel(-5)).toBe("not due");
+    expect(waitingLabel(-0.1)).toBe("not due");
+    expect(waitingLabel(0)).toBe("0 m");
+  });
+});
+
+describe("awaiting sort stability", () => {
+  it("keeps null-aged rows in input order rather than relying on engine behaviour", () => {
+    const mk = (id: string, plannedAt: string | null): PodJob => {
+      const j = job({ id, reference: `J-${id}` });
+      j.stops[1] = { ...j.stops[1], id: `s${id}`, planned_at: plannedAt };
+      return j;
+    };
+    const { awaiting } = splitDeliveryStops(
+      [mk("a", null), mk("b", "2026-08-09T08:00:00Z"), mk("c", null), mk("d", null)],
+      NOW,
+    );
+    expect(awaiting.map((r) => r.stopId)).toEqual(["sb", "sa", "sc", "sd"]);
+  });
 });
