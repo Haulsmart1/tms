@@ -209,7 +209,10 @@ describe("known contrast gaps (documented, must not regress)", () => {
     (_label, gap) => {
       const block = blocks[gap.selector];
       const ratio = contrastRatio(block[gap.fg], block[gap.bg]);
-      expect(ratio).toBeGreaterThanOrEqual(gap.floor);
+      expect(
+        ratio,
+        `${gap.selector} ${gap.fg} on ${gap.bg}: measures ${ratio.toFixed(2)}:1, below the documented floor of ${gap.floor}:1. This is a regression, not a known gap.`,
+      ).toBeGreaterThanOrEqual(gap.floor);
       // If this trips, it's good news: the gap has been fixed. Move the pair
       // from KNOWN_GAPS into PAIRS above instead of raising this floor.
       expect(
