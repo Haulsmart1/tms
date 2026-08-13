@@ -67,7 +67,15 @@ export default function DashboardPage() {
           .from("job_stops")
           .select("id, planned_at, pod_status, jobs ( reference, status )")
           .eq("type", "delivery")
-          .neq("pod_status", "delivered"),
+          // NULL-safe on purpose. PostgREST compiles .neq() to SQL <>, and
+          // NULL <> 'delivered' is NULL, which WHERE discards: a plain .neq
+          // silently drops every stop whose pod_status is NULL, even though an
+          // undelivered stop is exactly what this query is looking for. That
+          // made /dashboard and /pod disagree about the same rows despite
+          // sharing isAwaitingPod. The filter stays server-side rather than
+          // being dropped so the query does not fetch every delivered stop in
+          // the tenant's history on each load.
+          .or("pod_status.is.null,pod_status.neq.delivered"),
       );
 
       const overdueInvoicesQuery = tenant
