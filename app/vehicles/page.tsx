@@ -97,6 +97,17 @@ const EMPTY_FORM = {
   fleet_insurance_policy_id: "",
 };
 
+
+const EMPTY_FLEET_POLICY_FORM = {
+  provider: "",
+  policy_number: "",
+  start_date: "",
+  expiry_date: "",
+  auto_renew: false,
+  renewal_notice_days: "30",
+  notes: "",
+};
+
 export default function VehiclesPage() {
   const supabase = useMemo(() => createClient(), []);
   const tenant = useTenant();
@@ -108,6 +119,13 @@ export default function VehiclesPage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [fleetPolicySaving, setFleetPolicySaving] = useState(false);
+  const [editingFleetPolicyId, setEditingFleetPolicyId] = useState<string | null>(
+    null
+  );
+  const [fleetPolicyForm, setFleetPolicyForm] = useState(
+    EMPTY_FLEET_POLICY_FORM
+  );
 
   const [form, setForm] = useState(EMPTY_FORM);
 
@@ -158,6 +176,171 @@ export default function VehiclesPage() {
     void loadVehicles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenant.activeTenantId]);
+
+  function resetFleetPolicyForm() {
+    setEditingFleetPolicyId(null);
+    setFleetPolicyForm(EMPTY_FLEET_POLICY_FORM);
+  }
+
+  function startEditFleetPolicy(policy: FleetInsurancePolicy) {
+    setEditingFleetPolicyId(policy.id);
+    setMessage("");
+
+    setFleetPolicyForm({
+      provider: policy.provider || "",
+      policy_number: policy.policy_number || "",
+      start_date: policy.start_date || "",
+      expiry_date: policy.expiry_date || "",
+      auto_renew: policy.auto_renew,
+      renewal_notice_days: String(policy.renewal_notice_days ?? 30),
+      notes: policy.notes || "",
+    });
+
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function saveFleetPolicy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage("");
+
+    if (!isAdmin) {
+      setMessage("Only an admin can manage fleet insurance.");
+      return;
+    }
+
+    if (!fleetPolicyForm.provider.trim()) {
+      setMessage("Fleet insurance provider is required.");
+      return;
+    }
+
+    if (!fleetPolicyForm.policy_number.trim()) {
+      setMessage("Fleet insurance policy number is required.");
+      return;
+    }
+
+    if (!fleetPolicyForm.expiry_date) {
+      setMessage("Fleet insurance expiry date is required.");
+      return;
+    }
+
+    if (!editingFleetPolicyId && !tenant.writeTenantId) {
+      setMessage("Pick a specific tenant before creating a fleet policy.");
+      return;
+    }
+
+    const renewalNoticeDays = Number(
+      fleetPolicyForm.renewal_notice_days || "30"
+    );
+
+    if (
+      !Number.isFinite(renewalNoticeDays) ||
+      renewalNoticeDays < 0 ||
+      renewalNoticeDays > 365
+    ) {
+      setMessage("Renewal warning days must be between 0 and 365.");
+      return;
+    }
+
+    setFleetPolicySaving(true);
+
+    const payload = {
+      provider: fleetPolicyForm.provider.trim(),
+      policy_number: fleetPolicyForm.policy_number.trim(),
+      start_date: fleetPolicyForm.start_date || null,
+      expiry_date: fleetPolicyForm.expiry_date,
+      auto_renew: fleetPolicyForm.auto_renew,
+      renewal_notice_days: renewalNoticeDays,
+      notes: fleetPolicyForm.notes.trim() || null,
+      active: true,
+      updated_at: new Date().toISOString(),
+    };
+
+    let error: { message?: string } | null = null;
+    const wasEditing = Boolean(editingFleetPolicyId);
+
+    if (editingFleetPolicyId) {
+      const result = await tenant
+        .filterByTenant(
+          supabase
+            .from("fleet_insurance_policies")
+            .update(payload)
+            .eq("id", editingFleetPolicyId)
+        );
+
+      error = result.error;
+    } else {
+      const result = await supabase.from("fleet_insurance_policies").insert([
+        {
+          ...payload,
+          tenant_id: tenant.writeTenantId,
+        },
+      ]);
+
+      error = result.error;
+    }
+
+    if (error) {
+      setMessage(error.message || "Unable to save fleet insurance policy.");
+      setFleetPolicySaving(false);
+      return;
+    }
+
+    setMessage(
+      wasEditing
+        ? "Fleet insurance policy updated."
+        : "Fleet insurance policy created."
+    );
+
+    resetFleetPolicyForm();
+    await loadVehicles();
+    setFleetPolicySaving(false);
+  }
+
+  async function deactivateFleetPolicy(policy: FleetInsurancePolicy) {
+    if (!isAdmin) {
+      setMessage("Only an admin can manage fleet insurance.");
+      return;
+    }
+
+    const linkedVehicles = vehicles.filter(
+      (vehicle) => vehicle.fleet_insurance_policy_id === policy.id
+    );
+
+    if (linkedVehicles.length > 0) {
+      setMessage(
+        `This policy is linked to ${linkedVehicles.length} vehicle${
+          linkedVehicles.length === 1 ? "" : "s"
+        }. Move those vehicles to another policy before deactivating it.`
+      );
+      return;
+    }
+
+    if (!window.confirm(`Deactivate fleet policy ${policy.policy_number}?`)) {
+      return;
+    }
+
+    const result = await tenant.filterByTenant(
+      supabase
+        .from("fleet_insurance_policies")
+        .update({
+          active: false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", policy.id)
+    );
+
+    if (result.error) {
+      setMessage(result.error.message);
+      return;
+    }
+
+    if (editingFleetPolicyId === policy.id) {
+      resetFleetPolicyForm();
+    }
+
+    setMessage("Fleet insurance policy deactivated.");
+    await loadVehicles();
+  }
 
   function resetForm() {
     setEditingId(null);
@@ -381,6 +564,337 @@ export default function VehiclesPage() {
 
             <ComplianceLegend />
           </div>
+
+          {isAdmin ? (
+            <section
+              style={{
+                background: "white",
+                padding: 20,
+                borderRadius: 14,
+                marginBottom: 20,
+                display: "grid",
+                gap: 16,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                  gap: 12,
+                  flexWrap: "wrap",
+                }}
+              >
+                <div>
+                  <h2 style={{ margin: 0 }}>Fleet Insurance</h2>
+                  <p
+                    style={{
+                      margin: "6px 0 0",
+                      color: "#64748b",
+                      fontSize: 13,
+                    }}
+                  >
+                    Manage the tenant fleet policy here. Vehicles using Fleet
+                    Policy automatically inherit its insurer and expiry date.
+                  </p>
+                </div>
+
+                {editingFleetPolicyId ? (
+                  <button
+                    type="button"
+                    style={secondaryButtonStyle}
+                    onClick={resetFleetPolicyForm}
+                  >
+                    Cancel Policy Edit
+                  </button>
+                ) : null}
+              </div>
+
+              {fleetPolicies.length > 0 ? (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns:
+                      "repeat(auto-fit, minmax(280px, 1fr))",
+                    gap: 10,
+                  }}
+                >
+                  {fleetPolicies.map((policy) => {
+                    const policyCompliance = getCompliance(policy.expiry_date);
+                    const linkedCount = vehicles.filter(
+                      (vehicle) =>
+                        vehicle.fleet_insurance_policy_id === policy.id
+                    ).length;
+
+                    return (
+                      <div
+                        key={policy.id}
+                        style={{
+                          border: "1px solid #e2e8f0",
+                          borderRadius: 12,
+                          padding: 14,
+                          background: "#f8fafc",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "flex-start",
+                            gap: 10,
+                          }}
+                        >
+                          <div>
+                            <strong style={{ display: "block", fontSize: 16 }}>
+                              {policy.provider}
+                            </strong>
+                            <span style={{ color: "#64748b", fontSize: 12 }}>
+                              {policy.policy_number}
+                            </span>
+                          </div>
+
+                          <StatusBadge result={policyCompliance} small />
+                        </div>
+
+                        <div
+                          style={{
+                            display: "grid",
+                            gap: 4,
+                            marginTop: 12,
+                            fontSize: 13,
+                          }}
+                        >
+                          <span>
+                            Start:{" "}
+                            <strong>
+                              {policy.start_date
+                                ? formatDate(policy.start_date)
+                                : "Not set"}
+                            </strong>
+                          </span>
+                          <span>
+                            Expiry:{" "}
+                            <strong>{formatDate(policy.expiry_date)}</strong>
+                          </span>
+                          <span>
+                            Auto renew:{" "}
+                            <strong>{policy.auto_renew ? "Yes" : "No"}</strong>
+                          </span>
+                          <span>
+                            Renewal warning:{" "}
+                            <strong>
+                              {policy.renewal_notice_days} days
+                            </strong>
+                          </span>
+                          <span>
+                            Vehicles covered: <strong>{linkedCount}</strong>
+                          </span>
+                        </div>
+
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 8,
+                            flexWrap: "wrap",
+                            marginTop: 12,
+                          }}
+                        >
+                          <button
+                            type="button"
+                            style={secondaryButtonStyle}
+                            onClick={() => startEditFleetPolicy(policy)}
+                          >
+                            Edit Policy
+                          </button>
+
+                          <button
+                            type="button"
+                            style={deleteButtonStyle}
+                            onClick={() => void deactivateFleetPolicy(policy)}
+                          >
+                            Deactivate
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    padding: 14,
+                    borderRadius: 10,
+                    background: "#fffbeb",
+                    border: "1px solid #fcd34d",
+                    color: "#92400e",
+                    fontWeight: 700,
+                  }}
+                >
+                  No active fleet insurance policy is configured yet.
+                </div>
+              )}
+
+              <form
+                onSubmit={saveFleetPolicy}
+                style={{
+                  display: "grid",
+                  gap: 12,
+                  paddingTop: 14,
+                  borderTop: "1px solid #e2e8f0",
+                }}
+              >
+                <SectionTitle>
+                  {editingFleetPolicyId
+                    ? "Edit Fleet Policy"
+                    : "Add Fleet Policy"}
+                </SectionTitle>
+
+                <div style={formGridStyle}>
+                  <label style={fieldStyle}>
+                    <span style={labelStyle}>Insurance Provider</span>
+                    <input
+                      style={inputStyle}
+                      placeholder="e.g. Aviva"
+                      value={fleetPolicyForm.provider}
+                      onChange={(event) =>
+                        setFleetPolicyForm({
+                          ...fleetPolicyForm,
+                          provider: event.target.value,
+                        })
+                      }
+                    />
+                  </label>
+
+                  <label style={fieldStyle}>
+                    <span style={labelStyle}>Policy Number</span>
+                    <input
+                      style={inputStyle}
+                      placeholder="Policy number"
+                      value={fleetPolicyForm.policy_number}
+                      onChange={(event) =>
+                        setFleetPolicyForm({
+                          ...fleetPolicyForm,
+                          policy_number: event.target.value,
+                        })
+                      }
+                    />
+                  </label>
+
+                  <DateField
+                    label="Policy Start Date"
+                    value={fleetPolicyForm.start_date}
+                    onChange={(value) =>
+                      setFleetPolicyForm({
+                        ...fleetPolicyForm,
+                        start_date: value,
+                      })
+                    }
+                  />
+
+                  <DateField
+                    label="Policy Expiry Date"
+                    value={fleetPolicyForm.expiry_date}
+                    onChange={(value) =>
+                      setFleetPolicyForm({
+                        ...fleetPolicyForm,
+                        expiry_date: value,
+                      })
+                    }
+                  />
+
+                  <label style={fieldStyle}>
+                    <span style={labelStyle}>Renewal Warning (days)</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={365}
+                      style={inputStyle}
+                      value={fleetPolicyForm.renewal_notice_days}
+                      onChange={(event) =>
+                        setFleetPolicyForm({
+                          ...fleetPolicyForm,
+                          renewal_notice_days: event.target.value,
+                        })
+                      }
+                    />
+                  </label>
+
+                  <label style={fieldStyle}>
+                    <span style={labelStyle}>Auto Renew</span>
+                    <span
+                      style={{
+                        minHeight: 44,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "0 12px",
+                        border: "1px solid #d1d5db",
+                        borderRadius: 10,
+                        background: "white",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={fleetPolicyForm.auto_renew}
+                        onChange={(event) =>
+                          setFleetPolicyForm({
+                            ...fleetPolicyForm,
+                            auto_renew: event.target.checked,
+                          })
+                        }
+                      />
+                      Expected to renew automatically
+                    </span>
+                  </label>
+                </div>
+
+                <label style={fieldStyle}>
+                  <span style={labelStyle}>Policy Notes</span>
+                  <textarea
+                    rows={3}
+                    style={{
+                      ...inputStyle,
+                      width: "100%",
+                      boxSizing: "border-box",
+                      resize: "vertical",
+                    }}
+                    placeholder="Fleet policy notes"
+                    value={fleetPolicyForm.notes}
+                    onChange={(event) =>
+                      setFleetPolicyForm({
+                        ...fleetPolicyForm,
+                        notes: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    type="submit"
+                    style={buttonStyle}
+                    disabled={fleetPolicySaving}
+                  >
+                    {fleetPolicySaving
+                      ? "Saving Policy..."
+                      : editingFleetPolicyId
+                        ? "Update Fleet Policy"
+                        : "Add Fleet Policy"}
+                  </button>
+
+                  {editingFleetPolicyId ? (
+                    <button
+                      type="button"
+                      style={secondaryButtonStyle}
+                      onClick={resetFleetPolicyForm}
+                    >
+                      Cancel
+                    </button>
+                  ) : null}
+                </div>
+              </form>
+            </section>
+          ) : null}
 
           {isAdmin ? (
             <form
