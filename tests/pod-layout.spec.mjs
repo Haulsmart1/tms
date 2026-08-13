@@ -6,14 +6,22 @@
  * gap mid-row. Both were invisible in review and obvious the instant something
  * rendered and measured them. Reading the CSS is not sufficient evidence.
  *
- * Run: node tests/pod-layout.spec.mjs   (dev server must be running, SIGNED IN)
+ * SETUP, once:
+ *   npm install playwright --prefix tests
+ *   npx playwright install chromium
  *
- * Playwright is NOT a dependency of this project, deliberately: it would pull a
- * browser download into every install for one script. Install it somewhere
- * outside the repo and run this file with that node_modules on the path. Do NOT
- * install it into this repo's node_modules.
+ * Playwright is deliberately NOT in the root package.json: its browser download
+ * would run on every Vercel build for one local script. Installing it under
+ * tests/ keeps it resolvable from this file (ESM walks up from the module's own
+ * directory) while staying gitignored, so deploys never see it.
  *
- * Exit codes:  0 = all widths pass   1 = a layout failure   2 = nothing measured
+ * RUN, from the repo root, with the dev server up:
+ *   LINK=$(node scripts/dev-login.mjs <email> /pod | grep -o 'http://[^ ]*')
+ *   POD_AUTH_URL="$LINK" node tests/pod-layout.spec.mjs
+ *
+ * Without POD_AUTH_URL it aborts, because signed out /pod redirects to /login.
+ *
+ * Exit codes:  0 = passed   1 = a layout failure   2 = nothing measured
  */
 import { chromium } from "playwright";
 
