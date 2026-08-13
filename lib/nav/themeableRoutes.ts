@@ -18,7 +18,7 @@
 export const THEMEABLE_ROUTES: readonly string[] = [
   "/",                       // app/page.tsx:50          (pinned light, see spec)
   "/login",                  // app/login/page.tsx:62
-  "/dashboard",              // app/dashboard/page.tsx:179
+  "/dashboard",              // app/dashboard/page.tsx:184
   "/jobs",                   // app/jobs/page.tsx:249
   "/super-admin/requests",   // app/super-admin/requests/page.tsx:79
 ];
