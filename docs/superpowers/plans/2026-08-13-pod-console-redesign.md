@@ -10,7 +10,9 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-13-pod-console-redesign-design.md`
 
-**Branch:** `feat/pod-console-redesign` (exists; spec committed at `45b5c2e`).
+**Branch:** `ethan/pod-console-redesign` (spec committed at `45b5c2e`; renamed from
+`feat/pod-console-redesign` on 2026-08-13, before any push, to match the `ethan/<slug>` convention
+that flags authorship in Vercel Deployments).
 
 ---
 
