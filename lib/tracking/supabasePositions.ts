@@ -64,11 +64,16 @@ function firstPerVehicle(rows: PositionRow[]): Map<string, PositionReading> {
       // speed carries no documented unit and nothing writes this column yet,
       // so kph is assumed rather than verified, the same kind of assumption
       // position.ts makes about recorded_at being UTC. If the real feed turns
-      // out to report mph, speeds will read low. Number(null ?? 0) also
-      // renders an unknown speed as a confident 0, which reads as
-      // "stationary" rather than "unknown", so treat this field as
+      // out to report mph, speeds will read low, so treat this field as
       // best-effort until a real feed lands.
-      speedKph: Number(row.speed ?? 0),
+      //
+      // No `?? 0` default: an absent field becomes NaN, and speedLabel reports
+      // a non-finite speed as unknown rather than inventing a confident 0 the
+      // source never sent. Note this does NOT cover a SQL NULL, because
+      // Number(null) is 0, not NaN: a null speed column still reads as
+      // "Stationary". Whether that is right depends on what the real feed
+      // means by null, which is unknowable until one exists.
+      speedKph: Number(row.speed),
       headingDeg: row.heading == null ? null : Number(row.heading),
       recordedAt: normaliseTimestamp(String(row.recorded_at)),
     });

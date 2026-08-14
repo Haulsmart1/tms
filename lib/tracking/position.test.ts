@@ -5,14 +5,15 @@ import {
   signalState,
   isLive,
   pingLabel,
+  speedLabel,
   STALE_AFTER_MINUTES,
   type PositionReading,
 } from "./position";
 
 const NOW = new Date("2026-08-14T12:00:00Z");
 
-function reading(recordedAt: string): PositionReading {
-  return { vehicleId: "v1", lat: 53.8, lng: -1.5, speedKph: 80, headingDeg: null, recordedAt };
+function reading(recordedAt: string, speedKph = 80): PositionReading {
+  return { vehicleId: "v1", lat: 53.8, lng: -1.5, speedKph, headingDeg: null, recordedAt };
 }
 
 describe("normaliseTimestamp", () => {
@@ -117,6 +118,36 @@ describe("pingLabel", () => {
 
   it("says clock ahead when the reading is far enough in the future to be a broken clock", () => {
     expect(pingLabel(reading("2026-08-14T12:05:00Z"), NOW)).toBe("clock ahead");
+  });
+});
+
+describe("speedLabel", () => {
+  const AT = "2026-08-14T11:58:00Z";
+
+  it("rounds and formats a real speed", () => {
+    expect(speedLabel(reading(AT, 80.6))).toBe("81 km/h");
+  });
+
+  it("says Stationary at exactly zero", () => {
+    expect(speedLabel(reading(AT, 0))).toBe("Stationary");
+  });
+
+  it("says Stationary at 0.4, NOT 0 km/h", () => {
+    // GPS jitter on a parked truck reports small nonzero speeds constantly, so
+    // this is the most likely reading for a stationary vehicle. 0.4 > 0 is
+    // true but Math.round(0.4) is 0, which is why the guard is on the rounded
+    // value: "0 km/h" is the one string this vocabulary exists to prevent.
+    expect(speedLabel(reading(AT, 0.4))).toBe("Stationary");
+  });
+
+  it("says Stationary for a negative speed rather than rendering the minus", () => {
+    expect(speedLabel(reading(AT, -5))).toBe("Stationary");
+  });
+
+  it("returns null for a non-finite speed, so callers can word unknown themselves", () => {
+    // NaN > 0 is false, so the naive expression would call a moving vehicle
+    // "Stationary": a confident assertion rather than a figure to discount.
+    expect(speedLabel(reading(AT, Number.NaN))).toBeNull();
   });
 });
 

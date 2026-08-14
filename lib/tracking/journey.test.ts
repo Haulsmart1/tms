@@ -21,7 +21,7 @@ const pair = () => [
 ];
 
 function stops(nodes: JourneyNode[]) {
-  return nodes.filter((n) => n.kind === "stop") as Extract<JourneyNode, { kind: "stop" }>[];
+  return nodes.filter((n) => n.kind === "stop");
 }
 
 describe("buildJourney", () => {
@@ -129,6 +129,17 @@ describe("buildJourney", () => {
     };
     const n = buildJourney([stop()], live, NOW);
     expect((n[0] as Extract<JourneyNode, { kind: "live" }>).speedLabel).toBe("Stationary");
+  });
+
+  it("says Speed unknown rather than Stationary when the speed is not a number", () => {
+    // NaN > 0 is false, so the old expression labelled this "Stationary",
+    // which reads as a confident assertion about a truck that may be moving.
+    const live: PositionReading = {
+      vehicleId: "v1", lat: 53.8, lng: -1.5, speedKph: Number.NaN,
+      headingDeg: null, recordedAt: "2026-08-14T11:58:00Z",
+    };
+    const n = buildJourney([stop()], live, NOW);
+    expect((n[0] as Extract<JourneyNode, { kind: "live" }>).speedLabel).toBe("Speed unknown");
   });
 });
 

@@ -1,4 +1,4 @@
-import { pingLabel, signalState, type PositionReading } from "./position";
+import { pingLabel, signalState, speedLabel, type PositionReading } from "./position";
 
 export type Tile = {
   label: string;
@@ -23,14 +23,14 @@ const NO_SIGNAL = "No signal";
 export function telemetryTiles(reading: PositionReading | null, now: Date): Tile[] {
   const state = signalState(reading, now);
 
-  const speed: Tile =
-    state === "live" && reading
-      ? {
-          label: "Speed",
-          value: reading.speedKph > 0 ? `${Math.round(reading.speedKph)} km/h` : "Stationary",
-          muted: false,
-        }
-      : { label: "Speed", value: NO_SIGNAL, muted: true };
+  /* speedLabel returns null when the source gave a speed that cannot be
+     rendered, which from this tile's point of view is the same situation as
+     having no fix at all: it takes the NO_SIGNAL treatment. A "Stationary"
+     that came back non-null is a real reading, so it is NOT muted. */
+  const speedValue = state === "live" && reading ? speedLabel(reading) : null;
+  const speed: Tile = speedValue
+    ? { label: "Speed", value: speedValue, muted: false }
+    : { label: "Speed", value: NO_SIGNAL, muted: true };
 
   const ping: Tile =
     state === "none"

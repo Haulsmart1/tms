@@ -38,6 +38,26 @@ describe("telemetryTiles", () => {
     expect(telemetryTiles(reading("2026-08-14T11:58:00Z", 0), NOW)[0].value).toBe("Stationary");
   });
 
+  it("says Stationary rather than 0 km/h for GPS jitter on a parked truck", () => {
+    // 0.4 > 0 is true but rounds to 0. This is the likeliest reading a real
+    // parked vehicle sends, so it is the likeliest way "0 km/h" would ship.
+    expect(telemetryTiles(reading("2026-08-14T11:58:00Z", 0.4), NOW)[0].value).toBe("Stationary");
+  });
+
+  it("does not mute a Stationary tile, because a genuine zero is a real reading", () => {
+    // Muted ink means absent or untrustworthy. A vehicle we can see is stopped
+    // is neither.
+    expect(telemetryTiles(reading("2026-08-14T11:58:00Z", 0), NOW)[0].muted).toBe(false);
+  });
+
+  it("shows No signal, muted, for a live fix whose speed is not a number", () => {
+    // NaN > 0 is false, so the old expression rendered "Stationary" here: a
+    // confident claim that a possibly-moving truck is parked.
+    const [speed] = telemetryTiles(reading("2026-08-14T11:58:00Z", Number.NaN), NOW);
+    expect(speed.value).toBe("No signal");
+    expect(speed.muted).toBe(true);
+  });
+
   it("suppresses speed for a stale reading but still reports the ping", () => {
     // An old speed is meaningless. When it was last seen is not.
     const [speed, , ping] = telemetryTiles(reading("2026-08-14T09:00:00Z"), NOW);

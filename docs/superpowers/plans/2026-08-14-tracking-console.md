@@ -51,11 +51,13 @@ Each preserves the approved contract. Flagged here so review can catch them.
 
 **Create, `app/tracking/`:** `TrackingRail.tsx`, `TrackingHeader.tsx`, `TrackingMap.tsx`, `JourneyTimeline.tsx`, `ActivityFeed.tsx`.
 
+**Create:** `lib/time.ts` (Task 4a), holding `OPERATOR_TIME_ZONE`. Flat in `lib/` like `cn.ts` and `roles.ts`, because both `lib/pod/` and `lib/tracking/` format against it.
+
 **Modify:** `app/tracking/page.tsx` (full rewrite), `lib/nav/themeableRoutes.ts` (one line), `app/globals.css` (one components layer).
 
 **Create:** `tests/tracking-layout.spec.mjs`.
 
-**Do not touch:** `app/pod/*`, `lib/pod/*`, `components/RouteProgress.tsx`.
+**Do not touch:** `app/pod/*`, `components/RouteProgress.tsx`, and `lib/pod/*` with one exception: Task 4a deletes the `OPERATOR_TIME_ZONE` declaration from `lib/pod/kpis.ts` and imports it from `lib/time.ts` instead. That module's own comment promised the constant lived in a single place, so a second consumer has to move it rather than copy it.
 
 ---
 
@@ -124,14 +126,15 @@ import {
   signalState,
   isLive,
   pingLabel,
+  speedLabel,
   STALE_AFTER_MINUTES,
   type PositionReading,
 } from "./position";
 
 const NOW = new Date("2026-08-14T12:00:00Z");
 
-function reading(recordedAt: string): PositionReading {
-  return { vehicleId: "v1", lat: 53.8, lng: -1.5, speedKph: 80, headingDeg: null, recordedAt };
+function reading(recordedAt: string, speedKph = 80): PositionReading {
+  return { vehicleId: "v1", lat: 53.8, lng: -1.5, speedKph, headingDeg: null, recordedAt };
 }
 
 describe("normaliseTimestamp", () => {
@@ -239,6 +242,36 @@ describe("pingLabel", () => {
   });
 });
 
+describe("speedLabel", () => {
+  const AT = "2026-08-14T11:58:00Z";
+
+  it("rounds and formats a real speed", () => {
+    expect(speedLabel(reading(AT, 80.6))).toBe("81 km/h");
+  });
+
+  it("says Stationary at exactly zero", () => {
+    expect(speedLabel(reading(AT, 0))).toBe("Stationary");
+  });
+
+  it("says Stationary at 0.4, NOT 0 km/h", () => {
+    // GPS jitter on a parked truck reports small nonzero speeds constantly, so
+    // this is the most likely reading for a stationary vehicle. 0.4 > 0 is
+    // true but Math.round(0.4) is 0, which is why the guard is on the rounded
+    // value: "0 km/h" is the one string this vocabulary exists to prevent.
+    expect(speedLabel(reading(AT, 0.4))).toBe("Stationary");
+  });
+
+  it("says Stationary for a negative speed rather than rendering the minus", () => {
+    expect(speedLabel(reading(AT, -5))).toBe("Stationary");
+  });
+
+  it("returns null for a non-finite speed, so callers can word unknown themselves", () => {
+    // NaN > 0 is false, so the naive expression would call a moving vehicle
+    // "Stationary": a confident assertion rather than a figure to discount.
+    expect(speedLabel(reading(AT, Number.NaN))).toBeNull();
+  });
+});
+
 describe("STALE_AFTER_MINUTES", () => {
   it("is 10", () => {
     expect(STALE_AFTER_MINUTES).toBe(10);
@@ -324,7 +357,10 @@ export function signalState(reading: PositionReading | null, now: Date): SignalS
   return age > STALE_AFTER_MINUTES ? "stale" : "live";
 }
 
-export function isLive(reading: PositionReading | null, now: Date): boolean {
+/* A type predicate rather than a plain boolean, so a caller that has already
+   asked "is this live?" does not also have to prove the reading is non-null to
+   the narrower before using it. */
+export function isLive(reading: PositionReading | null, now: Date): reading is PositionReading {
   return signalState(reading, now) === "live";
 }
 
@@ -341,12 +377,28 @@ export function pingLabel(reading: PositionReading | null, now: Date): string {
   if (age < 1440) return `${Math.floor(age / 60)} h ago`;
   return `${Math.floor(age / 1440)} d ago`;
 }
+
+/* Speed vocabulary lives here rather than in each consumer, for the same
+   reason pingLabel does. The header tile and the live timeline node render the
+   SAME vehicle's speed from the SAME reading on the SAME screen, so two copies
+   can only ever disagree in ways a dispatcher can see at once. lib/pod/overdue.ts
+   was created for exactly this failure and its header says so.
+
+   Returns null rather than a string for an unusable speed, so each caller can
+   word "unknown" to suit its own context. Guarding on the ROUNDED value is
+   load-bearing: 0.4 km/h is greater than zero but rounds to zero, and "0 km/h"
+   on a truck is the string this vocabulary exists to avoid. */
+export function speedLabel(reading: PositionReading): string | null {
+  const kph = Math.round(reading.speedKph);
+  if (!Number.isFinite(kph)) return null;
+  return kph > 0 ? `${kph} km/h` : "Stationary";
+}
 ```
 
 - [ ] **Step 5: Run the test to verify it passes**
 
 Run: `npx vitest run lib/tracking/position.test.ts`
-Expected: PASS, 22 tests.
+Expected: PASS, 27 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -440,11 +492,16 @@ function firstPerVehicle(rows: PositionRow[]): Map<string, PositionReading> {
       // speed carries no documented unit and nothing writes this column yet,
       // so kph is assumed rather than verified, the same kind of assumption
       // position.ts makes about recorded_at being UTC. If the real feed turns
-      // out to report mph, speeds will read low. Number(null ?? 0) also
-      // renders an unknown speed as a confident 0, which reads as
-      // "stationary" rather than "unknown", so treat this field as
+      // out to report mph, speeds will read low, so treat this field as
       // best-effort until a real feed lands.
-      speedKph: Number(row.speed ?? 0),
+      //
+      // No `?? 0` default: an absent field becomes NaN, and speedLabel reports
+      // a non-finite speed as unknown rather than inventing a confident 0 the
+      // source never sent. Note this does NOT cover a SQL NULL, because
+      // Number(null) is 0, not NaN: a null speed column still reads as
+      // "Stationary". Whether that is right depends on what the real feed
+      // means by null, which is unknowable until one exists.
+      speedKph: Number(row.speed),
       headingDeg: row.heading == null ? null : Number(row.heading),
       recordedAt: normaliseTimestamp(String(row.recorded_at)),
     });
@@ -916,7 +973,7 @@ const pair = () => [
 ];
 
 function stops(nodes: JourneyNode[]) {
-  return nodes.filter((n) => n.kind === "stop") as Extract<JourneyNode, { kind: "stop" }>[];
+  return nodes.filter((n) => n.kind === "stop");
 }
 
 describe("buildJourney", () => {
@@ -1025,6 +1082,17 @@ describe("buildJourney", () => {
     const n = buildJourney([stop()], live, NOW);
     expect((n[0] as Extract<JourneyNode, { kind: "live" }>).speedLabel).toBe("Stationary");
   });
+
+  it("says Speed unknown rather than Stationary when the speed is not a number", () => {
+    // NaN > 0 is false, so the old expression labelled this "Stationary",
+    // which reads as a confident assertion about a truck that may be moving.
+    const live: PositionReading = {
+      vehicleId: "v1", lat: 53.8, lng: -1.5, speedKph: Number.NaN,
+      headingDeg: null, recordedAt: "2026-08-14T11:58:00Z",
+    };
+    const n = buildJourney([stop()], live, NOW);
+    expect((n[0] as Extract<JourneyNode, { kind: "live" }>).speedLabel).toBe("Speed unknown");
+  });
 });
 
 describe("arrowStateFor", () => {
@@ -1068,8 +1136,9 @@ Expected: FAIL, module resolution error for `./journey`.
 Create `lib/tracking/journey.ts`:
 
 ```ts
-import { isLive, pingLabel, type PositionReading } from "./position";
+import { isLive, pingLabel, speedLabel, type PositionReading } from "./position";
 import type { TrackingStop } from "./types";
+import { OPERATOR_TIME_ZONE } from "../time";
 // Type-only import. RouteProgress is shared, its node shape is shared, and
 // nothing at runtime crosses from tracking into pod.
 import type { ArrowState, RouteNode } from "../pod/routeNodes";
@@ -1095,15 +1164,17 @@ export type JourneyNode =
       pingLabel: string;
     };
 
-/* Formatting is pinned to Europe/London rather than the runtime default. The
-   fleet is UK-based (£ and en-GB throughout this codebase), and pinning it
-   also makes these functions deterministic under Vitest, which would otherwise
-   format against whatever TZ the machine happens to have. */
+/* Formatting is pinned to the operator's timezone rather than the runtime
+   default. The fleet is UK-based (£ and en-GB throughout this codebase), and
+   pinning it also makes these functions deterministic under Vitest, which would
+   otherwise format against whatever TZ the machine happens to have. The zone
+   itself comes from lib/time.ts so the stop dates here and "Delivered today" on
+   /pod can never resolve to different calendars. */
 const DATE_FMT = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Europe/London", day: "numeric", month: "short",
+  timeZone: OPERATOR_TIME_ZONE, day: "numeric", month: "short",
 });
 const TIME_FMT = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", hour12: false,
+  timeZone: OPERATOR_TIME_ZONE, hour: "2-digit", minute: "2-digit", hour12: false,
 });
 
 function formatWhen(stop: TrackingStop): string {
@@ -1146,14 +1217,18 @@ export function buildJourney(
       stop.pod_status === "delivered" ? "done" : i === currentIndex ? "current" : "upcoming";
 
     /* The live marker goes immediately BEFORE the stop being travelled to,
-       which is how the mockup reads: the truck is between the last completed
-       stop and the next one. A stale or absent fix inserts nothing at all
-       rather than a marker nobody can date. */
-    if (state === "current" && showLive && reading) {
+       which is how the mockup reads: the truck is short of the stop it is
+       heading for. On a job where the first stop is still the current one there
+       is no completed stop behind it, so the marker simply leads the timeline.
+       A stale or absent fix inserts nothing at all rather than a marker nobody
+       can date. */
+    if (state === "current" && showLive) {
       nodes.push({
         kind: "live",
         id: "live",
-        speedLabel: reading.speedKph > 0 ? `${Math.round(reading.speedKph)} km/h` : "Stationary",
+        // A speed we cannot render is reported as unknown rather than as
+        // "Stationary", which would be a confident claim about a moving truck.
+        speedLabel: speedLabel(reading) ?? "Speed unknown",
         pingLabel: `updated ${pingLabel(reading, now)}`,
       });
     }
@@ -1175,7 +1250,7 @@ export function buildJourney(
 
 export function arrowStateFor(journey: JourneyNode[], isLate: boolean): ArrowState {
   const stopNodes = journey.filter((n) => n.kind === "stop");
-  if (stopNodes.length > 0 && stopNodes.every((n) => n.kind === "stop" && n.state === "done")) {
+  if (stopNodes.length > 0 && stopNodes.every((n) => n.state === "done")) {
     return "delivered";
   }
   return isLate ? "overdue" : "pending";
@@ -1188,7 +1263,7 @@ export function routeGlyph(
 ): { nodes: RouteNode[]; arrowState: ArrowState } {
   const nodes: RouteNode[] = journey
     .filter((n) => n.kind === "stop")
-    .map((n) => ({ id: n.id, state: (n as Extract<JourneyNode, { kind: "stop" }>).state }));
+    .map((n) => ({ id: n.id, state: n.state }));
   return { nodes, arrowState };
 }
 ```
@@ -1196,7 +1271,7 @@ export function routeGlyph(
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run lib/tracking/journey.test.ts`
-Expected: PASS, 20 tests.
+Expected: PASS, 21 tests.
 
 If the two date assertions fail by exactly one hour, the `timeZone` option was dropped from a formatter. Do not "fix" the expectation, fix the formatter.
 
@@ -1209,6 +1284,74 @@ git commit -m "Add the tracking journey timeline model
 Renders planned_at as a date and never a time, because that column is a
 derived 08:00 stamp rather than a booked slot. A live position node is
 inserted only for a fix under the staleness threshold.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 4a: The shared operator timezone constant
+
+**Files:**
+- Create: `lib/time.ts`
+- Edit: `lib/pod/kpis.ts`
+
+No test file. It is a single string constant, and its behaviour is already asserted through the two modules that consume it: `lib/pod/kpis.test.ts` for "Delivered today" and `lib/tracking/journey.test.ts` for the stop date and time assertions.
+
+`lib/pod/kpis.ts` declared `OPERATOR_TIME_ZONE` and its comment promised that it was "the single place that has to change". Task 4 above formats stop dates against the same operator calendar, which would make that promise false the moment a second literal appeared. Hoisting the constant to `lib/` keeps it true. The flat filename matches the existing `lib/cn.ts` and `lib/roles.ts` convention.
+
+- [ ] **Step 1: Create `lib/time.ts`**
+
+```ts
+/* The operator's timezone, not the server's.
+
+   lib/pod/kpis.ts used to compare getFullYear/getMonth/getDate, which resolve
+   in whatever timezone the runtime happens to be set to. Vercel and most
+   containers run as UTC, so a delivery at 23:30 UTC on the 12th counts as the
+   13th to a UK dispatcher but as the 12th to the server, and "Delivered today"
+   quietly undercounts every late-evening drop. The bug is invisible on a
+   developer machine set to UK time, which is exactly why it needs pinning.
+
+   It lives in lib/ rather than beside its first caller because it now has more
+   than one: lib/tracking/journey.ts formats stop dates and times against the
+   same operator calendar, and a second copy of the string is a second thing to
+   miss on the day this becomes per-tenant.
+
+   Hardcoded rather than per-tenant even though the field exists:
+   company_profiles.timezone is in the schema and app/settings/company/page.tsx
+   both reads and writes it, defaulting to "Europe/London". Nothing in the
+   console reads that field yet, so this constant remains the operator-wide
+   default until it is plumbed through. When it is, this is the single place
+   that has to change. */
+export const OPERATOR_TIME_ZONE = "Europe/London";
+```
+
+- [ ] **Step 2: Point `lib/pod/kpis.ts` at it**
+
+Delete the `OPERATOR_TIME_ZONE` declaration and its comment block from `lib/pod/kpis.ts`, and add the import at the top of the file:
+
+```ts
+import { OPERATOR_TIME_ZONE } from "../time";
+```
+
+Nothing outside `kpis.ts` imported the constant from there, so no re-export is needed. Confirm with `grep -rn OPERATOR_TIME_ZONE` before deleting the export; if a consumer has appeared since, re-export it from `kpis.ts` instead of breaking that importer.
+
+- [ ] **Step 3: Verify**
+
+Run: `npx vitest run lib/pod/kpis.test.ts lib/tracking/journey.test.ts`
+Expected: PASS, 12 and 21 tests. Both suites exercise the constant, so an unresolved import or a changed zone fails here rather than in production.
+
+Do NOT convert `lib/tracking/onTheRoad.ts` to use this constant. Its `localDay` deliberately uses the machine's local calendar and is commented to say so.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add lib/time.ts lib/pod/kpis.ts
+git commit -m "Hoist the operator timezone to lib/time.ts
+
+lib/pod/kpis.ts promised this constant was the single place that has to
+change when tenants get a timezone. A second consumer would have made that
+false, so the constant moved rather than the promise.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
@@ -1266,6 +1409,26 @@ describe("telemetryTiles", () => {
     expect(telemetryTiles(reading("2026-08-14T11:58:00Z", 0), NOW)[0].value).toBe("Stationary");
   });
 
+  it("says Stationary rather than 0 km/h for GPS jitter on a parked truck", () => {
+    // 0.4 > 0 is true but rounds to 0. This is the likeliest reading a real
+    // parked vehicle sends, so it is the likeliest way "0 km/h" would ship.
+    expect(telemetryTiles(reading("2026-08-14T11:58:00Z", 0.4), NOW)[0].value).toBe("Stationary");
+  });
+
+  it("does not mute a Stationary tile, because a genuine zero is a real reading", () => {
+    // Muted ink means absent or untrustworthy. A vehicle we can see is stopped
+    // is neither.
+    expect(telemetryTiles(reading("2026-08-14T11:58:00Z", 0), NOW)[0].muted).toBe(false);
+  });
+
+  it("shows No signal, muted, for a live fix whose speed is not a number", () => {
+    // NaN > 0 is false, so the old expression rendered "Stationary" here: a
+    // confident claim that a possibly-moving truck is parked.
+    const [speed] = telemetryTiles(reading("2026-08-14T11:58:00Z", Number.NaN), NOW);
+    expect(speed.value).toBe("No signal");
+    expect(speed.muted).toBe(true);
+  });
+
   it("suppresses speed for a stale reading but still reports the ping", () => {
     // An old speed is meaningless. When it was last seen is not.
     const [speed, , ping] = telemetryTiles(reading("2026-08-14T09:00:00Z"), NOW);
@@ -1296,7 +1459,7 @@ Expected: FAIL, module resolution error for `./telemetry`.
 Create `lib/tracking/telemetry.ts`:
 
 ```ts
-import { pingLabel, signalState, type PositionReading } from "./position";
+import { pingLabel, signalState, speedLabel, type PositionReading } from "./position";
 
 export type Tile = {
   label: string;
@@ -1321,14 +1484,14 @@ const NO_SIGNAL = "No signal";
 export function telemetryTiles(reading: PositionReading | null, now: Date): Tile[] {
   const state = signalState(reading, now);
 
-  const speed: Tile =
-    state === "live" && reading
-      ? {
-          label: "Speed",
-          value: reading.speedKph > 0 ? `${Math.round(reading.speedKph)} km/h` : "Stationary",
-          muted: false,
-        }
-      : { label: "Speed", value: NO_SIGNAL, muted: true };
+  /* speedLabel returns null when the source gave a speed that cannot be
+     rendered, which from this tile's point of view is the same situation as
+     having no fix at all: it takes the NO_SIGNAL treatment. A "Stationary"
+     that came back non-null is a real reading, so it is NOT muted. */
+  const speedValue = state === "live" && reading ? speedLabel(reading) : null;
+  const speed: Tile = speedValue
+    ? { label: "Speed", value: speedValue, muted: false }
+    : { label: "Speed", value: NO_SIGNAL, muted: true };
 
   const ping: Tile =
     state === "none"
@@ -1347,7 +1510,7 @@ export function telemetryTiles(reading: PositionReading | null, now: Date): Tile
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run lib/tracking/telemetry.test.ts`
-Expected: PASS, 7 tests.
+Expected: PASS, 10 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -2064,11 +2227,13 @@ Create `app/tracking/ActivityFeed.tsx`:
 
 ```tsx
 import type { ActivityEvent } from "../../lib/tracking/activity";
+import { OPERATOR_TIME_ZONE } from "../../lib/time";
 
 type Props = { events: ActivityEvent[] };
 
+// Same operator calendar as the journey timeline and /pod. See lib/time.ts.
 const STAMP = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Europe/London",
+  timeZone: OPERATOR_TIME_ZONE,
   day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false,
 });
 
@@ -2160,6 +2325,7 @@ import { buildActivity } from "../../lib/tracking/activity";
 import { createSupabasePositionSource } from "../../lib/tracking/supabasePositions";
 import { pingLabel, type PositionReading } from "../../lib/tracking/position";
 import type { TrackingJob } from "../../lib/tracking/types";
+import { OPERATOR_TIME_ZONE } from "../../lib/time";
 
 /* The old page polled every 10 seconds and fetched every vehicle_locations row
    ever recorded on each pass. 30 seconds matches the design's own footnote, and
@@ -2174,8 +2340,9 @@ function rel(value: any): any {
   return Array.isArray(value) ? (value[0] ?? null) : (value ?? null);
 }
 
+// Same operator calendar as the journey timeline and /pod. See lib/time.ts.
 const CLOCK = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", hour12: false,
+  timeZone: OPERATOR_TIME_ZONE, hour: "2-digit", minute: "2-digit", hour12: false,
 });
 
 export default function TrackingPage() {

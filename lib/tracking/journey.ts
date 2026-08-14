@@ -1,5 +1,6 @@
-import { isLive, pingLabel, type PositionReading } from "./position";
+import { isLive, pingLabel, speedLabel, type PositionReading } from "./position";
 import type { TrackingStop } from "./types";
+import { OPERATOR_TIME_ZONE } from "../time";
 // Type-only import. RouteProgress is shared, its node shape is shared, and
 // nothing at runtime crosses from tracking into pod.
 import type { ArrowState, RouteNode } from "../pod/routeNodes";
@@ -25,15 +26,17 @@ export type JourneyNode =
       pingLabel: string;
     };
 
-/* Formatting is pinned to Europe/London rather than the runtime default. The
-   fleet is UK-based (£ and en-GB throughout this codebase), and pinning it
-   also makes these functions deterministic under Vitest, which would otherwise
-   format against whatever TZ the machine happens to have. */
+/* Formatting is pinned to the operator's timezone rather than the runtime
+   default. The fleet is UK-based (£ and en-GB throughout this codebase), and
+   pinning it also makes these functions deterministic under Vitest, which would
+   otherwise format against whatever TZ the machine happens to have. The zone
+   itself comes from lib/time.ts so the stop dates here and "Delivered today" on
+   /pod can never resolve to different calendars. */
 const DATE_FMT = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Europe/London", day: "numeric", month: "short",
+  timeZone: OPERATOR_TIME_ZONE, day: "numeric", month: "short",
 });
 const TIME_FMT = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", hour12: false,
+  timeZone: OPERATOR_TIME_ZONE, hour: "2-digit", minute: "2-digit", hour12: false,
 });
 
 function formatWhen(stop: TrackingStop): string {
@@ -76,14 +79,18 @@ export function buildJourney(
       stop.pod_status === "delivered" ? "done" : i === currentIndex ? "current" : "upcoming";
 
     /* The live marker goes immediately BEFORE the stop being travelled to,
-       which is how the mockup reads: the truck is between the last completed
-       stop and the next one. A stale or absent fix inserts nothing at all
-       rather than a marker nobody can date. */
-    if (state === "current" && showLive && reading) {
+       which is how the mockup reads: the truck is short of the stop it is
+       heading for. On a job where the first stop is still the current one there
+       is no completed stop behind it, so the marker simply leads the timeline.
+       A stale or absent fix inserts nothing at all rather than a marker nobody
+       can date. */
+    if (state === "current" && showLive) {
       nodes.push({
         kind: "live",
         id: "live",
-        speedLabel: reading.speedKph > 0 ? `${Math.round(reading.speedKph)} km/h` : "Stationary",
+        // A speed we cannot render is reported as unknown rather than as
+        // "Stationary", which would be a confident claim about a moving truck.
+        speedLabel: speedLabel(reading) ?? "Speed unknown",
         pingLabel: `updated ${pingLabel(reading, now)}`,
       });
     }
@@ -105,7 +112,7 @@ export function buildJourney(
 
 export function arrowStateFor(journey: JourneyNode[], isLate: boolean): ArrowState {
   const stopNodes = journey.filter((n) => n.kind === "stop");
-  if (stopNodes.length > 0 && stopNodes.every((n) => n.kind === "stop" && n.state === "done")) {
+  if (stopNodes.length > 0 && stopNodes.every((n) => n.state === "done")) {
     return "delivered";
   }
   return isLate ? "overdue" : "pending";
@@ -118,6 +125,6 @@ export function routeGlyph(
 ): { nodes: RouteNode[]; arrowState: ArrowState } {
   const nodes: RouteNode[] = journey
     .filter((n) => n.kind === "stop")
-    .map((n) => ({ id: n.id, state: (n as Extract<JourneyNode, { kind: "stop" }>).state }));
+    .map((n) => ({ id: n.id, state: n.state }));
   return { nodes, arrowState };
 }

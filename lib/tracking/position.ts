@@ -66,7 +66,10 @@ export function signalState(reading: PositionReading | null, now: Date): SignalS
   return age > STALE_AFTER_MINUTES ? "stale" : "live";
 }
 
-export function isLive(reading: PositionReading | null, now: Date): boolean {
+/* A type predicate rather than a plain boolean, so a caller that has already
+   asked "is this live?" does not also have to prove the reading is non-null to
+   the narrower before using it. */
+export function isLive(reading: PositionReading | null, now: Date): reading is PositionReading {
   return signalState(reading, now) === "live";
 }
 
@@ -82,4 +85,20 @@ export function pingLabel(reading: PositionReading | null, now: Date): string {
   if (age < 60) return `${Math.floor(age)} min ago`;
   if (age < 1440) return `${Math.floor(age / 60)} h ago`;
   return `${Math.floor(age / 1440)} d ago`;
+}
+
+/* Speed vocabulary lives here rather than in each consumer, for the same
+   reason pingLabel does. The header tile and the live timeline node render the
+   SAME vehicle's speed from the SAME reading on the SAME screen, so two copies
+   can only ever disagree in ways a dispatcher can see at once. lib/pod/overdue.ts
+   was created for exactly this failure and its header says so.
+
+   Returns null rather than a string for an unusable speed, so each caller can
+   word "unknown" to suit its own context. Guarding on the ROUNDED value is
+   load-bearing: 0.4 km/h is greater than zero but rounds to zero, and "0 km/h"
+   on a truck is the string this vocabulary exists to avoid. */
+export function speedLabel(reading: PositionReading): string | null {
+  const kph = Math.round(reading.speedKph);
+  if (!Number.isFinite(kph)) return null;
+  return kph > 0 ? `${kph} km/h` : "Stationary";
 }
