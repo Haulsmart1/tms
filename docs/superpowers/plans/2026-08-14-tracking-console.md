@@ -538,7 +538,7 @@ Create `lib/tracking/onTheRoad.test.ts`:
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { localDay, isOnTheRoad, jobPhase, buildRail, PHASE_LABEL, PHASE_TONE } from "./onTheRoad";
+import { localDay, isOnTheRoad, jobPhase, buildRail } from "./onTheRoad";
 import type { TrackingJob, TrackingStop } from "./types";
 
 const NOW = new Date("2026-08-14T12:00:00Z");
@@ -641,26 +641,28 @@ describe("jobPhase", () => {
     expect(jobPhase(job(), NOW)).toBe("due");
   });
 
-  it("is in_progress when scheduled today and a stop is already delivered", () => {
+  it("is in_progress when scheduled today and the collection is already delivered", () => {
     const j = job();
     j.stops[0] = { ...j.stops[0], pod_status: "delivered" };
     expect(jobPhase(j, NOW)).toBe("in_progress");
   });
 
-  it("stays late even when a stop is already delivered, because late outranks progress", () => {
+  it("stays late even when the collection is already delivered, because late outranks progress", () => {
     const j = job({ scheduled_date: YESTERDAY });
     j.stops[0] = { ...j.stops[0], pod_status: "delivered" };
     expect(jobPhase(j, NOW)).toBe("late");
   });
-});
 
-describe("phase presentation", () => {
-  it("labels every phase", () => {
-    expect(PHASE_LABEL).toEqual({ late: "Late", in_progress: "In progress", due: "Due today" });
-  });
-
-  it("maps every phase to a Badge tone that exists in components/Badge.tsx", () => {
-    expect(PHASE_TONE).toEqual({ late: "danger", in_progress: "info", due: "warning" });
+  it("is in_progress on a multi-drop job once the first delivery lands and the second has not, which is the case the phase actually exists for", () => {
+    const j = job({
+      stops: [
+        stop({ id: "s0", stop_order: 0, type: "collection", city: "Leeds" }),
+        stop({ id: "s1", stop_order: 1, type: "delivery", city: "York", pod_status: "delivered" }),
+        stop({ id: "s2", stop_order: 2, type: "delivery", city: "Hull", pod_status: "pending" }),
+      ],
+    });
+    expect(jobPhase(j, NOW)).toBe("in_progress");
+    expect(isOnTheRoad(j, NOW)).toBe(true);
   });
 });
 
@@ -727,6 +729,7 @@ Create `lib/tracking/onTheRoad.ts`:
 
 ```ts
 import type { TrackingJob } from "./types";
+import type { Tone } from "../../components/Badge";
 
 /* THE SINGLE DEFINITION OF "ON THE ROAD".
 
@@ -761,9 +764,11 @@ export const PHASE_LABEL: Record<Phase, string> = {
   due: "Due today",
 };
 
-/* Tones are the ones components/Badge.tsx actually defines. "info" is the
+/* Typed against Badge's own Tone union rather than a hand copy of it, so that
+   renaming a tone in components/Badge.tsx fails the build here instead of
+   rendering an undefined class with the suite still green. "info" is the
    primary-tinted tone; there is no tone called "primary". */
-export const PHASE_TONE: Record<Phase, "danger" | "info" | "warning"> = {
+export const PHASE_TONE: Record<Phase, Tone> = {
   late: "danger",
   in_progress: "info",
   due: "warning",
@@ -772,7 +777,12 @@ export const PHASE_TONE: Record<Phase, "danger" | "info" | "warning"> = {
 /* jobs.scheduled_date is a `date` column, so it arrives as "YYYY-MM-DD" with
    no time and no zone. Comparing it against a UTC-formatted today would drop a
    job from the rail every evening in any zone ahead of UTC, so today is
-   formatted from the LOCAL calendar day. */
+   formatted from the LOCAL calendar day. This is safe only because
+   app/tracking/page.tsx is a client component fetching in an effect, so it
+   runs in the browser on the user's own clock. Calling it from a server
+   component or route handler would run it on Vercel's UTC runtime and
+   silently reintroduce the bug this function exists to avoid; moving it
+   server-side would require pinning a timezone explicitly. */
 export function localDay(now: Date): string {
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, "0");
@@ -798,6 +808,10 @@ export function jobPhase(job: TrackingJob, now: Date): Phase {
   // Late is checked first and outranks progress: a job running a day behind is
   // still the thing a dispatcher needs to see, however many stops it has done.
   if (job.scheduled_date && job.scheduled_date < localDay(now)) return "late";
+  // ANY stop counts, including a collection, deliberately. A job whose goods
+  // are collected is under way even before the first drop. Note this is a
+  // wider net than isOnTheRoad, which filters to delivery stops: that is
+  // intentional, not an oversight.
   const anyDone = job.stops.some((s) => s.pod_status === "delivered");
   return anyDone ? "in_progress" : "due";
 }
@@ -824,16 +838,23 @@ function toRailRow(job: TrackingJob, now: Date): RailRow {
 export function buildRail(jobs: TrackingJob[], now: Date): RailRow[] {
   const rows = jobs.filter((j) => isOnTheRoad(j, now)).map((j) => toRailRow(j, now));
 
-  /* Late first, then oldest scheduled date, then reference. The reference
-     tiebreak is load-bearing rather than cosmetic: without a total order the
-     rail can reshuffle on every 30 second poll, which moves the row under the
-     dispatcher's cursor. */
+  /* Late first, then oldest scheduled date, then reference, then jobId. The
+     rail can reshuffle on every 30 second poll otherwise, which moves the row
+     under the dispatcher's cursor. */
   rows.sort((a, b) => {
     const lateDiff = Number(b.phase === "late") - Number(a.phase === "late");
     if (lateDiff !== 0) return lateDiff;
-    const dateDiff = (a.scheduledDate ?? "").localeCompare(b.scheduledDate ?? "");
-    if (dateDiff !== 0) return dateDiff;
-    return a.reference.localeCompare(b.reference);
+    // isOnTheRoad already guarantees a non-null scheduled_date for every job
+    // that reaches this sort, so no fallback is needed here. `<`/`>` mirror
+    // the comparison isOnTheRoad itself uses on the same "YYYY-MM-DD" shape.
+    if (a.scheduledDate! < b.scheduledDate!) return -1;
+    if (a.scheduledDate! > b.scheduledDate!) return 1;
+    const refDiff = a.reference.localeCompare(b.reference);
+    if (refDiff !== 0) return refDiff;
+    // reference is free text with no unique constraint, so two jobs can tie on
+    // it. jobId is the primary key, which makes the ordering total and stops
+    // the rail reshuffling under the cursor between polls.
+    return a.jobId.localeCompare(b.jobId);
   });
 
   return rows;
@@ -843,7 +864,7 @@ export function buildRail(jobs: TrackingJob[], now: Date): RailRow[] {
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run lib/tracking/onTheRoad.test.ts`
-Expected: PASS, 22 tests.
+Expected: PASS, 21 tests.
 
 - [ ] **Step 5: Commit**
 

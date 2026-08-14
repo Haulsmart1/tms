@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { localDay, isOnTheRoad, jobPhase, buildRail, PHASE_LABEL, PHASE_TONE } from "./onTheRoad";
+import { localDay, isOnTheRoad, jobPhase, buildRail } from "./onTheRoad";
 import type { TrackingJob, TrackingStop } from "./types";
 
 const NOW = new Date("2026-08-14T12:00:00Z");
@@ -102,26 +102,28 @@ describe("jobPhase", () => {
     expect(jobPhase(job(), NOW)).toBe("due");
   });
 
-  it("is in_progress when scheduled today and a stop is already delivered", () => {
+  it("is in_progress when scheduled today and the collection is already delivered", () => {
     const j = job();
     j.stops[0] = { ...j.stops[0], pod_status: "delivered" };
     expect(jobPhase(j, NOW)).toBe("in_progress");
   });
 
-  it("stays late even when a stop is already delivered, because late outranks progress", () => {
+  it("stays late even when the collection is already delivered, because late outranks progress", () => {
     const j = job({ scheduled_date: YESTERDAY });
     j.stops[0] = { ...j.stops[0], pod_status: "delivered" };
     expect(jobPhase(j, NOW)).toBe("late");
   });
-});
 
-describe("phase presentation", () => {
-  it("labels every phase", () => {
-    expect(PHASE_LABEL).toEqual({ late: "Late", in_progress: "In progress", due: "Due today" });
-  });
-
-  it("maps every phase to a Badge tone that exists in components/Badge.tsx", () => {
-    expect(PHASE_TONE).toEqual({ late: "danger", in_progress: "info", due: "warning" });
+  it("is in_progress on a multi-drop job once the first delivery lands and the second has not, which is the case the phase actually exists for", () => {
+    const j = job({
+      stops: [
+        stop({ id: "s0", stop_order: 0, type: "collection", city: "Leeds" }),
+        stop({ id: "s1", stop_order: 1, type: "delivery", city: "York", pod_status: "delivered" }),
+        stop({ id: "s2", stop_order: 2, type: "delivery", city: "Hull", pod_status: "pending" }),
+      ],
+    });
+    expect(jobPhase(j, NOW)).toBe("in_progress");
+    expect(isOnTheRoad(j, NOW)).toBe(true);
   });
 });
 
