@@ -1,11 +1,16 @@
 import Link from "next/link";
 import Badge from "../../components/Badge";
+import Card from "../../components/Card";
 import RouteProgress from "../../components/RouteProgress";
-import { PHASE_LABEL, PHASE_TONE, type Phase } from "../../lib/tracking/onTheRoad";
+import { PHASE_LABEL, PHASE_TONE, routeEndpoints, type Phase } from "../../lib/tracking/onTheRoad";
 import { arrowStateFor, routeGlyph, type JourneyNode } from "../../lib/tracking/journey";
 import { pingLabel, signalState, type PositionReading } from "../../lib/tracking/position";
 import { telemetryTiles } from "../../lib/tracking/telemetry";
 import type { TrackingJob } from "../../lib/tracking/types";
+
+/* Renders correctly ONLY inside a `.ds` wrapper. Preflight is disabled, so the
+   borders here depend on the scoped reset in app/globals.css supplying
+   border-style: solid. Outside `.ds` the borders disappear entirely. */
 
 type Props = {
   job: TrackingJob;
@@ -52,14 +57,21 @@ export default function TrackingHeader({ job, phase, journey, reading, now }: Pr
   const tiles = telemetryTiles(reading, now);
   const glyph = routeGlyph(journey, arrowStateFor(journey, phase === "late"));
 
-  const ordered = [...job.stops].sort((a, b) => a.stop_order - b.stop_order);
-  const origin = ordered.find((s) => s.type === "collection")?.city ?? "—";
-  const destination = [...ordered].reverse().find((s) => s.type === "delivery")?.city ?? "—";
+  const { origin, destination } = routeEndpoints(job.stops);
+
+  /* The visible route keeps routeEndpoints' "—" fallback, which is the right
+     thing to SHOW. It is the wrong thing to SAY: a screen reader announces the
+     glyph as "em dash", so the aria label below swaps in words instead. */
+  const spokenOrigin = origin === "—" ? "Unknown origin" : origin;
+  const spokenDestination = destination === "—" ? "Unknown destination" : destination;
+  const stopCount = glyph.nodes.length;
 
   const isSubcontracted = Boolean(job.subcontractor_id);
   // A tel: link only when there is actually a number and the driver is ours.
   // Rendering a dead "Call driver" control is worse than rendering none.
-  const callable = !isSubcontracted && job.driver_phone;
+  // Whitespace is legal in the column but not in a tel: URI (RFC 3966). UK
+  // numbers are commonly stored as "07700 900123".
+  const driverPhone = isSubcontracted ? null : job.driver_phone?.replace(/\s/g, "") || null;
 
   const subtitle = [
     job.customer_name ?? "No customer",
@@ -68,7 +80,7 @@ export default function TrackingHeader({ job, phase, journey, reading, now }: Pr
   ].join(" · ");
 
   return (
-    <div className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+    <Card>
       <div className="flex flex-wrap items-center gap-2.5">
         <span className="font-mono text-md font-semibold tabular-nums text-ink">
           {job.vehicle_registration ?? "—"}
@@ -78,9 +90,9 @@ export default function TrackingHeader({ job, phase, journey, reading, now }: Pr
 
         <span className="flex-1" />
 
-        {callable ? (
+        {driverPhone ? (
           <a
-            href={`tel:${job.driver_phone}`}
+            href={`tel:${driverPhone}`}
             className="rounded-sm border border-line px-2.5 py-1 text-xs font-semibold text-ink hover:border-line-strong hover:bg-surface-2"
           >
             Call {job.driver_name ?? "driver"}
@@ -101,7 +113,9 @@ export default function TrackingHeader({ job, phase, journey, reading, now }: Pr
         <RouteProgress
           nodes={glyph.nodes}
           arrowState={glyph.arrowState}
-          label={`${origin} to ${destination}, ${glyph.nodes.length} stops, ${PHASE_LABEL[phase].toLowerCase()}`}
+          label={`${spokenOrigin} to ${spokenDestination}, ${stopCount} ${
+            stopCount === 1 ? "stop" : "stops"
+          }, ${PHASE_LABEL[phase].toLowerCase()}`}
         />
       </div>
 
@@ -121,6 +135,6 @@ export default function TrackingHeader({ job, phase, journey, reading, now }: Pr
           </div>
         ))}
       </dl>
-    </div>
+    </Card>
   );
 }

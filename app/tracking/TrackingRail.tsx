@@ -1,5 +1,10 @@
 import Badge from "../../components/Badge";
+import Card from "../../components/Card";
 import { PHASE_LABEL, PHASE_TONE, type RailRow } from "../../lib/tracking/onTheRoad";
+
+/* Renders correctly ONLY inside a `.ds` wrapper. Preflight is disabled, so the
+   borders here depend on the scoped reset in app/globals.css supplying
+   border-style: solid. Outside `.ds` the borders disappear entirely. */
 
 type Props = {
   rows: RailRow[];
@@ -11,7 +16,7 @@ type Props = {
 
 export default function TrackingRail({ rows, selectedJobId, onSelect, footNote }: Props) {
   return (
-    <div className="overflow-hidden rounded-lg border border-line bg-surface shadow-sm">
+    <Card flush>
       <header className="flex items-center gap-2 border-b border-line px-4 py-3">
         <span className="flex-1 text-sm font-semibold text-ink">On the road</span>
         <span className="rounded-full bg-surface-2 px-2 py-0.5 font-mono text-data-sm tabular-nums text-ink-2">
@@ -34,7 +39,7 @@ export default function TrackingRail({ rows, selectedJobId, onSelect, footNote }
                   /* The selected row is marked by an inset left bar rather than
                      a border, so selection does not shift the row's contents by
                      2px as it moves down the list. */
-                  className={`flex w-full flex-col gap-1 border-b border-line px-4 py-2.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+                  className={`flex w-full flex-col gap-1 border-b border-line px-4 py-2.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus ${
                     selected
                       ? "bg-primary-tint shadow-[inset_2px_0_0_var(--primary)]"
                       : "bg-transparent hover:bg-surface-2"
@@ -66,6 +71,6 @@ export default function TrackingRail({ rows, selectedJobId, onSelect, footNote }
       )}
 
       <p className="px-4 py-2.5 text-xs text-ink-3">{footNote}</p>
-    </div>
+    </Card>
   );
 }

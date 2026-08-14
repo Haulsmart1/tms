@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { localDay, isOnTheRoad, jobPhase, buildRail } from "./onTheRoad";
+import { localDay, isOnTheRoad, jobPhase, buildRail, routeEndpoints } from "./onTheRoad";
 import type { TrackingJob, TrackingStop } from "./types";
 
 const NOW = new Date("2026-08-14T12:00:00Z");
@@ -124,6 +124,27 @@ describe("jobPhase", () => {
     });
     expect(jobPhase(j, NOW)).toBe("in_progress");
     expect(isOnTheRoad(j, NOW)).toBe(true);
+  });
+});
+
+describe("routeEndpoints", () => {
+  it("takes the collection as origin and the delivery as destination", () => {
+    expect(routeEndpoints(job().stops)).toEqual({ origin: "Leeds", destination: "Hull" });
+  });
+
+  it("uses the LAST delivery on a multi-drop job, because that is where it finishes", () => {
+    const stops = [
+      stop({ id: "s0", stop_order: 0, type: "collection", city: "Leeds" }),
+      stop({ id: "s1", stop_order: 1, city: "York" }),
+      stop({ id: "s2", stop_order: 2, city: "Hull" }),
+    ];
+    expect(routeEndpoints(stops)).toEqual({ origin: "Leeds", destination: "Hull" });
+  });
+
+  it("falls back on both ends when neither stop type is present", () => {
+    // The rail cell and the header subtitle both need something readable here,
+    // which is the whole reason this lives in one place.
+    expect(routeEndpoints([stop({ type: null })])).toEqual({ origin: "—", destination: "—" });
   });
 });
 

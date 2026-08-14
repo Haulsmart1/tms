@@ -421,6 +421,8 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 No test file. This is thin I/O with no branching worth asserting in the node environment, and Vitest has no Supabase client to run it against. Its behaviour is verified by Task 12 rendering the page.
 
+Note: `getPositions` THROWS on a query error rather than returning an empty map, which is why the `load` function in Task 12 wraps its whole body in a try/catch. That catch is load-bearing, not defensive padding.
+
 - [ ] **Step 1: Write the adapter**
 
 Create `lib/tracking/supabasePositions.ts`:
@@ -596,7 +598,7 @@ Create `lib/tracking/onTheRoad.test.ts`:
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { localDay, isOnTheRoad, jobPhase, buildRail } from "./onTheRoad";
+import { localDay, isOnTheRoad, jobPhase, buildRail, routeEndpoints } from "./onTheRoad";
 import type { TrackingJob, TrackingStop } from "./types";
 
 const NOW = new Date("2026-08-14T12:00:00Z");
@@ -724,6 +726,27 @@ describe("jobPhase", () => {
   });
 });
 
+describe("routeEndpoints", () => {
+  it("takes the collection as origin and the delivery as destination", () => {
+    expect(routeEndpoints(job().stops)).toEqual({ origin: "Leeds", destination: "Hull" });
+  });
+
+  it("uses the LAST delivery on a multi-drop job, because that is where it finishes", () => {
+    const stops = [
+      stop({ id: "s0", stop_order: 0, type: "collection", city: "Leeds" }),
+      stop({ id: "s1", stop_order: 1, city: "York" }),
+      stop({ id: "s2", stop_order: 2, city: "Hull" }),
+    ];
+    expect(routeEndpoints(stops)).toEqual({ origin: "Leeds", destination: "Hull" });
+  });
+
+  it("falls back on both ends when neither stop type is present", () => {
+    // The rail cell and the header subtitle both need something readable here,
+    // which is the whole reason this lives in one place.
+    expect(routeEndpoints([stop({ type: null })])).toEqual({ origin: "—", destination: "—" });
+  });
+});
+
 describe("buildRail", () => {
   it("drops jobs that are not on the road", () => {
     const rows = buildRail([job(), job({ id: "j2", status: "completed" })], NOW);
@@ -786,7 +809,7 @@ Expected: FAIL, module resolution error for `./onTheRoad`.
 Create `lib/tracking/onTheRoad.ts`:
 
 ```ts
-import type { TrackingJob } from "./types";
+import type { TrackingJob, TrackingStop } from "./types";
 import type { Tone } from "../../components/Badge";
 
 /* THE SINGLE DEFINITION OF "ON THE ROAD".
@@ -874,20 +897,33 @@ export function jobPhase(job: TrackingJob, now: Date): Phase {
   return anyDone ? "in_progress" : "due";
 }
 
-function toRailRow(job: TrackingJob, now: Date): RailRow {
-  const ordered = [...job.stops].sort((a, b) => a.stop_order - b.stop_order);
+/* Origin and destination for a job's route. Exported because the rail row and
+   the header card both render it, on the same screen at the same time, so two
+   copies could only ever disagree visibly. lib/pod/overdue.ts documents the
+   same reasoning for "awaiting POD". */
+export function routeEndpoints(stops: TrackingStop[]): { origin: string; destination: string } {
+  const ordered = [...stops].sort((a, b) => a.stop_order - b.stop_order);
   const collection = ordered.find((s) => s.type === "collection");
   // The LAST delivery, not the first: on a multi-drop job the destination is
   // where it finishes.
   const delivery = [...ordered].reverse().find((s) => s.type === "delivery");
 
   return {
+    origin: collection?.city ?? "—",
+    destination: delivery?.city ?? "—",
+  };
+}
+
+function toRailRow(job: TrackingJob, now: Date): RailRow {
+  const { origin, destination } = routeEndpoints(job.stops);
+
+  return {
     jobId: job.id,
     reference: job.reference ?? "—",
     registration: job.vehicle_registration ?? "—",
     driverName: job.driver_name,
-    originCity: collection?.city ?? "—",
-    destinationCity: delivery?.city ?? "—",
+    originCity: origin,
+    destinationCity: destination,
     scheduledDate: job.scheduled_date,
     phase: jobPhase(job, now),
   };
@@ -922,7 +958,7 @@ export function buildRail(jobs: TrackingJob[], now: Date): RailRow[] {
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run lib/tracking/onTheRoad.test.ts`
-Expected: PASS, 21 tests.
+Expected: PASS, 24 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1859,7 +1895,12 @@ Create `app/tracking/TrackingRail.tsx`:
 
 ```tsx
 import Badge from "../../components/Badge";
+import Card from "../../components/Card";
 import { PHASE_LABEL, PHASE_TONE, type RailRow } from "../../lib/tracking/onTheRoad";
+
+/* Renders correctly ONLY inside a `.ds` wrapper. Preflight is disabled, so the
+   borders here depend on the scoped reset in app/globals.css supplying
+   border-style: solid. Outside `.ds` the borders disappear entirely. */
 
 type Props = {
   rows: RailRow[];
@@ -1871,7 +1912,7 @@ type Props = {
 
 export default function TrackingRail({ rows, selectedJobId, onSelect, footNote }: Props) {
   return (
-    <div className="overflow-hidden rounded-lg border border-line bg-surface shadow-sm">
+    <Card flush>
       <header className="flex items-center gap-2 border-b border-line px-4 py-3">
         <span className="flex-1 text-sm font-semibold text-ink">On the road</span>
         <span className="rounded-full bg-surface-2 px-2 py-0.5 font-mono text-data-sm tabular-nums text-ink-2">
@@ -1894,7 +1935,7 @@ export default function TrackingRail({ rows, selectedJobId, onSelect, footNote }
                   /* The selected row is marked by an inset left bar rather than
                      a border, so selection does not shift the row's contents by
                      2px as it moves down the list. */
-                  className={`flex w-full flex-col gap-1 border-b border-line px-4 py-2.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+                  className={`flex w-full flex-col gap-1 border-b border-line px-4 py-2.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus ${
                     selected
                       ? "bg-primary-tint shadow-[inset_2px_0_0_var(--primary)]"
                       : "bg-transparent hover:bg-surface-2"
@@ -1926,7 +1967,7 @@ export default function TrackingRail({ rows, selectedJobId, onSelect, footNote }
       )}
 
       <p className="px-4 py-2.5 text-xs text-ink-3">{footNote}</p>
-    </div>
+    </Card>
   );
 }
 ```
@@ -1962,12 +2003,17 @@ Create `app/tracking/TrackingHeader.tsx`:
 ```tsx
 import Link from "next/link";
 import Badge from "../../components/Badge";
+import Card from "../../components/Card";
 import RouteProgress from "../../components/RouteProgress";
-import { PHASE_LABEL, PHASE_TONE, type Phase } from "../../lib/tracking/onTheRoad";
+import { PHASE_LABEL, PHASE_TONE, routeEndpoints, type Phase } from "../../lib/tracking/onTheRoad";
 import { arrowStateFor, routeGlyph, type JourneyNode } from "../../lib/tracking/journey";
 import { pingLabel, signalState, type PositionReading } from "../../lib/tracking/position";
 import { telemetryTiles } from "../../lib/tracking/telemetry";
 import type { TrackingJob } from "../../lib/tracking/types";
+
+/* Renders correctly ONLY inside a `.ds` wrapper. Preflight is disabled, so the
+   borders here depend on the scoped reset in app/globals.css supplying
+   border-style: solid. Outside `.ds` the borders disappear entirely. */
 
 type Props = {
   job: TrackingJob;
@@ -2014,14 +2060,21 @@ export default function TrackingHeader({ job, phase, journey, reading, now }: Pr
   const tiles = telemetryTiles(reading, now);
   const glyph = routeGlyph(journey, arrowStateFor(journey, phase === "late"));
 
-  const ordered = [...job.stops].sort((a, b) => a.stop_order - b.stop_order);
-  const origin = ordered.find((s) => s.type === "collection")?.city ?? "—";
-  const destination = [...ordered].reverse().find((s) => s.type === "delivery")?.city ?? "—";
+  const { origin, destination } = routeEndpoints(job.stops);
+
+  /* The visible route keeps routeEndpoints' "—" fallback, which is the right
+     thing to SHOW. It is the wrong thing to SAY: a screen reader announces the
+     glyph as "em dash", so the aria label below swaps in words instead. */
+  const spokenOrigin = origin === "—" ? "Unknown origin" : origin;
+  const spokenDestination = destination === "—" ? "Unknown destination" : destination;
+  const stopCount = glyph.nodes.length;
 
   const isSubcontracted = Boolean(job.subcontractor_id);
   // A tel: link only when there is actually a number and the driver is ours.
   // Rendering a dead "Call driver" control is worse than rendering none.
-  const callable = !isSubcontracted && job.driver_phone;
+  // Whitespace is legal in the column but not in a tel: URI (RFC 3966). UK
+  // numbers are commonly stored as "07700 900123".
+  const driverPhone = isSubcontracted ? null : job.driver_phone?.replace(/\s/g, "") || null;
 
   const subtitle = [
     job.customer_name ?? "No customer",
@@ -2030,7 +2083,7 @@ export default function TrackingHeader({ job, phase, journey, reading, now }: Pr
   ].join(" · ");
 
   return (
-    <div className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+    <Card>
       <div className="flex flex-wrap items-center gap-2.5">
         <span className="font-mono text-md font-semibold tabular-nums text-ink">
           {job.vehicle_registration ?? "—"}
@@ -2040,9 +2093,9 @@ export default function TrackingHeader({ job, phase, journey, reading, now }: Pr
 
         <span className="flex-1" />
 
-        {callable ? (
+        {driverPhone ? (
           <a
-            href={`tel:${job.driver_phone}`}
+            href={`tel:${driverPhone}`}
             className="rounded-sm border border-line px-2.5 py-1 text-xs font-semibold text-ink hover:border-line-strong hover:bg-surface-2"
           >
             Call {job.driver_name ?? "driver"}
@@ -2063,7 +2116,9 @@ export default function TrackingHeader({ job, phase, journey, reading, now }: Pr
         <RouteProgress
           nodes={glyph.nodes}
           arrowState={glyph.arrowState}
-          label={`${origin} to ${destination}, ${glyph.nodes.length} stops, ${PHASE_LABEL[phase].toLowerCase()}`}
+          label={`${spokenOrigin} to ${spokenDestination}, ${stopCount} ${
+            stopCount === 1 ? "stop" : "stops"
+          }, ${PHASE_LABEL[phase].toLowerCase()}`}
         />
       </div>
 
@@ -2083,7 +2138,7 @@ export default function TrackingHeader({ job, phase, journey, reading, now }: Pr
           </div>
         ))}
       </dl>
-    </div>
+    </Card>
   );
 }
 ```
@@ -2407,7 +2462,12 @@ export default function TrackingPage() {
   const [positions, setPositions] = useState<Map<string, PositionReading>>(new Map());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [loadFailed, setLoadFailed] = useState(false);
+  /* Set by ANY failed query, cleared by the next success. It is deliberately
+     not enough on its own to blank the console: on a 30 second poll one
+     transient blip would take the rail out from under a dispatcher mid-task.
+     See the render below, which only reaches the error card when there has
+     never been a successful load. */
+  const [refreshFailed, setRefreshFailed] = useState(false);
   const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
 
@@ -2419,83 +2479,95 @@ export default function TrackingPage() {
     async function load(showSkeleton: boolean) {
       if (showSkeleton) setLoading(true);
 
-      const today = localDay(new Date());
+      /* createSupabasePositionSource THROWS on a query error rather than
+         returning an empty map, and load() is called unawaited from both the
+         first render and the interval. Without this catch that rejection
+         escapes the effect entirely: nothing clears `loading`, so a failed
+         position query leaves the skeleton on screen forever with no retry.
+         Catching here is what turns a throw into the error state. */
+      try {
+        const today = localDay(new Date());
 
-      /* Narrowed server-side on the three cheap conditions before
-         isOnTheRoad applies the rest client-side. The stop-level condition
-         cannot be expressed here, which is why the predicate still runs. */
-      const { data, error } = await tenant
-        .filterByTenant(
-          supabase.from("jobs").select(`
-            id,
-            reference,
-            status,
-            scheduled_date,
-            created_at,
-            vehicle_id,
-            subcontractor_id,
-            customers ( name ),
-            vehicles ( registration ),
-            drivers ( name, phone ),
-            job_stops (
-              id, stop_order, type, address_line, city, postcode,
-              planned_at, delivered_at, pod_status, recipient_name,
-              pod_updated_at, pod_photo_url, pod_document_url
-            )
-          `),
-        )
-        .eq("status", "planned")
-        .not("vehicle_id", "is", null)
-        .lte("scheduled_date", today);
+        /* Narrowed server-side on the three cheap conditions before
+           isOnTheRoad applies the rest client-side. The stop-level condition
+           cannot be expressed here, which is why the predicate still runs. */
+        const { data, error } = await tenant
+          .filterByTenant(
+            supabase.from("jobs").select(`
+              id,
+              reference,
+              status,
+              scheduled_date,
+              created_at,
+              vehicle_id,
+              subcontractor_id,
+              customers ( name ),
+              vehicles ( registration ),
+              drivers ( name, phone ),
+              job_stops (
+                id, stop_order, type, address_line, city, postcode,
+                planned_at, delivered_at, pod_status, recipient_name,
+                pod_updated_at, pod_photo_url, pod_document_url
+              )
+            `),
+          )
+          .eq("status", "planned")
+          .not("vehicle_id", "is", null)
+          .lte("scheduled_date", today);
 
-      if (cancelled) return;
+        if (cancelled) return;
 
-      if (error) {
-        setLoadFailed(true);
-        setLoading(false);
-        return;
-      }
+        if (error) {
+          setRefreshFailed(true);
+          setLoading(false);
+          return;
+        }
 
-      const mapped: TrackingJob[] = (data ?? []).map((row: any) => {
-        const vehicle = rel(row.vehicles);
-        const driver = rel(row.drivers);
-        return {
-          id: row.id,
-          reference: row.reference,
-          status: row.status,
-          scheduled_date: row.scheduled_date,
-          created_at: row.created_at,
-          customer_name: rel(row.customers)?.name ?? null,
-          vehicle_id: row.vehicle_id,
-          vehicle_registration: vehicle?.registration ?? null,
-          driver_name: driver?.name ?? null,
-          driver_phone: driver?.phone ?? null,
-          subcontractor_id: row.subcontractor_id,
-          stops: [...(row.job_stops ?? [])].sort(
-            (a: any, b: any) => a.stop_order - b.stop_order,
+        const mapped: TrackingJob[] = (data ?? []).map((row: any) => {
+          const vehicle = rel(row.vehicles);
+          const driver = rel(row.drivers);
+          return {
+            id: row.id,
+            reference: row.reference,
+            status: row.status,
+            scheduled_date: row.scheduled_date,
+            created_at: row.created_at,
+            customer_name: rel(row.customers)?.name ?? null,
+            vehicle_id: row.vehicle_id,
+            vehicle_registration: vehicle?.registration ?? null,
+            driver_name: driver?.name ?? null,
+            driver_phone: driver?.phone ?? null,
+            subcontractor_id: row.subcontractor_id,
+            stops: [...(row.job_stops ?? [])].sort(
+              (a: any, b: any) => a.stop_order - b.stop_order,
+            ),
+          };
+        });
+
+        const now = new Date();
+        const vehicleIds = Array.from(
+          new Set(
+            buildRail(mapped, now)
+              .map((r) => mapped.find((j) => j.id === r.jobId)?.vehicle_id)
+              .filter((id): id is string => Boolean(id)),
           ),
-        };
-      });
+        );
 
-      const now = new Date();
-      const vehicleIds = Array.from(
-        new Set(
-          buildRail(mapped, now)
-            .map((r) => mapped.find((j) => j.id === r.jobId)?.vehicle_id)
-            .filter((id): id is string => Boolean(id)),
-        ),
-      );
+        const source = createSupabasePositionSource(supabase, tenant);
+        const readings = await source.getPositions(vehicleIds);
 
-      const source = createSupabasePositionSource(supabase, tenant);
-      const readings = await source.getPositions(vehicleIds);
+        if (cancelled) return;
 
-      if (cancelled) return;
-
-      setJobs(mapped);
-      setPositions(readings);
-      setLoadFailed(false);
-      setLoading(false);
-      setLastLoadedAt(new Date());
+        setJobs(mapped);
+        setPositions(readings);
+        setRefreshFailed(false);
+        setLoading(false);
+        setLastLoadedAt(new Date());
+      } catch {
+        if (cancelled) return;
+        setRefreshFailed(true);
+        setLoading(false);
+      }
     }
 
     load(true);
@@ -2548,9 +2620,20 @@ export default function TrackingPage() {
     [selectedJob],
   );
 
-  const footNote = lastLoadedAt
-    ? `Auto-refresh 30 s · updated ${CLOCK.format(lastLoadedAt)}`
-    : "Auto-refresh 30 s";
+  /* Nothing has ever loaded, so there is no last known data to keep on screen
+     and the full error card with its retry is the only useful thing to render.
+     Once a load has succeeded, a later failure is reported in the rail's
+     footnote instead and the console stays up. */
+  const neverLoaded = lastLoadedAt === null;
+
+  const footNote = [
+    lastLoadedAt
+      ? `Auto-refresh 30 s · updated ${CLOCK.format(lastLoadedAt)}`
+      : "Auto-refresh 30 s",
+    refreshFailed ? "refresh failed, showing last known data" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <TenantGate>
@@ -2565,7 +2648,7 @@ export default function TrackingPage() {
             <div className="rounded-lg border border-line bg-surface p-6 shadow-sm">
               <p className="text-sm text-ink-3">Loading jobs…</p>
             </div>
-          ) : loadFailed ? (
+          ) : refreshFailed && neverLoaded ? (
             <div className="rounded-lg border border-danger-border bg-danger-tint p-6 shadow-sm">
               <p className="text-sm font-semibold text-danger-strong">Could not load tracking</p>
               <p className="mt-1 text-sm text-ink-2">

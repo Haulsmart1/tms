@@ -43,7 +43,12 @@ export default function TrackingPage() {
   const [positions, setPositions] = useState<Map<string, PositionReading>>(new Map());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [loadFailed, setLoadFailed] = useState(false);
+  /* Set by ANY failed query, cleared by the next success. It is deliberately
+     not enough on its own to blank the console: on a 30 second poll one
+     transient blip would take the rail out from under a dispatcher mid-task.
+     See the render below, which only reaches the error card when there has
+     never been a successful load. */
+  const [refreshFailed, setRefreshFailed] = useState(false);
   const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
 
@@ -94,7 +99,7 @@ export default function TrackingPage() {
         if (cancelled) return;
 
         if (error) {
-          setLoadFailed(true);
+          setRefreshFailed(true);
           setLoading(false);
           return;
         }
@@ -136,12 +141,12 @@ export default function TrackingPage() {
 
         setJobs(mapped);
         setPositions(readings);
-        setLoadFailed(false);
+        setRefreshFailed(false);
         setLoading(false);
         setLastLoadedAt(new Date());
       } catch {
         if (cancelled) return;
-        setLoadFailed(true);
+        setRefreshFailed(true);
         setLoading(false);
       }
     }
@@ -196,9 +201,20 @@ export default function TrackingPage() {
     [selectedJob],
   );
 
-  const footNote = lastLoadedAt
-    ? `Auto-refresh 30 s · updated ${CLOCK.format(lastLoadedAt)}`
-    : "Auto-refresh 30 s";
+  /* Nothing has ever loaded, so there is no last known data to keep on screen
+     and the full error card with its retry is the only useful thing to render.
+     Once a load has succeeded, a later failure is reported in the rail's
+     footnote instead and the console stays up. */
+  const neverLoaded = lastLoadedAt === null;
+
+  const footNote = [
+    lastLoadedAt
+      ? `Auto-refresh 30 s · updated ${CLOCK.format(lastLoadedAt)}`
+      : "Auto-refresh 30 s",
+    refreshFailed ? "refresh failed, showing last known data" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <TenantGate>
@@ -213,7 +229,7 @@ export default function TrackingPage() {
             <div className="rounded-lg border border-line bg-surface p-6 shadow-sm">
               <p className="text-sm text-ink-3">Loading jobs…</p>
             </div>
-          ) : loadFailed ? (
+          ) : refreshFailed && neverLoaded ? (
             <div className="rounded-lg border border-danger-border bg-danger-tint p-6 shadow-sm">
               <p className="text-sm font-semibold text-danger-strong">Could not load tracking</p>
               <p className="mt-1 text-sm text-ink-2">

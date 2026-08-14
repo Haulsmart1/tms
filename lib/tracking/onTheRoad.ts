@@ -1,4 +1,4 @@
-import type { TrackingJob } from "./types";
+import type { TrackingJob, TrackingStop } from "./types";
 import type { Tone } from "../../components/Badge";
 
 /* THE SINGLE DEFINITION OF "ON THE ROAD".
@@ -86,20 +86,33 @@ export function jobPhase(job: TrackingJob, now: Date): Phase {
   return anyDone ? "in_progress" : "due";
 }
 
-function toRailRow(job: TrackingJob, now: Date): RailRow {
-  const ordered = [...job.stops].sort((a, b) => a.stop_order - b.stop_order);
+/* Origin and destination for a job's route. Exported because the rail row and
+   the header card both render it, on the same screen at the same time, so two
+   copies could only ever disagree visibly. lib/pod/overdue.ts documents the
+   same reasoning for "awaiting POD". */
+export function routeEndpoints(stops: TrackingStop[]): { origin: string; destination: string } {
+  const ordered = [...stops].sort((a, b) => a.stop_order - b.stop_order);
   const collection = ordered.find((s) => s.type === "collection");
   // The LAST delivery, not the first: on a multi-drop job the destination is
   // where it finishes.
   const delivery = [...ordered].reverse().find((s) => s.type === "delivery");
 
   return {
+    origin: collection?.city ?? "—",
+    destination: delivery?.city ?? "—",
+  };
+}
+
+function toRailRow(job: TrackingJob, now: Date): RailRow {
+  const { origin, destination } = routeEndpoints(job.stops);
+
+  return {
     jobId: job.id,
     reference: job.reference ?? "—",
     registration: job.vehicle_registration ?? "—",
     driverName: job.driver_name,
-    originCity: collection?.city ?? "—",
-    destinationCity: delivery?.city ?? "—",
+    originCity: origin,
+    destinationCity: destination,
     scheduledDate: job.scheduled_date,
     phase: jobPhase(job, now),
   };
