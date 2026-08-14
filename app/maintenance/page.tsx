@@ -26,6 +26,8 @@ type MaintenanceRecord = {
     completed_date: string | null;
     status: string;
     cost: number | null;
+    mileage: number | null;
+    maintenance_hours: number | null;
     notes: string | null;
     created_at: string;
 };
@@ -55,6 +57,8 @@ export default function MaintenancePage() {
     const [completedDate, setCompletedDate] = useState("");
     const [status, setStatus] = useState("due");
     const [cost, setCost] = useState("");
+    const [mileage, setMileage] = useState("");
+    const [maintenanceHours, setMaintenanceHours] = useState("");
     const [notes, setNotes] = useState("");
 
     const [vorReason, setVorReason] = useState("");
@@ -155,6 +159,8 @@ export default function MaintenancePage() {
                             completed_date,
                             status,
                             cost,
+                            mileage,
+                            maintenance_hours,
                             notes,
                             created_at
                             `
@@ -251,6 +257,8 @@ export default function MaintenancePage() {
         setCompletedDate("");
         setStatus("due");
         setCost("");
+        setMileage("");
+        setMaintenanceHours("");
         setNotes("");
         setVorReason("");
     }
@@ -286,6 +294,32 @@ export default function MaintenancePage() {
             return;
         }
 
+        const numericMileage =
+            mileage.trim() === ""
+                ? null
+                : Number(mileage);
+
+        const numericMaintenanceHours =
+            maintenanceHours.trim() === ""
+                ? null
+                : Number(maintenanceHours);
+
+        if (
+            numericMileage !== null &&
+            (!Number.isFinite(numericMileage) || numericMileage < 0)
+        ) {
+            setErrorMessage("Enter a valid mileage.");
+            return;
+        }
+
+        if (
+            numericMaintenanceHours !== null &&
+            (!Number.isFinite(numericMaintenanceHours) ||
+                numericMaintenanceHours < 0)
+        ) {
+            setErrorMessage("Enter valid maintenance hours.");
+            return;
+        }
         setSaving(true);
 
         try {
@@ -302,6 +336,8 @@ export default function MaintenancePage() {
                     cost.trim() !== ""
                         ? Number(cost)
                         : null,
+                mileage: numericMileage,
+                maintenance_hours: numericMaintenanceHours,
                 notes: notes.trim() || null,
             };
 
@@ -1103,7 +1139,53 @@ export default function MaintenancePage() {
                             </label>
                         ) : null}
 
-                        <label style={styles.field}>
+                                                <div
+                            style={{
+                                display: "grid",
+                                gridTemplateColumns:
+                                    "repeat(auto-fit, minmax(180px, 1fr))",
+                                gap: 12,
+                            }}
+                        >
+                            <label style={styles.field}>
+                                <span style={styles.label}>
+                                    Mileage at Maintenance
+                                </span>
+
+                                <input
+                                    type="number"
+                                    min="0"
+                                    step="1"
+                                    value={mileage}
+                                    onChange={(event) =>
+                                        setMileage(event.target.value)
+                                    }
+                                    placeholder="e.g. 125000"
+                                    style={styles.input}
+                                />
+                            </label>
+
+                            <label style={styles.field}>
+                                <span style={styles.label}>
+                                    Maintenance Hours
+                                </span>
+
+                                <input
+                                    type="number"
+                                    min="0"
+                                    step="0.25"
+                                    value={maintenanceHours}
+                                    onChange={(event) =>
+                                        setMaintenanceHours(
+                                            event.target.value
+                                        )
+                                    }
+                                    placeholder="e.g. 3.5"
+                                    style={styles.input}
+                                />
+                            </label>
+                        </div>
+<label style={styles.field}>
                             <span style={styles.label}>
                                 Notes
                             </span>
@@ -1259,7 +1341,30 @@ export default function MaintenancePage() {
                                             }
                                         />
 
+                                                                                <RecordItem
+                                            label="Mileage"
+                                            value={
+                                                record.mileage !== null &&
+                                                record.mileage !== undefined
+                                                    ? `${Number(
+                                                          record.mileage
+                                                      ).toLocaleString()} miles`
+                                                    : "—"
+                                            }
+                                        />
+
                                         <RecordItem
+                                            label="Maintenance Hours"
+                                            value={
+                                                record.maintenance_hours !==
+                                                    null &&
+                                                record.maintenance_hours !==
+                                                    undefined
+                                                    ? `${record.maintenance_hours} hrs`
+                                                    : "—"
+                                            }
+                                        />
+<RecordItem
                                             label="Cost"
                                             value={
                                                 record.cost !==
