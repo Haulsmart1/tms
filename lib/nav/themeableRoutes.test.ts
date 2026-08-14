@@ -8,11 +8,12 @@ describe("isThemeableRoute", () => {
     expect(isThemeableRoute("/dashboard")).toBe(true);
     expect(isThemeableRoute("/jobs")).toBe(true);
     expect(isThemeableRoute("/pod")).toBe(true);
+    expect(isThemeableRoute("/tracking")).toBe(true);
     expect(isThemeableRoute("/super-admin/requests")).toBe(true);
   });
 
   it("returns false for legacy inline-styled pages, which pin themselves dark", () => {
-    expect(isThemeableRoute("/tracking")).toBe(false);
+    expect(isThemeableRoute("/telematics")).toBe(false);
     expect(isThemeableRoute("/invoices")).toBe(false);
     expect(isThemeableRoute("/stats")).toBe(false);
   });
@@ -36,7 +37,7 @@ describe("isThemeableRoute", () => {
 
   it("lists exactly the pages known to be tokenised today", () => {
     expect([...THEMEABLE_ROUTES].sort()).toEqual(
-      ["/", "/dashboard", "/jobs", "/login", "/pod", "/super-admin/requests"].sort(),
+      ["/", "/dashboard", "/jobs", "/login", "/pod", "/tracking", "/super-admin/requests"].sort(),
     );
   });
 });

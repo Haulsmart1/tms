@@ -2739,6 +2739,7 @@ Do this last of the code tasks. Until the page is fully tokenised, `ThemeScope` 
 
 **Files:**
 - Modify: `lib/nav/themeableRoutes.ts`
+- Modify: `lib/nav/themeableRoutes.test.ts`
 
 - [ ] **Step 1: Add the route**
 
@@ -2776,7 +2777,17 @@ Replace with:
 
 If the wrapping differs in the file, keep the surrounding lines intact and change only the route name.
 
-- [ ] **Step 3: Verify the toggle works in both directions**
+- [ ] **Step 3: Update the allowlist test**
+
+`lib/nav/themeableRoutes.test.ts` asserts the allowlist's contents directly, so it goes stale the moment a route moves onto the list. Update it in the same commit:
+
+- In the test that checks `isThemeableRoute` returns `true` for tokenised pages, add `/tracking`.
+- In the test that checks legacy inline-styled pages return `false`, replace `/tracking` with `/telematics`. `/tracking` is no longer a legacy example; `/telematics` is, and it is not on the list.
+- In the test that asserts the full contents of `THEMEABLE_ROUTES`, add `/tracking` to the expected array.
+
+Keep the assertion of the full array's contents rather than loosening it to a partial match: it is a deliberate tripwire so nobody adds a route without updating this test.
+
+- [ ] **Step 4: Verify the toggle works in both directions**
 
 Run: `npm run dev`, then sign in locally.
 
@@ -2791,19 +2802,20 @@ Open the printed link. Then:
 - Toggle back to dark.
 - Check the theme toggle is now visible on `/tracking`, since `AppShell` renders it for themeable routes.
 
-- [ ] **Step 4: Run the theme contrast suite**
+- [ ] **Step 5: Run the theme contrast suite**
 
 Run: `npx vitest run lib/theme/contrast.test.ts`
 Expected: PASS. It reads `app/tokens.css` and asserts full parity plus every contrast pair, so it catches a token that regressed.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add lib/nav/themeableRoutes.ts
+git add lib/nav/themeableRoutes.ts lib/nav/themeableRoutes.test.ts
 git commit -m "Activate light/dark theming for /tracking
 
 Seventh themeable route, second converted after /pod. Updates the file's own
-header comment, which used /tracking as its white-on-white example.
+header comment, which used /tracking as its white-on-white example. Moves the
+route allowlist test's assertions to match.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```

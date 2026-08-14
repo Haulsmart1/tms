@@ -4,7 +4,7 @@
    A route not on it is pinned dark by ThemeScope, because the ~14 legacy pages
    are styled with hardcoded inline colour literals that cannot respond to a
    theme class. Letting them follow the theme would put their dark-tuned text on
-   a light background: /tracking would render white-on-white.
+   a light background: /telematics would render white-on-white.
 
    TO ACTIVATE A LEGACY PAGE: convert its inline colour literals to tokens, give
    its root element `className="ds ... bg-canvas text-ink"` the way the pages
@@ -17,10 +17,11 @@
 
    THREE ENTRIES BELOW DO NOT SHOW A TOGGLE, and that is correct. AppShell is
    what renders the toggle, and shouldShowShell() hides AppShell entirely on
-   "/", "/login" and every "/super-admin/*" path. So of the six routes here,
-   only /dashboard, /jobs and /pod actually offer the control. The others still
-   need to be listed, because this list ALSO decides whether ThemeScope pins a
-   route dark, and pinning the landing page or /login dark would be wrong.
+   "/", "/login" and every "/super-admin/*" path. So of the seven routes here,
+   only /dashboard, /jobs, /pod and /tracking actually offer the control. The
+   others still need to be listed, because this list ALSO decides whether
+   ThemeScope pins a route dark, and pinning the landing page or /login dark
+   would be wrong.
 
    "/" is a further special case: it self-pins `.light` on its own root element
    (see app/page.tsx), because the public marketing page stays light whatever
@@ -41,6 +42,7 @@ export const THEMEABLE_ROUTES: readonly string[] = [
   "/dashboard",              // app/dashboard/page.tsx
   "/jobs",                   // app/jobs/page.tsx
   "/pod",                    // app/pod/page.tsx
+  "/tracking",               // app/tracking/page.tsx
   "/super-admin/requests",   // app/super-admin/requests/page.tsx
 ];
 
