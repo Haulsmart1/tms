@@ -1,0 +1,177 @@
+import { describe, it, expect } from "vitest";
+import { localDay, isOnTheRoad, jobPhase, buildRail, PHASE_LABEL, PHASE_TONE } from "./onTheRoad";
+import type { TrackingJob, TrackingStop } from "./types";
+
+const NOW = new Date("2026-08-14T12:00:00Z");
+const TODAY = "2026-08-14";
+const YESTERDAY = "2026-08-13";
+const TOMORROW = "2026-08-15";
+
+function stop(over: Partial<TrackingStop> = {}): TrackingStop {
+  return {
+    id: "s1", stop_order: 1, type: "delivery", address_line: "1 Dock Rd",
+    city: "Hull", postcode: "HU3 4AB", planned_at: `${TODAY}T08:00:00Z`,
+    delivered_at: null, pod_status: "pending", recipient_name: null,
+    pod_updated_at: null, pod_photo_url: null, pod_document_url: null,
+    ...over,
+  };
+}
+
+function job(over: Partial<TrackingJob> = {}): TrackingJob {
+  return {
+    id: "j1", reference: "J-100", status: "planned", scheduled_date: TODAY,
+    created_at: `${TODAY}T06:00:00Z`, customer_name: "Acme", vehicle_id: "v1",
+    vehicle_registration: "YT19 KHR", driver_name: "A. Marsh",
+    driver_phone: "07700900000", subcontractor_id: null,
+    stops: [
+      stop({ id: "s0", stop_order: 0, type: "collection", city: "Leeds", postcode: "LS10 1AA" }),
+      stop(),
+    ],
+    ...over,
+  };
+}
+
+describe("localDay", () => {
+  it("formats the local calendar day, not the UTC one", () => {
+    // A job scheduled for the 14th must still count as due at 23:30 local on
+    // the 14th. Formatting via toISOString() would roll it to the 15th in any
+    // zone ahead of UTC and quietly drop it from the rail.
+    const d = new Date(2026, 7, 14, 23, 30);
+    expect(localDay(d)).toBe("2026-08-14");
+  });
+
+  it("pads single-digit months and days", () => {
+    expect(localDay(new Date(2026, 0, 5, 9, 0))).toBe("2026-01-05");
+  });
+});
+
+describe("isOnTheRoad", () => {
+  it("is true for an assigned, due, unfinished job", () => {
+    expect(isOnTheRoad(job(), NOW)).toBe(true);
+  });
+
+  it("is true for an overdue job, which is the case that most needs showing", () => {
+    expect(isOnTheRoad(job({ scheduled_date: YESTERDAY }), NOW)).toBe(true);
+  });
+
+  it("is false once the job is completed", () => {
+    expect(isOnTheRoad(job({ status: "completed" }), NOW)).toBe(false);
+  });
+
+  it("is false with no vehicle assigned, because there is nothing to track", () => {
+    expect(isOnTheRoad(job({ vehicle_id: null }), NOW)).toBe(false);
+  });
+
+  it("is false for a job scheduled in the future", () => {
+    expect(isOnTheRoad(job({ scheduled_date: TOMORROW }), NOW)).toBe(false);
+  });
+
+  it("is false with no scheduled_date, which cannot be shown to be due", () => {
+    expect(isOnTheRoad(job({ scheduled_date: null }), NOW)).toBe(false);
+  });
+
+  it("is false once every delivery stop is delivered", () => {
+    const j = job();
+    j.stops = j.stops.map((s) =>
+      s.type === "delivery" ? { ...s, pod_status: "delivered" } : s,
+    );
+    expect(isOnTheRoad(j, NOW)).toBe(false);
+  });
+
+  it("is false for a job with no delivery stops at all", () => {
+    // Mirrors the deliveryStops.length > 0 guard the POD completion cascade
+    // applies in app/pod/page.tsx. A job with nothing to arrive at is not on
+    // the road.
+    expect(isOnTheRoad(job({ stops: [stop({ type: "collection" })] }), NOW)).toBe(false);
+  });
+
+  it("does NOT require the collection to be marked done", () => {
+    // Nothing in the product prompts anyone to mark a collection: /pod only
+    // ever surfaces delivery stops. Requiring it would leave the rail
+    // permanently empty.
+    expect(isOnTheRoad(job(), NOW)).toBe(true);
+  });
+});
+
+describe("jobPhase", () => {
+  it("is late when scheduled before today", () => {
+    expect(jobPhase(job({ scheduled_date: YESTERDAY }), NOW)).toBe("late");
+  });
+
+  it("is due when scheduled today with nothing marked yet", () => {
+    expect(jobPhase(job(), NOW)).toBe("due");
+  });
+
+  it("is in_progress when scheduled today and a stop is already delivered", () => {
+    const j = job();
+    j.stops[0] = { ...j.stops[0], pod_status: "delivered" };
+    expect(jobPhase(j, NOW)).toBe("in_progress");
+  });
+
+  it("stays late even when a stop is already delivered, because late outranks progress", () => {
+    const j = job({ scheduled_date: YESTERDAY });
+    j.stops[0] = { ...j.stops[0], pod_status: "delivered" };
+    expect(jobPhase(j, NOW)).toBe("late");
+  });
+});
+
+describe("phase presentation", () => {
+  it("labels every phase", () => {
+    expect(PHASE_LABEL).toEqual({ late: "Late", in_progress: "In progress", due: "Due today" });
+  });
+
+  it("maps every phase to a Badge tone that exists in components/Badge.tsx", () => {
+    expect(PHASE_TONE).toEqual({ late: "danger", in_progress: "info", due: "warning" });
+  });
+});
+
+describe("buildRail", () => {
+  it("drops jobs that are not on the road", () => {
+    const rows = buildRail([job(), job({ id: "j2", status: "completed" })], NOW);
+    expect(rows.map((r) => r.jobId)).toEqual(["j1"]);
+  });
+
+  it("puts late jobs first, then oldest scheduled date, then reference", () => {
+    const rows = buildRail(
+      [
+        job({ id: "a", reference: "J-300", scheduled_date: TODAY }),
+        job({ id: "b", reference: "J-100", scheduled_date: YESTERDAY }),
+        job({ id: "c", reference: "J-200", scheduled_date: "2026-08-12" }),
+        job({ id: "d", reference: "J-050", scheduled_date: TODAY }),
+      ],
+      NOW,
+    );
+    expect(rows.map((r) => r.jobId)).toEqual(["c", "b", "d", "a"]);
+  });
+
+  it("carries the route towns", () => {
+    const [row] = buildRail([job()], NOW);
+    expect(row.originCity).toBe("Leeds");
+    expect(row.destinationCity).toBe("Hull");
+  });
+
+  it("falls back rather than rendering blanks or the word null", () => {
+    // A delivery-only job with no city still belongs in the rail. Every cell
+    // must render something a dispatcher can read.
+    const [row] = buildRail(
+      [job({ reference: null, vehicle_registration: null, driver_name: null, stops: [stop({ city: null })] })],
+      NOW,
+    );
+    expect(row.reference).toBe("—");
+    expect(row.registration).toBe("—");
+    expect(row.originCity).toBe("—");
+    expect(row.destinationCity).toBe("—");
+    expect(row.driverName).toBeNull(); // the component supplies "No driver assigned"
+  });
+
+  it("uses the LAST delivery stop as the destination on a multi-drop job", () => {
+    const j = job({
+      stops: [
+        stop({ id: "s0", stop_order: 0, type: "collection", city: "Leeds" }),
+        stop({ id: "s1", stop_order: 1, city: "York" }),
+        stop({ id: "s2", stop_order: 2, city: "Hull" }),
+      ],
+    });
+    expect(buildRail([j], NOW)[0].destinationCity).toBe("Hull");
+  });
+});
