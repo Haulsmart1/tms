@@ -5,7 +5,7 @@ import { cn } from "../lib/cn";
    border here depends on the scoped reset in app/globals.css supplying
    border-style: solid. Outside `.ds` the border disappears entirely. */
 
-type Tone = "info" | "success" | "warning" | "danger" | "neutral";
+export type Tone = "info" | "success" | "warning" | "danger" | "neutral";
 
 const tones: Record<Tone, string> = {
   info: "bg-primary-tint text-primary-deep border-primary-tint-border",

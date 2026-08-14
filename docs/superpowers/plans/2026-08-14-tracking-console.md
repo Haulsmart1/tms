@@ -1,0 +1,3365 @@
+# Tracking Console Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Rebuild `/tracking` as a design-system console page: a job-first queue rail beside a stacked detail column of header, map, journey and activity cards, with every GPS-dependent element degrading honestly because no position feed exists yet.
+
+**Architecture:** All deciding lives in pure, tested modules under `lib/tracking/`. `app/tracking/page.tsx` owns only the Supabase query, the poll and selection state. Components are presentational. TomTom is prepared for behind one `PositionSource` interface, with no network call in this change.
+
+**Tech Stack:** Next.js App Router, React client components, Supabase JS, Tailwind with `var()`-backed tokens, Vitest (node env, `lib/**/*.test.ts` only), Playwright for the local layout regression check.
+
+**Spec:** `docs/superpowers/specs/2026-08-14-tracking-console-design.md`
+
+**Branch:** `ethan/tracking-console` (already created)
+
+---
+
+## Before you start: five things about this codebase
+
+1. **`:root` is DARK.** `app/tokens.css` inverts the usual convention on purpose. Never write a Tailwind `dark:` variant. Theme differences belong in token values. Read the header comment in `app/tokens.css` if tempted.
+2. **Preflight is OFF.** A component renders correctly only inside a `class="ds"` wrapper, which supplies `border-style: solid` and box-sizing. Omit `ds` and borders vanish and containers overflow. Omit `font-sans` and you silently get Inter.
+3. **Opacity modifiers compile to nothing.** `bg-primary/10` and `text-ink/60` emit no CSS, silently, because the token colours are plain `var()` strings. Use a `-tint` token instead.
+4. **The `—` glyph is an approved UI fallback.** `lib/pod/queue.ts` uses it deliberately for narrow mono columns and explains why. Use it the same way in cells. Do not use em-dashes in prose, comments or commit messages.
+5. **Vitest only sees `lib/**/*.test.ts`**, in the `node` environment. There is no component test runner. Components are verified by `npm run typecheck`, by running the app, and by the Playwright layout spec in Task 14.
+
+## Three refinements to the spec, made while planning
+
+Each preserves the approved contract. Flagged here so review can catch them.
+
+1. **The position seam is split across two files, not one.** `lib/tracking/position.ts` holds the types and the pure staleness helpers so Vitest can cover them. `lib/tracking/supabasePositions.ts` holds the Supabase adapter behind the same `PositionSource` interface. The seam is unchanged.
+2. **The activity feed uses no extra tables and no extra query.** The spec listed `pod_records`, `pod_files` and `job_documents` as sources. Nothing in the app writes any of them, so they would contribute zero events. `job_stops.pod_updated_at` IS written by `/pod`, so the feed is built entirely from `jobs.created_at`, `job_stops.delivered_at` and `job_stops.pod_updated_at`, all already in the page's existing query.
+3. **Timestamps are normalised before parsing.** `telematics_positions.recorded_at` is `timestamp without time zone`, so Supabase returns `"2026-08-14T09:41:00"` with no offset and `new Date()` reads it as local time. Task 1 adds a helper and a test for this.
+
+## File structure
+
+**Create, `lib/tracking/`:**
+
+| File | Responsibility |
+| --- | --- |
+| `types.ts` | `TrackingJob` and `TrackingStop` row shapes. No logic. |
+| `position.ts` | `PositionReading`, `PositionSource`, staleness, ping labels, timestamp normalisation. |
+| `position.test.ts` | Tests for the above. |
+| `supabasePositions.ts` | The adapter reading `telematics_positions` then `vehicle_locations`. |
+| `onTheRoad.ts` | Rail predicate, phase derivation, sort, row shape. |
+| `onTheRoad.test.ts` | Tests for the above. |
+| `journey.ts` | Stop timeline nodes, route glyph adapter, date formatting. |
+| `journey.test.ts` | Tests for the above. |
+| `telemetry.ts` | The four header tiles. |
+| `telemetry.test.ts` | Tests for the above. |
+| `activity.ts` | Synthesised event list. |
+| `activity.test.ts` | Tests for the above. |
+
+**Create, `app/tracking/`:** `TrackingRail.tsx`, `TrackingHeader.tsx`, `TrackingMap.tsx`, `JourneyTimeline.tsx`, `ActivityFeed.tsx`.
+
+**Create:** `lib/time.ts` and `lib/time.test.ts` (Task 4a), holding `OPERATOR_TIME_ZONE` and `operatorDay`. Flat in `lib/` like `cn.ts` and `roles.ts`, because both `lib/pod/` and `lib/tracking/` format against them.
+
+**Modify:** `app/tracking/page.tsx` (full rewrite), `lib/nav/themeableRoutes.ts` (one line), `app/globals.css` (one components layer).
+
+**Create:** `tests/tracking-layout.spec.mjs`.
+
+**Do not touch:** `app/pod/*`, `components/RouteProgress.tsx`, and `lib/pod/*` with one exception: Task 4a deletes the `OPERATOR_TIME_ZONE` declaration and the private `operatorDateKey` helper from `lib/pod/kpis.ts` and imports both from `lib/time.ts` instead. That module's own comment promised the constant lived in a single place, so a second consumer has to move it rather than copy it, and the same reasoning applies to the calendar day derived from it.
+
+---
+
+### Task 1: Position primitives and staleness
+
+**Files:**
+- Create: `lib/tracking/types.ts`
+- Create: `lib/tracking/position.ts`
+- Test: `lib/tracking/position.test.ts`
+
+- [ ] **Step 1: Write the row types**
+
+Create `lib/tracking/types.ts`:
+
+```ts
+/* Row shapes for the Tracking console, mirroring the columns app/tracking/page.tsx
+   selects. Kept separate from the logic modules so onTheRoad, journey and
+   activity can all import them without importing each other. */
+
+export type TrackingStop = {
+  id: string;
+  stop_order: number;
+  type: string | null;
+  address_line: string | null;
+  city: string | null;
+  postcode: string | null;
+  /* NOT a real planned time. app/jobs/page.tsx writes it as
+     `${scheduled_date}T08:00:00`, so it is accurate to the day and not the
+     hour. See lib/pod/overdue.ts, which says the same thing about the same
+     column. Render it as a date, never as a time. */
+  planned_at: string | null;
+  delivered_at: string | null;
+  pod_status: string | null;
+  recipient_name: string | null;
+  pod_updated_at: string | null;
+  pod_photo_url: string | null;
+  pod_document_url: string | null;
+};
+
+export type TrackingJob = {
+  id: string;
+  reference: string | null;
+  status: string | null;
+  /** A `date` column, so "YYYY-MM-DD" with no time and no zone. */
+  scheduled_date: string | null;
+  created_at: string | null;
+  customer_name: string | null;
+  vehicle_id: string | null;
+  vehicle_registration: string | null;
+  driver_name: string | null;
+  driver_phone: string | null;
+  subcontractor_id: string | null;
+  stops: TrackingStop[];
+};
+```
+
+- [ ] **Step 2: Write the failing test**
+
+Create `lib/tracking/position.test.ts`:
+
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  normaliseTimestamp,
+  readingAgeMinutes,
+  signalState,
+  isLive,
+  pingLabel,
+  speedLabel,
+  STALE_AFTER_MINUTES,
+  type PositionReading,
+} from "./position";
+
+const NOW = new Date("2026-08-14T12:00:00Z");
+
+function reading(recordedAt: string, speedKph = 80): PositionReading {
+  return { vehicleId: "v1", lat: 53.8, lng: -1.5, speedKph, headingDeg: null, recordedAt };
+}
+
+describe("normaliseTimestamp", () => {
+  it("appends Z to a naive stamp, because the column is stored in UTC", () => {
+    // telematics_positions.recorded_at is `timestamp without time zone`, so
+    // Supabase returns no offset and new Date() would read it as local time.
+    expect(normaliseTimestamp("2026-08-14T09:41:00")).toBe("2026-08-14T09:41:00Z");
+  });
+
+  it("leaves a stamp that already carries Z alone", () => {
+    expect(normaliseTimestamp("2026-08-14T09:41:00Z")).toBe("2026-08-14T09:41:00Z");
+  });
+
+  it("leaves a stamp that already carries a numeric offset alone", () => {
+    expect(normaliseTimestamp("2026-08-14T09:41:00+01:00")).toBe("2026-08-14T09:41:00+01:00");
+  });
+
+  it("leaves a stamp with a two-digit offset and no minutes alone", () => {
+    // Postgres emits +01 rather than +01:00 when the offset has zero minutes.
+    expect(normaliseTimestamp("2026-08-14T09:41:00+01")).toBe("2026-08-14T09:41:00+01");
+  });
+
+  it("leaves a stamp with a negative two-digit offset alone", () => {
+    expect(normaliseTimestamp("2026-08-14T09:41:00-05")).toBe("2026-08-14T09:41:00-05");
+  });
+});
+
+describe("readingAgeMinutes", () => {
+  it("returns elapsed minutes", () => {
+    expect(readingAgeMinutes(reading("2026-08-14T11:45:00Z"), NOW)).toBeCloseTo(15, 5);
+  });
+
+  it("parses a naive stamp as UTC rather than local", () => {
+    expect(readingAgeMinutes(reading("2026-08-14T11:45:00"), NOW)).toBeCloseTo(15, 5);
+  });
+
+  it("returns null for an unparseable stamp rather than NaN", () => {
+    expect(readingAgeMinutes(reading("not-a-date"), NOW)).toBeNull();
+  });
+});
+
+describe("signalState", () => {
+  it("is none with no reading at all", () => {
+    expect(signalState(null, NOW)).toBe("none");
+  });
+
+  it("is live under the threshold", () => {
+    expect(signalState(reading("2026-08-14T11:55:00Z"), NOW)).toBe("live");
+  });
+
+  it("is live at exactly the threshold, so the boundary is not double-counted", () => {
+    // Matches isPodOverdue in lib/pod/overdue.ts, which is also false at
+    // exactly its threshold. One convention across the codebase.
+    expect(signalState(reading("2026-08-14T11:50:00Z"), NOW)).toBe("live");
+  });
+
+  it("is stale past the threshold", () => {
+    expect(signalState(reading("2026-08-14T11:49:00Z"), NOW)).toBe("stale");
+  });
+
+  it("is none for an unparseable stamp, because an unreadable fix is not a fix", () => {
+    expect(signalState(reading("not-a-date"), NOW)).toBe("none");
+  });
+
+  it("is stale when the reading is far enough in the future to be a broken clock", () => {
+    // 5 minutes ahead exceeds FUTURE_TOLERANCE_MINUTES. Reporting "live" here
+    // would pin a green pill to a vehicle that may not have reported in days.
+    expect(signalState(reading("2026-08-14T12:05:00Z"), NOW)).toBe("stale");
+  });
+});
+
+describe("isLive", () => {
+  it("is true only for a live reading", () => {
+    expect(isLive(reading("2026-08-14T11:55:00Z"), NOW)).toBe(true);
+    expect(isLive(reading("2026-08-14T09:00:00Z"), NOW)).toBe(false);
+    expect(isLive(null, NOW)).toBe(false);
+  });
+});
+
+describe("pingLabel", () => {
+  it("says No GPS when there is no reading", () => {
+    expect(pingLabel(null, NOW)).toBe("No GPS");
+  });
+
+  it("says just now under a minute", () => {
+    expect(pingLabel(reading("2026-08-14T11:59:30Z"), NOW)).toBe("just now");
+  });
+
+  it("counts minutes, then hours, then days", () => {
+    expect(pingLabel(reading("2026-08-14T11:45:00Z"), NOW)).toBe("15 min ago");
+    expect(pingLabel(reading("2026-08-14T09:00:00Z"), NOW)).toBe("3 h ago");
+    expect(pingLabel(reading("2026-08-12T12:00:00Z"), NOW)).toBe("2 d ago");
+  });
+
+  it("reads 1 h ago at exactly 60 minutes", () => {
+    expect(pingLabel(reading("2026-08-14T11:00:00Z"), NOW)).toBe("1 h ago");
+  });
+
+  it("reads 1 d ago at exactly 1440 minutes", () => {
+    expect(pingLabel(reading("2026-08-13T12:00:00Z"), NOW)).toBe("1 d ago");
+  });
+
+  it("says clock ahead when the reading is far enough in the future to be a broken clock", () => {
+    expect(pingLabel(reading("2026-08-14T12:05:00Z"), NOW)).toBe("clock ahead");
+  });
+});
+
+describe("speedLabel", () => {
+  const AT = "2026-08-14T11:58:00Z";
+
+  it("rounds and formats a real speed", () => {
+    expect(speedLabel(reading(AT, 80.6))).toBe("81 km/h");
+  });
+
+  it("says Stationary at exactly zero", () => {
+    expect(speedLabel(reading(AT, 0))).toBe("Stationary");
+  });
+
+  it("says Stationary at 0.4, NOT 0 km/h", () => {
+    // GPS jitter on a parked truck reports small nonzero speeds constantly, so
+    // this is the most likely reading for a stationary vehicle. 0.4 > 0 is
+    // true but Math.round(0.4) is 0, which is why the guard is on the rounded
+    // value: "0 km/h" is the one string this vocabulary exists to prevent.
+    expect(speedLabel(reading(AT, 0.4))).toBe("Stationary");
+  });
+
+  it("returns null for a negative speed, because that is garbage, not a parked truck", () => {
+    // "Stationary" is a positive claim about where a vehicle is. A negative
+    // speed is unusable data, so it takes the same treatment as NaN: report
+    // unknown rather than assert something the source did not support.
+    expect(speedLabel(reading(AT, -5))).toBeNull();
+  });
+
+  it("returns null for a small negative speed too, since the guard is on the rounded value", () => {
+    // -0.4 rounds to -0 in JavaScript, and -0 < 0 is false. Math.round(-0.6)
+    // is -1, which does trip the guard. Both must land on null rather than one
+    // of them slipping through as "Stationary".
+    expect(speedLabel(reading(AT, -0.6))).toBeNull();
+  });
+
+  it("returns null for a non-finite speed, so callers can word unknown themselves", () => {
+    // NaN > 0 is false, so the naive expression would call a moving vehicle
+    // "Stationary": a confident assertion rather than a figure to discount.
+    expect(speedLabel(reading(AT, Number.NaN))).toBeNull();
+  });
+});
+
+describe("STALE_AFTER_MINUTES", () => {
+  it("is 10", () => {
+    expect(STALE_AFTER_MINUTES).toBe(10);
+  });
+});
+```
+
+- [ ] **Step 3: Run the test to verify it fails**
+
+Run: `npx vitest run lib/tracking/position.test.ts`
+Expected: FAIL, with a module resolution error for `./position`.
+
+- [ ] **Step 4: Write the implementation**
+
+Create `lib/tracking/position.ts`:
+
+```ts
+/* THE ENTIRE TOMTOM SURFACE.
+
+   Every GPS-dependent thing on /tracking reads a PositionReading and nothing
+   else. Today the only implementation of PositionSource is the Supabase
+   adapter in ./supabasePositions.ts, which finds no rows because nothing in
+   this repo writes a position table. A TomTom adapter later implements the
+   same interface and no component changes.
+
+   Staleness is deliberately a first-class state rather than a detail. The
+   design mockup renders a pulsing green "Live GPS" pill, and showing that over
+   a three-hour-old fix is the page lying to a dispatcher. */
+
+export type PositionReading = {
+  vehicleId: string;
+  lat: number;
+  lng: number;
+  speedKph: number;
+  headingDeg: number | null;
+  /** As the source returned it, so it MAY be naive. Never pass this to new Date()
+      directly: go through readingAgeMinutes, or normalise it first. */
+  recordedAt: string;
+};
+
+export type PositionSource = {
+  getPositions(vehicleIds: string[]): Promise<Map<string, PositionReading>>;
+};
+
+export type SignalState = "none" | "stale" | "live";
+
+/** Minutes after which a reading is stale rather than live. */
+export const STALE_AFTER_MINUTES = 10;
+
+/* A fix a few seconds in the future is clock drift and still counts as live. A
+   fix hours ahead is a broken device clock, and calling that live would pin a
+   green pill to a vehicle that may not have reported in days. lib/pod/queue.ts
+   made the same call about negative POD ages for the same reason. */
+export const FUTURE_TOLERANCE_MINUTES = 2;
+
+/* telematics_positions.recorded_at is `timestamp without time zone`, so
+   Supabase returns "2026-08-14T09:41:00" with no offset and new Date() reads
+   it as LOCAL time. The rows are assumed to be stored in UTC. Nothing in this
+   repo writes this table, so that is unverified until a real feed lands. If
+   the feed turns out to write local time, fixes read one hour old in summer
+   rather than falsely live, which is the safe direction to be wrong in.
+   vehicle_locations.recorded_at IS timezone-aware and already carries an
+   offset, which this leaves untouched. */
+export function normaliseTimestamp(raw: string): string {
+  return /([Zz]|[+-]\d{2}(:?\d{2})?)$/.test(raw) ? raw : `${raw}Z`;
+}
+
+export function readingAgeMinutes(reading: PositionReading, now: Date): number | null {
+  const t = new Date(normaliseTimestamp(reading.recordedAt)).getTime();
+  if (Number.isNaN(t)) return null;
+  return (now.getTime() - t) / 60000;
+}
+
+export function signalState(reading: PositionReading | null, now: Date): SignalState {
+  if (!reading) return "none";
+  const age = readingAgeMinutes(reading, now);
+  // An unparseable stamp is not a fix. Treating it as live would put a green
+  // pulsing pill over a reading we cannot date.
+  if (age === null) return "none";
+  // A reading far enough in the future to exceed clock drift tolerance is a
+  // broken device clock, not a live fix. See FUTURE_TOLERANCE_MINUTES.
+  if (age < -FUTURE_TOLERANCE_MINUTES) return "stale";
+  return age > STALE_AFTER_MINUTES ? "stale" : "live";
+}
+
+/* A type predicate rather than a plain boolean, so a caller that has already
+   asked "is this live?" does not also have to prove the reading is non-null to
+   the narrower before using it. */
+export function isLive(reading: PositionReading | null, now: Date): reading is PositionReading {
+  return signalState(reading, now) === "live";
+}
+
+export function pingLabel(reading: PositionReading | null, now: Date): string {
+  const age = reading ? readingAgeMinutes(reading, now) : null;
+  if (age === null) return "No GPS";
+  // Beyond drift tolerance, a negative age is a broken device clock, not a
+  // fix from the near future. Say so rather than claiming "just now" forever.
+  if (age < -FUTURE_TOLERANCE_MINUTES) return "clock ahead";
+  // A small negative age is clock drift. "just now" is the least wrong thing
+  // to say about a fix from the near future.
+  if (age < 1) return "just now";
+  if (age < 60) return `${Math.floor(age)} min ago`;
+  if (age < 1440) return `${Math.floor(age / 60)} h ago`;
+  return `${Math.floor(age / 1440)} d ago`;
+}
+
+/* Speed vocabulary lives here rather than in each consumer, for the same
+   reason pingLabel does. The header tile and the live timeline node render the
+   SAME vehicle's speed from the SAME reading on the SAME screen, so two copies
+   can only ever disagree in ways a dispatcher can see at once. lib/pod/overdue.ts
+   was created for exactly this failure and its header says so.
+
+   Returns null rather than a string for an unusable speed, so each caller can
+   word "unknown" to suit its own context. Guarding on the ROUNDED value is
+   load-bearing: 0.4 km/h is greater than zero but rounds to zero, and "0 km/h"
+   on a truck is the string this vocabulary exists to avoid.
+
+   A NEGATIVE speed is not a stationary vehicle, it is garbage from the source,
+   and "Stationary" is a confident positive claim about where a truck is. It
+   joins the non-finite case in returning null, so the tile reports unknown
+   rather than asserting something it cannot know. */
+export function speedLabel(reading: PositionReading): string | null {
+  const kph = Math.round(reading.speedKph);
+  if (!Number.isFinite(kph)) return null;
+  if (kph < 0) return null;
+  return kph > 0 ? `${kph} km/h` : "Stationary";
+}
+```
+
+- [ ] **Step 5: Run the test to verify it passes**
+
+Run: `npx vitest run lib/tracking/position.test.ts`
+Expected: PASS, 28 tests.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add lib/tracking/types.ts lib/tracking/position.ts lib/tracking/position.test.ts
+git commit -m "Add tracking position primitives and staleness model
+
+Staleness is a first-class state because the mockup's pulsing Live GPS pill
+over an hours-old fix would be the page lying to a dispatcher.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 2: The Supabase position adapter
+
+**Files:**
+- Create: `lib/tracking/supabasePositions.ts`
+
+No test file. This is thin I/O with no branching worth asserting in the node environment, and Vitest has no Supabase client to run it against. Its behaviour is verified by Task 12 rendering the page.
+
+Note: `getPositions` THROWS on a query error rather than returning an empty map, which is why the `load` function in Task 12 wraps its whole body in a try/catch. That catch is load-bearing, not defensive padding.
+
+- [ ] **Step 1: Write the adapter**
+
+Create `lib/tracking/supabasePositions.ts`:
+
+```ts
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+import { normaliseTimestamp, type PositionReading, type PositionSource } from "./position";
+
+/* The only implementation of PositionSource that exists today.
+
+   It reads telematics_positions first because that table carries a heading
+   column, then falls back to vehicle_locations, which does not. Both are
+   read-only from this app's point of view: nothing in this repo writes either
+   one, so in practice this returns an empty map and the page renders its
+   no-signal state throughout. That is the expected outcome until a feed lands,
+   not a bug.
+
+   Both queries go through tenant.filterByTenant, exactly like every other
+   query on the page. Do not bypass it. */
+
+type TenantFilter = { filterByTenant: <T>(query: T) => T };
+
+/* Rows to pull before reducing to the newest per vehicle. Supabase has no
+   DISTINCT ON, so ordering by recorded_at desc and taking the first row per
+   vehicle client-side is the cheap way to do this.
+
+   KNOWN LIMITATION: this bound is fleet-wide, not per-vehicle. A vehicle
+   reporting every few seconds can consume the whole budget and starve the
+   others, and a long-parked vehicle's newest fix may fall outside it entirely
+   and render as "No GPS" rather than "1 d ago". Harmless while nothing writes
+   these tables. Before a real feed lands this needs a DISTINCT ON RPC or one
+   query per vehicle. */
+const ROWS_PER_VEHICLE = 5;
+
+/* Both source tables share these column names, so one row shape covers both
+   queries. heading is optional because vehicle_locations does not select it.
+   latitude/longitude/speed are typed to admit string because these columns
+   are Postgres numeric, which PostgREST serialises as a JSON string to
+   preserve precision that a JSON number would lose. The Number() calls below
+   are load-bearing for that reason, not defensive noise. */
+type PositionRow = {
+  vehicle_id: string | null;
+  latitude: number | string | null;
+  longitude: number | string | null;
+  speed: number | string | null;
+  heading?: number | string | null;
+  recorded_at: string | null;
+};
+
+function firstPerVehicle(rows: PositionRow[]): Map<string, PositionReading> {
+  const out = new Map<string, PositionReading>();
+  // Rows arrive newest first, so the first row seen for a vehicle is its
+  // newest and later rows for the same vehicle are skipped.
+  for (const row of rows) {
+    const id = row.vehicle_id;
+    if (!id || out.has(id)) continue;
+    const lat = Number(row.latitude);
+    const lng = Number(row.longitude);
+    // A null or unparseable coordinate is not a fix. Number(null) is 0, and
+    // setting the vehicle there would draw a confident pin off West Africa.
+    // Skipping without marking the vehicle seen lets a later, valid row for
+    // the same vehicle still be picked up instead of losing it entirely.
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    out.set(id, {
+      vehicleId: id,
+      lat,
+      lng,
+      // speed carries no documented unit and nothing writes this column yet,
+      // so kph is assumed rather than verified, the same kind of assumption
+      // position.ts makes about recorded_at being UTC. If the real feed turns
+      // out to report mph, speeds will read low, so treat this field as
+      // best-effort until a real feed lands.
+      //
+      // An absent speed is deliberately left non-finite so speedLabel reports
+      // it as unknown. Coercing it instead would render a confident
+      // "Stationary" for a vehicle the source told us nothing about, which is
+      // a positive claim we have no basis for. The explicit null check is
+      // load-bearing: Number(null) is 0, not NaN, so `Number(row.speed)` alone
+      // would still turn a NULL column into a stationary vehicle. Loose
+      // `== null` catches an undefined field in the same test.
+      speedKph: row.speed == null ? NaN : Number(row.speed),
+      headingDeg: row.heading == null ? null : Number(row.heading),
+      recordedAt: normaliseTimestamp(String(row.recorded_at)),
+    });
+  }
+  return out;
+}
+
+export function createSupabasePositionSource(
+  supabase: SupabaseClient,
+  tenant: TenantFilter,
+): PositionSource {
+  return {
+    async getPositions(vehicleIds: string[]): Promise<Map<string, PositionReading>> {
+      if (vehicleIds.length === 0) return new Map();
+      const limit = vehicleIds.length * ROWS_PER_VEHICLE;
+
+      const { data: telematics, error: telematicsError } = await tenant
+        .filterByTenant(
+          supabase
+            .from("telematics_positions")
+            .select("vehicle_id, latitude, longitude, speed, heading, recorded_at"),
+        )
+        .in("vehicle_id", vehicleIds)
+        .order("recorded_at", { ascending: false })
+        .limit(limit);
+      if (telematicsError) throw new Error(`positions: ${telematicsError.message}`);
+
+      if (telematics && telematics.length > 0) {
+        return firstPerVehicle(telematics as PositionRow[]);
+      }
+
+      /* Reaching here means telematics_positions returned zero rows for this
+         tenant's vehicles, not that it returned some. A fleet mid-migration,
+         some vehicles on telematics and some still on the legacy table, gets
+         only the telematics rows: this is an either-or fallback, not a merge,
+         so vehicles that only ever appear in vehicle_locations show no GPS
+         once even one vehicle has a telematics row. A real migration window
+         would need both tables queried and merged, preferring the newer
+         reading per vehicle. */
+      const { data: legacy, error: legacyError } = await tenant
+        .filterByTenant(
+          supabase
+            .from("vehicle_locations")
+            .select("vehicle_id, latitude, longitude, speed, recorded_at"),
+        )
+        .in("vehicle_id", vehicleIds)
+        .order("recorded_at", { ascending: false })
+        .limit(limit);
+      if (legacyError) throw new Error(`positions: ${legacyError.message}`);
+
+      return firstPerVehicle((legacy ?? []) as PositionRow[]);
+    },
+  };
+}
+```
+
+- [ ] **Step 2: Verify it typechecks**
+
+Run: `npm run typecheck`
+Expected: no errors mentioning `lib/tracking/`.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add lib/tracking/supabasePositions.ts
+git commit -m "Add Supabase position source behind the tracking seam
+
+Reads telematics_positions then falls back to vehicle_locations, both tenant
+filtered. Bounded by vehicle count, unlike the old page which fetched every
+vehicle_locations row ever recorded.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+**Known limitations**
+
+- The `ROWS_PER_VEHICLE` bound is fleet-wide, not per-vehicle, so a chatty vehicle can starve others and a long-parked vehicle's newest fix can fall outside the window entirely.
+- The `vehicle_locations` fallback only fires when `telematics_positions` returns zero rows, so a fleet mid-migration shows no GPS for any vehicle that only exists in the legacy table.
+
+---
+
+### Task 3: The on-the-road predicate
+
+**Files:**
+- Create: `lib/tracking/onTheRoad.ts`
+- Test: `lib/tracking/onTheRoad.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `lib/tracking/onTheRoad.test.ts`:
+
+```ts
+import { describe, it, expect } from "vitest";
+import { isOnTheRoad, jobPhase, buildRail, routeEndpoints } from "./onTheRoad";
+import type { TrackingJob, TrackingStop } from "./types";
+
+const NOW = new Date("2026-08-14T12:00:00Z");
+const TODAY = "2026-08-14";
+const YESTERDAY = "2026-08-13";
+const TOMORROW = "2026-08-15";
+
+function stop(over: Partial<TrackingStop> = {}): TrackingStop {
+  return {
+    id: "s1", stop_order: 1, type: "delivery", address_line: "1 Dock Rd",
+    city: "Hull", postcode: "HU3 4AB", planned_at: `${TODAY}T08:00:00Z`,
+    delivered_at: null, pod_status: "pending", recipient_name: null,
+    pod_updated_at: null, pod_photo_url: null, pod_document_url: null,
+    ...over,
+  };
+}
+
+function job(over: Partial<TrackingJob> = {}): TrackingJob {
+  return {
+    id: "j1", reference: "J-100", status: "planned", scheduled_date: TODAY,
+    created_at: `${TODAY}T06:00:00Z`, customer_name: "Acme", vehicle_id: "v1",
+    vehicle_registration: "YT19 KHR", driver_name: "A. Marsh",
+    driver_phone: "07700900000", subcontractor_id: null,
+    stops: [
+      stop({ id: "s0", stop_order: 0, type: "collection", city: "Leeds", postcode: "LS10 1AA" }),
+      stop(),
+    ],
+    ...over,
+  };
+}
+
+describe("the operator's day boundary", () => {
+  /* Constructed from explicit UTC instants rather than local-component `new
+     Date(y, m, d)`, so these say what they mean regardless of what the runner's
+     TZ happens to be. operatorDay owns the formatting and lib/time.test.ts
+     pins it; what these two assert is that isOnTheRoad asks IT and gets the
+     boundary right on both sides. */
+
+  it("keeps a job scheduled for the operator's today on the road at 23:30 London", () => {
+    // 22:30Z is 23:30 on the 14th in London during BST, still the 14th.
+    const at = new Date("2026-08-14T22:30:00Z");
+    expect(isOnTheRoad(job({ scheduled_date: "2026-08-14" }), at)).toBe(true);
+  });
+
+  it("keeps tomorrow's job off the rail at the same instant", () => {
+    const at = new Date("2026-08-14T22:30:00Z");
+    expect(isOnTheRoad(job({ scheduled_date: "2026-08-15" }), at)).toBe(false);
+  });
+});
+
+describe("isOnTheRoad", () => {
+  it("is true for an assigned, due, unfinished job", () => {
+    expect(isOnTheRoad(job(), NOW)).toBe(true);
+  });
+
+  it("is true for an overdue job, which is the case that most needs showing", () => {
+    expect(isOnTheRoad(job({ scheduled_date: YESTERDAY }), NOW)).toBe(true);
+  });
+
+  it("is false once the job is completed", () => {
+    expect(isOnTheRoad(job({ status: "completed" }), NOW)).toBe(false);
+  });
+
+  it("is false with no vehicle assigned, because there is nothing to track", () => {
+    expect(isOnTheRoad(job({ vehicle_id: null }), NOW)).toBe(false);
+  });
+
+  it("is false for a job scheduled in the future", () => {
+    expect(isOnTheRoad(job({ scheduled_date: TOMORROW }), NOW)).toBe(false);
+  });
+
+  it("is false with no scheduled_date, which cannot be shown to be due", () => {
+    expect(isOnTheRoad(job({ scheduled_date: null }), NOW)).toBe(false);
+  });
+
+  it("is false once every delivery stop is delivered", () => {
+    const j = job();
+    j.stops = j.stops.map((s) =>
+      s.type === "delivery" ? { ...s, pod_status: "delivered" } : s,
+    );
+    expect(isOnTheRoad(j, NOW)).toBe(false);
+  });
+
+  it("is false for a job with no delivery stops at all", () => {
+    // Mirrors the deliveryStops.length > 0 guard the POD completion cascade
+    // applies in app/pod/page.tsx. A job with nothing to arrive at is not on
+    // the road.
+    expect(isOnTheRoad(job({ stops: [stop({ type: "collection" })] }), NOW)).toBe(false);
+  });
+
+  it("does NOT require the collection to be marked done", () => {
+    // Nothing in the product prompts anyone to mark a collection: /pod only
+    // ever surfaces delivery stops. Requiring it would leave the rail
+    // permanently empty.
+    expect(isOnTheRoad(job(), NOW)).toBe(true);
+  });
+});
+
+describe("jobPhase", () => {
+  it("is late when scheduled before today", () => {
+    expect(jobPhase(job({ scheduled_date: YESTERDAY }), NOW)).toBe("late");
+  });
+
+  it("is due when scheduled today with nothing marked yet", () => {
+    expect(jobPhase(job(), NOW)).toBe("due");
+  });
+
+  it("is in_progress when scheduled today and the collection is already delivered", () => {
+    const j = job();
+    j.stops[0] = { ...j.stops[0], pod_status: "delivered" };
+    expect(jobPhase(j, NOW)).toBe("in_progress");
+  });
+
+  it("stays late even when the collection is already delivered, because late outranks progress", () => {
+    const j = job({ scheduled_date: YESTERDAY });
+    j.stops[0] = { ...j.stops[0], pod_status: "delivered" };
+    expect(jobPhase(j, NOW)).toBe("late");
+  });
+
+  it("is in_progress on a multi-drop job once the first delivery lands and the second has not, which is the case the phase actually exists for", () => {
+    const j = job({
+      stops: [
+        stop({ id: "s0", stop_order: 0, type: "collection", city: "Leeds" }),
+        stop({ id: "s1", stop_order: 1, type: "delivery", city: "York", pod_status: "delivered" }),
+        stop({ id: "s2", stop_order: 2, type: "delivery", city: "Hull", pod_status: "pending" }),
+      ],
+    });
+    expect(jobPhase(j, NOW)).toBe("in_progress");
+    expect(isOnTheRoad(j, NOW)).toBe(true);
+  });
+});
+
+describe("routeEndpoints", () => {
+  it("takes the collection as origin and the delivery as destination", () => {
+    expect(routeEndpoints(job().stops)).toEqual({ origin: "Leeds", destination: "Hull" });
+  });
+
+  it("uses the LAST delivery on a multi-drop job, because that is where it finishes", () => {
+    const stops = [
+      stop({ id: "s0", stop_order: 0, type: "collection", city: "Leeds" }),
+      stop({ id: "s1", stop_order: 1, city: "York" }),
+      stop({ id: "s2", stop_order: 2, city: "Hull" }),
+    ];
+    expect(routeEndpoints(stops)).toEqual({ origin: "Leeds", destination: "Hull" });
+  });
+
+  it("falls back on both ends when neither stop type is present", () => {
+    // The rail cell and the header subtitle both need something readable here,
+    // which is the whole reason this lives in one place.
+    expect(routeEndpoints([stop({ type: null })])).toEqual({ origin: "—", destination: "—" });
+  });
+});
+
+describe("buildRail", () => {
+  it("drops jobs that are not on the road", () => {
+    const rows = buildRail([job(), job({ id: "j2", status: "completed" })], NOW);
+    expect(rows.map((r) => r.jobId)).toEqual(["j1"]);
+  });
+
+  it("puts late jobs first, then oldest scheduled date, then reference", () => {
+    const rows = buildRail(
+      [
+        job({ id: "a", reference: "J-300", scheduled_date: TODAY }),
+        job({ id: "b", reference: "J-100", scheduled_date: YESTERDAY }),
+        job({ id: "c", reference: "J-200", scheduled_date: "2026-08-12" }),
+        job({ id: "d", reference: "J-050", scheduled_date: TODAY }),
+      ],
+      NOW,
+    );
+    expect(rows.map((r) => r.jobId)).toEqual(["c", "b", "d", "a"]);
+  });
+
+  it("carries the route towns", () => {
+    const [row] = buildRail([job()], NOW);
+    expect(row.originCity).toBe("Leeds");
+    expect(row.destinationCity).toBe("Hull");
+  });
+
+  it("falls back rather than rendering blanks or the word null", () => {
+    // A delivery-only job with no city still belongs in the rail. Every cell
+    // must render something a dispatcher can read.
+    const [row] = buildRail(
+      [job({ reference: null, vehicle_registration: null, driver_name: null, stops: [stop({ city: null })] })],
+      NOW,
+    );
+    expect(row.reference).toBe("—");
+    expect(row.registration).toBe("—");
+    expect(row.originCity).toBe("—");
+    expect(row.destinationCity).toBe("—");
+    expect(row.driverName).toBeNull(); // the component supplies "No driver assigned"
+  });
+
+  it("uses the LAST delivery stop as the destination on a multi-drop job", () => {
+    const j = job({
+      stops: [
+        stop({ id: "s0", stop_order: 0, type: "collection", city: "Leeds" }),
+        stop({ id: "s1", stop_order: 1, city: "York" }),
+        stop({ id: "s2", stop_order: 2, city: "Hull" }),
+      ],
+    });
+    expect(buildRail([j], NOW)[0].destinationCity).toBe("Hull");
+  });
+});
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `npx vitest run lib/tracking/onTheRoad.test.ts`
+Expected: FAIL, module resolution error for `./onTheRoad`.
+
+- [ ] **Step 3: Write the implementation**
+
+Create `lib/tracking/onTheRoad.ts`:
+
+```ts
+import { operatorDay } from "../time";
+import type { TrackingJob, TrackingStop } from "./types";
+import type { Tone } from "../../components/Badge";
+
+/* THE SINGLE DEFINITION OF "ON THE ROAD".
+
+   Nothing else in the app may redefine it, the same way lib/pod/overdue.ts
+   owns "awaiting POD". If a second page ever needs this list, it imports from
+   here rather than writing its own filter.
+
+   The mockup this page is built from filters jobs on statuses called transit,
+   loading and late. Those do not exist in this database. Real jobs.status is
+   effectively binary: "planned" on create, "completed" once every delivery
+   stop is signed off. job_stops.status is written as "planned" at insert and
+   never updated by anything. So the rail is derived, and the phase below is
+   deliberately coarser than the mockup's. Loading versus moving is a
+   distinction only a live position can make. */
+
+export type Phase = "late" | "in_progress" | "due";
+
+export type RailRow = {
+  jobId: string;
+  reference: string;
+  registration: string;
+  driverName: string | null;
+  originCity: string;
+  destinationCity: string;
+  scheduledDate: string | null;
+  phase: Phase;
+};
+
+export const PHASE_LABEL: Record<Phase, string> = {
+  late: "Late",
+  in_progress: "In progress",
+  due: "Due today",
+};
+
+/* Typed against Badge's own Tone union rather than a hand copy of it, so that
+   renaming a tone in components/Badge.tsx fails the build here instead of
+   rendering an undefined class with the suite still green. "info" is the
+   primary-tinted tone; there is no tone called "primary". */
+export const PHASE_TONE: Record<Phase, Tone> = {
+  late: "danger",
+  in_progress: "info",
+  due: "warning",
+};
+
+/* jobs.scheduled_date is a `date` column, so it arrives as "YYYY-MM-DD" with
+   no time and no zone. Comparing it against a UTC-formatted today would drop a
+   job from the rail every evening in any zone ahead of UTC, so today comes
+   from operatorDay in lib/time.ts, which is pinned to the operator's zone and
+   therefore gives the same answer on a dispatcher's laptop, on Vercel's UTC
+   runtime, and in a test. */
+export function isOnTheRoad(job: TrackingJob, now: Date): boolean {
+  if (job.status !== "planned") return false;
+  if (!job.vehicle_id) return false;
+  // A job with no date cannot be shown to be due. Treating undated jobs as due
+  // would fill the rail with work nobody scheduled.
+  if (!job.scheduled_date) return false;
+  // Lexicographic comparison is correct for "YYYY-MM-DD".
+  if (job.scheduled_date > operatorDay(now)) return false;
+
+  const deliveries = job.stops.filter((s) => s.type === "delivery");
+  if (deliveries.length === 0) return false;
+  return deliveries.some((s) => s.pod_status !== "delivered");
+}
+
+export function jobPhase(job: TrackingJob, now: Date): Phase {
+  // Late is checked first and outranks progress: a job running a day behind is
+  // still the thing a dispatcher needs to see, however many stops it has done.
+  if (job.scheduled_date && job.scheduled_date < operatorDay(now)) return "late";
+  // ANY stop counts, including a collection, deliberately. A job whose goods
+  // are collected is under way even before the first drop. Note this is a
+  // wider net than isOnTheRoad, which filters to delivery stops: that is
+  // intentional, not an oversight.
+  const anyDone = job.stops.some((s) => s.pod_status === "delivered");
+  return anyDone ? "in_progress" : "due";
+}
+
+/* Origin and destination for a job's route. Exported because the rail row and
+   the header card both render it, on the same screen at the same time, so two
+   copies could only ever disagree visibly. lib/pod/overdue.ts documents the
+   same reasoning for "awaiting POD". */
+export function routeEndpoints(stops: TrackingStop[]): { origin: string; destination: string } {
+  const ordered = [...stops].sort((a, b) => a.stop_order - b.stop_order);
+  const collection = ordered.find((s) => s.type === "collection");
+  // The LAST delivery, not the first: on a multi-drop job the destination is
+  // where it finishes.
+  const delivery = [...ordered].reverse().find((s) => s.type === "delivery");
+
+  return {
+    origin: collection?.city ?? "—",
+    destination: delivery?.city ?? "—",
+  };
+}
+
+function toRailRow(job: TrackingJob, now: Date): RailRow {
+  const { origin, destination } = routeEndpoints(job.stops);
+
+  return {
+    jobId: job.id,
+    reference: job.reference ?? "—",
+    registration: job.vehicle_registration ?? "—",
+    driverName: job.driver_name,
+    originCity: origin,
+    destinationCity: destination,
+    scheduledDate: job.scheduled_date,
+    phase: jobPhase(job, now),
+  };
+}
+
+export function buildRail(jobs: TrackingJob[], now: Date): RailRow[] {
+  const rows = jobs.filter((j) => isOnTheRoad(j, now)).map((j) => toRailRow(j, now));
+
+  /* Late first, then oldest scheduled date, then reference, then jobId. The
+     rail can reshuffle on every 30 second poll otherwise, which moves the row
+     under the dispatcher's cursor. */
+  rows.sort((a, b) => {
+    const lateDiff = Number(b.phase === "late") - Number(a.phase === "late");
+    if (lateDiff !== 0) return lateDiff;
+    // isOnTheRoad already guarantees a non-null scheduled_date for every job
+    // that reaches this sort, so no fallback is needed here. `<`/`>` mirror
+    // the comparison isOnTheRoad itself uses on the same "YYYY-MM-DD" shape.
+    if (a.scheduledDate! < b.scheduledDate!) return -1;
+    if (a.scheduledDate! > b.scheduledDate!) return 1;
+    const refDiff = a.reference.localeCompare(b.reference);
+    if (refDiff !== 0) return refDiff;
+    // reference is free text with no unique constraint, so two jobs can tie on
+    // it. jobId is the primary key, which makes the ordering total and stops
+    // the rail reshuffling under the cursor between polls.
+    return a.jobId.localeCompare(b.jobId);
+  });
+
+  return rows;
+}
+```
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `npx vitest run lib/tracking/onTheRoad.test.ts`
+Expected: PASS, 24 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add lib/tracking/onTheRoad.ts lib/tracking/onTheRoad.test.ts
+git commit -m "Add the on-the-road predicate and phase derivation
+
+The mockup's transit/loading/late statuses do not exist in this database, so
+the rail is derived from status, vehicle assignment, scheduled_date and stop
+progress. Deliberately does not require a marked collection, since nothing in
+the product prompts one and requiring it would leave the rail empty.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 4: The journey timeline model
+
+**Files:**
+- Create: `lib/tracking/journey.ts`
+- Test: `lib/tracking/journey.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `lib/tracking/journey.test.ts`:
+
+```ts
+import { describe, it, expect } from "vitest";
+import { buildJourney, routeGlyph, arrowStateFor, type JourneyNode } from "./journey";
+import type { PositionReading } from "./position";
+import type { TrackingStop } from "./types";
+
+const NOW = new Date("2026-08-14T12:00:00Z");
+
+function stop(over: Partial<TrackingStop> = {}): TrackingStop {
+  return {
+    id: "s1", stop_order: 1, type: "delivery", address_line: "1 Dock Rd",
+    city: "Hull", postcode: "HU3 4AB", planned_at: "2026-08-14T08:00:00Z",
+    delivered_at: null, pod_status: "pending", recipient_name: null,
+    pod_updated_at: null, pod_photo_url: null, pod_document_url: null,
+    ...over,
+  };
+}
+
+const pair = () => [
+  stop({ id: "s0", stop_order: 0, type: "collection", city: "Leeds", postcode: "LS10 1AA" }),
+  stop(),
+];
+
+function stops(nodes: JourneyNode[]) {
+  return nodes.filter((n) => n.kind === "stop");
+}
+
+describe("buildJourney", () => {
+  it("marks delivered stops done and the first undelivered one current", () => {
+    const s = pair();
+    s[0] = { ...s[0], pod_status: "delivered" };
+    const n = stops(buildJourney(s, null, NOW));
+    expect(n.map((x) => x.state)).toEqual(["done", "current"]);
+  });
+
+  it("marks later stops upcoming, not current", () => {
+    const n = stops(buildJourney(
+      [stop({ id: "a", stop_order: 0 }), stop({ id: "b", stop_order: 1 }), stop({ id: "c", stop_order: 2 })],
+      null, NOW,
+    ));
+    expect(n.map((x) => x.state)).toEqual(["current", "upcoming", "upcoming"]);
+  });
+
+  it("orders by stop_order regardless of array order", () => {
+    const n = stops(buildJourney([stop({ id: "b", stop_order: 2 }), stop({ id: "a", stop_order: 1 })], null, NOW));
+    expect(n.map((x) => x.id)).toEqual(["a", "b"]);
+  });
+
+  it("has no current node when every stop is done", () => {
+    const s = pair().map((x) => ({ ...x, pod_status: "delivered" }));
+    const n = stops(buildJourney(s, null, NOW));
+    expect(n.every((x) => x.state === "done")).toBe(true);
+  });
+
+  it("handles a single-stop job", () => {
+    const n = stops(buildJourney([stop()], null, NOW));
+    expect(n).toHaveLength(1);
+    expect(n[0].isLast).toBe(true);
+    expect(n[0].caption).toBe("Destination");
+  });
+
+  it("captions a done collection and a done delivery differently", () => {
+    const s = pair().map((x) => ({ ...x, pod_status: "delivered", delivered_at: "2026-08-14T09:12:00Z" }));
+    const n = stops(buildJourney(s, null, NOW));
+    expect(n[0].caption).toBe("Collected");
+    expect(n[1].caption).toBe("Delivered");
+  });
+
+  it("captions an intermediate undelivered stop as a waypoint", () => {
+    const n = stops(buildJourney(
+      [stop({ id: "a", stop_order: 0 }), stop({ id: "b", stop_order: 1 }), stop({ id: "c", stop_order: 2 })],
+      null, NOW,
+    ));
+    expect(n.map((x) => x.caption)).toEqual(["Next stop", "Waypoint", "Destination"]);
+  });
+
+  it("shows delivered_at as a date and time", () => {
+    const n = stops(buildJourney([stop({ delivered_at: "2026-08-12T14:32:00Z" })], null, NOW));
+    expect(n[0].when).toBe("12 Aug 15:32"); // Europe/London, BST in August
+  });
+
+  it("shows planned_at as a DATE ONLY, because the 08:00 stamp is derived", () => {
+    // app/jobs/page.tsx writes planned_at as `${scheduled_date}T08:00:00`.
+    // Rendering a time from it would present a fabricated 8am as a real slot.
+    const n = stops(buildJourney([stop({ planned_at: "2026-08-16T08:00:00Z" })], null, NOW));
+    expect(n[0].when).toBe("16 Aug");
+  });
+
+  it("falls back rather than rendering a blank when both stamps are null", () => {
+    const n = stops(buildJourney([stop({ planned_at: null })], null, NOW));
+    expect(n[0].when).toBe("—");
+  });
+
+  it("labels a stop by city and postcode, falling back when both are null", () => {
+    expect(stops(buildJourney([stop()], null, NOW))[0].label).toBe("Hull HU3 4AB");
+    expect(stops(buildJourney([stop({ city: null, postcode: null })], null, NOW))[0].label)
+      .toBe("Unnamed stop");
+  });
+
+  it("inserts no live node when there is no reading", () => {
+    expect(buildJourney(pair(), null, NOW).some((n) => n.kind === "live")).toBe(false);
+  });
+
+  it("inserts no live node for a stale reading, because an old fix is not a position", () => {
+    const stale: PositionReading = {
+      vehicleId: "v1", lat: 53.8, lng: -1.5, speedKph: 80,
+      headingDeg: null, recordedAt: "2026-08-14T09:00:00Z",
+    };
+    expect(buildJourney(pair(), stale, NOW).some((n) => n.kind === "live")).toBe(false);
+  });
+
+  it("inserts a live node immediately before the current stop when the fix is live", () => {
+    const live: PositionReading = {
+      vehicleId: "v1", lat: 53.8, lng: -1.5, speedKph: 81,
+      headingDeg: null, recordedAt: "2026-08-14T11:58:00Z",
+    };
+    const s = pair();
+    s[0] = { ...s[0], pod_status: "delivered" };
+    const n = buildJourney(s, live, NOW);
+    expect(n.map((x) => x.kind)).toEqual(["stop", "live", "stop"]);
+    const liveNode = n[1] as Extract<JourneyNode, { kind: "live" }>;
+    expect(liveNode.speedLabel).toBe("81 km/h");
+    expect(liveNode.pingLabel).toBe("updated 2 min ago");
+  });
+
+  it("says Stationary rather than 0 km/h for a live fix that is not moving", () => {
+    const live: PositionReading = {
+      vehicleId: "v1", lat: 53.8, lng: -1.5, speedKph: 0,
+      headingDeg: null, recordedAt: "2026-08-14T11:58:00Z",
+    };
+    const n = buildJourney([stop()], live, NOW);
+    expect((n[0] as Extract<JourneyNode, { kind: "live" }>).speedLabel).toBe("Stationary");
+  });
+
+  it("says Speed unknown rather than Stationary when the speed is not a number", () => {
+    // NaN > 0 is false, so the old expression labelled this "Stationary",
+    // which reads as a confident assertion about a truck that may be moving.
+    const live: PositionReading = {
+      vehicleId: "v1", lat: 53.8, lng: -1.5, speedKph: Number.NaN,
+      headingDeg: null, recordedAt: "2026-08-14T11:58:00Z",
+    };
+    const n = buildJourney([stop()], live, NOW);
+    expect((n[0] as Extract<JourneyNode, { kind: "live" }>).speedLabel).toBe("Speed unknown");
+  });
+});
+
+describe("arrowStateFor", () => {
+  it("is delivered when every stop is done", () => {
+    const n = buildJourney(pair().map((x) => ({ ...x, pod_status: "delivered" })), null, NOW);
+    expect(arrowStateFor(n, false)).toBe("delivered");
+  });
+
+  it("is overdue for a late job with work outstanding", () => {
+    expect(arrowStateFor(buildJourney(pair(), null, NOW), true)).toBe("overdue");
+  });
+
+  it("is pending otherwise", () => {
+    expect(arrowStateFor(buildJourney(pair(), null, NOW), false)).toBe("pending");
+  });
+
+  it("is not delivered for an empty journey, which has nothing to have delivered", () => {
+    expect(arrowStateFor([], false)).toBe("pending");
+  });
+});
+
+describe("routeGlyph", () => {
+  it("drops the live node, since RouteProgress renders stops only", () => {
+    const live: PositionReading = {
+      vehicleId: "v1", lat: 53.8, lng: -1.5, speedKph: 81,
+      headingDeg: null, recordedAt: "2026-08-14T11:58:00Z",
+    };
+    const { nodes } = routeGlyph(buildJourney(pair(), live, NOW), "pending");
+    expect(nodes.map((n) => n.id)).toEqual(["s0", "s1"]);
+  });
+});
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `npx vitest run lib/tracking/journey.test.ts`
+Expected: FAIL, module resolution error for `./journey`.
+
+- [ ] **Step 3: Write the implementation**
+
+Create `lib/tracking/journey.ts`:
+
+```ts
+import { isLive, pingLabel, speedLabel, type PositionReading } from "./position";
+import type { TrackingStop } from "./types";
+import { OPERATOR_TIME_ZONE } from "../time";
+// Type-only import. RouteProgress is shared, its node shape is shared, and
+// nothing at runtime crosses from tracking into pod.
+import type { ArrowState, RouteNode } from "../pod/routeNodes";
+
+export type JourneyStopState = "done" | "current" | "upcoming";
+
+export type JourneyNode =
+  | {
+      kind: "stop";
+      id: string;
+      state: JourneyStopState;
+      /** "Hull HU3 4AB" */
+      label: string;
+      addressLine: string | null;
+      caption: string;
+      when: string;
+      isLast: boolean;
+    }
+  | {
+      kind: "live";
+      id: "live";
+      speedLabel: string;
+      pingLabel: string;
+    };
+
+/* Formatting is pinned to the operator's timezone rather than the runtime
+   default. The fleet is UK-based (£ and en-GB throughout this codebase), and
+   pinning it also makes these functions deterministic under Vitest, which would
+   otherwise format against whatever TZ the machine happens to have. The zone
+   itself comes from lib/time.ts so the stop dates here and "Delivered today" on
+   /pod can never resolve to different calendars. */
+const DATE_FMT = new Intl.DateTimeFormat("en-GB", {
+  timeZone: OPERATOR_TIME_ZONE, day: "numeric", month: "short",
+});
+const TIME_FMT = new Intl.DateTimeFormat("en-GB", {
+  timeZone: OPERATOR_TIME_ZONE, hour: "2-digit", minute: "2-digit", hour12: false,
+});
+
+function formatWhen(stop: TrackingStop): string {
+  /* delivered_at is a real event stamp, so it earns a time. planned_at is NOT:
+     app/jobs/page.tsx writes it as `${scheduled_date}T08:00:00`, so showing a
+     time from it would present a fabricated 8am as a booked slot. Date only.
+     See lib/pod/overdue.ts, which documents the same column. */
+  if (stop.delivered_at) {
+    const d = new Date(stop.delivered_at);
+    if (!Number.isNaN(d.getTime())) return `${DATE_FMT.format(d)} ${TIME_FMT.format(d)}`;
+  }
+  if (stop.planned_at) {
+    const d = new Date(stop.planned_at);
+    if (!Number.isNaN(d.getTime())) return DATE_FMT.format(d);
+  }
+  return "—";
+}
+
+function captionFor(stop: TrackingStop, state: JourneyStopState, isLast: boolean): string {
+  if (state === "done") return stop.type === "collection" ? "Collected" : "Delivered";
+  if (isLast) return "Destination";
+  if (state === "current") return "Next stop";
+  return "Waypoint";
+}
+
+export function buildJourney(
+  stops: TrackingStop[],
+  reading: PositionReading | null,
+  now: Date,
+): JourneyNode[] {
+  const ordered = [...stops].sort((a, b) => a.stop_order - b.stop_order);
+  const currentIndex = ordered.findIndex((s) => s.pod_status !== "delivered");
+  const showLive = isLive(reading, now);
+
+  const nodes: JourneyNode[] = [];
+
+  ordered.forEach((stop, i) => {
+    const isLast = i === ordered.length - 1;
+    const state: JourneyStopState =
+      stop.pod_status === "delivered" ? "done" : i === currentIndex ? "current" : "upcoming";
+
+    /* The live marker goes immediately BEFORE the stop being travelled to,
+       which is how the mockup reads: the truck is short of the stop it is
+       heading for. On a job where the first stop is still the current one there
+       is no completed stop behind it, so the marker simply leads the timeline.
+       A stale or absent fix inserts nothing at all rather than a marker nobody
+       can date. */
+    if (state === "current" && showLive) {
+      nodes.push({
+        kind: "live",
+        id: "live",
+        // A speed we cannot render is reported as unknown rather than as
+        // "Stationary", which would be a confident claim about a moving truck.
+        speedLabel: speedLabel(reading) ?? "Speed unknown",
+        pingLabel: `updated ${pingLabel(reading, now)}`,
+      });
+    }
+
+    nodes.push({
+      kind: "stop",
+      id: stop.id,
+      state,
+      label: [stop.city, stop.postcode].filter(Boolean).join(" ") || "Unnamed stop",
+      addressLine: stop.address_line,
+      caption: captionFor(stop, state, isLast),
+      when: formatWhen(stop),
+      isLast,
+    });
+  });
+
+  return nodes;
+}
+
+export function arrowStateFor(journey: JourneyNode[], isLate: boolean): ArrowState {
+  const stopNodes = journey.filter((n) => n.kind === "stop");
+  if (stopNodes.length > 0 && stopNodes.every((n) => n.state === "done")) {
+    return "delivered";
+  }
+  return isLate ? "overdue" : "pending";
+}
+
+/** Adapts the journey to the node shape components/RouteProgress.tsx expects. */
+export function routeGlyph(
+  journey: JourneyNode[],
+  arrowState: ArrowState,
+): { nodes: RouteNode[]; arrowState: ArrowState } {
+  const nodes: RouteNode[] = journey
+    .filter((n) => n.kind === "stop")
+    .map((n) => ({ id: n.id, state: n.state }));
+  return { nodes, arrowState };
+}
+```
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `npx vitest run lib/tracking/journey.test.ts`
+Expected: PASS, 21 tests.
+
+If the two date assertions fail by exactly one hour, the `timeZone` option was dropped from a formatter. Do not "fix" the expectation, fix the formatter.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add lib/tracking/journey.ts lib/tracking/journey.test.ts
+git commit -m "Add the tracking journey timeline model
+
+Renders planned_at as a date and never a time, because that column is a
+derived 08:00 stamp rather than a booked slot. A live position node is
+inserted only for a fix under the staleness threshold.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 4a: The shared operator timezone, and the operator's calendar day
+
+**Files:**
+- Create: `lib/time.ts`
+- Create: `lib/time.test.ts`
+- Edit: `lib/pod/kpis.ts`
+- Edit: `lib/tracking/onTheRoad.ts`
+
+`lib/pod/kpis.ts` declared `OPERATOR_TIME_ZONE` and its comment promised that it was "the single place that has to change". Task 4 above formats stop dates against the same operator calendar, which would make that promise false the moment a second literal appeared. Hoisting the constant to `lib/` keeps it true. The flat filename matches the existing `lib/cn.ts` and `lib/roles.ts` convention.
+
+**The same argument applies one level up, to the DAY and not just the zone.** `lib/pod/kpis.ts` had a private `operatorDateKey` and `lib/tracking/onTheRoad.ts` had a private `localDay`, two implementations of "the operator's calendar day" that disagreed: `localDay` read the machine's zone, so a dispatcher on a UTC laptop between midnight and 01:00 London time in summer computed yesterday, and every job scheduled for the real today vanished from the rail for that hour while the Activity card beside it stamped its events with the correct day. So `lib/time.ts` exports `operatorDay` too, and both modules call it.
+
+`operatorDay` gets its own `lib/time.test.ts`, which is the one test in the suite that `vitest.config.ts` cannot render pointless. That config pins `TZ=Europe/London`, so a runtime-local implementation and an `OPERATOR_TIME_ZONE` one agree on every ordinary instant and no test elsewhere can tell them apart. `lib/time.test.ts` uses instants that fall on different calendar days in UTC and in London, so only the formatter passes them.
+
+- [ ] **Step 1: Create `lib/time.ts`**
+
+```ts
+/* The operator's timezone, not the server's.
+
+   lib/pod/kpis.ts used to compare getFullYear/getMonth/getDate, which resolve
+   in whatever timezone the runtime happens to be set to. Vercel and most
+   containers run as UTC, so a delivery at 23:30 UTC on the 12th counts as the
+   13th to a UK dispatcher but as the 12th to the server, and "Delivered today"
+   quietly undercounts every late-evening drop. The bug is invisible on a
+   developer machine set to UK time, which is exactly why it needs pinning.
+
+   It lives in lib/ rather than beside its first caller because it now has more
+   than one: lib/tracking/journey.ts formats stop dates and times against the
+   same operator calendar, and a second copy of the string is a second thing to
+   miss on the day this becomes per-tenant.
+
+   Hardcoded rather than per-tenant even though the field exists:
+   company_profiles.timezone is in the schema and app/settings/company/page.tsx
+   both reads and writes it, defaulting to "Europe/London". Nothing in the
+   console reads that field yet, so this constant remains the operator-wide
+   default until it is plumbed through. When it is, this is the single place
+   that has to change. */
+export const OPERATOR_TIME_ZONE = "Europe/London";
+
+/* THE ONE DEFINITION OF THE OPERATOR'S CALENDAR DAY.
+
+   en-CA formats as YYYY-MM-DD, which compares correctly as a plain string.
+
+   A runtime's own local day is NOT this. getFullYear/getMonth/getDate resolve
+   in whatever zone the machine happens to be set to, so a dispatcher on a UTC
+   laptop between midnight and 01:00 London time in summer computes yesterday,
+   and every job scheduled for the real today drops out of the rail for that
+   hour while the card beside it stamps its events with the correct day. Two
+   private copies of this used to exist, in lib/pod/kpis.ts and
+   lib/tracking/onTheRoad.ts, and they disagreed on exactly that hour. Anything
+   asking "what day is it for the operator?" calls this. */
+export function operatorDay(now: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: OPERATOR_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+```
+
+- [ ] **Step 2: Create `lib/time.test.ts`**
+
+```ts
+import { describe, it, expect } from "vitest";
+import { OPERATOR_TIME_ZONE, operatorDay } from "./time";
+
+/* THE TEST vitest.config.ts CANNOT MAKE POINTLESS.
+
+   That config pins TZ=Europe/London so timezone-sensitive tests discriminate
+   on every machine. The side effect is that a runtime-local implementation and
+   an OPERATOR_TIME_ZONE one agree on every ordinary instant, so no test in
+   lib/tracking/ can prove which of the two is actually doing the work.
+
+   The instants below are chosen to fall on DIFFERENT calendar days in UTC and
+   in London. A getFullYear/getMonth/getDate implementation would pass them
+   under the pinned TZ and fail on a UTC laptop or on Vercel, which is exactly
+   the bug operatorDay exists to end. */
+
+describe("operatorDay", () => {
+  it("returns the LONDON day for an instant that is the previous day in UTC", () => {
+    // 23:30 on the 14th UTC is 00:30 on the 15th in London during BST.
+    expect(operatorDay(new Date("2026-08-14T23:30:00Z"))).toBe("2026-08-15");
+  });
+
+  it("returns the LONDON day for an instant just before that boundary", () => {
+    // 22:30Z the same evening is still 23:30 on the 14th in London, so the two
+    // cases together pin the boundary rather than one side of it.
+    expect(operatorDay(new Date("2026-08-14T22:30:00Z"))).toBe("2026-08-14");
+  });
+
+  it("agrees with UTC in winter, when London carries no offset", () => {
+    // GMT, so 23:30Z is 23:30 local and the day does not roll. A formatter that
+    // hardcoded +1 rather than reading the zone would fail here.
+    expect(operatorDay(new Date("2026-01-14T23:30:00Z"))).toBe("2026-01-14");
+  });
+
+  it("zero-pads to YYYY-MM-DD, which is what makes plain string comparison correct", () => {
+    // jobs.scheduled_date arrives as "YYYY-MM-DD" and is compared with < and >
+    // against this. "2026-1-5" would compare wrongly against "2026-01-05".
+    expect(operatorDay(new Date("2026-01-05T09:00:00Z"))).toBe("2026-01-05");
+  });
+});
+
+describe("OPERATOR_TIME_ZONE", () => {
+  it("is Europe/London until company_profiles.timezone is plumbed through", () => {
+    expect(OPERATOR_TIME_ZONE).toBe("Europe/London");
+  });
+});
+```
+
+- [ ] **Step 3: Point `lib/pod/kpis.ts` at it**
+
+Delete the `operatorDateKey` function and its comment from `lib/pod/kpis.ts`, swap the import, and have `isSameOperatorDay` call `operatorDay`:
+
+```ts
+import { operatorDay } from "../time";
+```
+
+Nothing outside `kpis.ts` imported `OPERATOR_TIME_ZONE` from there and `operatorDateKey` was never exported, so no re-export is needed. Confirm with `grep -rn "OPERATOR_TIME_ZONE\|operatorDateKey"` before deleting; if a consumer has appeared since, re-export from `kpis.ts` rather than breaking that importer.
+
+- [ ] **Step 4: Point `lib/tracking/onTheRoad.ts` at it**
+
+Delete `localDay` entirely, including its "safe only because the page is client-side" caveat, which no longer applies once the zone is pinned. `isOnTheRoad` and `jobPhase` call `operatorDay` instead, and `app/tracking/page.tsx` imports `operatorDay` from `lib/time` for its `scheduled_date` filter. See Task 3 for the resulting file.
+
+Note the ordering: Task 3 as written already imports `operatorDay`, so `lib/time.ts` has to exist before Task 3's suite will run. Do Step 1 of this task first if working strictly in order.
+
+- [ ] **Step 5: Verify**
+
+Run: `npx vitest run lib/time.test.ts lib/pod/kpis.test.ts lib/tracking/journey.test.ts lib/tracking/onTheRoad.test.ts`
+Expected: PASS, 5, 12, 21 and 24 tests. All four suites exercise `lib/time.ts`, so an unresolved import or a changed zone fails here rather than in production.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add lib/time.ts lib/time.test.ts lib/pod/kpis.ts lib/tracking/onTheRoad.ts
+git commit -m "Hoist the operator timezone and calendar day to lib/time.ts
+
+lib/pod/kpis.ts promised this constant was the single place that has to
+change when tenants get a timezone. A second consumer would have made that
+false, so the constant moved rather than the promise. The DAY moved with it:
+two private implementations disagreed for the hour after midnight London
+time on a UTC machine.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 5: The telemetry tiles
+
+**Files:**
+- Create: `lib/tracking/telemetry.ts`
+- Test: `lib/tracking/telemetry.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `lib/tracking/telemetry.test.ts`:
+
+```ts
+import { describe, it, expect } from "vitest";
+import { telemetryTiles, ROUTING_HINT } from "./telemetry";
+import type { PositionReading } from "./position";
+
+const NOW = new Date("2026-08-14T12:00:00Z");
+
+function reading(recordedAt: string, speedKph = 81): PositionReading {
+  return { vehicleId: "v1", lat: 53.8, lng: -1.5, speedKph, headingDeg: null, recordedAt };
+}
+
+describe("telemetryTiles", () => {
+  it("always returns the mockup's four slots in order", () => {
+    expect(telemetryTiles(null, NOW).map((t) => t.label))
+      .toEqual(["Speed", "Distance to go", "Last ping", "ETA"]);
+  });
+
+  it("shows No signal for speed and ping when there is no reading", () => {
+    const [speed, , ping] = telemetryTiles(null, NOW);
+    expect(speed.value).toBe("No signal");
+    expect(speed.muted).toBe(true);
+    expect(ping.value).toBe("No signal");
+  });
+
+  it("never shows a zero speed for a missing fix", () => {
+    // A "0 km/h" on a truck that is actually moving is worse than a blank.
+    expect(telemetryTiles(null, NOW)[0].value).not.toContain("0");
+  });
+
+  it("populates speed and ping from a live reading", () => {
+    const [speed, , ping] = telemetryTiles(reading("2026-08-14T11:58:00Z"), NOW);
+    expect(speed.value).toBe("81 km/h");
+    expect(speed.muted).toBe(false);
+    expect(ping.value).toBe("2 min ago");
+    expect(ping.muted).toBe(false);
+  });
+
+  it("says Stationary rather than 0 km/h for a live but halted vehicle", () => {
+    expect(telemetryTiles(reading("2026-08-14T11:58:00Z", 0), NOW)[0].value).toBe("Stationary");
+  });
+
+  it("says Stationary rather than 0 km/h for GPS jitter on a parked truck", () => {
+    // 0.4 > 0 is true but rounds to 0. This is the likeliest reading a real
+    // parked vehicle sends, so it is the likeliest way "0 km/h" would ship.
+    expect(telemetryTiles(reading("2026-08-14T11:58:00Z", 0.4), NOW)[0].value).toBe("Stationary");
+  });
+
+  it("does not mute a Stationary tile, because a genuine zero is a real reading", () => {
+    // Muted ink means absent or untrustworthy. A vehicle we can see is stopped
+    // is neither.
+    expect(telemetryTiles(reading("2026-08-14T11:58:00Z", 0), NOW)[0].muted).toBe(false);
+  });
+
+  it("shows No signal, muted, for a live fix whose speed is not a number", () => {
+    // NaN > 0 is false, so the old expression rendered "Stationary" here: a
+    // confident claim that a possibly-moving truck is parked.
+    const [speed] = telemetryTiles(reading("2026-08-14T11:58:00Z", Number.NaN), NOW);
+    expect(speed.value).toBe("No signal");
+    expect(speed.muted).toBe(true);
+  });
+
+  it("suppresses speed for a stale reading but still reports the ping", () => {
+    // An old speed is meaningless. When it was last seen is not.
+    const [speed, , ping] = telemetryTiles(reading("2026-08-14T09:00:00Z"), NOW);
+    expect(speed.value).toBe("No signal");
+    expect(ping.value).toBe("3 h ago");
+    expect(ping.muted).toBe(true);
+  });
+
+  it("leaves distance and ETA blank in every case, with a hint saying why", () => {
+    for (const r of [null, reading("2026-08-14T11:58:00Z"), reading("2026-08-14T09:00:00Z")]) {
+      const [, distance, , eta] = telemetryTiles(r, NOW);
+      expect(distance.value).toBe("—");
+      expect(eta.value).toBe("—");
+      expect(distance.hint).toBe(ROUTING_HINT);
+      expect(eta.hint).toBe(ROUTING_HINT);
+    }
+  });
+});
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `npx vitest run lib/tracking/telemetry.test.ts`
+Expected: FAIL, module resolution error for `./telemetry`.
+
+- [ ] **Step 3: Write the implementation**
+
+Create `lib/tracking/telemetry.ts`:
+
+```ts
+import { pingLabel, signalState, speedLabel, type PositionReading } from "./position";
+
+export type Tile = {
+  label: string;
+  value: string;
+  /** Render in the muted ink colour: this value is absent or not trustworthy. */
+  muted: boolean;
+  /** Explains an absent value. Rendered once, visually hidden, for screen readers. */
+  hint?: string;
+};
+
+export const ROUTING_HINT = "Available once telematics routing is connected";
+
+const NO_SIGNAL = "No signal";
+
+/* The mockup's four header slots. Two of them cannot be filled today and say
+   so rather than guessing:
+
+   Distance to go and ETA both need road routing. A straight-line haversine
+   from the last fix to a destination postcode is not a road distance, and it
+   would be wrong by a different amount on every job, which is the worst kind
+   of wrong: plausible. They stay blank until TomTom Routing exists. */
+export function telemetryTiles(reading: PositionReading | null, now: Date): Tile[] {
+  const state = signalState(reading, now);
+
+  /* speedLabel returns null when the source gave a speed that cannot be
+     rendered, which from this tile's point of view is the same situation as
+     having no fix at all: it takes the NO_SIGNAL treatment. A "Stationary"
+     that came back non-null is a real reading, so it is NOT muted. */
+  const speedValue = state === "live" && reading ? speedLabel(reading) : null;
+  const speed: Tile = speedValue
+    ? { label: "Speed", value: speedValue, muted: false }
+    : { label: "Speed", value: NO_SIGNAL, muted: true };
+
+  const ping: Tile =
+    state === "none"
+      ? { label: "Last ping", value: NO_SIGNAL, muted: true }
+      : { label: "Last ping", value: pingLabel(reading, now), muted: state === "stale" };
+
+  return [
+    speed,
+    { label: "Distance to go", value: "—", muted: true, hint: ROUTING_HINT },
+    ping,
+    { label: "ETA", value: "—", muted: true, hint: ROUTING_HINT },
+  ];
+}
+```
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `npx vitest run lib/tracking/telemetry.test.ts`
+Expected: PASS, 10 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add lib/tracking/telemetry.ts lib/tracking/telemetry.test.ts
+git commit -m "Add tracking telemetry tiles with honest absent states
+
+Speed reads No signal rather than 0 km/h when there is no fix, and is
+suppressed entirely for a stale one. Distance and ETA stay blank with a hint,
+because a haversine to a postcode is not a road distance.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 6: The synthesised activity feed
+
+**Files:**
+- Create: `lib/tracking/activity.ts`
+- Test: `lib/tracking/activity.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `lib/tracking/activity.test.ts`:
+
+```ts
+import { describe, it, expect } from "vitest";
+import { buildActivity } from "./activity";
+import type { TrackingJob, TrackingStop } from "./types";
+
+function stop(over: Partial<TrackingStop> = {}): TrackingStop {
+  return {
+    id: "s1", stop_order: 1, type: "delivery", address_line: "1 Dock Rd",
+    city: "Hull", postcode: "HU3 4AB", planned_at: "2026-08-14T08:00:00Z",
+    delivered_at: null, pod_status: "pending", recipient_name: null,
+    pod_updated_at: null, pod_photo_url: null, pod_document_url: null,
+    ...over,
+  };
+}
+
+function job(over: Partial<TrackingJob> = {}): TrackingJob {
+  return {
+    id: "j1", reference: "J-100", status: "planned", scheduled_date: "2026-08-14",
+    created_at: "2026-08-14T06:00:00Z", customer_name: "Acme", vehicle_id: "v1",
+    vehicle_registration: "YT19 KHR", driver_name: "A. Marsh",
+    driver_phone: "07700900000", subcontractor_id: null, stops: [stop()],
+    ...over,
+  };
+}
+
+describe("buildActivity", () => {
+  it("always includes the job creation event", () => {
+    const events = buildActivity(job());
+    expect(events).toHaveLength(1);
+    expect(events[0].text).toBe("Job J-100 created");
+  });
+
+  it("returns an empty list rather than a bogus event when created_at is null", () => {
+    expect(buildActivity(job({ created_at: null }))).toEqual([]);
+  });
+
+  it("reports a delivered delivery stop with its recipient", () => {
+    const events = buildActivity(job({
+      stops: [stop({ pod_status: "delivered", delivered_at: "2026-08-14T11:00:00Z", recipient_name: "R. Bell" })],
+    }));
+    expect(events[0].text).toBe("Delivered to Hull, signed by R. Bell");
+  });
+
+  it("reports a delivered stop without a recipient, rather than saying signed by null", () => {
+    const events = buildActivity(job({
+      stops: [stop({ pod_status: "delivered", delivered_at: "2026-08-14T11:00:00Z" })],
+    }));
+    expect(events[0].text).toBe("Delivered to Hull");
+  });
+
+  it("words a collection differently from a delivery", () => {
+    const events = buildActivity(job({
+      stops: [stop({ type: "collection", city: "Leeds", pod_status: "delivered", delivered_at: "2026-08-14T09:12:00Z" })],
+    }));
+    expect(events[0].text).toBe("Collected at Leeds");
+  });
+
+  it("reports POD evidence attached, using pod_updated_at", () => {
+    const events = buildActivity(job({
+      stops: [stop({ pod_updated_at: "2026-08-14T11:05:00Z", pod_photo_url: "https://x/y.jpg" })],
+    }));
+    expect(events[0].text).toBe("POD evidence attached at Hull");
+  });
+
+  it("does not report evidence when pod_updated_at exists but no file is attached", () => {
+    const events = buildActivity(job({ stops: [stop({ pod_updated_at: "2026-08-14T11:05:00Z" })] }));
+    expect(events.map((e) => e.text)).toEqual(["Job J-100 created"]);
+  });
+
+  it("falls back to delivered_at for the evidence stamp when pod_updated_at is null, since /jobs never writes it", () => {
+    const events = buildActivity(job({
+      stops: [stop({ delivered_at: "2026-08-14T11:00:00Z", pod_photo_url: "https://x/y.jpg" })],
+    }));
+    expect(events.map((e) => e.text)).toEqual([
+      "POD evidence attached at Hull",
+      "Job J-100 created",
+    ]);
+  });
+
+  it("ranks delivered above evidence when both stamps tie exactly, rather than relying on id spelling", () => {
+    const events = buildActivity(job({
+      stops: [stop({
+        pod_status: "delivered",
+        delivered_at: "2026-08-14T11:00:00Z",
+        pod_updated_at: "2026-08-14T11:00:00Z",
+        pod_photo_url: "https://x/y.jpg",
+      })],
+    }));
+    expect(events.map((e) => e.text)).toEqual([
+      "Delivered to Hull",
+      "POD evidence attached at Hull",
+      "Job J-100 created",
+    ]);
+  });
+
+  it("sorts newest first", () => {
+    const events = buildActivity(job({
+      stops: [
+        stop({ id: "a", stop_order: 0, type: "collection", city: "Leeds", pod_status: "delivered", delivered_at: "2026-08-14T09:12:00Z" }),
+        stop({ id: "b", stop_order: 1, pod_status: "delivered", delivered_at: "2026-08-14T11:00:00Z" }),
+      ],
+    }));
+    expect(events.map((e) => e.text)).toEqual([
+      "Delivered to Hull",
+      "Collected at Leeds",
+      "Job J-100 created",
+    ]);
+  });
+
+  it("gives every event a stable unique id, so React keys do not collide", () => {
+    const events = buildActivity(job({
+      stops: [stop({ pod_status: "delivered", delivered_at: "2026-08-14T11:00:00Z", pod_updated_at: "2026-08-14T11:05:00Z", pod_photo_url: "https://x/y.jpg" })],
+    }));
+    expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
+  });
+
+  it("names an unreferenced job without printing null", () => {
+    expect(buildActivity(job({ reference: null }))[0].text).toBe("Job created");
+  });
+});
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `npx vitest run lib/tracking/activity.test.ts`
+Expected: FAIL, module resolution error for `./activity`.
+
+- [ ] **Step 3: Write the implementation**
+
+Create `lib/tracking/activity.ts`:
+
+```ts
+import type { TrackingJob, TrackingStop } from "./types";
+
+export type ActivityEvent = {
+  id: string;
+  /** Whatever PostgREST returned for the source timestamp column, used only
+   * for sorting here. The component must format it in OPERATOR_TIME_ZONE
+   * (lib/time.ts), the same zone the Journey card pins: format it without
+   * that zone and the two cards disagree about the calendar, which gives
+   * Next.js a hydration mismatch for an hour of every summer afternoon. */
+  at: string;
+  text: string;
+};
+
+/* THE FEED USES NO EXTRA TABLES AND NO EXTRA QUERY.
+
+   The design spec listed pod_records, pod_files and job_documents as sources.
+   Nothing in this repo writes any of them, so they would contribute exactly
+   zero events while costing three joins. job_stops.pod_updated_at IS written,
+   but only by the /pod save path (app/pod/page.tsx). app/jobs/page.tsx has a
+   second savePod that writes delivered_at, pod_status and pod_photo_url but
+   never pod_updated_at, so a stop POD'd from /jobs would otherwise hide a
+   real file behind a null stamp. The evidence event below falls back to
+   delivered_at for its stamp for that reason.
+
+   Every line here is something that provably happened. When a position feed
+   exists, departed and arrived events join this list from the same function. */
+
+type EventKind = "delivered" | "evidence" | "created";
+
+/* Both stamps for one stop are written a statement apart in app/pod/page.tsx,
+   so an exact tie is the normal case, not an edge case. Rank makes the
+   resulting order a decision rather than a side effect of how the id suffixes
+   happen to sort: the file is uploaded before the stop is marked delivered,
+   so newest-first puts "Delivered" above "POD evidence attached". */
+const KIND_RANK: Record<EventKind, number> = { delivered: 0, evidence: 1, created: 2 };
+
+type BuiltEvent = ActivityEvent & { kind: EventKind };
+
+function stopPlace(stop: TrackingStop): string {
+  return stop.city || stop.postcode || "an unnamed stop";
+}
+
+export function buildActivity(job: TrackingJob): ActivityEvent[] {
+  const events: BuiltEvent[] = [];
+
+  if (job.created_at) {
+    events.push({
+      id: `${job.id}:created`,
+      at: job.created_at,
+      text: job.reference ? `Job ${job.reference} created` : "Job created",
+      kind: "created",
+    });
+  }
+
+  for (const stop of job.stops) {
+    if (stop.pod_status === "delivered" && stop.delivered_at) {
+      const place = stopPlace(stop);
+      const text =
+        stop.type === "collection"
+          ? `Collected at ${place}`
+          : stop.recipient_name
+            ? `Delivered to ${place}, signed by ${stop.recipient_name}`
+            : `Delivered to ${place}`;
+      events.push({ id: `${stop.id}:delivered`, at: stop.delivered_at, text, kind: "delivered" });
+    }
+
+    // pod_updated_at alone proves only that the POD form was saved. Requiring a
+    // file too means this line always corresponds to evidence a dispatcher can
+    // actually open. /jobs writes the file without pod_updated_at (see header
+    // comment above), so fall back to delivered_at for the stamp rather than
+    // hiding a real file.
+    const hasEvidence = Boolean(stop.pod_photo_url || stop.pod_document_url);
+    const evidenceAt = stop.pod_updated_at ?? stop.delivered_at;
+    if (hasEvidence && evidenceAt) {
+      events.push({
+        id: `${stop.id}:evidence`,
+        at: evidenceAt,
+        text: `POD evidence attached at ${stopPlace(stop)}`,
+        kind: "evidence",
+      });
+    }
+  }
+
+  // Newest first by stamp, using < / > rather than localeCompare: ICU
+  // collation gives punctuation variable weight and disagrees with chronology
+  // once one stamp carries fractional seconds and another does not. Ties on
+  // the stamp fall to KIND_RANK, and only two different stops sharing both a
+  // stamp and a kind fall through to the id, which is a genuine string sort.
+  events.sort((a, b) => {
+    if (a.at < b.at) return 1;
+    if (a.at > b.at) return -1;
+    const byRank = KIND_RANK[a.kind] - KIND_RANK[b.kind];
+    return byRank !== 0 ? byRank : a.id.localeCompare(b.id);
+  });
+
+  return events.map(({ kind, ...event }) => event);
+}
+```
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `npx vitest run lib/tracking/activity.test.ts`
+Expected: PASS, 12 tests.
+
+- [ ] **Step 5: Run the whole suite, to be sure nothing else moved**
+
+Run: `npm test`
+Expected: PASS, all existing pod, dashboard and theme tests plus the five new tracking files.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add lib/tracking/activity.ts lib/tracking/activity.test.ts
+git commit -m "Add the synthesised tracking activity feed
+
+Built from jobs.created_at and job_stops timestamps only. pod_records,
+pod_files and job_documents were dropped from the design's source list because
+nothing in the app writes them, so they would add joins and no events.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 7: The pulse animation and its reduced-motion guard
+
+**Files:**
+- Modify: `app/globals.css` (append after the existing `@layer base` block, which currently ends at the end of the file)
+
+Doing this before the components means every pulsing element written afterwards has a class to reach for.
+
+- [ ] **Step 1: Append the components layer**
+
+Add to the end of `app/globals.css`:
+
+```css
+/* Scoped to .ds so it cannot reach the ~14 legacy inline-styled pages.
+
+   The design mockup animates the live-GPS dot and the current-stop marker with
+   an infinite pulse and has no reduced-motion guard at all. An infinite
+   animation is exactly what prefers-reduced-motion exists for, and this console
+   is used for long shifts, so the guard is not optional. */
+@layer components {
+  @keyframes ds-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
+
+  .ds .ds-pulse {
+    animation: ds-pulse 1.8s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ds .ds-pulse {
+      animation: none;
+    }
+  }
+}
+```
+
+- [ ] **Step 2: Verify the build compiles the new layer**
+
+Run: `npm run build`
+Expected: build succeeds. Tailwind emits `@layer components` content without needing a content-scan hit, because this is hand-written CSS rather than a utility.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add app/globals.css
+git commit -m "Add a reduced-motion-guarded pulse class for the tracking console
+
+The design mockup animates its live indicators infinitely with no guard.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 8: TrackingRail
+
+**Files:**
+- Create: `app/tracking/TrackingRail.tsx`
+
+- [ ] **Step 1: Write the component**
+
+Create `app/tracking/TrackingRail.tsx`:
+
+```tsx
+import Badge from "../../components/Badge";
+import Card from "../../components/Card";
+import { PHASE_LABEL, PHASE_TONE, type RailRow } from "../../lib/tracking/onTheRoad";
+
+/* Renders correctly ONLY inside a `.ds` wrapper. Preflight is disabled, so the
+   borders here depend on the scoped reset in app/globals.css supplying
+   border-style: solid. Outside `.ds` the borders disappear entirely. */
+
+type Props = {
+  rows: RailRow[];
+  selectedJobId: string | null;
+  onSelect: (jobId: string) => void;
+  /** Rendered under the list, e.g. "Auto-refresh 30 s · updated 14:02". */
+  footNote: string;
+};
+
+export default function TrackingRail({ rows, selectedJobId, onSelect, footNote }: Props) {
+  return (
+    <Card flush>
+      <header className="flex items-center gap-2 border-b border-line px-4 py-3">
+        <span className="flex-1 text-sm font-semibold text-ink">On the road</span>
+        <span className="rounded-full bg-surface-2 px-2 py-0.5 font-mono text-data-sm tabular-nums text-ink-2">
+          {rows.length}
+        </span>
+      </header>
+
+      {rows.length === 0 ? (
+        <p className="px-4 py-6 text-sm text-ink-3">Nothing on the road right now.</p>
+      ) : (
+        <ul className="m-0 list-none p-0">
+          {rows.map((row) => {
+            const selected = row.jobId === selectedJobId;
+            return (
+              <li key={row.jobId}>
+                <button
+                  type="button"
+                  onClick={() => onSelect(row.jobId)}
+                  aria-current={selected ? "true" : undefined}
+                  /* The selected row is marked by an inset left bar rather than
+                     a border, so selection does not shift the row's contents by
+                     2px as it moves down the list. */
+                  className={`flex w-full flex-col gap-1 border-b border-line px-4 py-2.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus ${
+                    selected
+                      ? "bg-primary-tint shadow-[inset_2px_0_0_var(--primary)]"
+                      : "bg-transparent hover:bg-surface-2"
+                  }`}
+                >
+                  <span className="flex w-full items-center gap-2">
+                    <span className="font-mono text-data tabular-nums text-ink">{row.registration}</span>
+                    <span className="flex-1" />
+                    <Badge tone={PHASE_TONE[row.phase]}>{PHASE_LABEL[row.phase]}</Badge>
+                  </span>
+
+                  <span className="block truncate text-xs text-ink-2">
+                    {row.driverName ?? "No driver assigned"}
+                  </span>
+
+                  <span className="flex w-full items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate font-mono text-data-sm text-ink-3">
+                      {row.originCity} → {row.destinationCity}
+                    </span>
+                    <span className="font-mono text-data-sm tabular-nums text-ink-2">
+                      {row.scheduledDate ?? "—"}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      <p className="px-4 py-2.5 text-xs text-ink-3">{footNote}</p>
+    </Card>
+  );
+}
+```
+
+- [ ] **Step 2: Verify it typechecks**
+
+Run: `npm run typecheck`
+Expected: no errors mentioning `app/tracking/TrackingRail.tsx`.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add app/tracking/TrackingRail.tsx
+git commit -m "Add the tracking rail
+
+Rows are real buttons with aria-current, and selection is an inset bar rather
+than a border so the row contents do not shift as selection moves.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 9: TrackingHeader
+
+**Files:**
+- Create: `app/tracking/TrackingHeader.tsx`
+
+- [ ] **Step 1: Write the component**
+
+Create `app/tracking/TrackingHeader.tsx`:
+
+```tsx
+import Link from "next/link";
+import Badge from "../../components/Badge";
+import Card from "../../components/Card";
+import RouteProgress from "../../components/RouteProgress";
+import { PHASE_LABEL, PHASE_TONE, routeEndpoints, type Phase } from "../../lib/tracking/onTheRoad";
+import { arrowStateFor, routeGlyph, type JourneyNode } from "../../lib/tracking/journey";
+import {
+  FUTURE_TOLERANCE_MINUTES,
+  pingLabel,
+  readingAgeMinutes,
+  signalState,
+  type PositionReading,
+} from "../../lib/tracking/position";
+import { telemetryTiles } from "../../lib/tracking/telemetry";
+import type { TrackingJob } from "../../lib/tracking/types";
+
+/* Renders correctly ONLY inside a `.ds` wrapper. Preflight is disabled, so the
+   borders here depend on the scoped reset in app/globals.css supplying
+   border-style: solid. Outside `.ds` the borders disappear entirely. */
+
+type Props = {
+  job: TrackingJob;
+  phase: Phase;
+  journey: JourneyNode[];
+  reading: PositionReading | null;
+  now: Date;
+};
+
+/* The GPS pill is the one element most likely to mislead. A green pulsing
+   "Live GPS" over a three-hour-old fix tells a dispatcher the truck is
+   reporting when it is not, so each signal state gets its own wording, its own
+   tone, and only the live one animates. */
+function GpsPill({ reading, now }: { reading: PositionReading | null; now: Date }) {
+  const state = signalState(reading, now);
+
+  if (state === "live") {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-success-tint px-2 py-0.5 text-xs font-medium text-success-strong">
+        <span aria-hidden className="ds-pulse block h-1.5 w-1.5 rounded-full bg-success" />
+        Live GPS
+      </span>
+    );
+  }
+
+  if (state === "stale") {
+    /* signalState folds a broken device clock into `stale`, but pingLabel's
+       vocabulary for it is "clock ahead", a standalone phrase the telemetry
+       tile renders on its own. Prefixing it here would read "Last seen clock
+       ahead", which is not a sentence. This branch says the same thing as one
+       instead, and pingLabel is left alone for the tile's sake. */
+    const age = reading ? readingAgeMinutes(reading, now) : null;
+    const clockAhead = age !== null && age < -FUTURE_TOLERANCE_MINUTES;
+
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-warning-tint px-2 py-0.5 text-xs font-medium text-warning-strong">
+        <span aria-hidden className="block h-1.5 w-1.5 rounded-full bg-warning" />
+        {clockAhead ? "Device clock ahead" : `Last seen ${pingLabel(reading, now)}`}
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-2 py-0.5 text-xs font-medium text-ink-3">
+      <span aria-hidden className="block h-1.5 w-1.5 rounded-full bg-ink-4" />
+      No GPS
+    </span>
+  );
+}
+
+export default function TrackingHeader({ job, phase, journey, reading, now }: Props) {
+  const tiles = telemetryTiles(reading, now);
+  const glyph = routeGlyph(journey, arrowStateFor(journey, phase === "late"));
+
+  const { origin, destination } = routeEndpoints(job.stops);
+
+  /* The visible route keeps routeEndpoints' "—" fallback, which is the right
+     thing to SHOW. It is the wrong thing to SAY: a screen reader announces the
+     glyph as "em dash", so the aria label below swaps in words instead. */
+  const spokenOrigin = origin === "—" ? "Unknown origin" : origin;
+  const spokenDestination = destination === "—" ? "Unknown destination" : destination;
+  const stopCount = glyph.nodes.length;
+
+  const isSubcontracted = Boolean(job.subcontractor_id);
+  // A tel: link only when there is actually a number and the driver is ours.
+  // Rendering a dead "Call driver" control is worse than rendering none.
+  // Whitespace is legal in the column but not in a tel: URI (RFC 3966). UK
+  // numbers are commonly stored as "07700 900123".
+  const driverPhone = isSubcontracted ? null : job.driver_phone?.replace(/\s/g, "") || null;
+
+  const subtitle = [
+    job.customer_name ?? "No customer",
+    `${origin} → ${destination}`,
+    isSubcontracted ? `${job.driver_name ?? "Carrier"} (carrier)` : (job.driver_name ?? "No driver"),
+  ].join(" · ");
+
+  return (
+    <Card>
+      <div className="flex flex-wrap items-center gap-2.5">
+        <span className="font-mono text-md font-semibold tabular-nums text-ink">
+          {job.vehicle_registration ?? "—"}
+        </span>
+        <Badge tone={PHASE_TONE[phase]}>{PHASE_LABEL[phase]}</Badge>
+        <GpsPill reading={reading} now={now} />
+
+        <span className="flex-1" />
+
+        {driverPhone ? (
+          <a
+            href={`tel:${driverPhone}`}
+            className="rounded-sm border border-line px-2.5 py-1 text-xs font-semibold text-ink hover:border-line-strong hover:bg-surface-2"
+          >
+            Call {job.driver_name ?? "driver"}
+          </a>
+        ) : null}
+
+        {/* "All jobs", not "Job detail": app/jobs/ has no dynamic route, so
+            there is no per-job page to send anyone to. The destination was
+            always honest; the label was not. */}
+        <Link
+          href="/jobs"
+          className="rounded-sm px-2.5 py-1 text-xs font-semibold text-ink-2 hover:bg-surface-2 hover:text-ink"
+        >
+          All jobs
+        </Link>
+      </div>
+
+      <p className="mt-1 text-xs text-ink-3">{subtitle}</p>
+
+      <div className="mt-4">
+        <RouteProgress
+          nodes={glyph.nodes}
+          arrowState={glyph.arrowState}
+          label={`${spokenOrigin} to ${spokenDestination}, ${stopCount} ${
+            stopCount === 1 ? "stop" : "stops"
+          }, ${PHASE_LABEL[phase].toLowerCase()}`}
+        />
+      </div>
+
+      <dl className="mt-4 grid grid-cols-2 gap-3.5 border-t border-line pt-4 sm:grid-cols-4">
+        {tiles.map((tile) => (
+          <div key={tile.label} className="min-w-0">
+            <dt className="truncate text-kicker uppercase text-ink-3">{tile.label}</dt>
+            {/* The hint is rendered ONCE, in the sr-only span. It used to also
+                sit in a title attribute, and several screen readers announce
+                both, so the explanation was read out twice. title is mouse-only
+                anyway; the span is the load-bearing one. */}
+            <dd
+              className={`m-0 font-mono text-md font-semibold tabular-nums ${
+                tile.muted ? "text-ink-3" : "text-ink"
+              }`}
+            >
+              {tile.value}
+              {tile.hint ? <span className="sr-only"> ({tile.hint})</span> : null}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </Card>
+  );
+}
+```
+
+- [ ] **Step 2: Verify it typechecks**
+
+Run: `npm run typecheck`
+Expected: no errors mentioning `app/tracking/TrackingHeader.tsx`.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add app/tracking/TrackingHeader.tsx
+git commit -m "Add the tracking header card
+
+The GPS pill has three distinct states and only the live one pulses, so the
+page cannot show a green Live GPS badge over an hours-old fix. Call driver is
+a tel: link and is omitted entirely when there is no number.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 10: TrackingMap
+
+**Files:**
+- Create: `app/tracking/TrackingMap.tsx`
+
+- [ ] **Step 1: Write the component**
+
+Create `app/tracking/TrackingMap.tsx`:
+
+```tsx
+import { signalState, type PositionReading } from "../../lib/tracking/position";
+import type { TrackingStop } from "../../lib/tracking/types";
+
+type Props = {
+  stops: TrackingStop[];
+  reading: PositionReading | null;
+  now: Date;
+};
+
+/* THE MAP SEAM.
+
+   These props are already the ones a real TomTom Maps mount needs: the stops
+   to draw a route through, and the reading to place the vehicle. Wiring TomTom
+   later changes this file's internals and nothing else.
+
+   Today it renders a labelled placeholder rather than a spinner or a fake map
+   image. A spinner would claim something is loading that is not, and a static
+   map picture would be a lie about a live system. */
+
+const HEIGHT = 260;
+
+export default function TrackingMap({ stops, reading, now }: Props) {
+  const state = signalState(reading, now);
+  const stopCount = stops.length;
+
+  const message =
+    state === "none"
+      ? "Vehicle positions appear here once telematics is connected."
+      : "Map tiles appear here once telematics is connected.";
+
+  return (
+    <section
+      aria-label="Vehicle position map"
+      className="flex flex-col items-center justify-center gap-1.5 rounded-lg border border-line bg-surface-2 p-6 text-center shadow-sm"
+      style={{ height: HEIGHT }}
+    >
+      <p className="text-sm font-semibold text-ink-2">{message}</p>
+      <p className="max-w-[42ch] text-xs text-ink-3">
+        {stopCount > 0
+          ? `This job has ${stopCount} ${stopCount === 1 ? "stop" : "stops"} ready to plot.`
+          : "This job has no stops to plot."}
+      </p>
+    </section>
+  );
+}
+```
+
+- [ ] **Step 2: Verify it typechecks**
+
+Run: `npm run typecheck`
+Expected: no errors mentioning `app/tracking/TrackingMap.tsx`.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add app/tracking/TrackingMap.tsx
+git commit -m "Add the tracking map card as a labelled placeholder
+
+Props are already the ones a TomTom Maps mount needs. Renders a stated
+placeholder rather than a spinner or a static map image, neither of which
+would be honest about a system with no feed.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 11: JourneyTimeline and ActivityFeed
+
+**Files:**
+- Create: `app/tracking/JourneyTimeline.tsx`
+- Create: `app/tracking/ActivityFeed.tsx`
+
+- [ ] **Step 1: Write JourneyTimeline**
+
+Create `app/tracking/JourneyTimeline.tsx`:
+
+```tsx
+import Card from "../../components/Card";
+import type { JourneyNode } from "../../lib/tracking/journey";
+
+/* Renders correctly ONLY inside a `.ds` wrapper. Preflight is disabled, so the
+   borders here depend on the scoped reset in app/globals.css supplying
+   border-style: solid. Outside `.ds` the borders disappear entirely. */
+
+type Props = { nodes: JourneyNode[]; note: string };
+
+const DOT: Record<"done" | "current" | "upcoming", string> = {
+  done: "bg-success border-success",
+  current: "bg-primary border-primary-tint-border",
+  upcoming: "bg-surface border-line-strong",
+};
+
+export default function JourneyTimeline({ nodes, note }: Props) {
+  return (
+    /* <Card flush> renders exactly the chrome this used to hand-roll, and
+       TrackingRail already uses it for the same header-plus-list shape. The
+       element goes from <section> to <div>, which changes nothing for assistive
+       technology: a <section> only becomes a `region` landmark once it has an
+       accessible name, and this one never had one. */
+    <Card flush>
+      <header className="flex items-center gap-2.5 border-b border-line px-5 py-3">
+        <h2 className="flex-1 text-sm font-semibold text-ink">Journey</h2>
+        <span className="text-xs text-ink-3">{note}</span>
+      </header>
+
+      <ol className="m-0 list-none px-5 py-4">
+        {nodes.map((node, i) => {
+          const last = i === nodes.length - 1;
+
+          if (node.kind === "live") {
+            return (
+              <li key={node.id} className="grid grid-cols-[22px_minmax(0,1fr)] gap-3.5">
+                <div className="flex flex-col items-center">
+                  <span aria-hidden className="ds-pulse block h-3 w-3 rounded-full border-2 border-primary-tint-border bg-primary" />
+                  {last ? null : <span aria-hidden className="w-0 flex-1 border-l-2 border-dotted border-line-strong" />}
+                </div>
+                <div className="min-w-0 pb-4">
+                  <span className="inline-flex items-center gap-2 rounded-sm border border-primary-tint-border bg-primary-tint px-2.5 py-1.5">
+                    <span className="font-mono text-data-sm tabular-nums text-primary-deep">{node.speedLabel}</span>
+                    <span aria-hidden className="block h-3 w-px bg-primary-tint-border" />
+                    <span className="text-xs text-primary-deep">{node.pingLabel}</span>
+                  </span>
+                </div>
+              </li>
+            );
+          }
+
+          return (
+            <li key={node.id} className="grid grid-cols-[22px_minmax(0,1fr)] gap-3.5">
+              <div className="flex flex-col items-center">
+                <span
+                  aria-hidden
+                  className={`mt-1 block h-2.5 w-2.5 flex-none rounded-full border-2 ${DOT[node.state]}`}
+                />
+                {last ? null : (
+                  <span
+                    aria-hidden
+                    className={`mt-1 w-0 flex-1 border-l-2 ${
+                      node.state === "done" ? "border-solid border-success-border" : "border-dotted border-line-strong"
+                    }`}
+                  />
+                )}
+              </div>
+
+              <div className="min-w-0 pb-4">
+                <div className="flex items-baseline gap-2.5">
+                  <span className="min-w-0 truncate text-sm font-semibold text-ink">{node.label}</span>
+                  <span className="flex-1" />
+                  <span className="whitespace-nowrap font-mono text-data-sm tabular-nums text-ink-2">
+                    {node.when}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-xs text-ink-3">
+                  {node.caption}
+                  {node.addressLine ? ` · ${node.addressLine}` : ""}
+                </p>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </Card>
+  );
+}
+```
+
+- [ ] **Step 2: Write ActivityFeed**
+
+Create `app/tracking/ActivityFeed.tsx`:
+
+```tsx
+import Card from "../../components/Card";
+import type { ActivityEvent } from "../../lib/tracking/activity";
+import { OPERATOR_TIME_ZONE } from "../../lib/time";
+
+/* Renders correctly ONLY inside a `.ds` wrapper. Preflight is disabled, so the
+   borders here depend on the scoped reset in app/globals.css supplying
+   border-style: solid. Outside `.ds` the borders disappear entirely. */
+
+type Props = { events: ActivityEvent[] };
+
+// Same operator calendar as the journey timeline and /pod. See lib/time.ts.
+const STAMP = new Intl.DateTimeFormat("en-GB", {
+  timeZone: OPERATOR_TIME_ZONE,
+  day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false,
+});
+
+function stamp(at: string): string {
+  const d = new Date(at);
+  return Number.isNaN(d.getTime()) ? "—" : STAMP.format(d);
+}
+
+export default function ActivityFeed({ events }: Props) {
+  return (
+    /* <Card flush> renders exactly the chrome this used to hand-roll, and
+       TrackingRail already uses it for the same header-plus-list shape. The
+       element goes from <section> to <div>, which changes nothing for assistive
+       technology: a <section> only becomes a `region` landmark once it has an
+       accessible name, and this one never had one. */
+    <Card flush>
+      <header className="flex items-center gap-2.5 border-b border-line px-5 py-3">
+        <h2 className="flex-1 text-sm font-semibold text-ink">Activity</h2>
+        <span className="font-mono text-data-sm tabular-nums text-ink-3">
+          {events.length} {events.length === 1 ? "event" : "events"}
+        </span>
+      </header>
+
+      {events.length === 0 ? (
+        <p className="px-5 py-4 text-sm text-ink-3">Nothing recorded for this job yet.</p>
+      ) : (
+        <ol className="m-0 list-none px-5 py-4">
+          {events.map((event, i) => (
+            <li key={event.id} className="grid grid-cols-[16px_minmax(0,1fr)] gap-3">
+              <div className="flex flex-col items-center">
+                <span
+                  aria-hidden
+                  className={`mt-1 block h-2 w-2 flex-none rounded-full border-2 ${
+                    i === 0 ? "border-primary bg-primary" : "border-line-strong bg-surface"
+                  }`}
+                />
+                {i < events.length - 1 ? (
+                  <span aria-hidden className="mt-1 w-0 flex-1 border-l-2 border-line" />
+                ) : null}
+              </div>
+              <div className="min-w-0 pb-3.5">
+                <p className="text-sm text-ink">{event.text}</p>
+                <p className="mt-0.5 font-mono text-data-sm tabular-nums text-ink-3">{stamp(event.at)}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </Card>
+  );
+}
+```
+
+- [ ] **Step 3: Verify both typecheck**
+
+Run: `npm run typecheck`
+Expected: no errors mentioning `app/tracking/`.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add app/tracking/JourneyTimeline.tsx app/tracking/ActivityFeed.tsx
+git commit -m "Add the tracking journey timeline and activity feed
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 12: Rewrite the page
+
+**Files:**
+- Modify: `app/tracking/page.tsx` (full replacement)
+
+- [ ] **Step 1: Replace the file**
+
+Replace the entire contents of `app/tracking/page.tsx` with:
+
+```tsx
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { createClient } from "../../lib/supabase/browser";
+import { useTenant } from "../components/TenantProvider";
+import TenantGate from "../components/TenantGate";
+import TrackingRail from "./TrackingRail";
+import TrackingHeader from "./TrackingHeader";
+import TrackingMap from "./TrackingMap";
+import JourneyTimeline from "./JourneyTimeline";
+import ActivityFeed from "./ActivityFeed";
+import { buildRail, isOnTheRoad, jobPhase } from "../../lib/tracking/onTheRoad";
+import { buildJourney } from "../../lib/tracking/journey";
+import { buildActivity } from "../../lib/tracking/activity";
+import { createSupabasePositionSource } from "../../lib/tracking/supabasePositions";
+import { pingLabel, type PositionReading } from "../../lib/tracking/position";
+import type { TrackingJob } from "../../lib/tracking/types";
+import { OPERATOR_TIME_ZONE, operatorDay } from "../../lib/time";
+
+/* The old page polled every 10 seconds and fetched every vehicle_locations row
+   ever recorded on each pass. 30 seconds matches the design's own footnote, and
+   the poll pauses while the tab is hidden so a forgotten background tab stops
+   issuing queries against a live database. */
+const POLL_MS = 30_000;
+
+/* Supabase returns an embedded relation as an object or as a one-element array
+   depending on how it infers the relationship. Both shapes have appeared in
+   this codebase, so this normalises rather than assuming. */
+function rel(value: any): any {
+  return Array.isArray(value) ? (value[0] ?? null) : (value ?? null);
+}
+
+// Same operator calendar as the journey timeline and /pod. See lib/time.ts.
+const CLOCK = new Intl.DateTimeFormat("en-GB", {
+  timeZone: OPERATOR_TIME_ZONE, hour: "2-digit", minute: "2-digit", hour12: false,
+});
+
+export default function TrackingPage() {
+  const supabase = createClient();
+  const tenant = useTenant();
+
+  const [jobs, setJobs] = useState<TrackingJob[]>([]);
+  const [positions, setPositions] = useState<Map<string, PositionReading>>(new Map());
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  /* Set by ANY failed query, cleared by the next success. It is deliberately
+     not enough on its own to blank the console: on a 30 second poll one
+     transient blip would take the rail out from under a dispatcher mid-task.
+     See the render below, which only reaches the error card when there has
+     never been a successful load. */
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+
+  useEffect(() => {
+    // `cancelled` guards against setting state after the tenant changes or the
+    // page unmounts mid-request. The old page had no such guard. It says
+    // nothing about ORDERING, which is what `inFlight` below is for.
+    let cancelled = false;
+
+    /* load() fires from the interval AND from visibilitychange, so two calls
+       can otherwise overlap and a slower earlier response can land after a
+       faster later one, painting the console with stale data. Dropping the
+       second call while one is running is enough here: the next poll is at
+       most 30 seconds away, and a dropped refresh costs nothing. */
+    let inFlight = false;
+
+    async function load(showSkeleton: boolean) {
+      if (inFlight) return;
+      inFlight = true;
+
+      if (showSkeleton) setLoading(true);
+
+      /* createSupabasePositionSource THROWS on a query error rather than
+         returning an empty map, and load() is called unawaited from both the
+         first render and the interval. Without this catch that rejection
+         escapes the effect entirely: nothing clears `loading`, so a failed
+         position query leaves the skeleton on screen forever with no retry.
+         Catching here is what turns a throw into the error state. */
+      try {
+        /* ONE `now` for the whole load, and the same one the render uses: it
+           is stored as lastLoadedAt below and read back as `now`. The server
+           filter, the vehicles whose positions get fetched, the rail order,
+           the phase badge and the staleness pill therefore all answer to a
+           single instant rather than to three Dates a few hundred
+           milliseconds apart. */
+        const startedAt = new Date();
+        const today = operatorDay(startedAt);
+
+        /* Narrowed server-side on the three cheap conditions before
+           isOnTheRoad applies the rest client-side. The stop-level condition
+           cannot be expressed here, which is why the predicate still runs. */
+        const { data, error } = await tenant
+          .filterByTenant(
+            supabase.from("jobs").select(`
+              id,
+              reference,
+              status,
+              scheduled_date,
+              created_at,
+              vehicle_id,
+              subcontractor_id,
+              customers ( name ),
+              vehicles ( registration ),
+              drivers ( name, phone ),
+              job_stops (
+                id, stop_order, type, address_line, city, postcode,
+                planned_at, delivered_at, pod_status, recipient_name,
+                pod_updated_at, pod_photo_url, pod_document_url
+              )
+            `),
+          )
+          .eq("status", "planned")
+          .not("vehicle_id", "is", null)
+          .lte("scheduled_date", today);
+
+        if (cancelled) return;
+
+        if (error) {
+          setRefreshFailed(true);
+          setLoading(false);
+          return;
+        }
+
+        const mapped: TrackingJob[] = (data ?? []).map((row: any) => {
+          const vehicle = rel(row.vehicles);
+          const driver = rel(row.drivers);
+          return {
+            id: row.id,
+            reference: row.reference,
+            status: row.status,
+            scheduled_date: row.scheduled_date,
+            created_at: row.created_at,
+            customer_name: rel(row.customers)?.name ?? null,
+            vehicle_id: row.vehicle_id,
+            vehicle_registration: vehicle?.registration ?? null,
+            driver_name: driver?.name ?? null,
+            driver_phone: driver?.phone ?? null,
+            subcontractor_id: row.subcontractor_id,
+            stops: [...(row.job_stops ?? [])].sort(
+              (a: any, b: any) => a.stop_order - b.stop_order,
+            ),
+          };
+        });
+
+        /* Filtered with isOnTheRoad directly rather than by calling buildRail
+           and looking each row's job back up: buildRail also sorts, which this
+           does not need, and the lookup was an O(n squared) find inside a map.
+           The rail itself is built once, in the render below. */
+        const vehicleIds = Array.from(
+          new Set(
+            mapped
+              .filter((j) => isOnTheRoad(j, startedAt))
+              .map((j) => j.vehicle_id)
+              .filter((id): id is string => Boolean(id)),
+          ),
+        );
+
+        const source = createSupabasePositionSource(supabase, tenant);
+        const readings = await source.getPositions(vehicleIds);
+
+        if (cancelled) return;
+
+        setJobs(mapped);
+        setPositions(readings);
+        setRefreshFailed(false);
+        setLoading(false);
+        setLastLoadedAt(startedAt);
+      } catch {
+        if (cancelled) return;
+        setRefreshFailed(true);
+        setLoading(false);
+      } finally {
+        inFlight = false;
+      }
+    }
+
+    load(true);
+
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") load(false);
+    }, POLL_MS);
+
+    function onVisibility() {
+      if (document.visibilityState === "visible") load(false);
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [tenant.activeTenantId, reloadToken]);
+
+  /* One `now` per load, injected into every pure function, so the rail order,
+     the phase badge and the staleness pill cannot disagree by milliseconds
+     about what "today" or "stale" means. Same reasoning as app/pod/page.tsx.
+
+     It is literally the instant load() started, so the render agrees with the
+     query that fetched the data rather than merely being close to it. The
+     fallback is unreachable: `loading` stays true until the first successful
+     load sets lastLoadedAt, and a first load that fails renders the error card
+     instead. It exists only to keep this a plain Date for the callees. */
+  const now = useMemo(() => lastLoadedAt ?? new Date(), [lastLoadedAt]);
+
+  const rail = useMemo(() => buildRail(jobs, now), [jobs, now]);
+
+  // Falling back to the first row means a fresh load, or a poll that removes
+  // the selected job, always leaves something selected rather than blanking
+  // the detail column.
+  const selected = useMemo(
+    () => rail.find((r) => r.jobId === selectedId) ?? rail[0] ?? null,
+    [rail, selectedId],
+  );
+
+  const selectedJob = useMemo(
+    () => (selected ? jobs.find((j) => j.id === selected.jobId) ?? null : null),
+    [jobs, selected],
+  );
+
+  const reading = selectedJob?.vehicle_id ? positions.get(selectedJob.vehicle_id) ?? null : null;
+
+  const journey = useMemo(
+    () => (selectedJob ? buildJourney(selectedJob.stops, reading, now) : []),
+    [selectedJob, reading, now],
+  );
+
+  const activity = useMemo(
+    () => (selectedJob ? buildActivity(selectedJob) : []),
+    [selectedJob],
+  );
+
+  /* Nothing has ever loaded, so there is no last known data to keep on screen
+     and the full error card with its retry is the only useful thing to render.
+     Once a load has succeeded, a later failure is reported in the rail's
+     footnote instead and the console stays up. */
+  const neverLoaded = lastLoadedAt === null;
+
+  const footNote = [
+    lastLoadedAt
+      ? `Auto-refresh 30 s · updated ${CLOCK.format(lastLoadedAt)}`
+      : "Auto-refresh 30 s",
+    refreshFailed ? "refresh failed, showing last known data" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <TenantGate>
+      <div className="ds min-h-screen bg-canvas font-sans text-ink">
+        <main className="mx-auto max-w-[1480px] px-6 py-8">
+          <div className="text-kicker uppercase text-ink-3">Tracking</div>
+          <h1 className="mb-4 mt-0.5 text-xl font-semibold tracking-tight text-ink">
+            Jobs on the road
+          </h1>
+
+          {loading ? (
+            <div className="rounded-lg border border-line bg-surface p-6 shadow-sm">
+              <p className="text-sm text-ink-3">Loading jobs…</p>
+            </div>
+          ) : refreshFailed && neverLoaded ? (
+            <div className="rounded-lg border border-danger-border bg-danger-tint p-6 shadow-sm">
+              <p className="text-sm font-semibold text-danger-strong">Could not load tracking</p>
+              <p className="mt-1 text-sm text-ink-2">
+                The jobs query failed. Nothing has been changed.
+              </p>
+              <button
+                type="button"
+                onClick={() => setReloadToken((t) => t + 1)}
+                className="mt-3 rounded-sm border border-line bg-surface px-3 py-1.5 text-xs font-semibold text-ink hover:border-line-strong hover:bg-surface-2"
+              >
+                Try again
+              </button>
+            </div>
+          ) : (
+            <div className="grid items-start gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
+              <div className="max-h-[40vh] overflow-y-auto lg:max-h-none lg:overflow-visible">
+                <TrackingRail
+                  rows={rail}
+                  selectedJobId={selected?.jobId ?? null}
+                  onSelect={setSelectedId}
+                  footNote={footNote}
+                />
+              </div>
+
+              <div className="grid min-w-0 gap-3">
+                {selectedJob && selected ? (
+                  <>
+                    <TrackingHeader
+                      job={selectedJob}
+                      phase={jobPhase(selectedJob, now)}
+                      journey={journey}
+                      reading={reading}
+                      now={now}
+                    />
+                    <TrackingMap stops={selectedJob.stops} reading={reading} now={now} />
+                    <JourneyTimeline
+                      nodes={journey}
+                      note={reading ? `Position ${pingLabel(reading, now)}` : "No position reported"}
+                    />
+                    <ActivityFeed events={activity} />
+                  </>
+                ) : (
+                  <div className="flex flex-col items-center gap-1.5 rounded-lg border border-line bg-surface px-6 py-16 text-center shadow-sm">
+                    <p className="text-md font-semibold text-ink">No jobs on the road</p>
+                    <p className="max-w-[46ch] text-sm text-ink-2">
+                      Assigned jobs appear here once they are due and still have a delivery
+                      outstanding.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
+    </TenantGate>
+  );
+}
+```
+
+- [ ] **Step 2: Verify it typechecks and builds**
+
+Run: `npm run typecheck && npm run build`
+Expected: both succeed.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add app/tracking/page.tsx
+git commit -m "Rebuild /tracking as a design-system console page
+
+Replaces the inline-styled vehicle table with a job-first rail beside a
+header, map, journey and activity column.
+
+Fixes three defects in the old page: it fetched every vehicle_locations row
+ever recorded and filtered client-side, it discarded the Supabase error so a
+failed load rendered as an empty table, and it polled every 10 seconds
+including in hidden tabs.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 13: Activate the theme for /tracking
+
+Do this last of the code tasks. Until the page is fully tokenised, `ThemeScope` pinning it dark is what keeps it readable, and adding the route early would render the old inline colours on a light background.
+
+**Files:**
+- Modify: `lib/nav/themeableRoutes.ts`
+- Modify: `lib/nav/themeableRoutes.test.ts`
+
+- [ ] **Step 1: Add the route**
+
+In `lib/nav/themeableRoutes.ts`, add one line to `THEMEABLE_ROUTES`, keeping the existing comment alignment:
+
+```ts
+export const THEMEABLE_ROUTES: readonly string[] = [
+  "/",                       // app/page.tsx                      (self-pins .light)
+  "/login",                  // app/login/page.tsx
+  "/dashboard",              // app/dashboard/page.tsx
+  "/jobs",                   // app/jobs/page.tsx
+  "/pod",                    // app/pod/page.tsx
+  "/tracking",               // app/tracking/page.tsx
+  "/super-admin/requests",   // app/super-admin/requests/page.tsx
+];
+```
+
+- [ ] **Step 2: Update the file's own header comment**
+
+That header names `/tracking` as its example of a page that would render white-on-white if activated too early. That is now out of date and would mislead the next reader. Replace that sentence:
+
+Find:
+
+```
+   theme would put their dark-tuned text on a light background: /tracking would
+   render white-on-white.
+```
+
+Replace with:
+
+```
+   theme would put their dark-tuned text on a light background: /telematics
+   would render white-on-white.
+```
+
+If the wrapping differs in the file, keep the surrounding lines intact and change only the route name.
+
+- [ ] **Step 3: Update the allowlist test**
+
+`lib/nav/themeableRoutes.test.ts` asserts the allowlist's contents directly, so it goes stale the moment a route moves onto the list. Update it in the same commit:
+
+- In the test that checks `isThemeableRoute` returns `true` for tokenised pages, add `/tracking`.
+- In the test that checks legacy inline-styled pages return `false`, replace `/tracking` with `/telematics`. `/tracking` is no longer a legacy example; `/telematics` is, and it is not on the list.
+- In the test that asserts the full contents of `THEMEABLE_ROUTES`, add `/tracking` to the expected array.
+
+Keep the assertion of the full array's contents rather than loosening it to a partial match: it is a deliberate tripwire so nobody adds a route without updating this test.
+
+- [ ] **Step 4: Verify the toggle works in both directions**
+
+Run: `npm run dev`, then sign in locally.
+
+Note: `scripts/dev-login.mjs` points at the LIVE Supabase project, so anything you change while testing writes production data. Read only. Do not save a POD or edit a job while checking this page.
+
+```bash
+node scripts/dev-login.mjs <your-email> /tracking
+```
+
+Open the printed link. Then:
+- Toggle to light. The page must switch fully. Any element still dark is an untokenised colour left in a component from Tasks 8 to 12.
+- Toggle back to dark.
+- Check the theme toggle is now visible on `/tracking`, since `AppShell` renders it for themeable routes.
+
+- [ ] **Step 5: Run the theme contrast suite**
+
+Run: `npx vitest run lib/theme/contrast.test.ts`
+Expected: PASS. It reads `app/tokens.css` and asserts full parity plus every contrast pair, so it catches a token that regressed.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add lib/nav/themeableRoutes.ts lib/nav/themeableRoutes.test.ts
+git commit -m "Activate light/dark theming for /tracking
+
+Seventh themeable route, second converted after /pod. Updates the file's own
+header comment, which used /tracking as its white-on-white example. Moves the
+route allowlist test's assertions to match.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 14: Layout regression check
+
+**Files:**
+- Create: `tests/tracking-layout.spec.mjs`
+
+Read `tests/pod-layout.spec.mjs` first and follow its structure, its env-var convention and its exit codes. This task mirrors it rather than inventing a second approach.
+
+**Four things about this file that are not obvious, and that the next person editing it needs.**
+
+**A check that measured nothing must not report a pass.** Every check records its own state and `SKIP` is one of those states, kept out of the pass count entirely. The rail is empty whenever no job satisfies the on-the-road predicate, which on this database is the likely case, and folding that into the passes would let an empty rail masquerade as evidence that the two columns sit side by side. `SKIP` is reported separately, and a run where everything skipped exits 2 rather than 0.
+
+**Half the ways this page can render satisfy every assertion while proving nothing.** `assertOnRealPage` runs before any measurement and aborts on each of them: a redirect to `/login` when the sign-in link was spent or expired, the TenantGate panel, `/tracking` without its heading, the "Could not load tracking" error card, and the "Loading jobs" skeleton. That last one is a real hazard rather than a theoretical one, because the rail arrives from a client-side query and Playwright's `networkidle` can land while the skeleton is still up, so the run also waits for the loading text to disappear first.
+
+**The column check is anchored on the grid's own `grid-cols-[300px` class, and this is load-bearing.** The obvious anchors, `[aria-current]` and `.ds ul li button`, both match the AppShell sidebar FIRST: its active nav link carries `aria-current="page"`, its `<ul>` comes earlier in the document, and its `<aside>` also carries a `.ds` wrapper. A fully stacked `/tracking` would therefore have measured the sidebar's right edge against the map's left edge, found the map to the right of it, and reported a pass on exactly the layout the check exists to catch. A layout detector that lies is worse than no detector, because it also teaches the reader to trust it. The spill scan is scoped for the same reason, to the `.ds` wrapper holding `<main>` rather than every `.ds` on the page, so the sidebar's known mobile squeeze does not fill the output with noise.
+
+**The sign-in token is single-use, like a real magic link.** The whole run happens in ONE browser context and resizes the viewport between widths. Opening a fresh page per width means a fresh context, an empty cookie jar, and a token already spent. For the same reason the measurements are exported and `run()` returns an exit code rather than calling `process.exit`, which would skip the `finally` that closes chromium.
+
+The grid collapses at Tailwind's `lg`, 1024px, which is the breakpoint the approved spec names. The wide measurement runs at 1440 and the narrow one at 900, both kept clear of the boundary so a scrollbar's width cannot decide which side of it a viewport lands on.
+
+- [ ] **Step 1: Write the spec**
+
+Create `tests/tracking-layout.spec.mjs`:
+
+```js
+/* Layout regression check for /tracking.
+ *
+ * WHY THIS EXISTS: the same reason tests/pod-layout.spec.mjs exists. Two
+ * separate overlap bugs shipped or nearly shipped in this repo on 2026-08-13.
+ * Job-form inputs overflowed their boxes by 25 to 57px with ordinary data, and
+ * the first POD mockup opened a several-hundred-pixel gap mid-row. Both were
+ * invisible in review and obvious the instant something rendered and measured
+ * them. Reading the CSS is not sufficient evidence.
+ *
+ * /tracking puts a four-card detail column beside a fixed 300px rail, which is
+ * exactly that class of risk.
+ *
+ * SETUP, once (shared with pod-layout.spec.mjs):
+ *   npm install playwright --prefix tests
+ *   npx playwright install chromium
+ *
+ * Playwright is deliberately NOT in the root package.json: its browser download
+ * would run on every Vercel build for one local script. Installing it under
+ * tests/ keeps it resolvable from this file (ESM walks up from the module's own
+ * directory) while staying gitignored, so deploys never see it.
+ *
+ * RUN, from the repo root, with the dev server up:
+ *   LINK=$(node scripts/dev-login.mjs <email> /tracking | grep -o 'http://[^ ]*')
+ *   TRACKING_AUTH_URL="$LINK" node tests/tracking-layout.spec.mjs
+ *
+ * Without TRACKING_AUTH_URL it aborts, because signed out /tracking redirects
+ * to /login.
+ *
+ * Exit codes:  0 = passed   1 = a layout failure   2 = nothing measured
+ */
+import { chromium } from "playwright";
+
+// NOT named URL: that would shadow the global URL constructor, which the
+// redirect guard below needs in order to parse page.url().
+const TARGET = process.env.TRACKING_URL || "http://localhost:3000/tracking";
+
+/* One-shot sign-in URL, normally the callback link minted by
+   scripts/dev-login.mjs. Visited ONCE before measuring.
+
+   It has to be once: that token is single-use, exactly like a real magic link.
+   So this runs in a single browser context and resizes the viewport between
+   widths, rather than opening a fresh page per width, because a fresh page
+   means a fresh context, an empty cookie jar, and a token already spent. */
+const AUTH_URL = process.env.TRACKING_AUTH_URL || "";
+
+/* The grid collapses at Tailwind's `lg`, 1024px, which is the breakpoint the
+   approved spec names. 1440 is comfortably above it, where the grid is 300px +
+   rest. 900 is comfortably below it, where the same grid stacks into one
+   column. Both are kept clear of the boundary so a scrollbar's width cannot
+   decide which side of it the viewport lands on. */
+const WIDE = 1440;
+const NARROW = 900;
+
+/* Every check lands here with its own state, and SKIP is a state of its own on
+   purpose. A check that found nothing to look at proved nothing, so folding it
+   into the pass count would let an empty rail masquerade as evidence that the
+   two columns sit side by side. */
+const results = [];
+const record = (name, state, detail) => results.push({ name, state, detail });
+const check = (name, ok, detail) => record(name, ok ? "PASS" : "FAIL", ok ? "" : detail);
+
+/* The measurements, exported so they can be pointed at fixtures with
+   known-good and known-bad geometry. A detector nobody has ever seen detect
+   anything is not evidence. */
+
+// How far the document itself scrolls sideways. This is the failure mode both
+// of the 2026-08-13 bugs shared.
+export async function documentOverflow(page) {
+  return page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+}
+
+/* Elements spilling out of their own parent's box.
+   Scoped to the `.ds` wrapper that holds <main>, NOT to every `.ds` on the
+   page: AppShell's <aside> also carries the class, and its known mobile
+   squeeze (docs/issues/2026-08-13-appshell-mobile-sidebar.md) is not a
+   /tracking defect. Anything it reported here would be noise that trains the
+   reader to ignore this check. */
+export async function findSpills(page) {
+  return page.evaluate(() => {
+    const root = document.querySelector("main")?.closest(".ds");
+    if (!root) return null;
+    const bad = [];
+    for (const el of root.querySelectorAll("*")) {
+      const parent = el.parentElement;
+      if (!parent) continue;
+      const e = el.getBoundingClientRect();
+      const p = parent.getBoundingClientRect();
+      if (e.width === 0 || p.width === 0) continue;
+      // A scroll container is allowed to hold something wider than itself.
+      if (getComputedStyle(parent).overflowX !== "visible") continue;
+      const spill = Math.round(Math.max(e.right - p.right, p.left - e.left));
+      if (spill > 1) {
+        const label = `${el.tagName.toLowerCase()}.${el.getAttribute("class") || "?"}`;
+        bad.push(`${label.slice(0, 80)} spills ${spill}px`);
+      }
+    }
+    return bad.slice(0, 10);
+  });
+}
+
+/* Geometry of the two columns.
+ *
+ * The rail is anchored on the grid's own template class rather than on
+ * `[aria-current]` or `.ds ul li button`. Both of those match the AppShell
+ * sidebar first: its active nav link carries aria-current="page" and its <ul>
+ * comes earlier in the document, so a stacked /tracking would still have
+ * measured the sidebar's right edge against the map and reported a pass.
+ *
+ * Returns null when the grid is absent, which is a broken anchor rather than
+ * an empty rail, and the caller treats the two differently.
+ */
+export async function readColumns(page) {
+  return page.evaluate(() => {
+    const grid = [...document.querySelectorAll("main div")].find((el) =>
+      (el.getAttribute("class") || "").includes("grid-cols-[300px"),
+    );
+    const railColumn = grid?.firstElementChild;
+    if (!railColumn) return null;
+
+    const map = document.querySelector('section[aria-label="Vehicle position map"]');
+    const r = railColumn.getBoundingClientRect();
+    return {
+      rows: railColumn.querySelectorAll("li button").length,
+      railRight: Math.round(r.right),
+      mapFound: Boolean(map),
+      mapLeft: map ? Math.round(map.getBoundingClientRect().left) : 0,
+    };
+  });
+}
+
+/* Guard, and the most important part of this file. An unauthenticated
+   /tracking redirects to /login, and the TenantGate panel it renders instead
+   satisfies every assertion below while measuring nothing at all. The loading
+   card and the query-failed card do the same, so both abort rather than being
+   measured. */
+export async function assertOnRealPage(page) {
+  const landed = new URL(page.url()).pathname.replace(/\/$/, "");
+  if (landed !== "/tracking") return `redirected to ${landed}, not signed in`;
+  return page.evaluate(() => {
+    if (!document.querySelector("main h1")) return "/tracking rendered without its heading";
+    const text = document.body.innerText;
+    if (text.includes("Could not load tracking")) return "the jobs query failed";
+    if (text.includes("Loading jobs")) return "the page never left its loading state";
+    return null;
+  });
+}
+
+/* Returns the process exit code instead of calling process.exit, so the caller
+   can close the browser first. process.exit skips finally blocks, which is how
+   an aborted run leaks a chromium process. */
+async function run(page) {
+  await page.goto(AUTH_URL, { waitUntil: "networkidle" });
+  if (new URL(page.url()).pathname.startsWith("/login")) {
+    console.log("ABORT  sign-in link rejected (expired, already used, or bad token).");
+    console.log("       Mint a fresh one: node scripts/dev-login.mjs <email> /tracking");
+    return 2;
+  }
+
+  await page.setViewportSize({ width: WIDE, height: 1000 });
+  await page.goto(TARGET, { waitUntil: "networkidle" });
+
+  // The rail arrives from a client-side query, so networkidle can land while
+  // the loading card is still up.
+  await page
+    .waitForFunction(() => !document.body.innerText.includes("Loading jobs"), { timeout: 15000 })
+    .catch(() => {});
+
+  const problem = await assertOnRealPage(page);
+  if (problem) {
+    console.log(`ABORT  ${problem}. Nothing was measured.`);
+    return 2;
+  }
+
+  // 1. The page itself never scrolls sideways.
+  const wideOverflow = await documentOverflow(page);
+  check("no horizontal overflow at 1440px", wideOverflow <= 1, `document overflows by ${wideOverflow}px`);
+
+  // 2. Nothing spills out of its own parent's box.
+  const spills = await findSpills(page);
+  if (spills === null) {
+    console.log("ABORT  no `.ds` wrapper around <main>. Nothing was measured.");
+    return 2;
+  }
+  check("no child spills its parent", spills.length === 0, spills.join("; "));
+
+  // 3. With rows in the rail, the detail column belongs beside it, not under it.
+  const columns = await readColumns(page);
+  if (!columns) {
+    // Not an empty rail: the grid this check navigates by is gone, so the
+    // check cannot be trusted to detect anything and must not report a pass.
+    record("detail column sits beside the rail at 1440px", "FAIL", "the 300px grid is gone, so this check has nothing to measure");
+  } else if (columns.rows === 0) {
+    record(
+      "detail column sits beside the rail at 1440px",
+      "SKIP",
+      "the rail was empty, so no job satisfied the on-the-road predicate",
+    );
+  } else if (!columns.mapFound) {
+    record(
+      "detail column sits beside the rail at 1440px",
+      "FAIL",
+      `the rail has ${columns.rows} rows but no map rendered beside them`,
+    );
+  } else {
+    check(
+      "detail column sits beside the rail at 1440px",
+      columns.mapLeft >= columns.railRight - 1,
+      `rail ends at ${columns.railRight}, map starts at ${columns.mapLeft}`,
+    );
+  }
+
+  // 4. The stacking breakpoint, where the grid collapses to one column and a
+  //    min-width that survived at 1440px stops fitting.
+  await page.setViewportSize({ width: NARROW, height: 1000 });
+  await page.waitForTimeout(300);
+  const narrowOverflow = await documentOverflow(page);
+  check(
+    "no horizontal overflow at 900px",
+    narrowOverflow <= 1,
+    `document overflows by ${narrowOverflow}px`,
+  );
+
+  const failures = results.filter((r) => r.state === "FAIL");
+  const skipped = results.filter((r) => r.state === "SKIP");
+  const measured = results.length - skipped.length;
+
+  for (const r of results) {
+    console.log(`${r.state}  ${r.name}${r.detail ? `\n      ${r.detail}` : ""}`);
+  }
+
+  if (measured === 0) {
+    console.log("ABORT  every check skipped. Nothing was measured.");
+    return 2;
+  }
+  if (failures.length > 0) {
+    console.log(`FAILED  ${failures.length} of ${measured} measured checks, ${skipped.length} skipped`);
+    return 1;
+  }
+  console.log(`PASSED  ${measured} checks, ${skipped.length} skipped`);
+  return 0;
+}
+
+// Importing this file for its exports must not launch a browser.
+const isMain = import.meta.url === `file://${process.argv[1]?.replace(/\\/g, "/")}`
+  || process.argv[1]?.endsWith("tracking-layout.spec.mjs");
+
+if (isMain) {
+  // Checked before launching, so a missing link costs nothing.
+  if (!AUTH_URL) {
+    console.log("ABORT  TRACKING_AUTH_URL is required. See the header of this file.");
+    process.exit(2);
+  }
+
+  const browser = await chromium.launch();
+  // ONE context for the whole run, so the session cookie survives both widths.
+  const context = await browser.newContext({ viewport: { width: WIDE, height: 1000 } });
+  let code = 2;
+  try {
+    code = await run(await context.newPage());
+  } catch (err) {
+    // An exception means the measurements never completed, which is exit 2
+    // territory, not a layout failure.
+    console.log(`ABORT  the run threw: ${err.message}`);
+  } finally {
+    await browser.close();
+  }
+  process.exit(code);
+}
+```
+
+- [ ] **Step 2: Run it**
+
+Once, before the first run (shared with `pod-layout.spec.mjs`, and deliberately not in the root `package.json` so Vercel never downloads a browser for one local script):
+
+```bash
+npm install playwright --prefix tests
+npx playwright install chromium
+```
+
+Then, from the repo root with the dev server up:
+
+```bash
+LINK=$(node scripts/dev-login.mjs <your-email> /tracking | grep -o 'http://[^ ]*')
+TRACKING_AUTH_URL="$LINK" node tests/tracking-layout.spec.mjs
+```
+
+Expected: `PASSED  4 checks, 0 skipped`, or `PASSED  3 checks, 1 skipped` when the rail is empty. Both are a pass. An empty rail means no job currently satisfies the on-the-road predicate, which is likely on this database and is not a spec failure. The three viewport and spill checks still run and still measure.
+
+Exit codes: `0` passed, `1` a real layout failure, `2` nothing was measured. A `2` is never a pass in disguise: read the `ABORT` line, which names which of the non-measurable renders it hit, and fix that before rerunning. The commonest one is a spent sign-in link, since the token is single-use; mint a fresh one and try again.
+
+**STATUS: this run is still outstanding.** It needs a session against the live database, because `scripts/dev-login.mjs` mints a real magic link and `.env.local` points at production. Nothing in `npm test`, `npm run typecheck` or `npm run build` covers what this file measures, so the layout claim in this plan is unverified until someone runs it and records the output here.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/tracking-layout.spec.mjs
+git commit -m "Add a layout regression check for /tracking
+
+Mirrors tests/pod-layout.spec.mjs. A four-card detail column beside a fixed
+300px rail is the same class of risk the POD check was written for.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 15: Full verification
+
+- [ ] **Step 1: Run everything**
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
+
+Expected: all three pass.
+
+- [ ] **Step 2: Confirm the old page's assets are unreferenced**
+
+Run: `grep -rn "GPS.jpg" app components lib public`
+
+If `public/GPS.jpg` is now referenced by nothing, leave the file in place. Deleting a public asset is outside this change's scope and belongs in a separate cleanup commit.
+
+- [ ] **Step 3: Walk the page manually**
+
+With the dev server up and signed in via `scripts/dev-login.mjs` (read only, it points at the live database):
+
+- The rail lists jobs, or the empty state reads "No jobs on the road".
+- Clicking a rail row swaps the detail column and moves `aria-current`.
+- Tab into the rail. Focus is visible on each row.
+- Every telemetry tile reads "No signal" or "—". None reads "0 km/h".
+- The GPS pill reads "No GPS" in grey and does not pulse.
+- The map card shows its placeholder text at 260px.
+- Toggle light and dark. Nothing stays the wrong colour.
+- Enable reduced motion at the OS level and reload. No element pulses.
+
+- [ ] **Step 4: Push the branch**
+
+```bash
+git push -u origin ethan/tracking-console
+```
+
+---
+
+## Self-review notes
+
+**Spec coverage.** Every section of the design spec maps to a task: `lib/tracking/` modules to Tasks 1 and 3 to 6, the position seam to Tasks 1 and 2, components to Tasks 8 to 11, composition and the three page states to Task 12, the theme conversion to Task 13, accessibility to Tasks 7 (reduced motion), 8 (`aria-current`) and 9 (`tel:` link), the three carried fixes to Task 12, and testing to every lib task plus Task 14.
+
+**Deviations, all flagged above:** the position seam is two files rather than one; the activity feed drops three never-written tables; timestamp normalisation was added.
+
+**Naming consistency.** `PositionReading`, `PositionSource`, `signalState`, `isLive`, `pingLabel`, `buildRail`, `RailRow`, `Phase`, `PHASE_LABEL`, `PHASE_TONE`, `buildJourney`, `JourneyNode`, `arrowStateFor`, `routeGlyph`, `telemetryTiles`, `Tile`, `ROUTING_HINT`, `buildActivity`, `ActivityEvent` are each defined once and used with the same name and signature everywhere they appear.

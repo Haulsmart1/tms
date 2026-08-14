@@ -29,7 +29,7 @@
     border-style: solid;
     border-color: var(--line);
   }
-  :where(.ds) :where(h1, h2, h3, h4, p, figure, ul, ol) { margin: 0; }
+  :where(.ds) :where(h1, h2, h3, h4, p, figure, ul, ol, dl) { margin: 0; }
   /* Preflight normally resets anchors too. Without this every link on the new
      pages gets the UA underline, and any link without an explicit text-* class
      renders in browser blue. Links that should LOOK like links opt back in with
@@ -47,4 +47,27 @@
     color: inherit;
   }
   :where(.ds) :where(button) { cursor: pointer; }
+}
+
+/* Scoped to .ds so it cannot reach the ~14 legacy inline-styled pages.
+
+   The design mockup animates the live-GPS dot and the current-stop marker with
+   an infinite pulse and has no reduced-motion guard at all. An infinite
+   animation is exactly what prefers-reduced-motion exists for, and this console
+   is used for long shifts, so the guard is not optional. */
+@layer components {
+  @keyframes ds-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
+
+  .ds .ds-pulse {
+    animation: ds-pulse 1.8s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ds .ds-pulse {
+      animation: none;
+    }
+  }
 }
