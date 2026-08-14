@@ -82,6 +82,26 @@ type Integration = {
   last_sync_at: string | null;
 };
 
+type XeroStatus = {
+  connected: boolean;
+  integration: {
+    id: string;
+    provider: string;
+    display_name: string | null;
+    active: boolean;
+    connection_status: string;
+    external_tenant_id: string | null;
+    external_tenant_name: string | null;
+    default_sales_account_code: string | null;
+    default_purchase_account_code: string | null;
+    default_tax_code: string | null;
+    default_currency: string | null;
+    connected_at: string | null;
+    last_sync_at: string | null;
+    updated_at: string | null;
+  } | null;
+};
+
 type GenericRow = Record<string, unknown>;
 
 const TABS: Array<[Tab, string]> = [
@@ -152,7 +172,59 @@ export default function CustomerAccountsPage() {
   const [purchaseAccountCode, setPurchaseAccountCode] = useState("");
   const [taxCode, setTaxCode] = useState("");
 
+  const [xeroStatus, setXeroStatus] = useState<XeroStatus>({
+    connected: false,
+    integration: null,
+  });
+  const [xeroWorking, setXeroWorking] = useState(false);
+
   const tenantId = tenant.activeTenantId;
+
+  const loadXeroStatus = useCallback(async () => {
+    if (!tenantId) {
+      setXeroStatus({
+        connected: false,
+        integration: null,
+      });
+      return;
+    }
+
+    const response = await fetch(
+      `/api/accounts/accounting/xero/status?tenantId=${encodeURIComponent(
+        tenantId
+      )}`,
+      {
+        cache: "no-store",
+      }
+    );
+
+    const body = (await response.json()) as XeroStatus & {
+      error?: string;
+    };
+
+    if (!response.ok) {
+      throw new Error(body.error || "Unable to load Xero connection status.");
+    }
+
+    setXeroStatus({
+      connected: body.connected === true,
+      integration: body.integration ?? null,
+    });
+
+    const integration = body.integration;
+
+    if (integration) {
+      setProvider("xero");
+      setProviderDisplayName(integration.display_name || "Xero");
+      setSalesAccountCode(
+        integration.default_sales_account_code || ""
+      );
+      setPurchaseAccountCode(
+        integration.default_purchase_account_code || ""
+      );
+      setTaxCode(integration.default_tax_code || "");
+    }
+  }, [tenantId]);
 
   const loadLookups = useCallback(async () => {
     if (!tenantId) return;
@@ -290,6 +362,20 @@ export default function CustomerAccountsPage() {
   useEffect(() => {
     void loadTab();
   }, [loadTab]);
+
+  useEffect(() => {
+    if (tab !== "accounting" || !tenantId) {
+      return;
+    }
+
+    void loadXeroStatus().catch((error) => {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to load Xero status."
+      );
+    });
+  }, [loadXeroStatus, tab, tenantId]);
 
   const selectedReady = useMemo(
     () => readyJobs.filter((job) => selectedJobs.includes(job.job_id)),
@@ -546,6 +632,136 @@ export default function CustomerAccountsPage() {
     }
   }
 
+  function connectXero() {
+    const targetTenantId =
+      tenant.writeTenantId || tenant.activeTenantId;
+
+    if (!targetTenantId) {
+      setMessage("Choose a tenant before connecting Xero.");
+      return;
+    }
+
+    window.location.assign(
+      `/api/accounts/accounting/xero/connect?tenantId=${encodeURIComponent(
+        targetTenantId
+      )}`
+    );
+  }
+
+  async function testXeroConnection() {
+    const targetTenantId =
+      tenant.writeTenantId || tenant.activeTenantId;
+
+    if (!targetTenantId) {
+      setMessage("Choose a tenant before testing Xero.");
+      return;
+    }
+
+    setXeroWorking(true);
+    setMessage("");
+
+    try {
+      const response = await fetch(
+        "/api/accounts/accounting/xero/test",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenantId: targetTenantId,
+          }),
+        }
+      );
+
+      const body = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        organisation?: {
+          Name?: string;
+        } | null;
+      };
+
+      if (!response.ok) {
+        throw new Error(body.error || "Xero connection test failed.");
+      }
+
+      setMessage(
+        body.organisation?.Name
+          ? `Xero connection successful: ${body.organisation.Name}`
+          : "Xero connection successful."
+      );
+
+      await loadXeroStatus();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Xero connection test failed."
+      );
+    } finally {
+      setXeroWorking(false);
+    }
+  }
+
+  async function disconnectXero() {
+    const targetTenantId =
+      tenant.writeTenantId || tenant.activeTenantId;
+
+    if (!targetTenantId) {
+      setMessage("Choose a tenant before disconnecting Xero.");
+      return;
+    }
+
+    if (
+      !window.confirm(
+        "Disconnect Xero from this TMS tenant?"
+      )
+    ) {
+      return;
+    }
+
+    setXeroWorking(true);
+    setMessage("");
+
+    try {
+      const response = await fetch(
+        "/api/accounts/accounting/xero/disconnect",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenantId: targetTenantId,
+          }),
+        }
+      );
+
+      const body = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(body.error || "Unable to disconnect Xero.");
+      }
+
+      setMessage("Xero disconnected.");
+
+      await loadXeroStatus();
+      await loadTab();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to disconnect Xero."
+      );
+    } finally {
+      setXeroWorking(false);
+    }
+  }
+
   async function saveAccountingProvider() {
     if (!tenant.writeTenantId) {
       setMessage("Choose a tenant.");
@@ -682,7 +898,7 @@ export default function CustomerAccountsPage() {
                           )
                           .map((invoice) => (
                             <option key={invoice.id} value={invoice.id}>
-                              {invoice.invoice_number} ·{" "}
+                              {invoice.invoice_number} Â·{" "}
                               {money(
                                 invoice.balance_due,
                                 invoice.currency || "GBP"
@@ -760,8 +976,8 @@ export default function CustomerAccountsPage() {
                         <option value="">Choose invoice</option>
                         {invoices.map((invoice) => (
                           <option key={invoice.id} value={invoice.id}>
-                            {invoice.invoice_number} ·{" "}
-                            {invoice.customer_name || "Customer"} ·{" "}
+                            {invoice.invoice_number} Â·{" "}
+                            {invoice.customer_name || "Customer"} Â·{" "}
                             {money(invoice.total, invoice.currency || "GBP")}
                           </option>
                         ))}
@@ -1054,10 +1270,114 @@ export default function CustomerAccountsPage() {
               {tab === "accounting" ? (
                 <section style={styles.card}>
                   <h2 style={styles.sectionTitle}>Accounting Integration</h2>
+
+                  <div
+                    style={{
+                      ...styles.invoiceCard,
+                      marginBottom: 18,
+                    }}
+                  >
+                    <div style={styles.rowBetween}>
+                      <div>
+                        <strong style={styles.invoiceNumber}>Xero</strong>
+
+                        <div style={styles.muted}>
+                          Secure OAuth accounting connection
+                        </div>
+                      </div>
+
+                      <Status
+                        value={
+                          xeroStatus.connected
+                            ? "connected"
+                            : xeroStatus.integration?.connection_status ||
+                              "not_connected"
+                        }
+                      />
+                    </div>
+
+                    <div style={styles.infoGrid}>
+                      <Info
+                        label="Organisation"
+                        value={
+                          xeroStatus.integration?.external_tenant_name ||
+                          "Not connected"
+                        }
+                      />
+
+                      <Info
+                        label="Connected"
+                        value={formatDate(
+                          xeroStatus.integration?.connected_at
+                        )}
+                      />
+
+                      <Info
+                        label="Last Sync"
+                        value={formatDate(
+                          xeroStatus.integration?.last_sync_at
+                        )}
+                      />
+
+                      <Info
+                        label="Currency"
+                        value={
+                          xeroStatus.integration?.default_currency ||
+                          "GBP"
+                        }
+                      />
+                    </div>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 10,
+                        flexWrap: "wrap",
+                        marginTop: 14,
+                      }}
+                    >
+                      {!xeroStatus.connected ? (
+                        <button
+                          type="button"
+                          onClick={connectXero}
+                          disabled={xeroWorking}
+                          style={styles.primaryButton}
+                        >
+                          Connect Xero
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void testXeroConnection()}
+                            disabled={xeroWorking}
+                            style={styles.primaryButton}
+                          >
+                            {xeroWorking
+                              ? "Testing..."
+                              : "Test Connection"}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => void disconnectXero()}
+                            disabled={xeroWorking}
+                            style={{
+                              ...styles.primaryButton,
+                              background: "#991b1b",
+                            }}
+                          >
+                            Disconnect Xero
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
                   <p style={styles.muted}>
-                    Save the provider configuration here. OAuth connection
-                    buttons for Xero, Sage, QuickBooks and FreeAgent come in the
-                    next integration phase.
+                    Configure nominal/account codes here. Xero credentials are
+                    stored securely on the server and are never exposed to the
+                    browser.
                   </p>
 
                   <div style={styles.formGrid}>
@@ -1121,32 +1441,43 @@ export default function CustomerAccountsPage() {
 
                   <ActionButton
                     working={working}
-                    label="Save Provider"
+                    label="Save Provider Settings"
                     onClick={saveAccountingProvider}
                   />
 
                   <div style={styles.listGrid}>
-                    {integrations.map((integration) => (
-                      <article
-                        key={integration.id}
-                        style={styles.invoiceCard}
-                      >
-                        <div style={styles.rowBetween}>
-                          <strong>
-                            {integration.display_name || integration.provider}
-                          </strong>
-                          <Status value={integration.connection_status} />
-                        </div>
+                    {integrations
+                      .filter(
+                        (integration) =>
+                          integration.provider !== "xero" ||
+                          integration.id !== xeroStatus.integration?.id
+                      )
+                      .map((integration) => (
+                        <article
+                          key={integration.id}
+                          style={styles.invoiceCard}
+                        >
+                          <div style={styles.rowBetween}>
+                            <strong>
+                              {integration.display_name ||
+                                integration.provider}
+                            </strong>
 
-                        <div style={styles.muted}>
-                          Provider: {integration.provider}
-                        </div>
+                            <Status
+                              value={integration.connection_status}
+                            />
+                          </div>
 
-                        <div style={styles.muted}>
-                          Last sync: {formatDate(integration.last_sync_at)}
-                        </div>
-                      </article>
-                    ))}
+                          <div style={styles.muted}>
+                            Provider: {integration.provider}
+                          </div>
+
+                          <div style={styles.muted}>
+                            Last sync:{" "}
+                            {formatDate(integration.last_sync_at)}
+                          </div>
+                        </article>
+                      ))}
                   </div>
                 </section>
               ) : null}
@@ -1453,7 +1784,7 @@ function money(
 }
 
 function formatDate(value: string | null | undefined) {
-  if (!value) return "—";
+  if (!value) return "â€”";
 
   const date = new Date(
     value.includes("T") ? value : `${value}T00:00:00`
