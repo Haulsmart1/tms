@@ -51,13 +51,13 @@ Each preserves the approved contract. Flagged here so review can catch them.
 
 **Create, `app/tracking/`:** `TrackingRail.tsx`, `TrackingHeader.tsx`, `TrackingMap.tsx`, `JourneyTimeline.tsx`, `ActivityFeed.tsx`.
 
-**Create:** `lib/time.ts` (Task 4a), holding `OPERATOR_TIME_ZONE`. Flat in `lib/` like `cn.ts` and `roles.ts`, because both `lib/pod/` and `lib/tracking/` format against it.
+**Create:** `lib/time.ts` and `lib/time.test.ts` (Task 4a), holding `OPERATOR_TIME_ZONE` and `operatorDay`. Flat in `lib/` like `cn.ts` and `roles.ts`, because both `lib/pod/` and `lib/tracking/` format against them.
 
 **Modify:** `app/tracking/page.tsx` (full rewrite), `lib/nav/themeableRoutes.ts` (one line), `app/globals.css` (one components layer).
 
 **Create:** `tests/tracking-layout.spec.mjs`.
 
-**Do not touch:** `app/pod/*`, `components/RouteProgress.tsx`, and `lib/pod/*` with one exception: Task 4a deletes the `OPERATOR_TIME_ZONE` declaration from `lib/pod/kpis.ts` and imports it from `lib/time.ts` instead. That module's own comment promised the constant lived in a single place, so a second consumer has to move it rather than copy it.
+**Do not touch:** `app/pod/*`, `components/RouteProgress.tsx`, and `lib/pod/*` with one exception: Task 4a deletes the `OPERATOR_TIME_ZONE` declaration and the private `operatorDateKey` helper from `lib/pod/kpis.ts` and imports both from `lib/time.ts` instead. That module's own comment promised the constant lived in a single place, so a second consumer has to move it rather than copy it, and the same reasoning applies to the calendar day derived from it.
 
 ---
 
@@ -261,8 +261,18 @@ describe("speedLabel", () => {
     expect(speedLabel(reading(AT, 0.4))).toBe("Stationary");
   });
 
-  it("says Stationary for a negative speed rather than rendering the minus", () => {
-    expect(speedLabel(reading(AT, -5))).toBe("Stationary");
+  it("returns null for a negative speed, because that is garbage, not a parked truck", () => {
+    // "Stationary" is a positive claim about where a vehicle is. A negative
+    // speed is unusable data, so it takes the same treatment as NaN: report
+    // unknown rather than assert something the source did not support.
+    expect(speedLabel(reading(AT, -5))).toBeNull();
+  });
+
+  it("returns null for a small negative speed too, since the guard is on the rounded value", () => {
+    // -0.4 rounds to -0 in JavaScript, and -0 < 0 is false. Math.round(-0.6)
+    // is -1, which does trip the guard. Both must land on null rather than one
+    // of them slipping through as "Stationary".
+    expect(speedLabel(reading(AT, -0.6))).toBeNull();
   });
 
   it("returns null for a non-finite speed, so callers can word unknown themselves", () => {
@@ -387,10 +397,16 @@ export function pingLabel(reading: PositionReading | null, now: Date): string {
    Returns null rather than a string for an unusable speed, so each caller can
    word "unknown" to suit its own context. Guarding on the ROUNDED value is
    load-bearing: 0.4 km/h is greater than zero but rounds to zero, and "0 km/h"
-   on a truck is the string this vocabulary exists to avoid. */
+   on a truck is the string this vocabulary exists to avoid.
+
+   A NEGATIVE speed is not a stationary vehicle, it is garbage from the source,
+   and "Stationary" is a confident positive claim about where a truck is. It
+   joins the non-finite case in returning null, so the tile reports unknown
+   rather than asserting something it cannot know. */
 export function speedLabel(reading: PositionReading): string | null {
   const kph = Math.round(reading.speedKph);
   if (!Number.isFinite(kph)) return null;
+  if (kph < 0) return null;
   return kph > 0 ? `${kph} km/h` : "Stationary";
 }
 ```
@@ -398,7 +414,7 @@ export function speedLabel(reading: PositionReading): string | null {
 - [ ] **Step 5: Run the test to verify it passes**
 
 Run: `npx vitest run lib/tracking/position.test.ts`
-Expected: PASS, 27 tests.
+Expected: PASS, 28 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -598,7 +614,7 @@ Create `lib/tracking/onTheRoad.test.ts`:
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { localDay, isOnTheRoad, jobPhase, buildRail, routeEndpoints } from "./onTheRoad";
+import { isOnTheRoad, jobPhase, buildRail, routeEndpoints } from "./onTheRoad";
 import type { TrackingJob, TrackingStop } from "./types";
 
 const NOW = new Date("2026-08-14T12:00:00Z");
@@ -630,17 +646,22 @@ function job(over: Partial<TrackingJob> = {}): TrackingJob {
   };
 }
 
-describe("localDay", () => {
-  it("formats the local calendar day, not the UTC one", () => {
-    // A job scheduled for the 14th must still count as due at 23:30 local on
-    // the 14th. Formatting via toISOString() would roll it to the 15th in any
-    // zone ahead of UTC and quietly drop it from the rail.
-    const d = new Date(2026, 7, 14, 23, 30);
-    expect(localDay(d)).toBe("2026-08-14");
+describe("the operator's day boundary", () => {
+  /* Constructed from explicit UTC instants rather than local-component `new
+     Date(y, m, d)`, so these say what they mean regardless of what the runner's
+     TZ happens to be. operatorDay owns the formatting and lib/time.test.ts
+     pins it; what these two assert is that isOnTheRoad asks IT and gets the
+     boundary right on both sides. */
+
+  it("keeps a job scheduled for the operator's today on the road at 23:30 London", () => {
+    // 22:30Z is 23:30 on the 14th in London during BST, still the 14th.
+    const at = new Date("2026-08-14T22:30:00Z");
+    expect(isOnTheRoad(job({ scheduled_date: "2026-08-14" }), at)).toBe(true);
   });
 
-  it("pads single-digit months and days", () => {
-    expect(localDay(new Date(2026, 0, 5, 9, 0))).toBe("2026-01-05");
+  it("keeps tomorrow's job off the rail at the same instant", () => {
+    const at = new Date("2026-08-14T22:30:00Z");
+    expect(isOnTheRoad(job({ scheduled_date: "2026-08-15" }), at)).toBe(false);
   });
 });
 
@@ -809,6 +830,7 @@ Expected: FAIL, module resolution error for `./onTheRoad`.
 Create `lib/tracking/onTheRoad.ts`:
 
 ```ts
+import { operatorDay } from "../time";
 import type { TrackingJob, TrackingStop } from "./types";
 import type { Tone } from "../../components/Badge";
 
@@ -857,20 +879,10 @@ export const PHASE_TONE: Record<Phase, Tone> = {
 
 /* jobs.scheduled_date is a `date` column, so it arrives as "YYYY-MM-DD" with
    no time and no zone. Comparing it against a UTC-formatted today would drop a
-   job from the rail every evening in any zone ahead of UTC, so today is
-   formatted from the LOCAL calendar day. This is safe only because
-   app/tracking/page.tsx is a client component fetching in an effect, so it
-   runs in the browser on the user's own clock. Calling it from a server
-   component or route handler would run it on Vercel's UTC runtime and
-   silently reintroduce the bug this function exists to avoid; moving it
-   server-side would require pinning a timezone explicitly. */
-export function localDay(now: Date): string {
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-
+   job from the rail every evening in any zone ahead of UTC, so today comes
+   from operatorDay in lib/time.ts, which is pinned to the operator's zone and
+   therefore gives the same answer on a dispatcher's laptop, on Vercel's UTC
+   runtime, and in a test. */
 export function isOnTheRoad(job: TrackingJob, now: Date): boolean {
   if (job.status !== "planned") return false;
   if (!job.vehicle_id) return false;
@@ -878,7 +890,7 @@ export function isOnTheRoad(job: TrackingJob, now: Date): boolean {
   // would fill the rail with work nobody scheduled.
   if (!job.scheduled_date) return false;
   // Lexicographic comparison is correct for "YYYY-MM-DD".
-  if (job.scheduled_date > localDay(now)) return false;
+  if (job.scheduled_date > operatorDay(now)) return false;
 
   const deliveries = job.stops.filter((s) => s.type === "delivery");
   if (deliveries.length === 0) return false;
@@ -888,7 +900,7 @@ export function isOnTheRoad(job: TrackingJob, now: Date): boolean {
 export function jobPhase(job: TrackingJob, now: Date): Phase {
   // Late is checked first and outranks progress: a job running a day behind is
   // still the thing a dispatcher needs to see, however many stops it has done.
-  if (job.scheduled_date && job.scheduled_date < localDay(now)) return "late";
+  if (job.scheduled_date && job.scheduled_date < operatorDay(now)) return "late";
   // ANY stop counts, including a collection, deliberately. A job whose goods
   // are collected is under way even before the first drop. Note this is a
   // wider net than isOnTheRoad, which filters to delivery stops: that is
@@ -1327,15 +1339,19 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ---
 
-### Task 4a: The shared operator timezone constant
+### Task 4a: The shared operator timezone, and the operator's calendar day
 
 **Files:**
 - Create: `lib/time.ts`
+- Create: `lib/time.test.ts`
 - Edit: `lib/pod/kpis.ts`
-
-No test file. It is a single string constant, and its behaviour is already asserted through the two modules that consume it: `lib/pod/kpis.test.ts` for "Delivered today" and `lib/tracking/journey.test.ts` for the stop date and time assertions.
+- Edit: `lib/tracking/onTheRoad.ts`
 
 `lib/pod/kpis.ts` declared `OPERATOR_TIME_ZONE` and its comment promised that it was "the single place that has to change". Task 4 above formats stop dates against the same operator calendar, which would make that promise false the moment a second literal appeared. Hoisting the constant to `lib/` keeps it true. The flat filename matches the existing `lib/cn.ts` and `lib/roles.ts` convention.
+
+**The same argument applies one level up, to the DAY and not just the zone.** `lib/pod/kpis.ts` had a private `operatorDateKey` and `lib/tracking/onTheRoad.ts` had a private `localDay`, two implementations of "the operator's calendar day" that disagreed: `localDay` read the machine's zone, so a dispatcher on a UTC laptop between midnight and 01:00 London time in summer computed yesterday, and every job scheduled for the real today vanished from the rail for that hour while the Activity card beside it stamped its events with the correct day. So `lib/time.ts` exports `operatorDay` too, and both modules call it.
+
+`operatorDay` gets its own `lib/time.test.ts`, which is the one test in the suite that `vitest.config.ts` cannot render pointless. That config pins `TZ=Europe/London`, so a runtime-local implementation and an `OPERATOR_TIME_ZONE` one agree on every ordinary instant and no test elsewhere can tell them apart. `lib/time.test.ts` uses instants that fall on different calendar days in UTC and in London, so only the formatter passes them.
 
 - [ ] **Step 1: Create `lib/time.ts`**
 
@@ -1361,34 +1377,111 @@ No test file. It is a single string constant, and its behaviour is already asser
    default until it is plumbed through. When it is, this is the single place
    that has to change. */
 export const OPERATOR_TIME_ZONE = "Europe/London";
+
+/* THE ONE DEFINITION OF THE OPERATOR'S CALENDAR DAY.
+
+   en-CA formats as YYYY-MM-DD, which compares correctly as a plain string.
+
+   A runtime's own local day is NOT this. getFullYear/getMonth/getDate resolve
+   in whatever zone the machine happens to be set to, so a dispatcher on a UTC
+   laptop between midnight and 01:00 London time in summer computes yesterday,
+   and every job scheduled for the real today drops out of the rail for that
+   hour while the card beside it stamps its events with the correct day. Two
+   private copies of this used to exist, in lib/pod/kpis.ts and
+   lib/tracking/onTheRoad.ts, and they disagreed on exactly that hour. Anything
+   asking "what day is it for the operator?" calls this. */
+export function operatorDay(now: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: OPERATOR_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
 ```
 
-- [ ] **Step 2: Point `lib/pod/kpis.ts` at it**
-
-Delete the `OPERATOR_TIME_ZONE` declaration and its comment block from `lib/pod/kpis.ts`, and add the import at the top of the file:
+- [ ] **Step 2: Create `lib/time.test.ts`**
 
 ```ts
-import { OPERATOR_TIME_ZONE } from "../time";
+import { describe, it, expect } from "vitest";
+import { OPERATOR_TIME_ZONE, operatorDay } from "./time";
+
+/* THE TEST vitest.config.ts CANNOT MAKE POINTLESS.
+
+   That config pins TZ=Europe/London so timezone-sensitive tests discriminate
+   on every machine. The side effect is that a runtime-local implementation and
+   an OPERATOR_TIME_ZONE one agree on every ordinary instant, so no test in
+   lib/tracking/ can prove which of the two is actually doing the work.
+
+   The instants below are chosen to fall on DIFFERENT calendar days in UTC and
+   in London. A getFullYear/getMonth/getDate implementation would pass them
+   under the pinned TZ and fail on a UTC laptop or on Vercel, which is exactly
+   the bug operatorDay exists to end. */
+
+describe("operatorDay", () => {
+  it("returns the LONDON day for an instant that is the previous day in UTC", () => {
+    // 23:30 on the 14th UTC is 00:30 on the 15th in London during BST.
+    expect(operatorDay(new Date("2026-08-14T23:30:00Z"))).toBe("2026-08-15");
+  });
+
+  it("returns the LONDON day for an instant just before that boundary", () => {
+    // 22:30Z the same evening is still 23:30 on the 14th in London, so the two
+    // cases together pin the boundary rather than one side of it.
+    expect(operatorDay(new Date("2026-08-14T22:30:00Z"))).toBe("2026-08-14");
+  });
+
+  it("agrees with UTC in winter, when London carries no offset", () => {
+    // GMT, so 23:30Z is 23:30 local and the day does not roll. A formatter that
+    // hardcoded +1 rather than reading the zone would fail here.
+    expect(operatorDay(new Date("2026-01-14T23:30:00Z"))).toBe("2026-01-14");
+  });
+
+  it("zero-pads to YYYY-MM-DD, which is what makes plain string comparison correct", () => {
+    // jobs.scheduled_date arrives as "YYYY-MM-DD" and is compared with < and >
+    // against this. "2026-1-5" would compare wrongly against "2026-01-05".
+    expect(operatorDay(new Date("2026-01-05T09:00:00Z"))).toBe("2026-01-05");
+  });
+});
+
+describe("OPERATOR_TIME_ZONE", () => {
+  it("is Europe/London until company_profiles.timezone is plumbed through", () => {
+    expect(OPERATOR_TIME_ZONE).toBe("Europe/London");
+  });
+});
 ```
 
-Nothing outside `kpis.ts` imported the constant from there, so no re-export is needed. Confirm with `grep -rn OPERATOR_TIME_ZONE` before deleting the export; if a consumer has appeared since, re-export it from `kpis.ts` instead of breaking that importer.
+- [ ] **Step 3: Point `lib/pod/kpis.ts` at it**
 
-- [ ] **Step 3: Verify**
+Delete the `operatorDateKey` function and its comment from `lib/pod/kpis.ts`, swap the import, and have `isSameOperatorDay` call `operatorDay`:
 
-Run: `npx vitest run lib/pod/kpis.test.ts lib/tracking/journey.test.ts`
-Expected: PASS, 12 and 21 tests. Both suites exercise the constant, so an unresolved import or a changed zone fails here rather than in production.
+```ts
+import { operatorDay } from "../time";
+```
 
-Do NOT convert `lib/tracking/onTheRoad.ts` to use this constant. Its `localDay` deliberately uses the machine's local calendar and is commented to say so.
+Nothing outside `kpis.ts` imported `OPERATOR_TIME_ZONE` from there and `operatorDateKey` was never exported, so no re-export is needed. Confirm with `grep -rn "OPERATOR_TIME_ZONE\|operatorDateKey"` before deleting; if a consumer has appeared since, re-export from `kpis.ts` rather than breaking that importer.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Point `lib/tracking/onTheRoad.ts` at it**
+
+Delete `localDay` entirely, including its "safe only because the page is client-side" caveat, which no longer applies once the zone is pinned. `isOnTheRoad` and `jobPhase` call `operatorDay` instead, and `app/tracking/page.tsx` imports `operatorDay` from `lib/time` for its `scheduled_date` filter. See Task 3 for the resulting file.
+
+Note the ordering: Task 3 as written already imports `operatorDay`, so `lib/time.ts` has to exist before Task 3's suite will run. Do Step 1 of this task first if working strictly in order.
+
+- [ ] **Step 5: Verify**
+
+Run: `npx vitest run lib/time.test.ts lib/pod/kpis.test.ts lib/tracking/journey.test.ts lib/tracking/onTheRoad.test.ts`
+Expected: PASS, 5, 12, 21 and 24 tests. All four suites exercise `lib/time.ts`, so an unresolved import or a changed zone fails here rather than in production.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add lib/time.ts lib/pod/kpis.ts
-git commit -m "Hoist the operator timezone to lib/time.ts
+git add lib/time.ts lib/time.test.ts lib/pod/kpis.ts lib/tracking/onTheRoad.ts
+git commit -m "Hoist the operator timezone and calendar day to lib/time.ts
 
 lib/pod/kpis.ts promised this constant was the single place that has to
 change when tenants get a timezone. A second consumer would have made that
-false, so the constant moved rather than the promise.
+false, so the constant moved rather than the promise. The DAY moved with it:
+two private implementations disagreed for the hour after midnight London
+time on a UTC machine.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
@@ -1503,7 +1596,7 @@ export type Tile = {
   value: string;
   /** Render in the muted ink colour: this value is absent or not trustworthy. */
   muted: boolean;
-  /** Explains an absent value. Rendered as a title attribute and for screen readers. */
+  /** Explains an absent value. Rendered once, visually hidden, for screen readers. */
   hint?: string;
 };
 
@@ -2007,7 +2100,13 @@ import Card from "../../components/Card";
 import RouteProgress from "../../components/RouteProgress";
 import { PHASE_LABEL, PHASE_TONE, routeEndpoints, type Phase } from "../../lib/tracking/onTheRoad";
 import { arrowStateFor, routeGlyph, type JourneyNode } from "../../lib/tracking/journey";
-import { pingLabel, signalState, type PositionReading } from "../../lib/tracking/position";
+import {
+  FUTURE_TOLERANCE_MINUTES,
+  pingLabel,
+  readingAgeMinutes,
+  signalState,
+  type PositionReading,
+} from "../../lib/tracking/position";
 import { telemetryTiles } from "../../lib/tracking/telemetry";
 import type { TrackingJob } from "../../lib/tracking/types";
 
@@ -2040,10 +2139,18 @@ function GpsPill({ reading, now }: { reading: PositionReading | null; now: Date 
   }
 
   if (state === "stale") {
+    /* signalState folds a broken device clock into `stale`, but pingLabel's
+       vocabulary for it is "clock ahead", a standalone phrase the telemetry
+       tile renders on its own. Prefixing it here would read "Last seen clock
+       ahead", which is not a sentence. This branch says the same thing as one
+       instead, and pingLabel is left alone for the tile's sake. */
+    const age = reading ? readingAgeMinutes(reading, now) : null;
+    const clockAhead = age !== null && age < -FUTURE_TOLERANCE_MINUTES;
+
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-warning-tint px-2 py-0.5 text-xs font-medium text-warning-strong">
         <span aria-hidden className="block h-1.5 w-1.5 rounded-full bg-warning" />
-        Last seen {pingLabel(reading, now)}
+        {clockAhead ? "Device clock ahead" : `Last seen ${pingLabel(reading, now)}`}
       </span>
     );
   }
@@ -2102,11 +2209,14 @@ export default function TrackingHeader({ job, phase, journey, reading, now }: Pr
           </a>
         ) : null}
 
+        {/* "All jobs", not "Job detail": app/jobs/ has no dynamic route, so
+            there is no per-job page to send anyone to. The destination was
+            always honest; the label was not. */}
         <Link
           href="/jobs"
           className="rounded-sm px-2.5 py-1 text-xs font-semibold text-ink-2 hover:bg-surface-2 hover:text-ink"
         >
-          Job detail
+          All jobs
         </Link>
       </div>
 
@@ -2126,11 +2236,14 @@ export default function TrackingHeader({ job, phase, journey, reading, now }: Pr
         {tiles.map((tile) => (
           <div key={tile.label} className="min-w-0">
             <dt className="truncate text-kicker uppercase text-ink-3">{tile.label}</dt>
+            {/* The hint is rendered ONCE, in the sr-only span. It used to also
+                sit in a title attribute, and several screen readers announce
+                both, so the explanation was read out twice. title is mouse-only
+                anyway; the span is the load-bearing one. */}
             <dd
               className={`m-0 font-mono text-md font-semibold tabular-nums ${
                 tile.muted ? "text-ink-3" : "text-ink"
               }`}
-              title={tile.hint}
             >
               {tile.value}
               {tile.hint ? <span className="sr-only"> ({tile.hint})</span> : null}
@@ -2251,7 +2364,12 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 Create `app/tracking/JourneyTimeline.tsx`:
 
 ```tsx
+import Card from "../../components/Card";
 import type { JourneyNode } from "../../lib/tracking/journey";
+
+/* Renders correctly ONLY inside a `.ds` wrapper. Preflight is disabled, so the
+   borders here depend on the scoped reset in app/globals.css supplying
+   border-style: solid. Outside `.ds` the borders disappear entirely. */
 
 type Props = { nodes: JourneyNode[]; note: string };
 
@@ -2263,7 +2381,12 @@ const DOT: Record<"done" | "current" | "upcoming", string> = {
 
 export default function JourneyTimeline({ nodes, note }: Props) {
   return (
-    <section className="overflow-hidden rounded-lg border border-line bg-surface shadow-sm">
+    /* <Card flush> renders exactly the chrome this used to hand-roll, and
+       TrackingRail already uses it for the same header-plus-list shape. The
+       element goes from <section> to <div>, which changes nothing for assistive
+       technology: a <section> only becomes a `region` landmark once it has an
+       accessible name, and this one never had one. */
+    <Card flush>
       <header className="flex items-center gap-2.5 border-b border-line px-5 py-3">
         <h2 className="flex-1 text-sm font-semibold text-ink">Journey</h2>
         <span className="text-xs text-ink-3">{note}</span>
@@ -2325,7 +2448,7 @@ export default function JourneyTimeline({ nodes, note }: Props) {
           );
         })}
       </ol>
-    </section>
+    </Card>
   );
 }
 ```
@@ -2335,8 +2458,13 @@ export default function JourneyTimeline({ nodes, note }: Props) {
 Create `app/tracking/ActivityFeed.tsx`:
 
 ```tsx
+import Card from "../../components/Card";
 import type { ActivityEvent } from "../../lib/tracking/activity";
 import { OPERATOR_TIME_ZONE } from "../../lib/time";
+
+/* Renders correctly ONLY inside a `.ds` wrapper. Preflight is disabled, so the
+   borders here depend on the scoped reset in app/globals.css supplying
+   border-style: solid. Outside `.ds` the borders disappear entirely. */
 
 type Props = { events: ActivityEvent[] };
 
@@ -2353,7 +2481,12 @@ function stamp(at: string): string {
 
 export default function ActivityFeed({ events }: Props) {
   return (
-    <section className="overflow-hidden rounded-lg border border-line bg-surface shadow-sm">
+    /* <Card flush> renders exactly the chrome this used to hand-roll, and
+       TrackingRail already uses it for the same header-plus-list shape. The
+       element goes from <section> to <div>, which changes nothing for assistive
+       technology: a <section> only becomes a `region` landmark once it has an
+       accessible name, and this one never had one. */
+    <Card flush>
       <header className="flex items-center gap-2.5 border-b border-line px-5 py-3">
         <h2 className="flex-1 text-sm font-semibold text-ink">Activity</h2>
         <span className="font-mono text-data-sm tabular-nums text-ink-3">
@@ -2386,7 +2519,7 @@ export default function ActivityFeed({ events }: Props) {
           ))}
         </ol>
       )}
-    </section>
+    </Card>
   );
 }
 ```
@@ -2428,13 +2561,13 @@ import TrackingHeader from "./TrackingHeader";
 import TrackingMap from "./TrackingMap";
 import JourneyTimeline from "./JourneyTimeline";
 import ActivityFeed from "./ActivityFeed";
-import { buildRail, jobPhase, localDay } from "../../lib/tracking/onTheRoad";
+import { buildRail, isOnTheRoad, jobPhase } from "../../lib/tracking/onTheRoad";
 import { buildJourney } from "../../lib/tracking/journey";
 import { buildActivity } from "../../lib/tracking/activity";
 import { createSupabasePositionSource } from "../../lib/tracking/supabasePositions";
 import { pingLabel, type PositionReading } from "../../lib/tracking/position";
 import type { TrackingJob } from "../../lib/tracking/types";
-import { OPERATOR_TIME_ZONE } from "../../lib/time";
+import { OPERATOR_TIME_ZONE, operatorDay } from "../../lib/time";
 
 /* The old page polled every 10 seconds and fetched every vehicle_locations row
    ever recorded on each pass. 30 seconds matches the design's own footnote, and
@@ -2473,10 +2606,21 @@ export default function TrackingPage() {
 
   useEffect(() => {
     // `cancelled` guards against setting state after the tenant changes or the
-    // page unmounts mid-request. The old page had no such guard.
+    // page unmounts mid-request. The old page had no such guard. It says
+    // nothing about ORDERING, which is what `inFlight` below is for.
     let cancelled = false;
 
+    /* load() fires from the interval AND from visibilitychange, so two calls
+       can otherwise overlap and a slower earlier response can land after a
+       faster later one, painting the console with stale data. Dropping the
+       second call while one is running is enough here: the next poll is at
+       most 30 seconds away, and a dropped refresh costs nothing. */
+    let inFlight = false;
+
     async function load(showSkeleton: boolean) {
+      if (inFlight) return;
+      inFlight = true;
+
       if (showSkeleton) setLoading(true);
 
       /* createSupabasePositionSource THROWS on a query error rather than
@@ -2486,7 +2630,14 @@ export default function TrackingPage() {
          position query leaves the skeleton on screen forever with no retry.
          Catching here is what turns a throw into the error state. */
       try {
-        const today = localDay(new Date());
+        /* ONE `now` for the whole load, and the same one the render uses: it
+           is stored as lastLoadedAt below and read back as `now`. The server
+           filter, the vehicles whose positions get fetched, the rail order,
+           the phase badge and the staleness pill therefore all answer to a
+           single instant rather than to three Dates a few hundred
+           milliseconds apart. */
+        const startedAt = new Date();
+        const today = operatorDay(startedAt);
 
         /* Narrowed server-side on the three cheap conditions before
            isOnTheRoad applies the rest client-side. The stop-level condition
@@ -2544,11 +2695,15 @@ export default function TrackingPage() {
           };
         });
 
-        const now = new Date();
+        /* Filtered with isOnTheRoad directly rather than by calling buildRail
+           and looking each row's job back up: buildRail also sorts, which this
+           does not need, and the lookup was an O(n squared) find inside a map.
+           The rail itself is built once, in the render below. */
         const vehicleIds = Array.from(
           new Set(
-            buildRail(mapped, now)
-              .map((r) => mapped.find((j) => j.id === r.jobId)?.vehicle_id)
+            mapped
+              .filter((j) => isOnTheRoad(j, startedAt))
+              .map((j) => j.vehicle_id)
               .filter((id): id is string => Boolean(id)),
           ),
         );
@@ -2562,11 +2717,13 @@ export default function TrackingPage() {
         setPositions(readings);
         setRefreshFailed(false);
         setLoading(false);
-        setLastLoadedAt(new Date());
+        setLastLoadedAt(startedAt);
       } catch {
         if (cancelled) return;
         setRefreshFailed(true);
         setLoading(false);
+      } finally {
+        inFlight = false;
       }
     }
 
@@ -2588,10 +2745,16 @@ export default function TrackingPage() {
     };
   }, [tenant.activeTenantId, reloadToken]);
 
-  // One `now` per load, injected into every pure function, so the rail order,
-  // the phase badge and the staleness pill cannot disagree by milliseconds
-  // about what "today" or "stale" means. Same reasoning as app/pod/page.tsx.
-  const now = useMemo(() => new Date(), [jobs]);
+  /* One `now` per load, injected into every pure function, so the rail order,
+     the phase badge and the staleness pill cannot disagree by milliseconds
+     about what "today" or "stale" means. Same reasoning as app/pod/page.tsx.
+
+     It is literally the instant load() started, so the render agrees with the
+     query that fetched the data rather than merely being close to it. The
+     fallback is unreachable: `loading` stays true until the first successful
+     load sets lastLoadedAt, and a first load that fails renders the error card
+     instead. It exists only to keep this a plain Date for the callees. */
+  const now = useMemo(() => lastLoadedAt ?? new Date(), [lastLoadedAt]);
 
   const rail = useMemo(() => buildRail(jobs, now), [jobs, now]);
 
@@ -2663,8 +2826,8 @@ export default function TrackingPage() {
               </button>
             </div>
           ) : (
-            <div className="grid items-start gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
-              <div className="max-h-[40vh] overflow-y-auto xl:max-h-none xl:overflow-visible">
+            <div className="grid items-start gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
+              <div className="max-h-[40vh] overflow-y-auto lg:max-h-none lg:overflow-visible">
                 <TrackingRail
                   rows={rail}
                   selectedJobId={selected?.jobId ?? null}
@@ -2831,7 +2994,9 @@ Read `tests/pod-layout.spec.mjs` first and follow its structure, its env-var con
 
 - [ ] **Step 1: Write the spec**
 
-Create `tests/tracking-layout.spec.mjs`:
+Create `tests/tracking-layout.spec.mjs`. The block below is the DRAFT this task started from. The shipped file is the source of truth and is deliberately stricter: it exports its measurements so they can be pointed at fixtures, treats "nothing to measure" as a SKIP state distinct from a pass, aborts when the page is a redirect or a loading card rather than measuring it, anchors the column check on the grid's own `grid-cols-[300px` class instead of a selector the AppShell sidebar matches first, and uses one browser context so the single-use sign-in token is not spent twice.
+
+Two things the draft and the shipped file agree on, and which must stay true: the grid collapses at Tailwind's `lg`, 1024px, which is the breakpoint the approved spec names, so the wide measurement runs at 1440 and the narrow one at 900, both kept clear of the boundary so a scrollbar's width cannot decide which side of it a viewport lands on.
 
 ```js
 /* Layout regression check for /tracking.

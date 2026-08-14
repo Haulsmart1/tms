@@ -4,7 +4,13 @@ import Card from "../../components/Card";
 import RouteProgress from "../../components/RouteProgress";
 import { PHASE_LABEL, PHASE_TONE, routeEndpoints, type Phase } from "../../lib/tracking/onTheRoad";
 import { arrowStateFor, routeGlyph, type JourneyNode } from "../../lib/tracking/journey";
-import { pingLabel, signalState, type PositionReading } from "../../lib/tracking/position";
+import {
+  FUTURE_TOLERANCE_MINUTES,
+  pingLabel,
+  readingAgeMinutes,
+  signalState,
+  type PositionReading,
+} from "../../lib/tracking/position";
 import { telemetryTiles } from "../../lib/tracking/telemetry";
 import type { TrackingJob } from "../../lib/tracking/types";
 
@@ -37,10 +43,18 @@ function GpsPill({ reading, now }: { reading: PositionReading | null; now: Date 
   }
 
   if (state === "stale") {
+    /* signalState folds a broken device clock into `stale`, but pingLabel's
+       vocabulary for it is "clock ahead", a standalone phrase the telemetry
+       tile renders on its own. Prefixing it here would read "Last seen clock
+       ahead", which is not a sentence. This branch says the same thing as one
+       instead, and pingLabel is left alone for the tile's sake. */
+    const age = reading ? readingAgeMinutes(reading, now) : null;
+    const clockAhead = age !== null && age < -FUTURE_TOLERANCE_MINUTES;
+
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-warning-tint px-2 py-0.5 text-xs font-medium text-warning-strong">
         <span aria-hidden className="block h-1.5 w-1.5 rounded-full bg-warning" />
-        Last seen {pingLabel(reading, now)}
+        {clockAhead ? "Device clock ahead" : `Last seen ${pingLabel(reading, now)}`}
       </span>
     );
   }
@@ -99,11 +113,14 @@ export default function TrackingHeader({ job, phase, journey, reading, now }: Pr
           </a>
         ) : null}
 
+        {/* "All jobs", not "Job detail": app/jobs/ has no dynamic route, so
+            there is no per-job page to send anyone to. The destination was
+            always honest; the label was not. */}
         <Link
           href="/jobs"
           className="rounded-sm px-2.5 py-1 text-xs font-semibold text-ink-2 hover:bg-surface-2 hover:text-ink"
         >
-          Job detail
+          All jobs
         </Link>
       </div>
 
@@ -123,11 +140,14 @@ export default function TrackingHeader({ job, phase, journey, reading, now }: Pr
         {tiles.map((tile) => (
           <div key={tile.label} className="min-w-0">
             <dt className="truncate text-kicker uppercase text-ink-3">{tile.label}</dt>
+            {/* The hint is rendered ONCE, in the sr-only span. It used to also
+                sit in a title attribute, and several screen readers announce
+                both, so the explanation was read out twice. title is mouse-only
+                anyway; the span is the load-bearing one. */}
             <dd
               className={`m-0 font-mono text-md font-semibold tabular-nums ${
                 tile.muted ? "text-ink-3" : "text-ink"
               }`}
-              title={tile.hint}
             >
               {tile.value}
               {tile.hint ? <span className="sr-only"> ({tile.hint})</span> : null}

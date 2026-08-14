@@ -19,3 +19,24 @@
    default until it is plumbed through. When it is, this is the single place
    that has to change. */
 export const OPERATOR_TIME_ZONE = "Europe/London";
+
+/* THE ONE DEFINITION OF THE OPERATOR'S CALENDAR DAY.
+
+   en-CA formats as YYYY-MM-DD, which compares correctly as a plain string.
+
+   A runtime's own local day is NOT this. getFullYear/getMonth/getDate resolve
+   in whatever zone the machine happens to be set to, so a dispatcher on a UTC
+   laptop between midnight and 01:00 London time in summer computes yesterday,
+   and every job scheduled for the real today drops out of the rail for that
+   hour while the card beside it stamps its events with the correct day. Two
+   private copies of this used to exist, in lib/pod/kpis.ts and
+   lib/tracking/onTheRoad.ts, and they disagreed on exactly that hour. Anything
+   asking "what day is it for the operator?" calls this. */
+export function operatorDay(now: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: OPERATOR_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}

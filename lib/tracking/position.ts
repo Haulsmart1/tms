@@ -96,9 +96,15 @@ export function pingLabel(reading: PositionReading | null, now: Date): string {
    Returns null rather than a string for an unusable speed, so each caller can
    word "unknown" to suit its own context. Guarding on the ROUNDED value is
    load-bearing: 0.4 km/h is greater than zero but rounds to zero, and "0 km/h"
-   on a truck is the string this vocabulary exists to avoid. */
+   on a truck is the string this vocabulary exists to avoid.
+
+   A NEGATIVE speed is not a stationary vehicle, it is garbage from the source,
+   and "Stationary" is a confident positive claim about where a truck is. It
+   joins the non-finite case in returning null, so the tile reports unknown
+   rather than asserting something it cannot know. */
 export function speedLabel(reading: PositionReading): string | null {
   const kph = Math.round(reading.speedKph);
   if (!Number.isFinite(kph)) return null;
+  if (kph < 0) return null;
   return kph > 0 ? `${kph} km/h` : "Stationary";
 }

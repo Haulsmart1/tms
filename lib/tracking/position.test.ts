@@ -140,8 +140,18 @@ describe("speedLabel", () => {
     expect(speedLabel(reading(AT, 0.4))).toBe("Stationary");
   });
 
-  it("says Stationary for a negative speed rather than rendering the minus", () => {
-    expect(speedLabel(reading(AT, -5))).toBe("Stationary");
+  it("returns null for a negative speed, because that is garbage, not a parked truck", () => {
+    // "Stationary" is a positive claim about where a vehicle is. A negative
+    // speed is unusable data, so it takes the same treatment as NaN: report
+    // unknown rather than assert something the source did not support.
+    expect(speedLabel(reading(AT, -5))).toBeNull();
+  });
+
+  it("returns null for a small negative speed too, since the guard is on the rounded value", () => {
+    // -0.4 rounds to -0 in JavaScript, and -0 < 0 is false. Math.round(-0.6)
+    // is -1, which does trip the guard. Both must land on null rather than one
+    // of them slipping through as "Stationary".
+    expect(speedLabel(reading(AT, -0.6))).toBeNull();
   });
 
   it("returns null for a non-finite speed, so callers can word unknown themselves", () => {

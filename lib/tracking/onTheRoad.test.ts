@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { localDay, isOnTheRoad, jobPhase, buildRail, routeEndpoints } from "./onTheRoad";
+import { isOnTheRoad, jobPhase, buildRail, routeEndpoints } from "./onTheRoad";
 import type { TrackingJob, TrackingStop } from "./types";
 
 const NOW = new Date("2026-08-14T12:00:00Z");
@@ -31,17 +31,22 @@ function job(over: Partial<TrackingJob> = {}): TrackingJob {
   };
 }
 
-describe("localDay", () => {
-  it("formats the local calendar day, not the UTC one", () => {
-    // A job scheduled for the 14th must still count as due at 23:30 local on
-    // the 14th. Formatting via toISOString() would roll it to the 15th in any
-    // zone ahead of UTC and quietly drop it from the rail.
-    const d = new Date(2026, 7, 14, 23, 30);
-    expect(localDay(d)).toBe("2026-08-14");
+describe("the operator's day boundary", () => {
+  /* Constructed from explicit UTC instants rather than local-component `new
+     Date(y, m, d)`, so these say what they mean regardless of what the runner's
+     TZ happens to be. operatorDay owns the formatting and lib/time.test.ts
+     pins it; what these two assert is that isOnTheRoad asks IT and gets the
+     boundary right on both sides. */
+
+  it("keeps a job scheduled for the operator's today on the road at 23:30 London", () => {
+    // 22:30Z is 23:30 on the 14th in London during BST, still the 14th.
+    const at = new Date("2026-08-14T22:30:00Z");
+    expect(isOnTheRoad(job({ scheduled_date: "2026-08-14" }), at)).toBe(true);
   });
 
-  it("pads single-digit months and days", () => {
-    expect(localDay(new Date(2026, 0, 5, 9, 0))).toBe("2026-01-05");
+  it("keeps tomorrow's job off the rail at the same instant", () => {
+    const at = new Date("2026-08-14T22:30:00Z");
+    expect(isOnTheRoad(job({ scheduled_date: "2026-08-15" }), at)).toBe(false);
   });
 });
 

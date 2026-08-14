@@ -43,8 +43,11 @@ const TARGET = process.env.TRACKING_URL || "http://localhost:3000/tracking";
    means a fresh context, an empty cookie jar, and a token already spent. */
 const AUTH_URL = process.env.TRACKING_AUTH_URL || "";
 
-// 1440 is above the xl breakpoint, where the grid is 300px + rest. 900 is
-// below it, where the same grid stacks into one column.
+/* The grid collapses at Tailwind's `lg`, 1024px, which is the breakpoint the
+   approved spec names. 1440 is comfortably above it, where the grid is 300px +
+   rest. 900 is comfortably below it, where the same grid stacks into one
+   column. Both are kept clear of the boundary so a scrollbar's width cannot
+   decide which side of it the viewport lands on. */
 const WIDE = 1440;
 const NARROW = 900;
 

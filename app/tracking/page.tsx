@@ -9,13 +9,13 @@ import TrackingHeader from "./TrackingHeader";
 import TrackingMap from "./TrackingMap";
 import JourneyTimeline from "./JourneyTimeline";
 import ActivityFeed from "./ActivityFeed";
-import { buildRail, jobPhase, localDay } from "../../lib/tracking/onTheRoad";
+import { buildRail, isOnTheRoad, jobPhase } from "../../lib/tracking/onTheRoad";
 import { buildJourney } from "../../lib/tracking/journey";
 import { buildActivity } from "../../lib/tracking/activity";
 import { createSupabasePositionSource } from "../../lib/tracking/supabasePositions";
 import { pingLabel, type PositionReading } from "../../lib/tracking/position";
 import type { TrackingJob } from "../../lib/tracking/types";
-import { OPERATOR_TIME_ZONE } from "../../lib/time";
+import { OPERATOR_TIME_ZONE, operatorDay } from "../../lib/time";
 
 /* The old page polled every 10 seconds and fetched every vehicle_locations row
    ever recorded on each pass. 30 seconds matches the design's own footnote, and
@@ -54,10 +54,21 @@ export default function TrackingPage() {
 
   useEffect(() => {
     // `cancelled` guards against setting state after the tenant changes or the
-    // page unmounts mid-request. The old page had no such guard.
+    // page unmounts mid-request. The old page had no such guard. It says
+    // nothing about ORDERING, which is what `inFlight` below is for.
     let cancelled = false;
 
+    /* load() fires from the interval AND from visibilitychange, so two calls
+       can otherwise overlap and a slower earlier response can land after a
+       faster later one, painting the console with stale data. Dropping the
+       second call while one is running is enough here: the next poll is at
+       most 30 seconds away, and a dropped refresh costs nothing. */
+    let inFlight = false;
+
     async function load(showSkeleton: boolean) {
+      if (inFlight) return;
+      inFlight = true;
+
       if (showSkeleton) setLoading(true);
 
       /* createSupabasePositionSource THROWS on a query error rather than
@@ -67,7 +78,14 @@ export default function TrackingPage() {
          position query leaves the skeleton on screen forever with no retry.
          Catching here is what turns a throw into the error state. */
       try {
-        const today = localDay(new Date());
+        /* ONE `now` for the whole load, and the same one the render uses: it
+           is stored as lastLoadedAt below and read back as `now`. The server
+           filter, the vehicles whose positions get fetched, the rail order,
+           the phase badge and the staleness pill therefore all answer to a
+           single instant rather than to three Dates a few hundred
+           milliseconds apart. */
+        const startedAt = new Date();
+        const today = operatorDay(startedAt);
 
         /* Narrowed server-side on the three cheap conditions before
            isOnTheRoad applies the rest client-side. The stop-level condition
@@ -125,11 +143,15 @@ export default function TrackingPage() {
           };
         });
 
-        const now = new Date();
+        /* Filtered with isOnTheRoad directly rather than by calling buildRail
+           and looking each row's job back up: buildRail also sorts, which this
+           does not need, and the lookup was an O(n squared) find inside a map.
+           The rail itself is built once, in the render below. */
         const vehicleIds = Array.from(
           new Set(
-            buildRail(mapped, now)
-              .map((r) => mapped.find((j) => j.id === r.jobId)?.vehicle_id)
+            mapped
+              .filter((j) => isOnTheRoad(j, startedAt))
+              .map((j) => j.vehicle_id)
               .filter((id): id is string => Boolean(id)),
           ),
         );
@@ -143,11 +165,13 @@ export default function TrackingPage() {
         setPositions(readings);
         setRefreshFailed(false);
         setLoading(false);
-        setLastLoadedAt(new Date());
+        setLastLoadedAt(startedAt);
       } catch {
         if (cancelled) return;
         setRefreshFailed(true);
         setLoading(false);
+      } finally {
+        inFlight = false;
       }
     }
 
@@ -169,10 +193,16 @@ export default function TrackingPage() {
     };
   }, [tenant.activeTenantId, reloadToken]);
 
-  // One `now` per load, injected into every pure function, so the rail order,
-  // the phase badge and the staleness pill cannot disagree by milliseconds
-  // about what "today" or "stale" means. Same reasoning as app/pod/page.tsx.
-  const now = useMemo(() => new Date(), [jobs]);
+  /* One `now` per load, injected into every pure function, so the rail order,
+     the phase badge and the staleness pill cannot disagree by milliseconds
+     about what "today" or "stale" means. Same reasoning as app/pod/page.tsx.
+
+     It is literally the instant load() started, so the render agrees with the
+     query that fetched the data rather than merely being close to it. The
+     fallback is unreachable: `loading` stays true until the first successful
+     load sets lastLoadedAt, and a first load that fails renders the error card
+     instead. It exists only to keep this a plain Date for the callees. */
+  const now = useMemo(() => lastLoadedAt ?? new Date(), [lastLoadedAt]);
 
   const rail = useMemo(() => buildRail(jobs, now), [jobs, now]);
 
@@ -244,8 +274,8 @@ export default function TrackingPage() {
               </button>
             </div>
           ) : (
-            <div className="grid items-start gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
-              <div className="max-h-[40vh] overflow-y-auto xl:max-h-none xl:overflow-visible">
+            <div className="grid items-start gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
+              <div className="max-h-[40vh] overflow-y-auto lg:max-h-none lg:overflow-visible">
                 <TrackingRail
                   rows={rail}
                   selectedJobId={selected?.jobId ?? null}

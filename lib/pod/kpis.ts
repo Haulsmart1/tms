@@ -1,4 +1,4 @@
-import { OPERATOR_TIME_ZONE } from "../time";
+import { operatorDay } from "../time";
 import type { QueueRow } from "./queue";
 
 export type PodKpis = {
@@ -10,20 +10,10 @@ export type PodKpis = {
   valueRecent: number;
 };
 
-/* en-CA formats as YYYY-MM-DD, which compares correctly as a plain string. */
-function operatorDateKey(d: Date): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: OPERATOR_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(d);
-}
-
 function isSameOperatorDay(iso: string, now: Date): boolean {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return false;
-  return operatorDateKey(d) === operatorDateKey(now);
+  return operatorDay(d) === operatorDay(now);
 }
 
 /* jobPrices maps jobId to customer_price. Value is summed per JOB, not per

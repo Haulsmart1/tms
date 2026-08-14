@@ -5,7 +5,7 @@ export type Tile = {
   value: string;
   /** Render in the muted ink colour: this value is absent or not trustworthy. */
   muted: boolean;
-  /** Explains an absent value. Rendered as a title attribute and for screen readers. */
+  /** Explains an absent value. Rendered once, visually hidden, for screen readers. */
   hint?: string;
 };
 

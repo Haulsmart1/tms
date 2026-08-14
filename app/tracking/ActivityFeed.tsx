@@ -1,5 +1,10 @@
+import Card from "../../components/Card";
 import type { ActivityEvent } from "../../lib/tracking/activity";
 import { OPERATOR_TIME_ZONE } from "../../lib/time";
+
+/* Renders correctly ONLY inside a `.ds` wrapper. Preflight is disabled, so the
+   borders here depend on the scoped reset in app/globals.css supplying
+   border-style: solid. Outside `.ds` the borders disappear entirely. */
 
 type Props = { events: ActivityEvent[] };
 
@@ -16,7 +21,12 @@ function stamp(at: string): string {
 
 export default function ActivityFeed({ events }: Props) {
   return (
-    <section className="overflow-hidden rounded-lg border border-line bg-surface shadow-sm">
+    /* <Card flush> renders exactly the chrome this used to hand-roll, and
+       TrackingRail already uses it for the same header-plus-list shape. The
+       element goes from <section> to <div>, which changes nothing for assistive
+       technology: a <section> only becomes a `region` landmark once it has an
+       accessible name, and this one never had one. */
+    <Card flush>
       <header className="flex items-center gap-2.5 border-b border-line px-5 py-3">
         <h2 className="flex-1 text-sm font-semibold text-ink">Activity</h2>
         <span className="font-mono text-data-sm tabular-nums text-ink-3">
@@ -49,6 +59,6 @@ export default function ActivityFeed({ events }: Props) {
           ))}
         </ol>
       )}
-    </section>
+    </Card>
   );
 }

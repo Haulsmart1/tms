@@ -151,8 +151,24 @@ function getPositions(vehicleIds: string[]): Promise<Map<string, PositionReading
 
 Today's adapter reads the newest row per vehicle from `telematics_positions`,
 falling back to `vehicle_locations`, both tenant-filtered through
-`tenant.filterByTenant` exactly as the rest of the page is. A TomTom adapter
-later sits behind the same signature and no component changes.
+`tenant.filterByTenant` exactly as the rest of the page is.
+
+**What the seam does and does not buy, stated precisely, because it is the
+justification for the whole shape of this change.**
+
+What it does buy, and this is the real value: the four `lib/tracking/` modules
+and all five components read a `PositionReading` and nothing else. Not one of
+them changes on the day a live feed lands. Every question about staleness,
+speed wording, ping wording, the live timeline node and the map marker is
+already decided against that one type.
+
+What it does not buy is a one-file swap. `page.tsx` constructs
+`createSupabasePositionSource` directly, so choosing a different adapter is an
+edit to the page. And because `page.tsx` is `"use client"`, a real TomTom key
+cannot live in a client-side adapter: a live feed needs a server route holding
+the key, a fetch adapter implementing `PositionSource` against it, and the page
+wired to use it. Three files, not one. The seam makes those three files the
+whole blast radius, which is the claim worth making.
 
 **Staleness is a first-class state.** A reading older than 10 minutes is stale,
 not live. The mockup renders a pulsing green "Live GPS" pill, and showing that
@@ -285,6 +301,19 @@ Not commitments, just the things it makes visible:
    from moving. That needs its own spec, and swapping it in touches
    `onTheRoad.ts` only.
 2. **TomTom adapters.** Webfleet for positions, Routing for distance and ETA,
-   Maps for tiles. Each lands behind an interface this change defines.
+   Maps for tiles. Only the first of the three has an interface waiting for it,
+   and even that one is three files rather than a drop-in: a server route
+   holding the key, a fetch adapter implementing `PositionSource`, and the line
+   in `page.tsx` that picks the adapter.
+
+   Routing has **no** interface at all. `telemetry.ts` hardcodes the Distance
+   and ETA tiles as blanks carrying `ROUTING_HINT`, so wiring routing means
+   changing `telemetryTiles`' signature to accept a route estimate and updating
+   its callers and its tests. That is a small change, but it is a design
+   decision this spec has not made, and calling it "behind an interface this
+   change defines" would be untrue.
+
+   Maps likewise: `TrackingMap.tsx` already takes the props a real mount needs,
+   which is as far as it goes.
 3. **A collection-done signal.** Nothing currently prompts a driver to mark a
    collection, which is why the rail predicate cannot use one.

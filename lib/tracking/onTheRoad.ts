@@ -1,3 +1,4 @@
+import { operatorDay } from "../time";
 import type { TrackingJob, TrackingStop } from "./types";
 import type { Tone } from "../../components/Badge";
 
@@ -46,20 +47,10 @@ export const PHASE_TONE: Record<Phase, Tone> = {
 
 /* jobs.scheduled_date is a `date` column, so it arrives as "YYYY-MM-DD" with
    no time and no zone. Comparing it against a UTC-formatted today would drop a
-   job from the rail every evening in any zone ahead of UTC, so today is
-   formatted from the LOCAL calendar day. This is safe only because
-   app/tracking/page.tsx is a client component fetching in an effect, so it
-   runs in the browser on the user's own clock. Calling it from a server
-   component or route handler would run it on Vercel's UTC runtime and
-   silently reintroduce the bug this function exists to avoid; moving it
-   server-side would require pinning a timezone explicitly. */
-export function localDay(now: Date): string {
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-
+   job from the rail every evening in any zone ahead of UTC, so today comes
+   from operatorDay in lib/time.ts, which is pinned to the operator's zone and
+   therefore gives the same answer on a dispatcher's laptop, on Vercel's UTC
+   runtime, and in a test. */
 export function isOnTheRoad(job: TrackingJob, now: Date): boolean {
   if (job.status !== "planned") return false;
   if (!job.vehicle_id) return false;
@@ -67,7 +58,7 @@ export function isOnTheRoad(job: TrackingJob, now: Date): boolean {
   // would fill the rail with work nobody scheduled.
   if (!job.scheduled_date) return false;
   // Lexicographic comparison is correct for "YYYY-MM-DD".
-  if (job.scheduled_date > localDay(now)) return false;
+  if (job.scheduled_date > operatorDay(now)) return false;
 
   const deliveries = job.stops.filter((s) => s.type === "delivery");
   if (deliveries.length === 0) return false;
@@ -77,7 +68,7 @@ export function isOnTheRoad(job: TrackingJob, now: Date): boolean {
 export function jobPhase(job: TrackingJob, now: Date): Phase {
   // Late is checked first and outranks progress: a job running a day behind is
   // still the thing a dispatcher needs to see, however many stops it has done.
-  if (job.scheduled_date && job.scheduled_date < localDay(now)) return "late";
+  if (job.scheduled_date && job.scheduled_date < operatorDay(now)) return "late";
   // ANY stop counts, including a collection, deliberately. A job whose goods
   // are collected is under way even before the first drop. Note this is a
   // wider net than isOnTheRoad, which filters to delivery stops: that is
