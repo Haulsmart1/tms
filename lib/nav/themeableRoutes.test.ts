@@ -2,16 +2,16 @@ import { describe, it, expect } from "vitest";
 import { isThemeableRoute, THEMEABLE_ROUTES } from "./themeableRoutes";
 
 describe("isThemeableRoute", () => {
-  it("returns true for the five pages that paint their own bg-canvas on a .ds wrapper", () => {
+  it("returns true for the pages that paint their own bg-canvas on a .ds wrapper", () => {
     expect(isThemeableRoute("/")).toBe(true);
     expect(isThemeableRoute("/login")).toBe(true);
     expect(isThemeableRoute("/dashboard")).toBe(true);
     expect(isThemeableRoute("/jobs")).toBe(true);
+    expect(isThemeableRoute("/pod")).toBe(true);
     expect(isThemeableRoute("/super-admin/requests")).toBe(true);
   });
 
   it("returns false for legacy inline-styled pages, which pin themselves dark", () => {
-    expect(isThemeableRoute("/pod")).toBe(false);
     expect(isThemeableRoute("/tracking")).toBe(false);
     expect(isThemeableRoute("/invoices")).toBe(false);
     expect(isThemeableRoute("/stats")).toBe(false);
@@ -34,9 +34,9 @@ describe("isThemeableRoute", () => {
     expect(isThemeableRoute("/")).toBe(true);
   });
 
-  it("lists exactly the five pages known to be tokenised today", () => {
+  it("lists exactly the pages known to be tokenised today", () => {
     expect([...THEMEABLE_ROUTES].sort()).toEqual(
-      ["/", "/dashboard", "/jobs", "/login", "/super-admin/requests"].sort(),
+      ["/", "/dashboard", "/jobs", "/login", "/pod", "/super-admin/requests"].sort(),
     );
   });
 });

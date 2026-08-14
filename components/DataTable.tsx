@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { cn } from "../lib/cn";
 
 export type Column<T> = {
@@ -6,6 +6,10 @@ export type Column<T> = {
   align?: "left" | "right";
   cell: (row: T) => ReactNode;
   className?: string;
+  /* Fixed CSS width, emitted as a <colgroup> with table-layout: fixed. Set it
+     on every column or none: a mix lets the unspecified ones absorb all the
+     leftover width, which opens a large gap in the middle of the row. */
+  width?: string;
 };
 
 export type DataTableState = "loading" | "error" | "empty" | "ready";
@@ -22,6 +26,10 @@ type Props<T> = {
   emptyTitle?: string;
   emptyDescription?: string;
   emptyAction?: ReactNode;
+  /** Renders an extra full-width row beneath the matching row. */
+  renderExpanded?: (row: T) => ReactNode;
+  /** rowKey of the currently expanded row, if any. */
+  expandedKey?: string | null;
 };
 
 export default function DataTable<T>({
@@ -36,10 +44,24 @@ export default function DataTable<T>({
   emptyTitle = "Nothing here yet",
   emptyDescription,
   emptyAction,
+  renderExpanded,
+  expandedKey = null,
 }: Props<T>) {
   return (
     <div className="overflow-x-auto rounded-lg border border-line bg-surface shadow-sm">
-      <table className="w-full min-w-[640px] border-collapse text-sm">
+      <table
+        className={cn(
+          "w-full min-w-[640px] border-collapse text-sm",
+          columns.some((c) => c.width) && "table-fixed",
+        )}
+      >
+        {columns.some((c) => c.width) ? (
+          <colgroup>
+            {columns.map((col, i) => (
+              <col key={`col-${col.header}-${i}`} style={{ width: col.width }} />
+            ))}
+          </colgroup>
+        ) : null}
         <thead>
           <tr className="border-b border-line bg-surface-2">
             {columns.map((col, i) => (
@@ -70,39 +92,51 @@ export default function DataTable<T>({
 
           {state === "ready"
             ? rows.map((row) => (
-                <tr
-                  key={rowKey(row)}
-                  onClick={onRowClick ? () => onRowClick(row) : undefined}
-                  tabIndex={onRowClick ? 0 : undefined}
-                  role={onRowClick ? "button" : undefined}
-                  onKeyDown={
-                    onRowClick
-                      ? (e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            onRowClick(row);
+                <Fragment key={rowKey(row)}>
+                  <tr
+                    onClick={onRowClick ? () => onRowClick(row) : undefined}
+                    tabIndex={onRowClick ? 0 : undefined}
+                    role={onRowClick ? "button" : undefined}
+                    onKeyDown={
+                      onRowClick
+                        ? (e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              onRowClick(row);
+                            }
                           }
-                        }
-                      : undefined
-                  }
-                  className={cn(
-                    "border-b border-line last:border-0",
-                    onRowClick && "cursor-pointer hover:bg-surface-2 focus-visible:bg-surface-2",
-                  )}
-                >
-                  {columns.map((col, i) => (
-                    <td
-                      key={`${col.header}-${i}`}
-                      className={cn(
-                        "px-4 py-3 align-middle",
-                        col.align === "right" ? "text-right" : "text-left",
-                        col.className,
-                      )}
-                    >
-                      {col.cell(row)}
-                    </td>
-                  ))}
-                </tr>
+                        : undefined
+                    }
+                    className={cn(
+                      "border-b border-line last:border-0",
+                      onRowClick && "cursor-pointer hover:bg-surface-2 focus-visible:bg-surface-2",
+                    )}
+                  >
+                    {columns.map((col, i) => (
+                      <td
+                        key={`${col.header}-${i}`}
+                        className={cn(
+                          "px-4 py-3 align-middle",
+                          col.align === "right" ? "text-right" : "text-left",
+                          col.className,
+                        )}
+                      >
+                        {col.cell(row)}
+                      </td>
+                    ))}
+                  </tr>
+                  {/* The separator lives on the <tr>, matching every other row
+                      in this table. On the <td> it would sit on an only-child
+                      cell, so `last:border-0` would always match and the border
+                      would never render at all. */}
+                  {renderExpanded && expandedKey === rowKey(row) ? (
+                    <tr className="border-b border-line last:border-0">
+                      <td colSpan={columns.length} className="p-0">
+                        {renderExpanded(row)}
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
               ))
             : null}
         </tbody>

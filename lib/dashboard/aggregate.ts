@@ -1,3 +1,5 @@
+import { podAgeHours } from "../pod/overdue";
+
 export type AttentionItem = {
   id: string;
   title: string;
@@ -11,13 +13,23 @@ export function buildNeedsAttention(
   overdueInvoices: { id: string; invoiceNumber: string; dueDate: string; total: number }[],
   now: Date,
 ): AttentionItem[] {
-  const podItems: AttentionItem[] = overduePods.map((p) => ({
-    id: `pod-${p.stopId}`,
-    title: `${p.jobRef} — POD awaiting`,
-    meta: `since ${new Date(p.plannedAt).toLocaleDateString("en-GB")}`,
-    ageHours: (now.getTime() - new Date(p.plannedAt).getTime()) / 36e5,
-    href: "/pod",
-  }));
+  /* Null ages are dropped here rather than trusted away. podAgeHours returns
+     null for a missing or unparseable planned_at, and the caller in
+     app/dashboard/page.tsx does filter those out before calling, but that is a
+     guarantee living in a different file. Without this guard a null age would
+     coerce to 0 in the sort below and the item would silently rank as the
+     freshest rather than failing visibly. */
+  const podItems: AttentionItem[] = overduePods.flatMap((p) => {
+    const ageHours = podAgeHours(p.plannedAt, now);
+    if (ageHours === null) return [];
+    return [{
+      id: `pod-${p.stopId}`,
+      title: `${p.jobRef} — POD awaiting`,
+      meta: `since ${new Date(p.plannedAt).toLocaleDateString("en-GB")}`,
+      ageHours,
+      href: "/pod",
+    }];
+  });
   const invoiceItems: AttentionItem[] = overdueInvoices.map((i) => ({
     id: `invoice-${i.id}`,
     title: `${i.invoiceNumber} — overdue`,

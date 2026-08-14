@@ -8,6 +8,7 @@ import TenantGate from "../components/TenantGate";
 import Stat from "../../components/Stat";
 import DataTable, { type Column } from "../../components/DataTable";
 import { buildNeedsAttention, buildRevenueLast7Days, type AttentionItem, type RevenueDay } from "../../lib/dashboard/aggregate";
+import { isAwaitingPod } from "../../lib/pod/overdue";
 
 type Kpis = {
   jobsToday: number;
@@ -64,9 +65,17 @@ export default function DashboardPage() {
       const overduePodStopsQuery = tenant.filterByTenant(
         supabase
           .from("job_stops")
-          .select("id, planned_at, jobs ( reference, status )")
+          .select("id, planned_at, pod_status, jobs ( reference, status )")
           .eq("type", "delivery")
-          .neq("pod_status", "delivered"),
+          // NULL-safe on purpose. PostgREST compiles .neq() to SQL <>, and
+          // NULL <> 'delivered' is NULL, which WHERE discards: a plain .neq
+          // silently drops every stop whose pod_status is NULL, even though an
+          // undelivered stop is exactly what this query is looking for. That
+          // made /dashboard and /pod disagree about the same rows despite
+          // sharing isAwaitingPod. The filter stays server-side rather than
+          // being dropped so the query does not fetch every delivered stop in
+          // the tenant's history on each load.
+          .or("pod_status.is.null,pod_status.neq.delivered"),
       );
 
       const overdueInvoicesQuery = tenant
@@ -86,13 +95,20 @@ export default function DashboardPage() {
         { data: paidInvoices, error: revenueError },
       ] = await Promise.all([jobsTodayQuery, overduePodStopsQuery, overdueInvoicesQuery, paidInvoicesQuery]);
 
-      // Filtered client-side rather than via a PostgREST embedded-relation filter
-      // (`.eq("jobs.status", ...)`) — matches this codebase's existing convention
-      // (see app/invoices/page.tsx's "ready to invoice" computation) of doing this
-      // kind of cross-table filter after fetch, rather than relying on the less
-      // common embedded-filter query syntax.
-      const overduePodStops = (overduePodStopsRaw ?? []).filter(
-        (r: any) => r.jobs?.status === "planned",
+      // The query already restricts to delivery stops that are not delivered;
+      // isAwaitingPod re-states the whole predicate in one place so /pod and
+      // this page cannot drift apart. Kept client-side rather than as a
+      // PostgREST embedded-relation filter, matching this codebase's existing
+      // convention (see app/invoices/page.tsx).
+      const overduePodStops = (overduePodStopsRaw ?? []).filter((r: any) =>
+        isAwaitingPod({
+          // "delivery" is a literal, not a read: the query above already filters
+          // .eq("type", "delivery") and does not select the column. Re-select
+          // type if this block is ever reused without that server-side filter.
+          type: "delivery",
+          pod_status: r.pod_status ?? null,
+          jobStatus: r.jobs?.status ?? null,
+        }),
       );
 
       if (cancelled) return;
