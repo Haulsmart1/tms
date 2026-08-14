@@ -291,6 +291,7 @@ export default function MaintenancePage() {
         try {
             const payload = {
                 vehicle_id: vehicleId,
+                tenant_id: tenantId,
                 maintenance_type:
                     maintenanceType.trim(),
                 due_date: dueDate || null,
