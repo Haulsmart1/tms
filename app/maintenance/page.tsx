@@ -18,9 +18,22 @@ type Vehicle = {
     returned_to_service_at: string | null;
 };
 
+type Asset = {
+    id: string;
+    tenant_id: string;
+    name: string;
+    asset_type: string;
+    asset_number: string | null;
+    registration: string | null;
+    barcode: string | null;
+    mechanical: boolean;
+    status: string | null;
+};
+
 type MaintenanceRecord = {
     id: string;
     vehicle_id: string | null;
+    asset_id: string | null;
     maintenance_type: string;
     due_date: string | null;
     completed_date: string | null;
@@ -34,6 +47,7 @@ type MaintenanceRecord = {
 
 type MaintenanceRecordWithVehicle = MaintenanceRecord & {
     vehicle: Vehicle | null;
+    asset: Asset | null;
 };
 
 export default function MaintenancePage() {
@@ -42,6 +56,8 @@ export default function MaintenancePage() {
     const [tenantId, setTenantId] = useState<string | null>(null);
 
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+
+    const [assets, setAssets] = useState<Asset[]>([]);
     const [records, setRecords] = useState<MaintenanceRecordWithVehicle[]>([]);
 
     const [loading, setLoading] = useState(true);
@@ -52,6 +68,8 @@ export default function MaintenancePage() {
     const [errorMessage, setErrorMessage] = useState("");
 
     const [vehicleId, setVehicleId] = useState("");
+
+    const [assetId, setAssetId] = useState("");
     const [maintenanceType, setMaintenanceType] = useState("");
     const [dueDate, setDueDate] = useState("");
     const [completedDate, setCompletedDate] = useState("");
@@ -165,6 +183,7 @@ export default function MaintenancePage() {
                             `
                             id,
                             vehicle_id,
+                            asset_id,
                             maintenance_type,
                             due_date,
                             completed_date,
@@ -191,6 +210,33 @@ export default function MaintenancePage() {
 
                 const tenantVehicles =
                     (vehicleResult.data ?? []) as Vehicle[];
+                const {
+                    data: assetData,
+                    error: assetError,
+                } = await supabase
+                    .from("assets")
+                    .select(
+                        "id, tenant_id, name, asset_type, asset_number, registration, barcode, mechanical, status"
+                    )
+                    .eq("tenant_id", currentTenantId)
+                    .eq("mechanical", true)
+                    .order("asset_number", {
+                        ascending: true,
+                    });
+
+                if (assetError) {
+                    throw assetError;
+                }
+
+                const tenantAssets =
+                    (assetData ?? []) as Asset[];
+
+                const assetMap = new Map(
+                    tenantAssets.map((asset) => [
+                        asset.id,
+                        asset,
+                    ])
+                );
 
                 const vehicleMap = new Map(
                     tenantVehicles.map((vehicle) => [
@@ -212,14 +258,22 @@ export default function MaintenancePage() {
                                               record.vehicle_id
                                           ) ?? null
                                         : null,
+                                asset:
+                                    record.asset_id
+                                        ? assetMap.get(
+                                              record.asset_id
+                                          ) ?? null
+                                        : null,
                             })
                         )
                         .filter(
                             (record) =>
-                                record.vehicle !== null
+                                record.vehicle !== null ||
+                                record.asset !== null
                         );
 
                 setVehicles(tenantVehicles);
+                setAssets(tenantAssets);
                 setRecords(tenantMaintenance);
             } catch (error) {
                 setErrorMessage(
@@ -263,6 +317,7 @@ export default function MaintenancePage() {
 
     function resetForm() {
         setVehicleId("");
+        setAssetId("");
         setMaintenanceType("");
         setDueDate("");
         setCompletedDate("");
@@ -290,10 +345,9 @@ export default function MaintenancePage() {
             setErrorMessage("Tenant not loaded.");
             return;
         }
-
-        if (!vehicleId) {
+        if (!vehicleId && !assetId) {
             setErrorMessage(
-                "Please select a vehicle."
+                "Select a vehicle or mechanical asset."
             );
             return;
         }
@@ -335,7 +389,8 @@ export default function MaintenancePage() {
 
         try {
             const payload = {
-                vehicle_id: vehicleId,
+                vehicle_id: vehicleId || null,
+                asset_id: assetId || null,
                 tenant_id: tenantId,
                 maintenance_type:
                     maintenanceType.trim(),
@@ -365,7 +420,7 @@ export default function MaintenancePage() {
              * also mark the vehicle VOR.
              */
 
-            if (status === "vor") {
+            if (status === "vor" && vehicleId) {
                 const reason =
                     vorReason.trim() ||
                     notes.trim() ||
@@ -929,44 +984,98 @@ export default function MaintenancePage() {
                         onSubmit={createRecord}
                         style={styles.form}
                     >
-                        <label style={styles.field}>
+                                                <label style={styles.field}>
                             <span style={styles.label}>
-                                Vehicle
+                                Maintenance Target
                             </span>
 
                             <select
-                                value={vehicleId}
+                                value={
+                                    assetId
+                                        ? `asset:${assetId}`
+                                        : vehicleId
+                                          ? `vehicle:${vehicleId}`
+                                          : ""
+                                }
                                 onChange={(event) => {
-                                    setVehicleId(
-                                        event.target
-                                            .value
-                                    );
+                                    const value =
+                                        event.target.value;
 
-                                    setVorReason("");
+                                    if (
+                                        value.startsWith(
+                                            "vehicle:"
+                                        )
+                                    ) {
+                                        setVehicleId(
+                                            value.slice(
+                                                "vehicle:".length
+                                            )
+                                        );
+                                        setAssetId("");
+                                        return;
+                                    }
+
+                                    if (
+                                        value.startsWith(
+                                            "asset:"
+                                        )
+                                    ) {
+                                        setAssetId(
+                                            value.slice(
+                                                "asset:".length
+                                            )
+                                        );
+                                        setVehicleId("");
+                                        return;
+                                    }
+
+                                    setVehicleId("");
+                                    setAssetId("");
                                 }}
                                 style={styles.input}
                                 required
                             >
                                 <option value="">
-                                    Select vehicle
+                                    Select vehicle or mechanical asset
                                 </option>
 
-                                {vehicles.map(
-                                    (vehicle) => (
-                                        <option
-                                            key={
-                                                vehicle.id
-                                            }
-                                            value={
-                                                vehicle.id
-                                            }
-                                        >
-                                            {vehicleLabel(
-                                                vehicle
-                                            )}
-                                        </option>
-                                    )
-                                )}
+                                {vehicles.length > 0 ? (
+                                    <optgroup label="Vehicles">
+                                        {vehicles.map(
+                                            (vehicle) => (
+                                                <option
+                                                    key={vehicle.id}
+                                                    value={`vehicle:${vehicle.id}`}
+                                                >
+                                                    {vehicleLabel(
+                                                        vehicle
+                                                    )}
+                                                </option>
+                                            )
+                                        )}
+                                    </optgroup>
+                                ) : null}
+
+                                {assets.length > 0 ? (
+                                    <optgroup label="Mechanical Assets">
+                                        {assets.map(
+                                            (asset) => (
+                                                <option
+                                                    key={asset.id}
+                                                    value={`asset:${asset.id}`}
+                                                >
+                                                    {[
+                                                        asset.asset_number,
+                                                        asset.name,
+                                                        asset.asset_type,
+                                                    ]
+                                                        .filter(Boolean)
+                                                        .join(" — ")}
+                                                </option>
+                                            )
+                                        )}
+                                    </optgroup>
+                                ) : null}
                             </select>
                         </label>
 
@@ -1431,28 +1540,38 @@ export default function MaintenancePage() {
                                                 }
                                             </h3>
 
-                                            <p
+                                                                                        <p
                                                 style={
                                                     styles.recordVehicle
                                                 }
                                             >
-                                                {record.vehicle
-                                                    ?.registration ||
-                                                    [
-                                                        record
-                                                            .vehicle
-                                                            ?.make,
-                                                        record
-                                                            .vehicle
-                                                            ?.model,
-                                                    ]
-                                                        .filter(
-                                                            Boolean
-                                                        )
-                                                        .join(
-                                                            " "
-                                                        ) ||
-                                                    "Vehicle"}
+                                                {record.asset
+                                                    ? [
+                                                          record
+                                                              .asset
+                                                              .asset_number,
+                                                          record
+                                                              .asset
+                                                              .name,
+                                                          record
+                                                              .asset
+                                                              .asset_type,
+                                                      ]
+                                                          .filter(Boolean)
+                                                          .join(" — ")
+                                                    : record.vehicle
+                                                          ?.registration ||
+                                                      [
+                                                          record
+                                                              .vehicle
+                                                              ?.make,
+                                                          record
+                                                              .vehicle
+                                                              ?.model,
+                                                      ]
+                                                          .filter(Boolean)
+                                                          .join(" ") ||
+                                                      "Maintenance target"}
                                             </p>
                                         </div>
 
