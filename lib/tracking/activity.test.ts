@@ -66,6 +66,32 @@ describe("buildActivity", () => {
     expect(events.map((e) => e.text)).toEqual(["Job J-100 created"]);
   });
 
+  it("falls back to delivered_at for the evidence stamp when pod_updated_at is null, since /jobs never writes it", () => {
+    const events = buildActivity(job({
+      stops: [stop({ delivered_at: "2026-08-14T11:00:00Z", pod_photo_url: "https://x/y.jpg" })],
+    }));
+    expect(events.map((e) => e.text)).toEqual([
+      "POD evidence attached at Hull",
+      "Job J-100 created",
+    ]);
+  });
+
+  it("ranks delivered above evidence when both stamps tie exactly, rather than relying on id spelling", () => {
+    const events = buildActivity(job({
+      stops: [stop({
+        pod_status: "delivered",
+        delivered_at: "2026-08-14T11:00:00Z",
+        pod_updated_at: "2026-08-14T11:00:00Z",
+        pod_photo_url: "https://x/y.jpg",
+      })],
+    }));
+    expect(events.map((e) => e.text)).toEqual([
+      "Delivered to Hull",
+      "POD evidence attached at Hull",
+      "Job J-100 created",
+    ]);
+  });
+
   it("sorts newest first", () => {
     const events = buildActivity(job({
       stops: [
