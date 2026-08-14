@@ -1170,7 +1170,7 @@ export default function PodPage() {
                                   {savingStopId ===
                                   stop.id
                                     ? "Saving..."
-                                    : "Save Draft"}
+                                    : "Save POD Draft"}
                                 </button>
 
                                 <button
@@ -1203,7 +1203,7 @@ export default function PodPage() {
                                     : savingStopId ===
                                         stop.id
                                       ? "Saving..."
-                                      : "Complete Delivery"}
+                                      : "✓ Complete Delivery"}
                                 </button>
                               </div>
                             </div>
@@ -1250,6 +1250,15 @@ function EvidenceUpload({
         multiple={multiple}
         disabled={uploading}
         onChange={onChange}
+        style={{
+          width: "100%",
+          padding: "10px",
+          border: "1px dashed #94a3b8",
+          borderRadius: 9,
+          background: "#f8fafc",
+          color: "#334155",
+          cursor: uploading ? "not-allowed" : "pointer",
+        }}
       />
 
       {uploading ? (
@@ -1642,11 +1651,14 @@ const styles: Record<string, CSSProperties> = {
 
   uploadCard: {
     display: "grid",
-    gap: 8,
-    padding: 14,
+    gap: 10,
+    padding: 18,
+    minHeight: 120,
+    alignContent: "start",
     borderRadius: 12,
-    background: "white",
-    border: "1px solid #e2e8f0",
+    background: "#ffffff",
+    border: "1px solid #cbd5e1",
+    boxShadow: "0 2px 6px rgba(15, 23, 42, 0.04)",
   },
 
   uploading: {
@@ -1713,28 +1725,43 @@ const styles: Record<string, CSSProperties> = {
 
   actions: {
     display: "flex",
-    gap: 10,
+    gap: 12,
     flexWrap: "wrap",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingTop: 16,
+    marginTop: 4,
+    borderTop: "1px solid #e2e8f0",
   },
 
   primaryButton: {
-    padding: "10px 15px",
-    border: "none",
-    borderRadius: 9,
+    minWidth: 190,
+    minHeight: 46,
+    padding: "12px 20px",
+    border: "1px solid #1d4ed8",
+    borderRadius: 10,
     background: "#2563eb",
     color: "white",
+    fontSize: 14,
     fontWeight: 900,
     cursor: "pointer",
+    boxShadow: "0 4px 12px rgba(37, 99, 235, 0.22)",
+    textAlign: "center",
   },
 
   secondaryButton: {
-    padding: "10px 15px",
+    minWidth: 140,
+    minHeight: 46,
+    padding: "12px 18px",
     border: "1px solid #cbd5e1",
-    borderRadius: 9,
-    background: "white",
+    borderRadius: 10,
+    background: "#ffffff",
     color: "#0f172a",
-    fontWeight: 800,
+    fontSize: 14,
+    fontWeight: 850,
     cursor: "pointer",
+    boxShadow: "0 2px 6px rgba(15, 23, 42, 0.06)",
+    textAlign: "center",
   },
 
   deleteButton: {
