@@ -67,13 +67,14 @@ function firstPerVehicle(rows: PositionRow[]): Map<string, PositionReading> {
       // out to report mph, speeds will read low, so treat this field as
       // best-effort until a real feed lands.
       //
-      // No `?? 0` default: an absent field becomes NaN, and speedLabel reports
-      // a non-finite speed as unknown rather than inventing a confident 0 the
-      // source never sent. Note this does NOT cover a SQL NULL, because
-      // Number(null) is 0, not NaN: a null speed column still reads as
-      // "Stationary". Whether that is right depends on what the real feed
-      // means by null, which is unknowable until one exists.
-      speedKph: Number(row.speed),
+      // An absent speed is deliberately left non-finite so speedLabel reports
+      // it as unknown. Coercing it instead would render a confident
+      // "Stationary" for a vehicle the source told us nothing about, which is
+      // a positive claim we have no basis for. The explicit null check is
+      // load-bearing: Number(null) is 0, not NaN, so `Number(row.speed)` alone
+      // would still turn a NULL column into a stationary vehicle. Loose
+      // `== null` catches an undefined field in the same test.
+      speedKph: row.speed == null ? NaN : Number(row.speed),
       headingDeg: row.heading == null ? null : Number(row.heading),
       recordedAt: normaliseTimestamp(String(row.recorded_at)),
     });
