@@ -63,6 +63,17 @@ export default function MaintenancePage() {
 
     const [vorReason, setVorReason] = useState("");
 
+    const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
+    const [editMaintenanceType, setEditMaintenanceType] = useState("");
+    const [editStatus, setEditStatus] = useState("due");
+    const [editDueDate, setEditDueDate] = useState("");
+    const [editCompletedDate, setEditCompletedDate] = useState("");
+    const [editCost, setEditCost] = useState("");
+    const [editMileage, setEditMileage] = useState("");
+    const [editMaintenanceHours, setEditMaintenanceHours] = useState("");
+    const [editNotes, setEditNotes] = useState("");
+    const [editSaving, setEditSaving] = useState(false);
+
     const selectedVehicle =
         vehicles.find((vehicle) => vehicle.id === vehicleId) ?? null;
 
@@ -403,6 +414,142 @@ export default function MaintenancePage() {
         }
     }
 
+    function beginEditRecord(record: MaintenanceRecordWithVehicle) {
+        clearMessages();
+
+        setEditingRecordId(record.id);
+        setEditMaintenanceType(record.maintenance_type ?? "");
+        setEditStatus(record.status ?? "due");
+        setEditDueDate(record.due_date ?? "");
+        setEditCompletedDate(record.completed_date ?? "");
+
+        setEditCost(
+            record.cost !== null && record.cost !== undefined
+                ? String(record.cost)
+                : ""
+        );
+
+        setEditMileage(
+            record.mileage !== null && record.mileage !== undefined
+                ? String(record.mileage)
+                : ""
+        );
+
+        setEditMaintenanceHours(
+            record.maintenance_hours !== null &&
+                record.maintenance_hours !== undefined
+                ? String(record.maintenance_hours)
+                : ""
+        );
+
+        setEditNotes(record.notes ?? "");
+    }
+
+    function cancelEditRecord() {
+        setEditingRecordId(null);
+        setEditMaintenanceType("");
+        setEditStatus("due");
+        setEditDueDate("");
+        setEditCompletedDate("");
+        setEditCost("");
+        setEditMileage("");
+        setEditMaintenanceHours("");
+        setEditNotes("");
+    }
+
+    async function saveEditRecord(recordId: string) {
+        if (!tenantId) {
+            setErrorMessage("Tenant not loaded.");
+            return;
+        }
+
+        const trimmedType = editMaintenanceType.trim();
+
+        if (!trimmedType) {
+            setErrorMessage("Maintenance type is required.");
+            return;
+        }
+
+        const numericCost =
+            editCost.trim() === ""
+                ? null
+                : Number(editCost);
+
+        const numericMileage =
+            editMileage.trim() === ""
+                ? null
+                : Number(editMileage);
+
+        const numericHours =
+            editMaintenanceHours.trim() === ""
+                ? null
+                : Number(editMaintenanceHours);
+
+        if (
+            numericCost !== null &&
+            (!Number.isFinite(numericCost) || numericCost < 0)
+        ) {
+            setErrorMessage("Cost must be a valid positive number.");
+            return;
+        }
+
+        if (
+            numericMileage !== null &&
+            (!Number.isFinite(numericMileage) || numericMileage < 0)
+        ) {
+            setErrorMessage("Mileage must be a valid positive number.");
+            return;
+        }
+
+        if (
+            numericHours !== null &&
+            (!Number.isFinite(numericHours) || numericHours < 0)
+        ) {
+            setErrorMessage(
+                "Maintenance hours must be a valid positive number."
+            );
+            return;
+        }
+
+        clearMessages();
+        setEditSaving(true);
+
+        try {
+            const { error } = await supabase
+                .from("maintenance_records")
+                .update({
+                    maintenance_type: trimmedType,
+                    status: editStatus,
+                    due_date: editDueDate || null,
+                    completed_date: editCompletedDate || null,
+                    cost: numericCost,
+                    mileage: numericMileage,
+                    maintenance_hours: numericHours,
+                    notes: editNotes.trim() || null,
+                })
+                .eq("id", recordId)
+                .eq("tenant_id", tenantId);
+
+            if (error) {
+                throw error;
+            }
+
+            await loadData(tenantId);
+
+            cancelEditRecord();
+            setMessage("Maintenance record updated.");
+        } catch (error) {
+            console.error("Failed to update maintenance record:", error);
+
+            setErrorMessage(
+                error instanceof Error
+                    ? error.message
+                    : "Unable to update maintenance record."
+            );
+        } finally {
+            setEditSaving(false);
+        }
+    }
     async function placeVehicleVor(
         vehicle: Vehicle
     ) {
@@ -1401,7 +1548,350 @@ export default function MaintenancePage() {
                                             VOR
                                         </div>
                                     ) : null}
-                                </article>
+                                
+                                    <div
+                                        style={{
+                                            marginTop: 16,
+                                            paddingTop: 14,
+                                            borderTop: "1px solid #e2e8f0",
+                                        }}
+                                    >
+                                        {editingRecordId !== record.id ? (
+                                            <button
+                                                type="button"
+                                                onClick={() =>
+                                                    beginEditRecord(record)
+                                                }
+                                                style={{
+                                                    padding: "9px 14px",
+                                                    borderRadius: 8,
+                                                    border: "1px solid #cbd5e1",
+                                                    background: "#ffffff",
+                                                    color: "#0f172a",
+                                                    fontWeight: 800,
+                                                    cursor: "pointer",
+                                                }}
+                                            >
+                                                Edit
+                                            </button>
+                                        ) : (
+                                            <div
+                                                style={{
+                                                    display: "grid",
+                                                    gap: 14,
+                                                }}
+                                            >
+                                                <div
+                                                    style={{
+                                                        fontWeight: 900,
+                                                        color: "#0f172a",
+                                                    }}
+                                                >
+                                                    Edit Maintenance Record
+                                                </div>
+
+                                                <label style={styles.field}>
+                                                    <span style={styles.label}>
+                                                        Maintenance Type
+                                                    </span>
+                                                    <input
+                                                        type="text"
+                                                        value={
+                                                            editMaintenanceType
+                                                        }
+                                                        onChange={(event) =>
+                                                            setEditMaintenanceType(
+                                                                event.target
+                                                                    .value
+                                                            )
+                                                        }
+                                                        style={styles.input}
+                                                    />
+                                                </label>
+
+                                                <div
+                                                    style={{
+                                                        display: "grid",
+                                                        gridTemplateColumns:
+                                                            "repeat(auto-fit, minmax(180px, 1fr))",
+                                                        gap: 12,
+                                                    }}
+                                                >
+                                                    <label
+                                                        style={styles.field}
+                                                    >
+                                                        <span
+                                                            style={
+                                                                styles.label
+                                                            }
+                                                        >
+                                                            Status
+                                                        </span>
+                                                        <select
+                                                            value={editStatus}
+                                                            onChange={(event) =>
+                                                                setEditStatus(
+                                                                    event.target
+                                                                        .value
+                                                                )
+                                                            }
+                                                            style={
+                                                                styles.input
+                                                            }
+                                                        >
+                                                            <option value="due">
+                                                                Due
+                                                            </option>
+                                                            <option value="completed">
+                                                                Completed
+                                                            </option>
+                                                            <option value="vor">
+                                                                VOR
+                                                            </option>
+                                                        </select>
+                                                    </label>
+
+                                                    <label
+                                                        style={styles.field}
+                                                    >
+                                                        <span
+                                                            style={
+                                                                styles.label
+                                                            }
+                                                        >
+                                                            Cost (£)
+                                                        </span>
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            step="0.01"
+                                                            value={editCost}
+                                                            onChange={(event) =>
+                                                                setEditCost(
+                                                                    event.target
+                                                                        .value
+                                                                )
+                                                            }
+                                                            style={
+                                                                styles.input
+                                                            }
+                                                        />
+                                                    </label>
+                                                </div>
+
+                                                <div
+                                                    style={{
+                                                        display: "grid",
+                                                        gridTemplateColumns:
+                                                            "repeat(auto-fit, minmax(180px, 1fr))",
+                                                        gap: 12,
+                                                    }}
+                                                >
+                                                    <label
+                                                        style={styles.field}
+                                                    >
+                                                        <span
+                                                            style={
+                                                                styles.label
+                                                            }
+                                                        >
+                                                            Due Date
+                                                        </span>
+                                                        <input
+                                                            type="date"
+                                                            value={editDueDate}
+                                                            onChange={(event) =>
+                                                                setEditDueDate(
+                                                                    event.target
+                                                                        .value
+                                                                )
+                                                            }
+                                                            style={
+                                                                styles.input
+                                                            }
+                                                        />
+                                                    </label>
+
+                                                    <label
+                                                        style={styles.field}
+                                                    >
+                                                        <span
+                                                            style={
+                                                                styles.label
+                                                            }
+                                                        >
+                                                            Completed Date
+                                                        </span>
+                                                        <input
+                                                            type="date"
+                                                            value={
+                                                                editCompletedDate
+                                                            }
+                                                            onChange={(event) =>
+                                                                setEditCompletedDate(
+                                                                    event.target
+                                                                        .value
+                                                                )
+                                                            }
+                                                            style={
+                                                                styles.input
+                                                            }
+                                                        />
+                                                    </label>
+                                                </div>
+
+                                                <div
+                                                    style={{
+                                                        display: "grid",
+                                                        gridTemplateColumns:
+                                                            "repeat(auto-fit, minmax(180px, 1fr))",
+                                                        gap: 12,
+                                                    }}
+                                                >
+                                                    <label
+                                                        style={styles.field}
+                                                    >
+                                                        <span
+                                                            style={
+                                                                styles.label
+                                                            }
+                                                        >
+                                                            Mileage
+                                                        </span>
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            step="1"
+                                                            value={
+                                                                editMileage
+                                                            }
+                                                            onChange={(event) =>
+                                                                setEditMileage(
+                                                                    event.target
+                                                                        .value
+                                                                )
+                                                            }
+                                                            style={
+                                                                styles.input
+                                                            }
+                                                        />
+                                                    </label>
+
+                                                    <label
+                                                        style={styles.field}
+                                                    >
+                                                        <span
+                                                            style={
+                                                                styles.label
+                                                            }
+                                                        >
+                                                            Maintenance Hours
+                                                        </span>
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            step="0.1"
+                                                            value={
+                                                                editMaintenanceHours
+                                                            }
+                                                            onChange={(event) =>
+                                                                setEditMaintenanceHours(
+                                                                    event.target
+                                                                        .value
+                                                                )
+                                                            }
+                                                            style={
+                                                                styles.input
+                                                            }
+                                                        />
+                                                    </label>
+                                                </div>
+
+                                                <label style={styles.field}>
+                                                    <span style={styles.label}>
+                                                        Notes
+                                                    </span>
+                                                    <textarea
+                                                        value={editNotes}
+                                                        onChange={(event) =>
+                                                            setEditNotes(
+                                                                event.target
+                                                                    .value
+                                                            )
+                                                        }
+                                                        rows={4}
+                                                        style={{
+                                                            ...styles.input,
+                                                            resize: "vertical",
+                                                        }}
+                                                    />
+                                                </label>
+
+                                                <div
+                                                    style={{
+                                                        display: "flex",
+                                                        gap: 10,
+                                                        flexWrap: "wrap",
+                                                    }}
+                                                >
+                                                    <button
+                                                        type="button"
+                                                        disabled={editSaving}
+                                                        onClick={() =>
+                                                            void saveEditRecord(
+                                                                record.id
+                                                            )
+                                                        }
+                                                        style={{
+                                                            padding:
+                                                                "10px 16px",
+                                                            borderRadius: 8,
+                                                            border: "none",
+                                                            background:
+                                                                "#0f172a",
+                                                            color: "#ffffff",
+                                                            fontWeight: 900,
+                                                            cursor: editSaving
+                                                                ? "not-allowed"
+                                                                : "pointer",
+                                                            opacity: editSaving
+                                                                ? 0.65
+                                                                : 1,
+                                                        }}
+                                                    >
+                                                        {editSaving
+                                                            ? "Saving..."
+                                                            : "Save Changes"}
+                                                    </button>
+
+                                                    <button
+                                                        type="button"
+                                                        disabled={editSaving}
+                                                        onClick={
+                                                            cancelEditRecord
+                                                        }
+                                                        style={{
+                                                            padding:
+                                                                "10px 16px",
+                                                            borderRadius: 8,
+                                                            border:
+                                                                "1px solid #cbd5e1",
+                                                            background:
+                                                                "#ffffff",
+                                                            color: "#0f172a",
+                                                            fontWeight: 800,
+                                                            cursor: editSaving
+                                                                ? "not-allowed"
+                                                                : "pointer",
+                                                        }}
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+</article>
                             ))}
                         </div>
                     )}
