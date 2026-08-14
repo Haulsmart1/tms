@@ -29,6 +29,12 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true);
   const [inviting, setInviting] = useState(false);
 
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editFullName, setEditFullName] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editRole, setEditRole] = useState("staff");
+  const [savingUser, setSavingUser] = useState(false);
+
   const loadUsers = useCallback(async () => {
     if (!tenant.activeTenantId) {
       setUsers([]);
@@ -124,6 +130,78 @@ export default function UsersPage() {
     }
   }
 
+  function beginEdit(user: TenantUser) {
+    if (!canInvite || !user.user_id) {
+      return;
+    }
+
+    setMessage("");
+    setEditingUserId(user.user_id);
+    setEditFullName(user.full_name ?? "");
+    setEditPhone(user.phone ?? "");
+    setEditRole(user.role || "staff");
+  }
+
+  function cancelEdit() {
+    setEditingUserId(null);
+    setEditFullName("");
+    setEditPhone("");
+    setEditRole("staff");
+  }
+
+  async function saveUser(userId: string) {
+    if (!canInvite) {
+      setMessage("Only an admin can edit tenant users.");
+      return;
+    }
+
+    if (!tenant.writeTenantId) {
+      setMessage("Pick a specific tenant before editing users.");
+      return;
+    }
+
+    setSavingUser(true);
+    setMessage("");
+
+    try {
+      const response = await fetch(
+        `/api/settings/users/${encodeURIComponent(userId)}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenantId: tenant.writeTenantId,
+            fullName: editFullName,
+            phone: editPhone,
+            role: editRole,
+          }),
+        }
+      );
+
+      const body = (await response.json()) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(body.error || "Unable to update tenant user.");
+      }
+
+      setMessage("User updated.");
+      cancelEdit();
+      await loadUsers();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to update tenant user."
+      );
+    } finally {
+      setSavingUser(false);
+    }
+  }
+
   return (
     <TenantGate>
       <main style={pageStyle}>
@@ -183,29 +261,107 @@ export default function UsersPage() {
             ) : users.length === 0 ? (
               <div style={cardStyle}>No users found for this tenant.</div>
             ) : (
-              users.map((user) => (
-                <div key={user.membership_id} style={cardStyle}>
-                  <div style={userHeaderStyle}>
-                    <div>
-                      <strong style={{ fontSize: 18 }}>
-                        {user.full_name || user.email || "TMS User"}
-                      </strong>
+              users.map((user) => {
+                const isEditing =
+                  Boolean(user.user_id) &&
+                  editingUserId === user.user_id;
 
-                      {user.email ? (
-                        <div style={mutedStyle}>{user.email}</div>
-                      ) : null}
+                return (
+                  <div key={user.membership_id} style={cardStyle}>
+                    <div style={userHeaderStyle}>
+                      <div>
+                        <strong style={{ fontSize: 18 }}>
+                          {user.full_name || user.email || "TMS User"}
+                        </strong>
 
-                      {user.phone ? (
-                        <div style={mutedStyle}>{user.phone}</div>
-                      ) : null}
+                        {user.email ? (
+                          <div style={mutedStyle}>{user.email}</div>
+                        ) : null}
+
+                        {user.phone ? (
+                          <div style={mutedStyle}>{user.phone}</div>
+                        ) : null}
+                      </div>
+
+                      <div style={userActionsStyle}>
+                        <span style={roleBadgeStyle}>
+                          {formatRole(user.role)}
+                        </span>
+
+                        {canInvite && user.user_id ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              isEditing
+                                ? cancelEdit()
+                                : beginEdit(user)
+                            }
+                            style={secondaryButtonStyle}
+                          >
+                            {isEditing ? "Cancel" : "Edit"}
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
 
-                    <span style={roleBadgeStyle}>
-                      {formatRole(user.role)}
-                    </span>
+                    {isEditing && user.user_id ? (
+                      <div style={editorStyle}>
+                        <label style={fieldStyle}>
+                          <span style={labelStyle}>Full name</span>
+                          <input
+                            value={editFullName}
+                            onChange={(event) =>
+                              setEditFullName(event.target.value)
+                            }
+                            style={inputStyle}
+                            placeholder="Full name"
+                          />
+                        </label>
+
+                        <label style={fieldStyle}>
+                          <span style={labelStyle}>Phone</span>
+                          <input
+                            value={editPhone}
+                            onChange={(event) =>
+                              setEditPhone(event.target.value)
+                            }
+                            style={inputStyle}
+                            placeholder="Phone number"
+                          />
+                        </label>
+
+                        <label style={fieldStyle}>
+                          <span style={labelStyle}>Tenant role</span>
+                          <select
+                            value={editRole}
+                            onChange={(event) =>
+                              setEditRole(event.target.value)
+                            }
+                            style={inputStyle}
+                          >
+                            <option value="staff">Staff</option>
+                            <option value="driver">Driver</option>
+                            <option value="admin">Admin</option>
+                          </select>
+                        </label>
+
+                        <button
+                          type="button"
+                          disabled={savingUser}
+                          onClick={() => void saveUser(user.user_id!)}
+                          style={{
+                            ...buttonStyle,
+                            opacity: savingUser ? 0.65 : 1,
+                            cursor: savingUser ? "wait" : "pointer",
+                          }}
+                        >
+                          {savingUser ? "Saving..." : "Save Changes"}
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
@@ -289,6 +445,33 @@ const userHeaderStyle = {
   justifyContent: "space-between",
   alignItems: "flex-start",
   gap: 12,
+};
+
+const userActionsStyle = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  flexWrap: "wrap" as const,
+};
+
+const secondaryButtonStyle = {
+  padding: "7px 11px",
+  borderRadius: 9,
+  border: "1px solid #cbd5e1",
+  background: "white",
+  color: "#0f172a",
+  fontWeight: 700,
+  cursor: "pointer",
+};
+
+const editorStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 12,
+  alignItems: "end",
+  marginTop: 18,
+  paddingTop: 18,
+  borderTop: "1px solid #e2e8f0",
 };
 
 const mutedStyle = {
