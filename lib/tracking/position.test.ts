@@ -11,8 +11,8 @@ import {
 
 const NOW = new Date("2026-08-14T12:00:00Z");
 
-function reading(recordedAt: string, speedKph = 80): PositionReading {
-  return { vehicleId: "v1", lat: 53.8, lng: -1.5, speedKph, headingDeg: null, recordedAt };
+function reading(recordedAt: string): PositionReading {
+  return { vehicleId: "v1", lat: 53.8, lng: -1.5, speedKph: 80, headingDeg: null, recordedAt };
 }
 
 describe("normaliseTimestamp", () => {
@@ -28,6 +28,15 @@ describe("normaliseTimestamp", () => {
 
   it("leaves a stamp that already carries a numeric offset alone", () => {
     expect(normaliseTimestamp("2026-08-14T09:41:00+01:00")).toBe("2026-08-14T09:41:00+01:00");
+  });
+
+  it("leaves a stamp with a two-digit offset and no minutes alone", () => {
+    // Postgres emits +01 rather than +01:00 when the offset has zero minutes.
+    expect(normaliseTimestamp("2026-08-14T09:41:00+01")).toBe("2026-08-14T09:41:00+01");
+  });
+
+  it("leaves a stamp with a negative two-digit offset alone", () => {
+    expect(normaliseTimestamp("2026-08-14T09:41:00-05")).toBe("2026-08-14T09:41:00-05");
   });
 });
 
@@ -67,6 +76,12 @@ describe("signalState", () => {
   it("is none for an unparseable stamp, because an unreadable fix is not a fix", () => {
     expect(signalState(reading("not-a-date"), NOW)).toBe("none");
   });
+
+  it("is stale when the reading is far enough in the future to be a broken clock", () => {
+    // 5 minutes ahead exceeds FUTURE_TOLERANCE_MINUTES. Reporting "live" here
+    // would pin a green pill to a vehicle that may not have reported in days.
+    expect(signalState(reading("2026-08-14T12:05:00Z"), NOW)).toBe("stale");
+  });
 });
 
 describe("isLive", () => {
@@ -90,6 +105,18 @@ describe("pingLabel", () => {
     expect(pingLabel(reading("2026-08-14T11:45:00Z"), NOW)).toBe("15 min ago");
     expect(pingLabel(reading("2026-08-14T09:00:00Z"), NOW)).toBe("3 h ago");
     expect(pingLabel(reading("2026-08-12T12:00:00Z"), NOW)).toBe("2 d ago");
+  });
+
+  it("reads 1 h ago at exactly 60 minutes", () => {
+    expect(pingLabel(reading("2026-08-14T11:00:00Z"), NOW)).toBe("1 h ago");
+  });
+
+  it("reads 1 d ago at exactly 1440 minutes", () => {
+    expect(pingLabel(reading("2026-08-13T12:00:00Z"), NOW)).toBe("1 d ago");
+  });
+
+  it("says clock ahead when the reading is far enough in the future to be a broken clock", () => {
+    expect(pingLabel(reading("2026-08-14T12:05:00Z"), NOW)).toBe("clock ahead");
   });
 });
 
