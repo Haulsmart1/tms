@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { createClient } from "../../lib/supabase/browser";
@@ -1170,7 +1171,7 @@ export default function PodPage() {
                                   {savingStopId ===
                                   stop.id
                                     ? "Saving..."
-                                    : "Save POD Draft"}
+                                    : "SAVE POD DRAFT"}
                                 </button>
 
                                 <button
@@ -1203,7 +1204,7 @@ export default function PodPage() {
                                     : savingStopId ===
                                         stop.id
                                       ? "Saving..."
-                                      : "✓ Complete Delivery"}
+                                      : "COMPLETE DELIVERY"}
                                 </button>
                               </div>
                             </div>
@@ -1239,33 +1240,51 @@ function EvidenceUpload({
     event: ChangeEvent<HTMLInputElement>
   ) => void;
 }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const buttonLabel =
+    title === "Delivery Photos"
+      ? "ADD DELIVERY PHOTOS"
+      : "ADD DELIVERY DOCUMENTS";
+
   return (
     <div style={styles.uploadCard}>
-      <strong>{title}</strong>
-      <div style={styles.muted}>{description}</div>
+      <div>
+        <strong style={styles.uploadTitle}>
+          {title}
+        </strong>
+
+        <div style={styles.uploadDescription}>
+          {description}
+        </div>
+      </div>
 
       <input
+        ref={inputRef}
         type="file"
         accept={accept}
         multiple={multiple}
         disabled={uploading}
         onChange={onChange}
-        style={{
-          width: "100%",
-          padding: "10px",
-          border: "1px dashed #94a3b8",
-          borderRadius: 9,
-          background: "#f8fafc",
-          color: "#334155",
-          cursor: uploading ? "not-allowed" : "pointer",
-        }}
+        style={styles.hiddenFileInput}
       />
 
-      {uploading ? (
-        <div style={styles.uploading}>
-          Uploading...
-        </div>
-      ) : null}
+      <button
+        type="button"
+        disabled={uploading}
+        onClick={() => inputRef.current?.click()}
+        style={{
+          ...styles.uploadButton,
+          opacity: uploading ? 0.55 : 1,
+          cursor: uploading
+            ? "not-allowed"
+            : "pointer",
+        }}
+      >
+        {uploading
+          ? "UPLOADING..."
+          : buttonLabel}
+      </button>
     </div>
   );
 }
@@ -1651,14 +1670,46 @@ const styles: Record<string, CSSProperties> = {
 
   uploadCard: {
     display: "grid",
-    gap: 10,
+    gap: 12,
     padding: 18,
-    minHeight: 120,
-    alignContent: "start",
-    borderRadius: 12,
+    minHeight: 140,
+    alignContent: "space-between",
+    borderRadius: 4,
     background: "#ffffff",
-    border: "1px solid #cbd5e1",
-    boxShadow: "0 2px 6px rgba(15, 23, 42, 0.04)",
+    border: "2px solid #b1b4b6",
+  },
+
+  uploadTitle: {
+    display: "block",
+    fontSize: 15,
+    fontWeight: 900,
+    color: "#0b0c0c",
+    marginBottom: 5,
+  },
+
+  uploadDescription: {
+    color: "#505a5f",
+    fontSize: 13,
+    lineHeight: 1.4,
+  },
+
+  uploadButton: {
+    width: "100%",
+    minHeight: 50,
+    padding: "12px 16px",
+    border: "2px solid #0b0c0c",
+    borderRadius: 4,
+    background: "#ffffff",
+    color: "#0b0c0c",
+    fontSize: 14,
+    fontWeight: 900,
+    letterSpacing: "0.02em",
+    textAlign: "center",
+    boxShadow: "0 2px 0 #929191",
+  },
+
+  hiddenFileInput: {
+    display: "none",
   },
 
   uploading: {
@@ -1725,43 +1776,45 @@ const styles: Record<string, CSSProperties> = {
 
   actions: {
     display: "flex",
-    gap: 12,
+    gap: 16,
     flexWrap: "wrap",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingTop: 16,
-    marginTop: 4,
-    borderTop: "1px solid #e2e8f0",
+    paddingTop: 20,
+    marginTop: 8,
+    borderTop: "2px solid #b1b4b6",
   },
 
   primaryButton: {
-    minWidth: 190,
-    minHeight: 46,
-    padding: "12px 20px",
-    border: "1px solid #1d4ed8",
-    borderRadius: 10,
-    background: "#2563eb",
-    color: "white",
-    fontSize: 14,
+    minWidth: 220,
+    minHeight: 52,
+    padding: "12px 22px",
+    border: "2px solid #005a30",
+    borderRadius: 4,
+    background: "#00703c",
+    color: "#ffffff",
+    fontSize: 15,
     fontWeight: 900,
+    letterSpacing: "0.02em",
     cursor: "pointer",
-    boxShadow: "0 4px 12px rgba(37, 99, 235, 0.22)",
     textAlign: "center",
+    boxShadow: "0 2px 0 #003d21",
   },
 
   secondaryButton: {
-    minWidth: 140,
-    minHeight: 46,
-    padding: "12px 18px",
-    border: "1px solid #cbd5e1",
-    borderRadius: 10,
-    background: "#ffffff",
-    color: "#0f172a",
-    fontSize: 14,
-    fontWeight: 850,
+    minWidth: 180,
+    minHeight: 52,
+    padding: "12px 22px",
+    border: "2px solid #0b0c0c",
+    borderRadius: 4,
+    background: "#f3f2f1",
+    color: "#0b0c0c",
+    fontSize: 15,
+    fontWeight: 900,
+    letterSpacing: "0.02em",
     cursor: "pointer",
-    boxShadow: "0 2px 6px rgba(15, 23, 42, 0.06)",
     textAlign: "center",
+    boxShadow: "0 2px 0 #929191",
   },
 
   deleteButton: {
