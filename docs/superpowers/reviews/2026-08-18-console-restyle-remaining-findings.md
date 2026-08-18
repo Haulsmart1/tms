@@ -93,3 +93,15 @@ markup-only pass candidate.
 ### 15. /stats period pills have no hover or transition states
 Button carries transition-colors and hover treatments; the period
 pills have none. Cosmetic polish alongside the finding-13 fix.
+
+### 16. /vehicles card badge fill can vanish on matching tint
+A red-level vehicle card is bg-danger-tint and its StatusBadge is also
+bg-danger-tint, so the pill's fill disappears into the card and only
+the border and text delineate it (same for amber). Text contrast is
+fine; shape legibility only. Check on the signed-in pass; consider a
+bg-surface context for card-level badges.
+
+### 17. /vehicles compliance legend has no accessible group label
+Three bare badges ("31+ days" etc.) with no aria-label on the wrapper;
+meaningless out of context to a screen reader. Pre-existing shape; add
+aria-label="Compliance legend" when the freeze lifts.

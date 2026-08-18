@@ -966,7 +966,7 @@ export default function VehiclesPage() {
                         {vehicle.registration}
                       </h3>
 
-                      <div className="text-sm text-ink-3">
+                      <div className="text-sm text-ink-2">
                         {vehicle.vehicle_type || "No type"} •{" "}
                         {vehicle.make || "-"} {vehicle.model || ""}
                       </div>
