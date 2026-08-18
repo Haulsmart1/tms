@@ -822,7 +822,7 @@ export default function CustomersPage() {
                 />
               </Section>
 
-              <Button type="submit" disabled={saving}>
+              <Button type="submit" disabled={saving} className="mt-4">
                 {saving
                   ? "Saving..."
                   : editingId
@@ -847,14 +847,14 @@ export default function CustomersPage() {
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search name, account code or postcode..."
-                className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3 sm:w-64"
+                className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3 sm:w-80"
               />
             </div>
 
             {loading ? (
-              <p className="text-sm text-ink-3">Loading customers...</p>
+              <p className="py-10 text-center text-sm text-ink-3">Loading customers...</p>
             ) : customers.length === 0 ? (
-              <p className="text-sm text-ink-3">No customers found.</p>
+              <p className="py-10 text-center text-sm text-ink-3">No customers found.</p>
             ) : (
               <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {customers.map((customer) => (
@@ -974,7 +974,7 @@ function Section({
   return (
     <section className="mt-4 border-t border-line pt-4">
       <h3 className="mb-3 text-kicker uppercase text-ink-3">{title}</h3>
-      {children}
+      <div className="grid gap-3">{children}</div>
     </section>
   );
 }
@@ -1067,7 +1067,7 @@ function CheckboxField({
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="flex min-h-10 items-center gap-2 text-sm text-ink-2">
+    <label className="flex min-h-10 items-center gap-2 rounded-md border border-ink-3 bg-surface px-3 text-sm text-ink-2">
       <input
         type="checkbox"
         checked={checked}
