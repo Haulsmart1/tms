@@ -206,7 +206,7 @@ async function createJob(
       customer_reference: rma.number,
       external_reference: `CAMBRIDGE-RMA-${rma.id}`,
 
-      status: "pending",
+      status: "pending_acceptance",
       priority: "normal",
 
       job_date: today,

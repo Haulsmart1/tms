@@ -17,6 +17,21 @@ function formatMoney(value: any) {
   return new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(Number(value));
 }
 
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "-";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+
+  return date.toLocaleString("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
 export default function JobsPage() {
   const supabase = createClient();
   const tenant = useTenant();
@@ -32,6 +47,20 @@ export default function JobsPage() {
   const [podForms, setPodForms] = useState<Record<string, any>>({});
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; reference: string } | null>(null);
 
+  const [acceptanceTarget, setAcceptanceTarget] = useState<{
+    id: string;
+    tenant_id: string;
+    reference: string;
+  } | null>(null);
+
+  const [acceptanceForm, setAcceptanceForm] = useState({
+    collection_eta: "",
+    delivery_eta: "",
+    acceptance_note: "",
+  });
+
+  const [accepting, setAccepting] = useState(false);
+
   const [form, setForm] = useState({
     reference: "", scheduled_date: "", customer_id: "", vehicle_id: "", driver_id: "",
     customer_price: "", subcontractor_id: "", subcontractor_cost: "",
@@ -41,8 +70,9 @@ export default function JobsPage() {
   async function loadData() {
     setMessage("");
     const jobsQuery = supabase.from("jobs").select(`
-        id, reference, status, scheduled_date, customer_id, vehicle_id, driver_id,
+        id, tenant_id, reference, status, scheduled_date, customer_id, vehicle_id, driver_id,
         customer_price, subcontractor_id, subcontractor_cost,
+        accepted_at, accepted_by, collection_eta, delivery_eta, acceptance_note,
         customers ( name ), vehicles ( registration ), drivers ( name ),
         subcontractors ( name, vehicle_reg, driver_name ),
         job_stops ( id, stop_order, type, address_line, city, postcode, status, pod_status, recipient_name, delivered_at, pod_notes, pod_photo_url )
@@ -216,6 +246,159 @@ export default function JobsPage() {
     setDeleteTarget({ id: job.id, reference: job.reference });
   }
 
+  function openAcceptance(job: any) {
+    setMessage("");
+
+    setAcceptanceTarget({
+      id: job.id,
+      tenant_id: job.tenant_id,
+      reference: job.reference,
+    });
+
+    setAcceptanceForm({
+      collection_eta: "",
+      delivery_eta: "",
+      acceptance_note: "",
+    });
+  }
+
+  function cancelAcceptance() {
+    if (accepting) {
+      return;
+    }
+
+    setAcceptanceTarget(null);
+
+    setAcceptanceForm({
+      collection_eta: "",
+      delivery_eta: "",
+      acceptance_note: "",
+    });
+  }
+
+  async function confirmAcceptance() {
+    if (!acceptanceTarget || accepting) {
+      return;
+    }
+
+    setMessage("");
+
+    if (!acceptanceForm.collection_eta) {
+      setMessage("Enter a collection ETA before accepting the job.");
+      return;
+    }
+
+    const collectionDate = new Date(
+      acceptanceForm.collection_eta
+    );
+
+    if (Number.isNaN(collectionDate.getTime())) {
+      setMessage("Enter a valid collection ETA.");
+      return;
+    }
+
+    let deliveryDate: Date | null = null;
+
+    if (acceptanceForm.delivery_eta) {
+      deliveryDate = new Date(
+        acceptanceForm.delivery_eta
+      );
+
+      if (Number.isNaN(deliveryDate.getTime())) {
+        setMessage("Enter a valid delivery ETA.");
+        return;
+      }
+
+      if (
+        deliveryDate.getTime() <
+        collectionDate.getTime()
+      ) {
+        setMessage(
+          "Delivery ETA cannot be earlier than collection ETA."
+        );
+        return;
+      }
+    }
+
+    setAccepting(true);
+
+    try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        setMessage(
+          "Your session has expired. Please sign in again."
+        );
+        return;
+      }
+
+      const {
+        data: acceptedJob,
+        error: acceptanceError,
+      } = await supabase
+        .from("jobs")
+        .update({
+          status: "planned",
+          accepted_at: new Date().toISOString(),
+          accepted_by: user.id,
+          collection_eta: collectionDate.toISOString(),
+          delivery_eta: deliveryDate
+            ? deliveryDate.toISOString()
+            : null,
+          acceptance_note:
+            acceptanceForm.acceptance_note.trim() ||
+            null,
+        })
+        .eq("id", acceptanceTarget.id)
+        .eq(
+          "tenant_id",
+          acceptanceTarget.tenant_id
+        )
+        .eq(
+          "status",
+          "pending_acceptance"
+        )
+        .select("id")
+        .maybeSingle();
+
+      if (acceptanceError) {
+        setMessage(
+          `Accept job error: ${acceptanceError.message}`
+        );
+        return;
+      }
+
+      if (!acceptedJob) {
+        setMessage(
+          "This job has already been accepted or is no longer awaiting acceptance."
+        );
+
+        setAcceptanceTarget(null);
+        await loadData();
+        return;
+      }
+
+      setMessage(
+        `Job ${acceptanceTarget.reference} accepted.`
+      );
+
+      setAcceptanceTarget(null);
+
+      setAcceptanceForm({
+        collection_eta: "",
+        delivery_eta: "",
+        acceptance_note: "",
+      });
+
+      await loadData();
+    } finally {
+      setAccepting(false);
+    }
+  }
+
   async function savePod(jobId: string, stopId: string) {
     const podForm = podForms[stopId] || { recipient_name: "", pod_notes: "", pod_photo_url: "" };
     const updatePayload: Record<string, any> = {
@@ -290,14 +473,182 @@ export default function JobsPage() {
                   <div>
                     <h2 className="font-mono text-lg font-semibold text-ink">{job.reference}</h2>
                     <div className="text-sm text-ink-2">
-                      Date: {job.scheduled_date || "-"} · Status: {job.status}
+                      Date: {job.scheduled_date || "-"} · Status:{" "}
+                      {job.status === "pending_acceptance"
+                        ? "Awaiting acceptance"
+                        : job.status}
                     </div>
                   </div>
-                  <div className="flex gap-2">
-                    <Button type="button" variant="secondary" onClick={() => startEdit(job)}>Edit</Button>
-                    <Button type="button" variant="danger" onClick={() => requestDelete(job)}>Delete</Button>
+                  <div className="flex flex-wrap gap-2">
+                    {job.status === "pending_acceptance" ? (
+                      <Button
+                        type="button"
+                        onClick={() => openAcceptance(job)}
+                      >
+                        Accept Job
+                      </Button>
+                    ) : null}
+
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => startEdit(job)}
+                    >
+                      Edit
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="danger"
+                      onClick={() => requestDelete(job)}
+                    >
+                      Delete
+                    </Button>
                   </div>
                 </div>
+
+                {acceptanceTarget?.id === job.id ? (
+                  <div className="mb-4 rounded-lg border border-line bg-surface-2 p-4">
+                    <div className="text-sm font-semibold text-ink">
+                      Accept Job - {job.reference}
+                    </div>
+
+                    <p className="mt-1 text-xs text-ink-2">
+                      Confirm the expected collection time before accepting this customer job.
+                    </p>
+
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <label className="grid gap-1.5 text-sm text-ink">
+                        <span className="font-medium">
+                          Collection ETA *
+                        </span>
+
+                        <input
+                          type="datetime-local"
+                          value={acceptanceForm.collection_eta}
+                          onChange={(event) =>
+                            setAcceptanceForm((current) => ({
+                              ...current,
+                              collection_eta:
+                                event.target.value,
+                            }))
+                          }
+                          disabled={accepting}
+                          className="rounded-md border border-line-strong bg-surface px-3 py-2 text-ink"
+                        />
+                      </label>
+
+                      <label className="grid gap-1.5 text-sm text-ink">
+                        <span className="font-medium">
+                          Delivery ETA
+                        </span>
+
+                        <input
+                          type="datetime-local"
+                          value={acceptanceForm.delivery_eta}
+                          onChange={(event) =>
+                            setAcceptanceForm((current) => ({
+                              ...current,
+                              delivery_eta:
+                                event.target.value,
+                            }))
+                          }
+                          disabled={accepting}
+                          className="rounded-md border border-line-strong bg-surface px-3 py-2 text-ink"
+                        />
+                      </label>
+                    </div>
+
+                    <label className="mt-3 grid gap-1.5 text-sm text-ink">
+                      <span className="font-medium">
+                        Acceptance note
+                      </span>
+
+                      <textarea
+                        value={acceptanceForm.acceptance_note}
+                        onChange={(event) =>
+                          setAcceptanceForm((current) => ({
+                            ...current,
+                            acceptance_note:
+                              event.target.value,
+                          }))
+                        }
+                        rows={3}
+                        disabled={accepting}
+                        placeholder="Optional note about collection, access or scheduling"
+                        className="rounded-md border border-line-strong bg-surface px-3 py-2 text-ink"
+                      />
+                    </label>
+
+                    <div className="mt-4 flex flex-wrap justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={cancelAcceptance}
+                        disabled={accepting}
+                      >
+                        Cancel
+                      </Button>
+
+                      <Button
+                        type="button"
+                        onClick={confirmAcceptance}
+                        loading={accepting}
+                      >
+                        Confirm Acceptance
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {job.accepted_at ? (
+                  <div className="mb-4 rounded-lg border border-line bg-surface-2 p-4">
+                    <div className="text-sm font-semibold text-ink">
+                      Accepted
+                    </div>
+
+                    <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                      <div>
+                        <div className="text-xs font-semibold text-ink-3">
+                          Collection ETA
+                        </div>
+                        <div className="text-sm text-ink">
+                          {formatDateTime(job.collection_eta)}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-xs font-semibold text-ink-3">
+                          Delivery ETA
+                        </div>
+                        <div className="text-sm text-ink">
+                          {formatDateTime(job.delivery_eta)}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-xs font-semibold text-ink-3">
+                          Accepted at
+                        </div>
+                        <div className="text-sm text-ink">
+                          {formatDateTime(job.accepted_at)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {job.acceptance_note ? (
+                      <div className="mt-3">
+                        <div className="text-xs font-semibold text-ink-3">
+                          Acceptance note
+                        </div>
+
+                        <div className="mt-1 whitespace-pre-wrap text-sm text-ink">
+                          {job.acceptance_note}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
                   <div className="rounded-md bg-surface-2 p-3">
