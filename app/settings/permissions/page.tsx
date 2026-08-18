@@ -57,23 +57,26 @@ export default function PermissionsPage() {
 
     return (
 
-        <main style={pageStyle}>
+        <div className="ds min-h-screen bg-canvas font-sans text-ink">
+            <main className="mx-auto max-w-[1480px] px-6 py-8">
 
-            <div style={overlayStyle}>
+                <header className="mb-4">
+                    <div className="text-kicker uppercase text-ink-3">Admin</div>
 
-                <h1 style={titleStyle}>Permissions</h1>
+                    <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">Permissions</h1>
+                </header>
 
                 {users.map(user => (
 
-                    <div key={user.id} style={cardStyle}>
+                    <article key={user.id} className="mb-3 rounded-lg border border-line bg-surface p-4 shadow-sm">
 
-                        <h3>{user.email}</h3>
+                        <h3 className="mb-2 text-md font-semibold text-ink">{user.email}</h3>
 
-                        <div style={gridStyle}>
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
 
                             {pages.map(p => (
 
-                                <label key={p}>
+                                <label key={p} className="flex items-center gap-2 text-sm text-ink-2">
 
                                     <input
                                         type="checkbox"
@@ -88,24 +91,13 @@ export default function PermissionsPage() {
 
                         </div>
 
-                    </div>
+                    </article>
 
                 ))}
 
-            </div>
-
-        </main>
+            </main>
+        </div>
 
     )
 
 }
-
-const pageStyle = { minHeight: "100vh", padding: 30, backgroundImage: "url('https://images.unsplash.com/photo-1553413077-190dd305871c')", backgroundSize: "cover" }
-
-const overlayStyle = { background: "rgba(0,0,0,0.65)", padding: 30, borderRadius: 20 }
-
-const titleStyle = { color: "white" }
-
-const cardStyle = { background: "white", padding: 20, borderRadius: 14, marginBottom: 20 }
-
-const gridStyle = { display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }
