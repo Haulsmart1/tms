@@ -66,3 +66,8 @@ the freeze lifts.
 When the queries return no rows, both pages show an empty grid with no
 empty-state message. Pre-existing; add the standard empty-state line
 when the freeze lifts.
+
+### 11. Settings kicker labels diverge
+This batch's settings pages use the kicker "Admin" (per the plan);
+the earlier-restyled /settings/users uses "Settings". Reconcile the
+convention family-wide when the freeze lifts.
