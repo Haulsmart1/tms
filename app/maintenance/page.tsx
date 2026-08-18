@@ -1,8 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CSSProperties, FormEvent } from "react";
+import type { FormEvent } from "react";
 import { createClient } from "../../lib/supabase/browser";
+import Badge, { type Tone } from "../../components/Badge";
+import Button from "../../components/Button";
+import Field from "../../components/Field";
+import Textarea from "../../components/Textarea";
 
 type Vehicle = {
     id: string;
@@ -747,62 +751,48 @@ export default function MaintenancePage() {
     }
 
     return (
-        <main style={styles.page}>
-            <div style={styles.overlay}>
-                <header style={styles.header}>
-                    <div>
-                        <p style={styles.eyebrow}>
+        <div className="ds min-h-screen bg-canvas font-sans text-ink">
+            <main className="mx-auto max-w-[1480px] px-6 py-8">
+                <header className="mb-4 flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0">
+                        <div className="text-kicker uppercase text-ink-3">
                             Fleet Compliance
-                        </p>
+                        </div>
 
-                        <h1 style={styles.title}>
+                        <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">
                             Maintenance Records
                         </h1>
 
-                        <p style={styles.subtitle}>
+                        <p className="mb-4 text-sm text-ink-3">
                             Manage maintenance,
                             defects and vehicle
                             off-road status.
                         </p>
                     </div>
 
-                    <div style={styles.headerStats}>
-                        <div style={styles.stat}>
-                            <span
-                                style={
-                                    styles.statLabel
-                                }
-                            >
+                    <div className="flex gap-2.5">
+                        <div className="min-w-[90px] rounded-lg border border-line bg-surface p-4 shadow-sm">
+                            <span className="block text-xs font-medium uppercase text-ink-3">
                                 Fleet
                             </span>
 
-                            <strong
-                                style={
-                                    styles.statValue
-                                }
-                            >
+                            <strong className="mt-1 block font-mono text-2xl font-semibold tabular-nums text-ink">
                                 {vehicles.length}
                             </strong>
                         </div>
 
-                        <div style={styles.stat}>
-                            <span
-                                style={
-                                    styles.statLabel
-                                }
-                            >
+                        <div className="min-w-[90px] rounded-lg border border-line bg-surface p-4 shadow-sm">
+                            <span className="block text-xs font-medium uppercase text-ink-3">
                                 VOR
                             </span>
 
                             <strong
-                                style={{
-                                    ...styles.statValue,
-                                    color:
-                                        vorVehicles.length >
-                                        0
-                                            ? "#dc2626"
-                                            : "#16a34a",
-                                }}
+                                className={`mt-1 block font-mono text-2xl font-semibold tabular-nums ${
+                                    vorVehicles.length >
+                                    0
+                                        ? "text-danger-strong"
+                                        : "text-success-strong"
+                                }`}
                             >
                                 {
                                     vorVehicles.length
@@ -813,78 +803,59 @@ export default function MaintenancePage() {
                 </header>
 
                 {errorMessage ? (
-                    <div style={styles.errorMessage}>
+                    <div className="mb-4 rounded-lg border border-danger-border bg-danger-tint p-3 text-sm text-danger-strong">
                         {errorMessage}
                     </div>
                 ) : null}
 
                 {message ? (
-                    <div style={styles.successMessage}>
+                    <div className="mb-4 rounded-lg border border-success-border bg-success-tint p-3 text-sm text-success-strong">
                         {message}
                     </div>
                 ) : null}
 
                 {vorVehicles.length > 0 ? (
-                    <section style={styles.vorPanel}>
-                        <div
-                            style={
-                                styles.sectionHeading
-                            }
-                        >
-                            <div>
-                                <h2
-                                    style={
-                                        styles.sectionTitle
-                                    }
-                                >
+                    <section
+                        aria-label="Vehicles off road"
+                        className="mb-4 rounded-lg border border-warning-border bg-warning-tint p-4"
+                    >
+                        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                                <h2 className="mb-2 text-md font-semibold text-warning-strong">
                                     Vehicles Off Road
                                 </h2>
 
-                                <p
-                                    style={
-                                        styles.sectionDescription
-                                    }
-                                >
+                                <p className="mb-3 text-sm text-ink-3">
                                     These vehicles
                                     should not be
                                     allocated to jobs.
                                 </p>
                             </div>
 
-                            <span style={styles.vorBadge}>
+                            <Badge tone="danger">
                                 {
                                     vorVehicles.length
                                 }{" "}
                                 VOR
-                            </span>
+                            </Badge>
                         </div>
 
-                        <div style={styles.vorGrid}>
+                        <div className="grid grid-cols-[repeat(auto-fit,minmax(270px,1fr))] gap-3">
                             {vorVehicles.map(
                                 (vehicle) => (
                                     <div
                                         key={
                                             vehicle.id
                                         }
-                                        style={
-                                            styles.vorCard
-                                        }
+                                        className="grid content-start gap-3 rounded-lg border border-danger-border bg-surface p-4"
                                     >
-                                        <div>
-                                            <strong
-                                                style={
-                                                    styles.vehicleRegistration
-                                                }
-                                            >
+                                        <div className="min-w-0">
+                                            <strong className="break-words text-md font-semibold text-ink">
                                                 {vehicle.registration ??
                                                     "Vehicle"}
                                             </strong>
 
-                                            <div
-                                                style={
-                                                    styles.vehicleDescription
-                                                }
-                                            >
+                                            <div className="mt-0.5 break-words text-sm text-ink-3">
                                                 {[
                                                     vehicle.make,
                                                     vehicle.model,
@@ -900,31 +871,19 @@ export default function MaintenancePage() {
                                             </div>
                                         </div>
 
-                                        <div
-                                            style={
-                                                styles.vorReasonBox
-                                            }
-                                        >
-                                            <span
-                                                style={
-                                                    styles.smallLabel
-                                                }
-                                            >
+                                        <div className="grid min-w-0 gap-1 rounded-md bg-danger-tint p-3">
+                                            <span className="block text-kicker uppercase text-ink-3">
                                                 VOR
                                                 reason
                                             </span>
 
-                                            <strong>
+                                            <strong className="break-words text-sm font-semibold text-ink">
                                                 {vehicle.vor_reason ||
                                                     "Not recorded"}
                                             </strong>
 
                                             {vehicle.vor_since ? (
-                                                <span
-                                                    style={
-                                                        styles.smallText
-                                                    }
-                                                >
+                                                <span className="block text-xs text-ink-3">
                                                     Since{" "}
                                                     {formatDateTime(
                                                         vehicle.vor_since
@@ -933,8 +892,7 @@ export default function MaintenancePage() {
                                             ) : null}
                                         </div>
 
-                                        <button
-                                            type="button"
+                                        <Button
                                             disabled={
                                                 vorSaving
                                             }
@@ -943,13 +901,10 @@ export default function MaintenancePage() {
                                                     vehicle
                                                 )
                                             }
-                                            style={
-                                                styles.returnButton
-                                            }
                                         >
                                             Return to
                                             Service
-                                        </button>
+                                        </Button>
                                     </div>
                                 )
                             )}
@@ -957,35 +912,25 @@ export default function MaintenancePage() {
                     </section>
                 ) : null}
 
-                <section style={styles.formCard}>
-                    <div style={styles.sectionHeading}>
-                        <div>
-                            <h2
-                                style={
-                                    styles.sectionTitle
-                                }
-                            >
-                                Add Maintenance Record
-                            </h2>
+                <section className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm">
+                    <div>
+                        <h2 className="mb-1 text-md font-semibold text-ink">
+                            Add Maintenance Record
+                        </h2>
 
-                            <p
-                                style={
-                                    styles.sectionDescription
-                                }
-                            >
-                                Record inspections,
-                                repairs, servicing or
-                                defects.
-                            </p>
-                        </div>
+                        <p className="mb-3 text-sm text-ink-3">
+                            Record inspections,
+                            repairs, servicing or
+                            defects.
+                        </p>
                     </div>
 
                     <form
                         onSubmit={createRecord}
-                        style={styles.form}
+                        className="grid gap-3"
                     >
-                                                <label style={styles.field}>
-                            <span style={styles.label}>
+                        <label className="grid gap-1.5">
+                            <span className="text-sm font-medium text-ink-2">
                                 Maintenance Target
                             </span>
 
@@ -1032,7 +977,7 @@ export default function MaintenancePage() {
                                     setVehicleId("");
                                     setAssetId("");
                                 }}
-                                style={styles.input}
+                                className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                                 required
                             >
                                 <option value="">
@@ -1081,38 +1026,26 @@ export default function MaintenancePage() {
 
                         {selectedVehicle ? (
                             <div
-                                style={
+                                className={
                                     selectedVehicle.vor ||
                                     selectedVehicle.active ===
                                         false
-                                        ? styles.selectedVehicleVor
-                                        : styles.selectedVehicleActive
+                                        ? "flex flex-wrap items-center justify-between gap-3 rounded-lg border border-danger-border bg-danger-tint p-4"
+                                        : "flex flex-wrap items-center justify-between gap-3 rounded-lg border border-success-border bg-success-tint p-4"
                                 }
                             >
-                                <div>
-                                    <span
-                                        style={
-                                            styles.smallLabel
-                                        }
-                                    >
+                                <div className="min-w-0">
+                                    <span className="block text-kicker uppercase text-ink-3">
                                         Vehicle
                                         Status
                                     </span>
 
-                                    <strong
-                                        style={
-                                            styles.selectedVehicleTitle
-                                        }
-                                    >
+                                    <strong className="mt-0.5 block break-words text-md font-semibold text-ink">
                                         {selectedVehicle.registration ??
                                             "Vehicle"}
                                     </strong>
 
-                                    <span
-                                        style={
-                                            styles.smallText
-                                        }
-                                    >
+                                    <span className="mt-0.5 block text-xs text-ink-3">
                                         {selectedVehicle.vor ||
                                         selectedVehicle.active ===
                                             false
@@ -1124,8 +1057,7 @@ export default function MaintenancePage() {
                                 {selectedVehicle.vor ||
                                 selectedVehicle.active ===
                                     false ? (
-                                    <button
-                                        type="button"
+                                    <Button
                                         disabled={
                                             vorSaving
                                         }
@@ -1134,19 +1066,12 @@ export default function MaintenancePage() {
                                                 selectedVehicle
                                             )
                                         }
-                                        style={
-                                            styles.returnButton
-                                        }
                                     >
                                         Return to
                                         Service
-                                    </button>
+                                    </Button>
                                 ) : (
-                                    <div
-                                        style={
-                                            styles.vorControl
-                                        }
-                                    >
+                                    <div className="flex grow basis-[400px] justify-end gap-2">
                                         <input
                                             type="text"
                                             value={
@@ -1162,13 +1087,12 @@ export default function MaintenancePage() {
                                                 )
                                             }
                                             placeholder="Reason for VOR"
-                                            style={
-                                                styles.input
-                                            }
+                                            aria-label="Reason for VOR"
+                                            className="h-10 min-w-0 flex-1 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
                                         />
 
-                                        <button
-                                            type="button"
+                                        <Button
+                                            variant="danger"
                                             disabled={
                                                 vorSaving
                                             }
@@ -1177,58 +1101,36 @@ export default function MaintenancePage() {
                                                     selectedVehicle
                                                 )
                                             }
-                                            style={
-                                                styles.vorButton
-                                            }
                                         >
                                             VOR Vehicle
-                                        </button>
+                                        </Button>
                                     </div>
                                 )}
                             </div>
                         ) : null}
 
-                        <div style={styles.formGrid}>
-                            <label
-                                style={styles.field}
-                            >
-                                <span
-                                    style={
-                                        styles.label
-                                    }
-                                >
-                                    Maintenance Type
-                                </span>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                            <Field
+                                id="maint-type"
+                                label="Maintenance Type"
+                                type="text"
+                                placeholder="e.g. PMI, tyres, brakes, service"
+                                value={
+                                    maintenanceType
+                                }
+                                onChange={(
+                                    event
+                                ) =>
+                                    setMaintenanceType(
+                                        event.target
+                                            .value
+                                    )
+                                }
+                                required
+                            />
 
-                                <input
-                                    type="text"
-                                    placeholder="e.g. PMI, tyres, brakes, service"
-                                    value={
-                                        maintenanceType
-                                    }
-                                    onChange={(
-                                        event
-                                    ) =>
-                                        setMaintenanceType(
-                                            event.target
-                                                .value
-                                        )
-                                    }
-                                    style={
-                                        styles.input
-                                    }
-                                    required
-                                />
-                            </label>
-
-                            <label
-                                style={styles.field}
-                            >
-                                <span
-                                    style={
-                                        styles.label
-                                    }
-                                >
+                            <label className="grid gap-1.5">
+                                <span className="text-sm font-medium text-ink-2">
                                     Status
                                 </span>
 
@@ -1242,9 +1144,7 @@ export default function MaintenancePage() {
                                                 .value
                                         )
                                     }
-                                    style={
-                                        styles.input
-                                    }
+                                    className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                                 >
                                     <option value="due">
                                         Due
@@ -1272,279 +1172,174 @@ export default function MaintenancePage() {
                                 </select>
                             </label>
 
-                            <label
-                                style={styles.field}
-                            >
-                                <span
-                                    style={
-                                        styles.label
-                                    }
-                                >
-                                    Due Date
-                                </span>
+                            <Field
+                                id="maint-due-date"
+                                label="Due Date"
+                                type="date"
+                                value={dueDate}
+                                onChange={(
+                                    event
+                                ) =>
+                                    setDueDate(
+                                        event.target
+                                            .value
+                                    )
+                                }
+                            />
 
-                                <input
-                                    type="date"
-                                    value={dueDate}
-                                    onChange={(
-                                        event
-                                    ) =>
-                                        setDueDate(
-                                            event.target
-                                                .value
-                                        )
-                                    }
-                                    style={
-                                        styles.input
-                                    }
-                                />
-                            </label>
+                            <Field
+                                id="maint-completed-date"
+                                label="Completed Date"
+                                type="date"
+                                value={
+                                    completedDate
+                                }
+                                onChange={(
+                                    event
+                                ) =>
+                                    setCompletedDate(
+                                        event.target
+                                            .value
+                                    )
+                                }
+                            />
 
-                            <label
-                                style={styles.field}
-                            >
-                                <span
-                                    style={
-                                        styles.label
-                                    }
-                                >
-                                    Completed Date
-                                </span>
-
-                                <input
-                                    type="date"
-                                    value={
-                                        completedDate
-                                    }
-                                    onChange={(
-                                        event
-                                    ) =>
-                                        setCompletedDate(
-                                            event.target
-                                                .value
-                                        )
-                                    }
-                                    style={
-                                        styles.input
-                                    }
-                                />
-                            </label>
-
-                            <label
-                                style={styles.field}
-                            >
-                                <span
-                                    style={
-                                        styles.label
-                                    }
-                                >
-                                    Cost
-                                </span>
-
-                                <input
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    placeholder="0.00"
-                                    value={cost}
-                                    onChange={(
-                                        event
-                                    ) =>
-                                        setCost(
-                                            event.target
-                                                .value
-                                        )
-                                    }
-                                    style={
-                                        styles.input
-                                    }
-                                />
-                            </label>
+                            <Field
+                                id="maint-cost"
+                                label="Cost"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                placeholder="0.00"
+                                value={cost}
+                                onChange={(
+                                    event
+                                ) =>
+                                    setCost(
+                                        event.target
+                                            .value
+                                    )
+                                }
+                            />
                         </div>
 
                         {status === "vor" &&
                         selectedVehicle &&
                         !selectedVehicle.vor ? (
-                            <label
-                                style={styles.field}
-                            >
-                                <span
-                                    style={
-                                        styles.label
-                                    }
-                                >
-                                    VOR Reason
-                                </span>
-
-                                <input
-                                    type="text"
-                                    value={vorReason}
-                                    onChange={(
-                                        event
-                                    ) =>
-                                        setVorReason(
-                                            event.target
-                                                .value
-                                        )
-                                    }
-                                    placeholder="Why is the vehicle off road?"
-                                    style={
-                                        styles.input
-                                    }
-                                />
-                            </label>
-                        ) : null}
-
-                                                <div
-                            style={{
-                                display: "grid",
-                                gridTemplateColumns:
-                                    "repeat(auto-fit, minmax(180px, 1fr))",
-                                gap: 12,
-                            }}
-                        >
-                            <label style={styles.field}>
-                                <span style={styles.label}>
-                                    Mileage at Maintenance
-                                </span>
-
-                                <input
-                                    type="number"
-                                    min="0"
-                                    step="1"
-                                    value={mileage}
-                                    onChange={(event) =>
-                                        setMileage(event.target.value)
-                                    }
-                                    placeholder="e.g. 125000"
-                                    style={styles.input}
-                                />
-                            </label>
-
-                            <label style={styles.field}>
-                                <span style={styles.label}>
-                                    Maintenance Hours
-                                </span>
-
-                                <input
-                                    type="number"
-                                    min="0"
-                                    step="0.25"
-                                    value={maintenanceHours}
-                                    onChange={(event) =>
-                                        setMaintenanceHours(
-                                            event.target.value
-                                        )
-                                    }
-                                    placeholder="e.g. 3.5"
-                                    style={styles.input}
-                                />
-                            </label>
-                        </div>
-<label style={styles.field}>
-                            <span style={styles.label}>
-                                Notes
-                            </span>
-
-                            <textarea
-                                value={notes}
-                                onChange={(event) =>
-                                    setNotes(
+                            <Field
+                                id="maint-vor-reason"
+                                label="VOR Reason"
+                                type="text"
+                                value={vorReason}
+                                onChange={(
+                                    event
+                                ) =>
+                                    setVorReason(
                                         event.target
                                             .value
                                     )
                                 }
-                                placeholder="Maintenance notes..."
-                                rows={4}
-                                style={{
-                                    ...styles.input,
-                                    resize: "vertical",
-                                }}
+                                placeholder="Why is the vehicle off road?"
                             />
-                        </label>
+                        ) : null}
 
-                        <button
+                        <div className="grid gap-3 sm:grid-cols-2">
+                            <Field
+                                id="maint-mileage"
+                                label="Mileage at Maintenance"
+                                type="number"
+                                min="0"
+                                step="1"
+                                value={mileage}
+                                onChange={(event) =>
+                                    setMileage(event.target.value)
+                                }
+                                placeholder="e.g. 125000"
+                            />
+
+                            <Field
+                                id="maint-hours"
+                                label="Maintenance Hours"
+                                type="number"
+                                min="0"
+                                step="0.25"
+                                value={maintenanceHours}
+                                onChange={(event) =>
+                                    setMaintenanceHours(
+                                        event.target.value
+                                    )
+                                }
+                                placeholder="e.g. 3.5"
+                            />
+                        </div>
+
+                        <Textarea
+                            id="maint-notes"
+                            label="Notes"
+                            value={notes}
+                            onChange={(event) =>
+                                setNotes(
+                                    event.target
+                                        .value
+                                )
+                            }
+                            placeholder="Maintenance notes..."
+                            rows={4}
+                            className="resize-y"
+                        />
+
+                        <Button
                             type="submit"
                             disabled={saving}
-                            style={{
-                                ...styles.primaryButton,
-                                opacity: saving
-                                    ? 0.65
-                                    : 1,
-                            }}
                         >
                             {saving
                                 ? "Saving..."
                                 : "Add Maintenance Record"}
-                        </button>
+                        </Button>
                     </form>
                 </section>
 
-                <section style={styles.recordsSection}>
-                    <div style={styles.sectionHeading}>
-                        <div>
-                            <h2
-                                style={
-                                    styles.sectionTitle
-                                }
-                            >
-                                Maintenance History
-                            </h2>
+                <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+                    <div>
+                        <h2 className="mb-1 text-md font-semibold text-ink">
+                            Maintenance History
+                        </h2>
 
-                            <p
-                                style={
-                                    styles.sectionDescription
-                                }
-                            >
-                                {records.length} maintenance
-                                record
-                                {records.length === 1
-                                    ? ""
-                                    : "s"}
-                            </p>
-                        </div>
+                        <p className="mb-3 text-sm text-ink-3">
+                            {records.length} maintenance
+                            record
+                            {records.length === 1
+                                ? ""
+                                : "s"}
+                        </p>
                     </div>
 
                     {loading ? (
-                        <div style={styles.empty}>
+                        <div className="rounded-lg bg-surface-2 p-8 text-center text-sm text-ink-3">
                             Loading maintenance
                             records...
                         </div>
                     ) : records.length === 0 ? (
-                        <div style={styles.empty}>
+                        <div className="rounded-lg bg-surface-2 p-8 text-center text-sm text-ink-3">
                             No maintenance records
                             found.
                         </div>
                     ) : (
-                        <div style={styles.recordGrid}>
+                        <div className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-4">
                             {records.map((record) => (
                                 <article
                                     key={record.id}
-                                    style={
-                                        styles.recordCard
-                                    }
+                                    className="rounded-lg border border-line bg-surface-2 p-4"
                                 >
-                                    <div
-                                        style={
-                                            styles.recordHeader
-                                        }
-                                    >
-                                        <div>
-                                            <h3
-                                                style={
-                                                    styles.recordTitle
-                                                }
-                                            >
+                                    <div className="mb-3 flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <h3 className="break-words text-md font-semibold text-ink">
                                                 {
                                                     record.maintenance_type
                                                 }
                                             </h3>
 
-                                                                                        <p
-                                                style={
-                                                    styles.recordVehicle
-                                                }
-                                            >
+                                            <p className="mt-1 break-words text-sm text-ink-3">
                                                 {record.asset
                                                     ? [
                                                           record
@@ -1575,22 +1370,18 @@ export default function MaintenancePage() {
                                             </p>
                                         </div>
 
-                                        <span
-                                            style={maintenanceStatusStyle(
+                                        <Badge
+                                            tone={maintenanceStatusTone(
                                                 record.status
                                             )}
                                         >
                                             {formatStatus(
                                                 record.status
                                             )}
-                                        </span>
+                                        </Badge>
                                     </div>
 
-                                    <div
-                                        style={
-                                            styles.recordDetails
-                                        }
-                                    >
+                                    <div className="grid grid-cols-3 gap-2.5">
                                         <RecordItem
                                             label="Due"
                                             value={
@@ -1607,7 +1398,7 @@ export default function MaintenancePage() {
                                             }
                                         />
 
-                                                                                <RecordItem
+                                        <RecordItem
                                             label="Mileage"
                                             value={
                                                 record.mileage !== null &&
@@ -1630,7 +1421,8 @@ export default function MaintenancePage() {
                                                     : "—"
                                             }
                                         />
-<RecordItem
+
+                                        <RecordItem
                                             label="Cost"
                                             value={
                                                 record.cost !==
@@ -1646,11 +1438,7 @@ export default function MaintenancePage() {
                                     </div>
 
                                     {record.notes ? (
-                                        <div
-                                            style={
-                                                styles.notesBox
-                                            }
-                                        >
+                                        <div className="mt-3 break-words rounded-md border border-line bg-surface p-3 text-sm leading-relaxed text-ink-2">
                                             {
                                                 record.notes
                                             }
@@ -1658,92 +1446,47 @@ export default function MaintenancePage() {
                                     ) : null}
 
                                     {record.vehicle?.vor ? (
-                                        <div
-                                            style={
-                                                styles.recordVorWarning
-                                            }
-                                        >
+                                        <div className="mt-3 rounded-md bg-danger-tint p-2 text-center text-xs font-semibold text-danger-strong">
                                             Vehicle currently
                                             VOR
                                         </div>
                                     ) : null}
-                                
-                                    <div
-                                        style={{
-                                            marginTop: 16,
-                                            paddingTop: 14,
-                                            borderTop: "1px solid #e2e8f0",
-                                        }}
-                                    >
+
+                                    <div className="mt-4 border-t border-line pt-3.5">
                                         {editingRecordId !== record.id ? (
-                                            <button
-                                                type="button"
+                                            <Button
+                                                variant="secondary"
+                                                size="sm"
                                                 onClick={() =>
                                                     beginEditRecord(record)
                                                 }
-                                                style={{
-                                                    padding: "9px 14px",
-                                                    borderRadius: 8,
-                                                    border: "1px solid #cbd5e1",
-                                                    background: "#ffffff",
-                                                    color: "#0f172a",
-                                                    fontWeight: 800,
-                                                    cursor: "pointer",
-                                                }}
                                             >
                                                 Edit
-                                            </button>
+                                            </Button>
                                         ) : (
-                                            <div
-                                                style={{
-                                                    display: "grid",
-                                                    gap: 14,
-                                                }}
-                                            >
-                                                <div
-                                                    style={{
-                                                        fontWeight: 900,
-                                                        color: "#0f172a",
-                                                    }}
-                                                >
+                                            <div className="grid gap-3.5">
+                                                <div className="font-semibold text-ink">
                                                     Edit Maintenance Record
                                                 </div>
 
-                                                <label style={styles.field}>
-                                                    <span style={styles.label}>
-                                                        Maintenance Type
-                                                    </span>
-                                                    <input
-                                                        type="text"
-                                                        value={
-                                                            editMaintenanceType
-                                                        }
-                                                        onChange={(event) =>
-                                                            setEditMaintenanceType(
-                                                                event.target
-                                                                    .value
-                                                            )
-                                                        }
-                                                        style={styles.input}
-                                                    />
-                                                </label>
+                                                <Field
+                                                    id={`maint-${record.id}-type`}
+                                                    label="Maintenance Type"
+                                                    type="text"
+                                                    value={
+                                                        editMaintenanceType
+                                                    }
+                                                    onChange={(event) =>
+                                                        setEditMaintenanceType(
+                                                            event.target
+                                                                .value
+                                                        )
+                                                    }
+                                                />
 
-                                                <div
-                                                    style={{
-                                                        display: "grid",
-                                                        gridTemplateColumns:
-                                                            "repeat(auto-fit, minmax(180px, 1fr))",
-                                                        gap: 12,
-                                                    }}
-                                                >
-                                                    <label
-                                                        style={styles.field}
-                                                    >
-                                                        <span
-                                                            style={
-                                                                styles.label
-                                                            }
-                                                        >
+                                                <div className="grid gap-3 sm:grid-cols-2">
+                                                    <label className="grid gap-1.5">
+                                                        <span className="text-sm font-medium text-ink-2">
                                                             Status
                                                         </span>
                                                         <select
@@ -1754,9 +1497,7 @@ export default function MaintenancePage() {
                                                                         .value
                                                                 )
                                                             }
-                                                            style={
-                                                                styles.input
-                                                            }
+                                                            className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                                                         >
                                                             <option value="due">
                                                                 Due
@@ -1770,253 +1511,136 @@ export default function MaintenancePage() {
                                                         </select>
                                                     </label>
 
-                                                    <label
-                                                        style={styles.field}
-                                                    >
-                                                        <span
-                                                            style={
-                                                                styles.label
-                                                            }
-                                                        >
-                                                            Cost (£)
-                                                        </span>
-                                                        <input
-                                                            type="number"
-                                                            min="0"
-                                                            step="0.01"
-                                                            value={editCost}
-                                                            onChange={(event) =>
-                                                                setEditCost(
-                                                                    event.target
-                                                                        .value
-                                                                )
-                                                            }
-                                                            style={
-                                                                styles.input
-                                                            }
-                                                        />
-                                                    </label>
-                                                </div>
-
-                                                <div
-                                                    style={{
-                                                        display: "grid",
-                                                        gridTemplateColumns:
-                                                            "repeat(auto-fit, minmax(180px, 1fr))",
-                                                        gap: 12,
-                                                    }}
-                                                >
-                                                    <label
-                                                        style={styles.field}
-                                                    >
-                                                        <span
-                                                            style={
-                                                                styles.label
-                                                            }
-                                                        >
-                                                            Due Date
-                                                        </span>
-                                                        <input
-                                                            type="date"
-                                                            value={editDueDate}
-                                                            onChange={(event) =>
-                                                                setEditDueDate(
-                                                                    event.target
-                                                                        .value
-                                                                )
-                                                            }
-                                                            style={
-                                                                styles.input
-                                                            }
-                                                        />
-                                                    </label>
-
-                                                    <label
-                                                        style={styles.field}
-                                                    >
-                                                        <span
-                                                            style={
-                                                                styles.label
-                                                            }
-                                                        >
-                                                            Completed Date
-                                                        </span>
-                                                        <input
-                                                            type="date"
-                                                            value={
-                                                                editCompletedDate
-                                                            }
-                                                            onChange={(event) =>
-                                                                setEditCompletedDate(
-                                                                    event.target
-                                                                        .value
-                                                                )
-                                                            }
-                                                            style={
-                                                                styles.input
-                                                            }
-                                                        />
-                                                    </label>
-                                                </div>
-
-                                                <div
-                                                    style={{
-                                                        display: "grid",
-                                                        gridTemplateColumns:
-                                                            "repeat(auto-fit, minmax(180px, 1fr))",
-                                                        gap: 12,
-                                                    }}
-                                                >
-                                                    <label
-                                                        style={styles.field}
-                                                    >
-                                                        <span
-                                                            style={
-                                                                styles.label
-                                                            }
-                                                        >
-                                                            Mileage
-                                                        </span>
-                                                        <input
-                                                            type="number"
-                                                            min="0"
-                                                            step="1"
-                                                            value={
-                                                                editMileage
-                                                            }
-                                                            onChange={(event) =>
-                                                                setEditMileage(
-                                                                    event.target
-                                                                        .value
-                                                                )
-                                                            }
-                                                            style={
-                                                                styles.input
-                                                            }
-                                                        />
-                                                    </label>
-
-                                                    <label
-                                                        style={styles.field}
-                                                    >
-                                                        <span
-                                                            style={
-                                                                styles.label
-                                                            }
-                                                        >
-                                                            Maintenance Hours
-                                                        </span>
-                                                        <input
-                                                            type="number"
-                                                            min="0"
-                                                            step="0.1"
-                                                            value={
-                                                                editMaintenanceHours
-                                                            }
-                                                            onChange={(event) =>
-                                                                setEditMaintenanceHours(
-                                                                    event.target
-                                                                        .value
-                                                                )
-                                                            }
-                                                            style={
-                                                                styles.input
-                                                            }
-                                                        />
-                                                    </label>
-                                                </div>
-
-                                                <label style={styles.field}>
-                                                    <span style={styles.label}>
-                                                        Notes
-                                                    </span>
-                                                    <textarea
-                                                        value={editNotes}
+                                                    <Field
+                                                        id={`maint-${record.id}-cost`}
+                                                        label="Cost (£)"
+                                                        type="number"
+                                                        min="0"
+                                                        step="0.01"
+                                                        value={editCost}
                                                         onChange={(event) =>
-                                                            setEditNotes(
+                                                            setEditCost(
                                                                 event.target
                                                                     .value
                                                             )
                                                         }
-                                                        rows={4}
-                                                        style={{
-                                                            ...styles.input,
-                                                            resize: "vertical",
-                                                        }}
                                                     />
-                                                </label>
+                                                </div>
 
-                                                <div
-                                                    style={{
-                                                        display: "flex",
-                                                        gap: 10,
-                                                        flexWrap: "wrap",
-                                                    }}
-                                                >
-                                                    <button
-                                                        type="button"
+                                                <div className="grid gap-3 sm:grid-cols-2">
+                                                    <Field
+                                                        id={`maint-${record.id}-due-date`}
+                                                        label="Due Date"
+                                                        type="date"
+                                                        value={editDueDate}
+                                                        onChange={(event) =>
+                                                            setEditDueDate(
+                                                                event.target
+                                                                    .value
+                                                            )
+                                                        }
+                                                    />
+
+                                                    <Field
+                                                        id={`maint-${record.id}-completed-date`}
+                                                        label="Completed Date"
+                                                        type="date"
+                                                        value={
+                                                            editCompletedDate
+                                                        }
+                                                        onChange={(event) =>
+                                                            setEditCompletedDate(
+                                                                event.target
+                                                                    .value
+                                                            )
+                                                        }
+                                                    />
+                                                </div>
+
+                                                <div className="grid gap-3 sm:grid-cols-2">
+                                                    <Field
+                                                        id={`maint-${record.id}-mileage`}
+                                                        label="Mileage"
+                                                        type="number"
+                                                        min="0"
+                                                        step="1"
+                                                        value={
+                                                            editMileage
+                                                        }
+                                                        onChange={(event) =>
+                                                            setEditMileage(
+                                                                event.target
+                                                                    .value
+                                                            )
+                                                        }
+                                                    />
+
+                                                    <Field
+                                                        id={`maint-${record.id}-hours`}
+                                                        label="Maintenance Hours"
+                                                        type="number"
+                                                        min="0"
+                                                        step="0.1"
+                                                        value={
+                                                            editMaintenanceHours
+                                                        }
+                                                        onChange={(event) =>
+                                                            setEditMaintenanceHours(
+                                                                event.target
+                                                                    .value
+                                                            )
+                                                        }
+                                                    />
+                                                </div>
+
+                                                <Textarea
+                                                    id={`maint-${record.id}-notes`}
+                                                    label="Notes"
+                                                    value={editNotes}
+                                                    onChange={(event) =>
+                                                        setEditNotes(
+                                                            event.target
+                                                                .value
+                                                        )
+                                                    }
+                                                    rows={4}
+                                                    className="resize-y"
+                                                />
+
+                                                <div className="flex flex-wrap gap-2.5">
+                                                    <Button
                                                         disabled={editSaving}
                                                         onClick={() =>
                                                             void saveEditRecord(
                                                                 record.id
                                                             )
                                                         }
-                                                        style={{
-                                                            padding:
-                                                                "10px 16px",
-                                                            borderRadius: 8,
-                                                            border: "none",
-                                                            background:
-                                                                "#0f172a",
-                                                            color: "#ffffff",
-                                                            fontWeight: 900,
-                                                            cursor: editSaving
-                                                                ? "not-allowed"
-                                                                : "pointer",
-                                                            opacity: editSaving
-                                                                ? 0.65
-                                                                : 1,
-                                                        }}
                                                     >
                                                         {editSaving
                                                             ? "Saving..."
                                                             : "Save Changes"}
-                                                    </button>
+                                                    </Button>
 
-                                                    <button
-                                                        type="button"
+                                                    <Button
+                                                        variant="secondary"
                                                         disabled={editSaving}
                                                         onClick={
                                                             cancelEditRecord
                                                         }
-                                                        style={{
-                                                            padding:
-                                                                "10px 16px",
-                                                            borderRadius: 8,
-                                                            border:
-                                                                "1px solid #cbd5e1",
-                                                            background:
-                                                                "#ffffff",
-                                                            color: "#0f172a",
-                                                            fontWeight: 800,
-                                                            cursor: editSaving
-                                                                ? "not-allowed"
-                                                                : "pointer",
-                                                        }}
                                                     >
                                                         Cancel
-                                                    </button>
+                                                    </Button>
                                                 </div>
                                             </div>
                                         )}
                                     </div>
-</article>
+                                </article>
                             ))}
                         </div>
                     )}
                 </section>
-            </div>
-        </main>
+            </main>
+        </div>
     );
 }
 
@@ -2028,12 +1652,12 @@ function RecordItem({
     value: string;
 }) {
     return (
-        <div>
-            <span style={styles.smallLabel}>
+        <div className="min-w-0">
+            <span className="mb-0.5 block text-kicker uppercase text-ink-3">
                 {label}
             </span>
 
-            <strong style={styles.recordValue}>
+            <strong className="block break-words text-sm font-semibold text-ink-2">
                 {value}
             </strong>
         </div>
@@ -2064,426 +1688,23 @@ function formatDateTime(value: string) {
     });
 }
 
-function maintenanceStatusStyle(
+function maintenanceStatusTone(
     status: string
-): CSSProperties {
-    const base: CSSProperties = {
-        display: "inline-flex",
-        borderRadius: 999,
-        padding: "6px 10px",
-        fontSize: 12,
-        fontWeight: 800,
-        whiteSpace: "nowrap",
-    };
-
+): Tone {
     if (status === "completed") {
-        return {
-            ...base,
-            background: "#dcfce7",
-            color: "#166534",
-        };
+        return "success";
     }
 
     if (
         status === "vor" ||
         status === "overdue"
     ) {
-        return {
-            ...base,
-            background: "#fee2e2",
-            color: "#991b1b",
-        };
+        return "danger";
     }
 
     if (status === "in_progress") {
-        return {
-            ...base,
-            background: "#dbeafe",
-            color: "#1d4ed8",
-        };
+        return "info";
     }
 
-    return {
-        ...base,
-        background: "#fef3c7",
-        color: "#92400e",
-    };
+    return "warning";
 }
-
-const styles: Record<string, CSSProperties> = {
-    page: {
-        minHeight: "100vh",
-        padding: 30,
-        boxSizing: "border-box",
-        backgroundImage:
-            "url('https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d')",
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        backgroundAttachment: "fixed",
-    },
-
-    overlay: {
-        maxWidth: 1400,
-        margin: "0 auto",
-        background: "rgba(2,6,23,0.72)",
-        padding: 28,
-        borderRadius: 22,
-        backdropFilter: "blur(3px)",
-    },
-
-    header: {
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "flex-start",
-        flexWrap: "wrap",
-        gap: 20,
-        marginBottom: 24,
-    },
-
-    eyebrow: {
-        margin: "0 0 6px",
-        color: "#93c5fd",
-        fontSize: 12,
-        fontWeight: 900,
-        textTransform: "uppercase",
-        letterSpacing: "0.1em",
-    },
-
-    title: {
-        color: "#ffffff",
-        margin: 0,
-        fontSize: "clamp(30px, 5vw, 46px)",
-        letterSpacing: "-0.03em",
-    },
-
-    subtitle: {
-        color: "#cbd5e1",
-        margin: "7px 0 0",
-    },
-
-    headerStats: {
-        display: "flex",
-        gap: 10,
-    },
-
-    stat: {
-        minWidth: 90,
-        background: "rgba(255,255,255,0.95)",
-        borderRadius: 13,
-        padding: "12px 16px",
-    },
-
-    statLabel: {
-        display: "block",
-        fontSize: 11,
-        fontWeight: 800,
-        color: "#64748b",
-        textTransform: "uppercase",
-    },
-
-    statValue: {
-        display: "block",
-        marginTop: 4,
-        fontSize: 25,
-        color: "#0f172a",
-    },
-
-    successMessage: {
-        background: "#dcfce7",
-        color: "#166534",
-        border: "1px solid #86efac",
-        padding: 13,
-        borderRadius: 11,
-        marginBottom: 18,
-        fontWeight: 700,
-    },
-
-    errorMessage: {
-        background: "#fee2e2",
-        color: "#991b1b",
-        border: "1px solid #fecaca",
-        padding: 13,
-        borderRadius: 11,
-        marginBottom: 18,
-        fontWeight: 700,
-    },
-
-    formCard: {
-        background: "rgba(255,255,255,0.97)",
-        padding: 22,
-        borderRadius: 17,
-        boxShadow: "0 10px 35px rgba(0,0,0,0.2)",
-        marginBottom: 22,
-    },
-
-    form: {
-        display: "grid",
-        gap: 16,
-    },
-
-    formGrid: {
-        display: "grid",
-        gridTemplateColumns:
-            "repeat(auto-fit, minmax(210px, 1fr))",
-        gap: 14,
-    },
-
-    field: {
-        display: "grid",
-        gap: 7,
-    },
-
-    label: {
-        fontSize: 13,
-        fontWeight: 800,
-        color: "#334155",
-    },
-
-    input: {
-        width: "100%",
-        padding: "12px 14px",
-        borderRadius: 10,
-        border: "1px solid #cbd5e1",
-        boxSizing: "border-box",
-        fontSize: 14,
-        background: "#ffffff",
-        color: "#0f172a",
-    },
-
-    primaryButton: {
-        width: "100%",
-        background: "#2563eb",
-        color: "#ffffff",
-        border: "none",
-        borderRadius: 10,
-        padding: 13,
-        cursor: "pointer",
-        fontWeight: 800,
-        fontSize: 14,
-    },
-
-    sectionHeading: {
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "flex-start",
-        gap: 15,
-        marginBottom: 16,
-    },
-
-    sectionTitle: {
-        margin: 0,
-        color: "#0f172a",
-        fontSize: 21,
-    },
-
-    sectionDescription: {
-        margin: "5px 0 0",
-        color: "#64748b",
-        fontSize: 13,
-    },
-
-    selectedVehicleActive: {
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        flexWrap: "wrap",
-        gap: 14,
-        padding: 16,
-        borderRadius: 13,
-        background: "#f0fdf4",
-        border: "1px solid #86efac",
-    },
-
-    selectedVehicleVor: {
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        flexWrap: "wrap",
-        gap: 14,
-        padding: 16,
-        borderRadius: 13,
-        background: "#fef2f2",
-        border: "1px solid #fecaca",
-    },
-
-    selectedVehicleTitle: {
-        display: "block",
-        fontSize: 18,
-        marginTop: 3,
-    },
-
-    vorControl: {
-        display: "flex",
-        gap: 8,
-        flex: "1 1 400px",
-        justifyContent: "flex-end",
-    },
-
-    vorButton: {
-        flexShrink: 0,
-        border: "none",
-        borderRadius: 10,
-        padding: "11px 15px",
-        color: "#ffffff",
-        background: "#dc2626",
-        fontWeight: 800,
-        cursor: "pointer",
-    },
-
-    returnButton: {
-        border: "none",
-        borderRadius: 10,
-        padding: "11px 15px",
-        color: "#ffffff",
-        background: "#16a34a",
-        fontWeight: 800,
-        cursor: "pointer",
-    },
-
-    vorPanel: {
-        background: "#fff7f7",
-        border: "2px solid #ef4444",
-        padding: 20,
-        borderRadius: 17,
-        marginBottom: 22,
-    },
-
-    vorBadge: {
-        borderRadius: 999,
-        background: "#dc2626",
-        color: "#ffffff",
-        padding: "6px 11px",
-        fontWeight: 900,
-        fontSize: 12,
-    },
-
-    vorGrid: {
-        display: "grid",
-        gridTemplateColumns:
-            "repeat(auto-fit, minmax(270px, 1fr))",
-        gap: 12,
-    },
-
-    vorCard: {
-        background: "#ffffff",
-        border: "1px solid #fecaca",
-        borderRadius: 13,
-        padding: 15,
-        display: "grid",
-        gap: 13,
-    },
-
-    vehicleRegistration: {
-        fontSize: 19,
-    },
-
-    vehicleDescription: {
-        color: "#64748b",
-        fontSize: 13,
-        marginTop: 3,
-    },
-
-    vorReasonBox: {
-        display: "grid",
-        gap: 3,
-        padding: 11,
-        background: "#fef2f2",
-        borderRadius: 9,
-    },
-
-    smallLabel: {
-        display: "block",
-        color: "#64748b",
-        fontSize: 10,
-        fontWeight: 900,
-        textTransform: "uppercase",
-        letterSpacing: "0.05em",
-    },
-
-    smallText: {
-        display: "block",
-        color: "#64748b",
-        fontSize: 12,
-        marginTop: 3,
-    },
-
-    recordsSection: {
-        background: "rgba(255,255,255,0.97)",
-        padding: 22,
-        borderRadius: 17,
-        boxShadow: "0 10px 35px rgba(0,0,0,0.2)",
-    },
-
-    recordGrid: {
-        display: "grid",
-        gridTemplateColumns:
-            "repeat(auto-fit, minmax(300px, 1fr))",
-        gap: 14,
-    },
-
-    recordCard: {
-        border: "1px solid #e2e8f0",
-        borderRadius: 14,
-        padding: 17,
-        background: "#f8fafc",
-    },
-
-    recordHeader: {
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "flex-start",
-        gap: 12,
-        marginBottom: 15,
-    },
-
-    recordTitle: {
-        margin: 0,
-        color: "#0f172a",
-    },
-
-    recordVehicle: {
-        margin: "4px 0 0",
-        color: "#64748b",
-        fontSize: 13,
-    },
-
-    recordDetails: {
-        display: "grid",
-        gridTemplateColumns:
-            "repeat(3, minmax(0, 1fr))",
-        gap: 10,
-    },
-
-    recordValue: {
-        display: "block",
-        marginTop: 3,
-        fontSize: 13,
-    },
-
-    notesBox: {
-        marginTop: 14,
-        padding: 11,
-        borderRadius: 9,
-        background: "#ffffff",
-        border: "1px solid #e2e8f0",
-        color: "#475569",
-        fontSize: 13,
-    },
-
-    recordVorWarning: {
-        marginTop: 12,
-        padding: 9,
-        textAlign: "center",
-        borderRadius: 8,
-        background: "#fee2e2",
-        color: "#991b1b",
-        fontSize: 12,
-        fontWeight: 900,
-    },
-
-    empty: {
-        padding: 35,
-        textAlign: "center",
-        color: "#64748b",
-    },
-};
