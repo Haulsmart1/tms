@@ -61,6 +61,19 @@ export default function JobsPage() {
 
   const [accepting, setAccepting] = useState(false);
 
+  const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
+
+  const [jobFilters, setJobFilters] = useState({
+    search: "",
+    status: "",
+    customer_id: "",
+    driver_id: "",
+    vehicle_id: "",
+    date_from: "",
+    date_to: "",
+    sort: "newest",
+  });
+
   const [form, setForm] = useState({
     reference: "", scheduled_date: "", customer_id: "", vehicle_id: "", driver_id: "",
     customer_price: "", subcontractor_id: "", subcontractor_cost: "",
@@ -248,6 +261,7 @@ export default function JobsPage() {
 
   function openAcceptance(job: any) {
     setMessage("");
+    setExpandedJobId(job.id);
 
     setAcceptanceTarget({
       id: job.id,
@@ -460,249 +474,824 @@ export default function JobsPage() {
           <div className="mt-5 rounded-lg border border-line bg-surface p-3.5 text-sm text-ink">{message}</div>
         ) : null}
 
-        <div className="mt-6 grid gap-4">
-          {jobs.map((job) => {
-            const margin =
-              job.customer_price != null && job.subcontractor_cost != null
-                ? Number(job.customer_price) - Number(job.subcontractor_cost)
-                : null;
+        {(() => {
+          const search = jobFilters.search.trim().toLowerCase();
 
-            return (
-              <div key={job.id} className="rounded-lg border border-line bg-surface p-5 shadow-sm">
-                <div className="mb-3.5 flex flex-wrap items-start justify-between gap-4">
+          const filteredJobs = jobs
+            .filter((job) => {
+              if (search) {
+                const searchable = [
+                  job.reference,
+                  job.customers?.name,
+                  job.drivers?.name,
+                  job.vehicles?.registration,
+                  job.subcontractors?.name,
+                ]
+                  .filter(Boolean)
+                  .join(" ")
+                  .toLowerCase();
+
+                if (!searchable.includes(search)) {
+                  return false;
+                }
+              }
+
+              if (
+                jobFilters.status &&
+                job.status !== jobFilters.status
+              ) {
+                return false;
+              }
+
+              if (
+                jobFilters.customer_id &&
+                job.customer_id !== jobFilters.customer_id
+              ) {
+                return false;
+              }
+
+              if (
+                jobFilters.driver_id &&
+                job.driver_id !== jobFilters.driver_id
+              ) {
+                return false;
+              }
+
+              if (
+                jobFilters.vehicle_id &&
+                job.vehicle_id !== jobFilters.vehicle_id
+              ) {
+                return false;
+              }
+
+              if (
+                jobFilters.date_from &&
+                (!job.scheduled_date ||
+                  job.scheduled_date < jobFilters.date_from)
+              ) {
+                return false;
+              }
+
+              if (
+                jobFilters.date_to &&
+                (!job.scheduled_date ||
+                  job.scheduled_date > jobFilters.date_to)
+              ) {
+                return false;
+              }
+
+              return true;
+            })
+            .slice();
+
+          if (jobFilters.sort === "date_asc") {
+            filteredJobs.sort((a, b) =>
+              String(a.scheduled_date || "").localeCompare(
+                String(b.scheduled_date || "")
+              )
+            );
+          }
+
+          if (jobFilters.sort === "eta_asc") {
+            filteredJobs.sort((a, b) => {
+              const aTime = a.collection_eta
+                ? new Date(a.collection_eta).getTime()
+                : Number.MAX_SAFE_INTEGER;
+
+              const bTime = b.collection_eta
+                ? new Date(b.collection_eta).getTime()
+                : Number.MAX_SAFE_INTEGER;
+
+              return aTime - bTime;
+            });
+          }
+
+          if (jobFilters.sort === "customer_asc") {
+            filteredJobs.sort((a, b) =>
+              String(a.customers?.name || "").localeCompare(
+                String(b.customers?.name || "")
+              )
+            );
+          }
+
+          if (jobFilters.sort === "status_asc") {
+            filteredJobs.sort((a, b) =>
+              String(a.status || "").localeCompare(
+                String(b.status || "")
+              )
+            );
+          }
+
+          const pendingCount = jobs.filter(
+            (job) => job.status === "pending_acceptance"
+          ).length;
+
+          return (
+            <div className="mt-6 space-y-4">
+
+              {/* FILTERS */}
+              <div className="sticky top-0 z-10 rounded-lg border border-line bg-surface p-4 shadow-sm">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h2 className="font-mono text-lg font-semibold text-ink">{job.reference}</h2>
-                    <div className="text-sm text-ink-2">
-                      Date: {job.scheduled_date || "-"} · Status:{" "}
-                      {job.status === "pending_acceptance"
-                        ? "Awaiting acceptance"
-                        : job.status}
+                    <h2 className="text-sm font-semibold text-ink">
+                      Job filters
+                    </h2>
+
+                    <div className="mt-0.5 text-xs text-ink-3">
+                      Showing {filteredJobs.length} of {jobs.length} jobs
+                      {pendingCount > 0
+                        ? ` · ${pendingCount} awaiting acceptance`
+                        : ""}
                     </div>
                   </div>
+
                   <div className="flex flex-wrap gap-2">
-                    {job.status === "pending_acceptance" ? (
-                      <Button
-                        type="button"
-                        onClick={() => openAcceptance(job)}
-                      >
-                        Accept Job
-                      </Button>
-                    ) : null}
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() =>
+                        setJobFilters((current) => ({
+                          ...current,
+                          status:
+                            current.status === "pending_acceptance"
+                              ? ""
+                              : "pending_acceptance",
+                        }))
+                      }
+                    >
+                      Awaiting ({pendingCount})
+                    </Button>
 
                     <Button
                       type="button"
                       variant="secondary"
-                      onClick={() => startEdit(job)}
+                      onClick={() =>
+                        setJobFilters({
+                          search: "",
+                          status: "",
+                          customer_id: "",
+                          driver_id: "",
+                          vehicle_id: "",
+                          date_from: "",
+                          date_to: "",
+                          sort: "newest",
+                        })
+                      }
                     >
-                      Edit
-                    </Button>
-
-                    <Button
-                      type="button"
-                      variant="danger"
-                      onClick={() => requestDelete(job)}
-                    >
-                      Delete
+                      Clear filters
                     </Button>
                   </div>
                 </div>
 
-                {acceptanceTarget?.id === job.id ? (
-                  <div className="mb-4 rounded-lg border border-line bg-surface-2 p-4">
-                    <div className="text-sm font-semibold text-ink">
-                      Accept Job - {job.reference}
-                    </div>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <label className="grid gap-1 text-xs text-ink-2">
+                    Search
+                    <input
+                      type="search"
+                      placeholder="Reference, customer, driver, vehicle..."
+                      value={jobFilters.search}
+                      onChange={(event) =>
+                        setJobFilters((current) => ({
+                          ...current,
+                          search: event.target.value,
+                        }))
+                      }
+                      className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink"
+                    />
+                  </label>
 
-                    <p className="mt-1 text-xs text-ink-2">
-                      Confirm the expected collection time before accepting this customer job.
-                    </p>
+                  <label className="grid gap-1 text-xs text-ink-2">
+                    Status
+                    <select
+                      value={jobFilters.status}
+                      onChange={(event) =>
+                        setJobFilters((current) => ({
+                          ...current,
+                          status: event.target.value,
+                        }))
+                      }
+                      className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink"
+                    >
+                      <option value="">All statuses</option>
+                      <option value="pending_acceptance">
+                        Awaiting acceptance
+                      </option>
+                      <option value="planned">Planned</option>
+                      <option value="in_progress">
+                        In progress
+                      </option>
+                      <option value="delivered">Delivered</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  </label>
 
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                      <label className="grid gap-1.5 text-sm text-ink">
-                        <span className="font-medium">
-                          Collection ETA *
-                        </span>
-
-                        <input
-                          type="datetime-local"
-                          value={acceptanceForm.collection_eta}
-                          onChange={(event) =>
-                            setAcceptanceForm((current) => ({
-                              ...current,
-                              collection_eta:
-                                event.target.value,
-                            }))
-                          }
-                          disabled={accepting}
-                          className="rounded-md border border-line-strong bg-surface px-3 py-2 text-ink"
-                        />
-                      </label>
-
-                      <label className="grid gap-1.5 text-sm text-ink">
-                        <span className="font-medium">
-                          Delivery ETA
-                        </span>
-
-                        <input
-                          type="datetime-local"
-                          value={acceptanceForm.delivery_eta}
-                          onChange={(event) =>
-                            setAcceptanceForm((current) => ({
-                              ...current,
-                              delivery_eta:
-                                event.target.value,
-                            }))
-                          }
-                          disabled={accepting}
-                          className="rounded-md border border-line-strong bg-surface px-3 py-2 text-ink"
-                        />
-                      </label>
-                    </div>
-
-                    <label className="mt-3 grid gap-1.5 text-sm text-ink">
-                      <span className="font-medium">
-                        Acceptance note
-                      </span>
-
-                      <textarea
-                        value={acceptanceForm.acceptance_note}
-                        onChange={(event) =>
-                          setAcceptanceForm((current) => ({
-                            ...current,
-                            acceptance_note:
-                              event.target.value,
-                          }))
-                        }
-                        rows={3}
-                        disabled={accepting}
-                        placeholder="Optional note about collection, access or scheduling"
-                        className="rounded-md border border-line-strong bg-surface px-3 py-2 text-ink"
-                      />
-                    </label>
-
-                    <div className="mt-4 flex flex-wrap justify-end gap-2">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={cancelAcceptance}
-                        disabled={accepting}
-                      >
-                        Cancel
-                      </Button>
-
-                      <Button
-                        type="button"
-                        onClick={confirmAcceptance}
-                        loading={accepting}
-                      >
-                        Confirm Acceptance
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
-
-                {job.accepted_at ? (
-                  <div className="mb-4 rounded-lg border border-line bg-surface-2 p-4">
-                    <div className="text-sm font-semibold text-ink">
-                      Accepted
-                    </div>
-
-                    <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                      <div>
-                        <div className="text-xs font-semibold text-ink-3">
-                          Collection ETA
-                        </div>
-                        <div className="text-sm text-ink">
-                          {formatDateTime(job.collection_eta)}
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="text-xs font-semibold text-ink-3">
-                          Delivery ETA
-                        </div>
-                        <div className="text-sm text-ink">
-                          {formatDateTime(job.delivery_eta)}
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="text-xs font-semibold text-ink-3">
-                          Accepted at
-                        </div>
-                        <div className="text-sm text-ink">
-                          {formatDateTime(job.accepted_at)}
-                        </div>
-                      </div>
-                    </div>
-
-                    {job.acceptance_note ? (
-                      <div className="mt-3">
-                        <div className="text-xs font-semibold text-ink-3">
-                          Acceptance note
-                        </div>
-
-                        <div className="mt-1 whitespace-pre-wrap text-sm text-ink">
-                          {job.acceptance_note}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <div className="rounded-md bg-surface-2 p-3">
-                    <div className="text-xs font-semibold text-ink-3">Customer</div>
-                    <div className="text-sm text-ink">{job.customers?.name || "-"}</div>
-                  </div>
-                  <div className="rounded-md bg-surface-2 p-3">
-                    <div className="text-xs font-semibold text-ink-3">Vehicle</div>
-                    <div className="font-mono text-sm text-ink">{job.vehicles?.registration || "-"}</div>
-                  </div>
-                  <div className="rounded-md bg-surface-2 p-3">
-                    <div className="text-xs font-semibold text-ink-3">Driver</div>
-                    <div className="text-sm text-ink">{job.drivers?.name || "-"}</div>
-                  </div>
-                  <div className="rounded-md bg-surface-2 p-3">
-                    <div className="text-xs font-semibold text-ink-3">Sell</div>
-                    <div className="font-mono text-sm slashed-zero text-ink">{formatMoney(job.customer_price)}</div>
-                  </div>
-                  <div className="rounded-md bg-surface-2 p-3">
-                    <div className="text-xs font-semibold text-ink-3">Subcontractor</div>
-                    <div className="text-sm text-ink">{job.subcontractors?.name || "-"}</div>
-                  </div>
-                  <div className="rounded-md bg-surface-2 p-3">
-                    <div className="text-xs font-semibold text-ink-3">Buy</div>
-                    <div className="font-mono text-sm slashed-zero text-ink">{formatMoney(job.subcontractor_cost)}</div>
-                  </div>
-                  <div className="rounded-md bg-surface-2 p-3">
-                    <div className="text-xs font-semibold text-ink-3">Margin</div>
-                    <div className="font-mono text-sm slashed-zero text-ink">{formatMoney(margin)}</div>
-                  </div>
-                </div>
-
-                <div>
-                  <h3 className="mb-2 text-sm font-semibold text-ink">Stops / POD</h3>
-                  {job.job_stops?.length ? (
-                    <div className="grid gap-2.5">
-                      {job.job_stops.map((stop: any) => (
-                        <StopCard
-                          key={stop.id}
-                          stop={stop}
-                          podForm={podForms[stop.id]}
-                          onPodFieldChange={updatePodForm}
-                          onMarkDelivered={(stopId) => savePod(job.id, stopId)}
-                        />
+                  <label className="grid gap-1 text-xs text-ink-2">
+                    Customer
+                    <select
+                      value={jobFilters.customer_id}
+                      onChange={(event) =>
+                        setJobFilters((current) => ({
+                          ...current,
+                          customer_id: event.target.value,
+                        }))
+                      }
+                      className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink"
+                    >
+                      <option value="">All customers</option>
+                      {customers.map((customer) => (
+                        <option
+                          key={customer.id}
+                          value={customer.id}
+                        >
+                          {customer.name}
+                        </option>
                       ))}
+                    </select>
+                  </label>
+
+                  <label className="grid gap-1 text-xs text-ink-2">
+                    Sort
+                    <select
+                      value={jobFilters.sort}
+                      onChange={(event) =>
+                        setJobFilters((current) => ({
+                          ...current,
+                          sort: event.target.value,
+                        }))
+                      }
+                      className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink"
+                    >
+                      <option value="newest">Newest first</option>
+                      <option value="date_asc">
+                        Scheduled date
+                      </option>
+                      <option value="eta_asc">
+                        Collection ETA
+                      </option>
+                      <option value="customer_asc">
+                        Customer
+                      </option>
+                      <option value="status_asc">
+                        Status
+                      </option>
+                    </select>
+                  </label>
+
+                  <label className="grid gap-1 text-xs text-ink-2">
+                    Driver
+                    <select
+                      value={jobFilters.driver_id}
+                      onChange={(event) =>
+                        setJobFilters((current) => ({
+                          ...current,
+                          driver_id: event.target.value,
+                        }))
+                      }
+                      className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink"
+                    >
+                      <option value="">All drivers</option>
+                      {drivers.map((driver) => (
+                        <option
+                          key={driver.id}
+                          value={driver.id}
+                        >
+                          {driver.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="grid gap-1 text-xs text-ink-2">
+                    Vehicle
+                    <select
+                      value={jobFilters.vehicle_id}
+                      onChange={(event) =>
+                        setJobFilters((current) => ({
+                          ...current,
+                          vehicle_id: event.target.value,
+                        }))
+                      }
+                      className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink"
+                    >
+                      <option value="">All vehicles</option>
+                      {vehicles.map((vehicle) => (
+                        <option
+                          key={vehicle.id}
+                          value={vehicle.id}
+                        >
+                          {vehicle.registration}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="grid gap-1 text-xs text-ink-2">
+                    Date from
+                    <input
+                      type="date"
+                      value={jobFilters.date_from}
+                      onChange={(event) =>
+                        setJobFilters((current) => ({
+                          ...current,
+                          date_from: event.target.value,
+                        }))
+                      }
+                      className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink"
+                    />
+                  </label>
+
+                  <label className="grid gap-1 text-xs text-ink-2">
+                    Date to
+                    <input
+                      type="date"
+                      value={jobFilters.date_to}
+                      onChange={(event) =>
+                        setJobFilters((current) => ({
+                          ...current,
+                          date_to: event.target.value,
+                        }))
+                      }
+                      className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink"
+                    />
+                  </label>
+                </div>
+              </div>
+
+
+              {/* COMPACT JOB LIST */}
+              <div className="overflow-x-auto rounded-lg border border-line bg-surface shadow-sm">
+                <div className="min-w-[1080px]">
+
+                  <div className="grid grid-cols-[1.45fr_1.35fr_0.8fr_1.05fr_1.05fr_0.85fr_0.9fr_auto] gap-3 border-b border-line bg-surface-2 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-ink-3">
+                    <div>Reference</div>
+                    <div>Customer</div>
+                    <div>Date</div>
+                    <div>Status</div>
+                    <div>Collection ETA</div>
+                    <div>Vehicle</div>
+                    <div>Driver</div>
+                    <div className="text-right">Actions</div>
+                  </div>
+
+                  {filteredJobs.length === 0 ? (
+                    <div className="px-4 py-10 text-center text-sm text-ink-3">
+                      No jobs match the current filters.
                     </div>
                   ) : (
-                    <div className="text-sm text-ink-3">No stops yet.</div>
+                    filteredJobs.map((job) => {
+                      const expanded =
+                        expandedJobId === job.id;
+
+                      const margin =
+                        job.customer_price != null &&
+                        job.subcontractor_cost != null
+                          ? Number(job.customer_price) -
+                            Number(job.subcontractor_cost)
+                          : null;
+
+                      const statusLabel =
+                        job.status === "pending_acceptance"
+                          ? "Awaiting acceptance"
+                          : String(job.status || "-")
+                              .replaceAll("_", " ");
+
+                      return (
+                        <div
+                          key={job.id}
+                          className="border-b border-line last:border-b-0"
+                        >
+
+                          {/* ONE-LINE JOB ROW */}
+                          <div
+                            className={`grid grid-cols-[1.45fr_1.35fr_0.8fr_1.05fr_1.05fr_0.85fr_0.9fr_auto] items-center gap-3 px-4 py-2.5 text-sm ${
+                              expanded
+                                ? "bg-surface-2"
+                                : "bg-surface"
+                            }`}
+                          >
+                            <div
+                              className="truncate font-mono font-semibold text-ink"
+                              title={job.reference}
+                            >
+                              {job.reference}
+                            </div>
+
+                            <div
+                              className="truncate text-ink"
+                              title={job.customers?.name || ""}
+                            >
+                              {job.customers?.name || "-"}
+                            </div>
+
+                            <div className="font-mono text-xs text-ink-2">
+                              {job.scheduled_date || "-"}
+                            </div>
+
+                            <div>
+                              <span
+                                className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${
+                                  job.status === "pending_acceptance"
+                                    ? "border-amber-400/40 bg-amber-400/10 text-amber-300"
+                                    : job.status === "delivered"
+                                      ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-300"
+                                      : "border-line bg-surface-2 text-ink-2"
+                                }`}
+                              >
+                                {statusLabel}
+                              </span>
+                            </div>
+
+                            <div className="truncate text-xs text-ink-2">
+                              {formatDateTime(
+                                job.collection_eta
+                              )}
+                            </div>
+
+                            <div className="truncate font-mono text-xs text-ink-2">
+                              {job.vehicles?.registration ||
+                                "-"}
+                            </div>
+
+                            <div className="truncate text-xs text-ink-2">
+                              {job.drivers?.name || "-"}
+                            </div>
+
+                            <div className="flex justify-end gap-2">
+                              {job.status ===
+                              "pending_acceptance" ? (
+                                <Button
+                                  type="button"
+                                  onClick={() =>
+                                    openAcceptance(job)
+                                  }
+                                >
+                                  Accept
+                                </Button>
+                              ) : null}
+
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                onClick={() =>
+                                  setExpandedJobId(
+                                    expanded ? null : job.id
+                                  )
+                                }
+                              >
+                                {expanded
+                                  ? "Hide"
+                                  : "View"}
+                              </Button>
+                            </div>
+                          </div>
+
+
+                          {/* EXPANDED JOB */}
+                          {expanded ? (
+                            <div className="border-t border-line bg-surface px-4 py-4">
+
+                              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                                <div>
+                                  <div className="font-mono text-base font-semibold text-ink">
+                                    {job.reference}
+                                  </div>
+
+                                  <div className="mt-0.5 text-xs text-ink-3">
+                                    {job.customers?.name ||
+                                      "No customer"}
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-wrap gap-2">
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    onClick={() =>
+                                      startEdit(job)
+                                    }
+                                  >
+                                    Edit
+                                  </Button>
+
+                                  <Button
+                                    type="button"
+                                    variant="danger"
+                                    onClick={() =>
+                                      requestDelete(job)
+                                    }
+                                  >
+                                    Delete
+                                  </Button>
+                                </div>
+                              </div>
+
+
+                              {/* ACCEPTANCE FORM */}
+                              {acceptanceTarget?.id ===
+                              job.id ? (
+                                <div className="mb-4 rounded-lg border border-line bg-surface-2 p-4">
+                                  <div className="text-sm font-semibold text-ink">
+                                    Accept Job -{" "}
+                                    {job.reference}
+                                  </div>
+
+                                  <p className="mt-1 text-xs text-ink-2">
+                                    Confirm the expected
+                                    collection time before
+                                    accepting this customer job.
+                                  </p>
+
+                                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                                    <label className="grid gap-1.5 text-sm text-ink">
+                                      <span className="font-medium">
+                                        Collection ETA *
+                                      </span>
+
+                                      <input
+                                        type="datetime-local"
+                                        value={
+                                          acceptanceForm.collection_eta
+                                        }
+                                        onChange={(event) =>
+                                          setAcceptanceForm(
+                                            (current) => ({
+                                              ...current,
+                                              collection_eta:
+                                                event.target
+                                                  .value,
+                                            })
+                                          )
+                                        }
+                                        disabled={accepting}
+                                        className="rounded-md border border-line-strong bg-surface px-3 py-2 text-ink"
+                                      />
+                                    </label>
+
+                                    <label className="grid gap-1.5 text-sm text-ink">
+                                      <span className="font-medium">
+                                        Delivery ETA
+                                      </span>
+
+                                      <input
+                                        type="datetime-local"
+                                        value={
+                                          acceptanceForm.delivery_eta
+                                        }
+                                        onChange={(event) =>
+                                          setAcceptanceForm(
+                                            (current) => ({
+                                              ...current,
+                                              delivery_eta:
+                                                event.target
+                                                  .value,
+                                            })
+                                          )
+                                        }
+                                        disabled={accepting}
+                                        className="rounded-md border border-line-strong bg-surface px-3 py-2 text-ink"
+                                      />
+                                    </label>
+                                  </div>
+
+                                  <label className="mt-3 grid gap-1.5 text-sm text-ink">
+                                    <span className="font-medium">
+                                      Acceptance note
+                                    </span>
+
+                                    <textarea
+                                      value={
+                                        acceptanceForm.acceptance_note
+                                      }
+                                      onChange={(event) =>
+                                        setAcceptanceForm(
+                                          (current) => ({
+                                            ...current,
+                                            acceptance_note:
+                                              event.target
+                                                .value,
+                                          })
+                                        )
+                                      }
+                                      rows={3}
+                                      disabled={accepting}
+                                      placeholder="Optional note about collection, access or scheduling"
+                                      className="rounded-md border border-line-strong bg-surface px-3 py-2 text-ink"
+                                    />
+                                  </label>
+
+                                  <div className="mt-4 flex flex-wrap justify-end gap-2">
+                                    <Button
+                                      type="button"
+                                      variant="secondary"
+                                      onClick={
+                                        cancelAcceptance
+                                      }
+                                      disabled={accepting}
+                                    >
+                                      Cancel
+                                    </Button>
+
+                                    <Button
+                                      type="button"
+                                      onClick={
+                                        confirmAcceptance
+                                      }
+                                      loading={accepting}
+                                    >
+                                      Confirm Acceptance
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : null}
+
+
+                              {/* ACCEPTED INFO */}
+                              {job.accepted_at ? (
+                                <div className="mb-4 rounded-lg border border-line bg-surface-2 p-4">
+                                  <div className="text-sm font-semibold text-ink">
+                                    Accepted
+                                  </div>
+
+                                  <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                                    <div>
+                                      <div className="text-xs font-semibold text-ink-3">
+                                        Collection ETA
+                                      </div>
+
+                                      <div className="text-sm text-ink">
+                                        {formatDateTime(
+                                          job.collection_eta
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    <div>
+                                      <div className="text-xs font-semibold text-ink-3">
+                                        Delivery ETA
+                                      </div>
+
+                                      <div className="text-sm text-ink">
+                                        {formatDateTime(
+                                          job.delivery_eta
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    <div>
+                                      <div className="text-xs font-semibold text-ink-3">
+                                        Accepted at
+                                      </div>
+
+                                      <div className="text-sm text-ink">
+                                        {formatDateTime(
+                                          job.accepted_at
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {job.acceptance_note ? (
+                                    <div className="mt-3">
+                                      <div className="text-xs font-semibold text-ink-3">
+                                        Acceptance note
+                                      </div>
+
+                                      <div className="mt-1 whitespace-pre-wrap text-sm text-ink">
+                                        {
+                                          job.acceptance_note
+                                        }
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              ) : null}
+
+
+                              {/* COMMERCIAL / RESOURCE INFO */}
+                              <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+                                <div className="rounded-md bg-surface-2 p-3">
+                                  <div className="text-xs font-semibold text-ink-3">
+                                    Customer
+                                  </div>
+                                  <div className="truncate text-sm text-ink">
+                                    {job.customers?.name ||
+                                      "-"}
+                                  </div>
+                                </div>
+
+                                <div className="rounded-md bg-surface-2 p-3">
+                                  <div className="text-xs font-semibold text-ink-3">
+                                    Vehicle
+                                  </div>
+                                  <div className="font-mono text-sm text-ink">
+                                    {job.vehicles
+                                      ?.registration || "-"}
+                                  </div>
+                                </div>
+
+                                <div className="rounded-md bg-surface-2 p-3">
+                                  <div className="text-xs font-semibold text-ink-3">
+                                    Driver
+                                  </div>
+                                  <div className="text-sm text-ink">
+                                    {job.drivers?.name ||
+                                      "-"}
+                                  </div>
+                                </div>
+
+                                <div className="rounded-md bg-surface-2 p-3">
+                                  <div className="text-xs font-semibold text-ink-3">
+                                    Sell
+                                  </div>
+                                  <div className="font-mono text-sm slashed-zero text-ink">
+                                    {formatMoney(
+                                      job.customer_price
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="rounded-md bg-surface-2 p-3">
+                                  <div className="text-xs font-semibold text-ink-3">
+                                    Subcontractor
+                                  </div>
+                                  <div className="truncate text-sm text-ink">
+                                    {job.subcontractors
+                                      ?.name || "-"}
+                                  </div>
+                                </div>
+
+                                <div className="rounded-md bg-surface-2 p-3">
+                                  <div className="text-xs font-semibold text-ink-3">
+                                    Buy
+                                  </div>
+                                  <div className="font-mono text-sm slashed-zero text-ink">
+                                    {formatMoney(
+                                      job.subcontractor_cost
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="rounded-md bg-surface-2 p-3">
+                                  <div className="text-xs font-semibold text-ink-3">
+                                    Margin
+                                  </div>
+                                  <div className="font-mono text-sm slashed-zero text-ink">
+                                    {formatMoney(margin)}
+                                  </div>
+                                </div>
+                              </div>
+
+
+                              {/* STOPS / POD */}
+                              <div>
+                                <h3 className="mb-2 text-sm font-semibold text-ink">
+                                  Stops / POD
+                                </h3>
+
+                                {job.job_stops?.length ? (
+                                  <div className="grid gap-2.5">
+                                    {job.job_stops.map(
+                                      (stop: any) => (
+                                        <StopCard
+                                          key={stop.id}
+                                          stop={stop}
+                                          podForm={
+                                            podForms[
+                                              stop.id
+                                            ]
+                                          }
+                                          onPodFieldChange={
+                                            updatePodForm
+                                          }
+                                          onMarkDelivered={(
+                                            stopId
+                                          ) =>
+                                            savePod(
+                                              job.id,
+                                              stopId
+                                            )
+                                          }
+                                        />
+                                      )
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="text-sm text-ink-3">
+                                    No stops yet.
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               </div>
-            );
-          })}
-        </div>
+            </div>
+          );
+        })()}
       </main>
 
       <DeleteJobDialog
