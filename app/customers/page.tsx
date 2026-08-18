@@ -1,9 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CSSProperties, FormEvent } from "react";
+import type { FormEvent } from "react";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
+import Badge from "../../components/Badge";
+import Button from "../../components/Button";
+import MessageBanner from "../../components/MessageBanner";
 
 type Customer = {
   id: string;
@@ -425,54 +428,52 @@ export default function CustomersPage() {
 
   return (
     <TenantGate>
-      <main style={styles.page}>
-        <div style={styles.container}>
-          <header style={styles.header}>
+      <div className="ds min-h-screen bg-canvas font-sans text-ink">
+        <main className="mx-auto max-w-[1450px] px-6 py-8">
+          <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p style={styles.eyebrow}>Commercial</p>
-              <h1 style={styles.title}>Customers</h1>
-              <p style={styles.subtitle}>
+              <div className="text-kicker uppercase text-ink-3">Commercial</div>
+              <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">
+                Customers
+              </h1>
+              <p className="m-0 text-sm text-ink-3">
                 Customer accounts, contacts, billing, transport requirements,
                 credit controls and API references.
               </p>
             </div>
 
-            <button
+            <Button
               type="button"
               onClick={() => {
                 resetForm();
                 setShowForm(true);
               }}
-              style={styles.primaryButton}
             >
               + Add Customer
-            </button>
+            </Button>
           </header>
 
-          {errorMessage ? (
-            <div style={styles.error}>{errorMessage}</div>
-          ) : null}
+          <MessageBanner tone="danger">{errorMessage}</MessageBanner>
 
-          {message ? <div style={styles.success}>{message}</div> : null}
+          <MessageBanner tone="success">{message}</MessageBanner>
 
           {showForm ? (
-            <form onSubmit={saveCustomer} style={styles.card}>
-              <div style={styles.sectionHeader}>
-                <h2 style={styles.sectionTitle}>
+            <form
+              onSubmit={saveCustomer}
+              className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="m-0 text-md font-semibold text-ink">
                   {editingId ? "Edit Customer" : "New Customer"}
                 </h2>
 
-                <button
-                  type="button"
-                  onClick={resetForm}
-                  style={styles.secondaryButton}
-                >
+                <Button variant="secondary" type="button" onClick={resetForm}>
                   Cancel
-                </button>
+                </Button>
               </div>
 
               <Section title="Company">
-                <div style={styles.grid}>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <TextField
                     label="Customer / Display Name"
                     value={form.name}
@@ -518,7 +519,7 @@ export default function CustomersPage() {
               </Section>
 
               <Section title="Primary Contacts">
-                <div style={styles.grid}>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <TextField
                     label="Contact Name"
                     value={form.contact_name}
@@ -568,7 +569,7 @@ export default function CustomersPage() {
               </Section>
 
               <Section title="Address">
-                <div style={styles.grid}>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <TextField
                     label="Address Line 1"
                     value={form.address_line_1}
@@ -605,7 +606,7 @@ export default function CustomersPage() {
               </Section>
 
               <Section title="Billing & Credit">
-                <div style={styles.grid}>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <TextField
                     label="Payment Terms (days)"
                     value={form.payment_terms_days}
@@ -659,7 +660,7 @@ export default function CustomersPage() {
                   />
                 </div>
 
-                <div style={styles.checkboxGrid}>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   <CheckboxField
                     label="PO required"
                     checked={form.requires_po}
@@ -674,7 +675,7 @@ export default function CustomersPage() {
               </Section>
 
               <Section title="Transport Requirements">
-                <div style={styles.grid}>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <TextField
                     label="Default Vehicle Type"
                     value={form.default_vehicle_type}
@@ -699,7 +700,7 @@ export default function CustomersPage() {
                   />
                 </div>
 
-                <div style={styles.checkboxGrid}>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   <CheckboxField
                     label="ADR required"
                     checked={form.adr_required}
@@ -779,7 +780,7 @@ export default function CustomersPage() {
               </Section>
 
               <Section title="API / External References">
-                <div style={styles.grid}>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <TextField
                     label="External Customer ID"
                     value={form.external_customer_id}
@@ -821,28 +822,23 @@ export default function CustomersPage() {
                 />
               </Section>
 
-              <button
-                type="submit"
-                disabled={saving}
-                style={{
-                  ...styles.primaryButton,
-                  opacity: saving ? 0.65 : 1,
-                }}
-              >
+              <Button type="submit" disabled={saving}>
                 {saving
                   ? "Saving..."
                   : editingId
                     ? "Update Customer"
                     : "Create Customer"}
-              </button>
+              </Button>
             </form>
           ) : null}
 
-          <section style={styles.card}>
-            <div style={styles.sectionHeader}>
+          <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 style={styles.sectionTitle}>Customer Accounts</h2>
-                <p style={styles.muted}>
+                <h2 className="m-0 text-md font-semibold text-ink">
+                  Customer Accounts
+                </h2>
+                <p className="m-0 text-sm text-ink-3">
                   {customers.length} customer{customers.length === 1 ? "" : "s"}
                 </p>
               </div>
@@ -851,44 +847,41 @@ export default function CustomersPage() {
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search name, account code or postcode..."
-                style={styles.search}
+                className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3 sm:w-64"
               />
             </div>
 
             {loading ? (
-              <div style={styles.empty}>Loading customers...</div>
+              <p className="text-sm text-ink-3">Loading customers...</p>
             ) : customers.length === 0 ? (
-              <div style={styles.empty}>No customers found.</div>
+              <p className="text-sm text-ink-3">No customers found.</p>
             ) : (
-              <div style={styles.customerGrid}>
+              <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {customers.map((customer) => (
-                  <article key={customer.id} style={styles.customerCard}>
-                    <div style={styles.customerHeader}>
+                  <article
+                    key={customer.id}
+                    className="rounded-lg border border-line bg-surface-2 p-3"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
                       <div>
-                        <h3 style={styles.customerName}>{customer.name}</h3>
-                        <span style={styles.muted}>
+                        <h3 className="m-0 text-md font-semibold text-ink">
+                          {customer.name}
+                        </h3>
+                        <span className="font-mono text-xs text-ink-3">
                           {customer.account_code || "No account code"}
                         </span>
                       </div>
 
-                      <span
-                        style={
-                          customer.credit_hold
-                            ? styles.holdBadge
-                            : customer.active
-                              ? styles.activeBadge
-                              : styles.inactiveBadge
-                        }
-                      >
-                        {customer.credit_hold
-                          ? "Credit Hold"
-                          : customer.active
-                            ? "Active"
-                            : "Inactive"}
-                      </span>
+                      {customer.credit_hold ? (
+                        <Badge tone="danger">Credit Hold</Badge>
+                      ) : customer.active ? (
+                        <Badge tone="success">Active</Badge>
+                      ) : (
+                        <Badge tone="neutral">Inactive</Badge>
+                      )}
                     </div>
 
-                    <div style={styles.infoGrid}>
+                    <div className="my-2 grid grid-cols-2 gap-2">
                       <Info
                         label="Contact"
                         value={customer.contact_name || customer.email}
@@ -923,48 +916,50 @@ export default function CustomersPage() {
                       />
                     </div>
 
-                    <div style={styles.tagRow}>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
                       {customer.adr_required ? (
-                        <span style={styles.tag}>ADR</span>
+                        <Badge tone="neutral">ADR</Badge>
                       ) : null}
                       {customer.tail_lift_required ? (
-                        <span style={styles.tag}>Tail Lift</span>
+                        <Badge tone="neutral">Tail Lift</Badge>
                       ) : null}
                       {customer.timed_delivery_required ? (
-                        <span style={styles.tag}>Timed</span>
+                        <Badge tone="neutral">Timed</Badge>
                       ) : null}
                       {customer.pod_required ? (
-                        <span style={styles.tag}>POD</span>
+                        <Badge tone="neutral">POD</Badge>
                       ) : null}
                       {customer.api_enabled ? (
-                        <span style={styles.apiTag}>API</span>
+                        <Badge tone="info">API</Badge>
                       ) : null}
                     </div>
 
-                    <div style={styles.actions}>
-                      <button
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
                         type="button"
                         onClick={() => startEdit(customer)}
-                        style={styles.secondaryButton}
                       >
                         Edit
-                      </button>
+                      </Button>
 
-                      <button
+                      <Button
+                        variant="danger"
+                        size="sm"
                         type="button"
                         onClick={() => void deleteCustomer(customer)}
-                        style={styles.deleteButton}
                       >
                         Delete
-                      </button>
+                      </Button>
                     </div>
                   </article>
                 ))}
               </div>
             )}
           </section>
-        </div>
-      </main>
+        </main>
+      </div>
     </TenantGate>
   );
 }
@@ -977,8 +972,8 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section style={styles.section}>
-      <h3 style={styles.subheading}>{title}</h3>
+    <section className="mt-4 border-t border-line pt-4">
+      <h3 className="mb-3 text-kicker uppercase text-ink-3">{title}</h3>
       {children}
     </section>
   );
@@ -998,14 +993,14 @@ function TextField({
   required?: boolean;
 }) {
   return (
-    <label style={styles.field}>
-      <span style={styles.label}>{label}</span>
+    <label className="grid gap-1.5">
+      <span className="text-sm font-medium text-ink-2">{label}</span>
       <input
         type={type}
         required={required}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        style={styles.input}
+        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
       />
     </label>
   );
@@ -1021,13 +1016,13 @@ function TextareaField({
   onChange: (value: string) => void;
 }) {
   return (
-    <label style={styles.field}>
-      <span style={styles.label}>{label}</span>
+    <label className="grid gap-1.5">
+      <span className="text-sm font-medium text-ink-2">{label}</span>
       <textarea
         rows={4}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        style={{ ...styles.input, resize: "vertical" }}
+        className="min-h-24 w-full min-w-0 resize-y rounded-md border border-ink-3 bg-surface px-3 py-2 text-base text-ink"
       />
     </label>
   );
@@ -1045,12 +1040,12 @@ function SelectField({
   options: [string, string][];
 }) {
   return (
-    <label style={styles.field}>
-      <span style={styles.label}>{label}</span>
+    <label className="grid gap-1.5">
+      <span className="text-sm font-medium text-ink-2">{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        style={styles.input}
+        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
       >
         {options.map(([valueOption, labelOption]) => (
           <option key={valueOption} value={valueOption}>
@@ -1072,7 +1067,7 @@ function CheckboxField({
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <label style={styles.checkbox}>
+    <label className="flex min-h-10 items-center gap-2 text-sm text-ink-2">
       <input
         type="checkbox"
         checked={checked}
@@ -1091,267 +1086,9 @@ function Info({
   value: string | null | undefined;
 }) {
   return (
-    <div>
-      <span style={styles.smallLabel}>{label}</span>
-      <strong style={styles.infoValue}>{value || "—"}</strong>
+    <div className="text-sm">
+      <span className="text-kicker uppercase text-ink-3">{label}</span>{" "}
+      <strong className="block text-ink">{value || "—"}</strong>
     </div>
   );
 }
-
-const styles: Record<string, CSSProperties> = {
-  page: {
-    minHeight: "100vh",
-    padding: "32px 20px 60px",
-    background: "#f8fafc",
-    color: "#0f172a",
-  },
-  container: {
-    maxWidth: 1450,
-    margin: "0 auto",
-  },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 20,
-    flexWrap: "wrap",
-    marginBottom: 24,
-  },
-  eyebrow: {
-    margin: "0 0 6px",
-    color: "#2563eb",
-    fontSize: 12,
-    fontWeight: 900,
-    textTransform: "uppercase",
-    letterSpacing: "0.08em",
-  },
-  title: {
-    margin: 0,
-    fontSize: "clamp(34px, 5vw, 48px)",
-    letterSpacing: "-0.04em",
-  },
-  subtitle: {
-    maxWidth: 760,
-    margin: "8px 0 0",
-    color: "#64748b",
-    lineHeight: 1.6,
-  },
-  card: {
-    background: "#ffffff",
-    border: "1px solid #e2e8f0",
-    borderRadius: 18,
-    padding: 22,
-    marginBottom: 22,
-    boxShadow: "0 8px 28px rgba(15,23,42,0.06)",
-  },
-  section: {
-    borderTop: "1px solid #e2e8f0",
-    paddingTop: 18,
-    marginTop: 18,
-  },
-  sectionHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 14,
-    flexWrap: "wrap",
-  },
-  sectionTitle: {
-    margin: 0,
-    fontSize: 22,
-  },
-  subheading: {
-    margin: "0 0 14px",
-    fontSize: 17,
-  },
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
-    gap: 14,
-    marginBottom: 14,
-  },
-  checkboxGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-    gap: 8,
-    margin: "12px 0",
-  },
-  field: {
-    display: "grid",
-    gap: 6,
-  },
-  label: {
-    color: "#334155",
-    fontSize: 12,
-    fontWeight: 800,
-  },
-  input: {
-    width: "100%",
-    boxSizing: "border-box",
-    border: "1px solid #cbd5e1",
-    borderRadius: 10,
-    padding: "11px 12px",
-    background: "#ffffff",
-    color: "#0f172a",
-    fontSize: 14,
-  },
-  checkbox: {
-    display: "flex",
-    gap: 8,
-    alignItems: "center",
-    padding: 10,
-    border: "1px solid #e2e8f0",
-    borderRadius: 10,
-    background: "#f8fafc",
-    fontSize: 13,
-    fontWeight: 700,
-  },
-  primaryButton: {
-    border: "none",
-    borderRadius: 10,
-    background: "#2563eb",
-    color: "#ffffff",
-    padding: "12px 16px",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-  secondaryButton: {
-    border: "1px solid #cbd5e1",
-    borderRadius: 9,
-    background: "#ffffff",
-    color: "#0f172a",
-    padding: "9px 12px",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-  deleteButton: {
-    border: "1px solid #fecaca",
-    borderRadius: 9,
-    background: "#fef2f2",
-    color: "#b91c1c",
-    padding: "9px 12px",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-  search: {
-    width: 320,
-    maxWidth: "100%",
-    border: "1px solid #cbd5e1",
-    borderRadius: 10,
-    padding: "10px 12px",
-  },
-  customerGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(330px, 1fr))",
-    gap: 14,
-    marginTop: 18,
-  },
-  customerCard: {
-    border: "1px solid #e2e8f0",
-    borderRadius: 14,
-    padding: 17,
-    background: "#f8fafc",
-  },
-  customerHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 12,
-  },
-  customerName: {
-    margin: 0,
-    fontSize: 20,
-  },
-  muted: {
-    margin: "4px 0 0",
-    color: "#64748b",
-    fontSize: 12,
-  },
-  infoGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0,1fr))",
-    gap: 12,
-    margin: "18px 0",
-  },
-  smallLabel: {
-    display: "block",
-    color: "#64748b",
-    fontSize: 10,
-    fontWeight: 900,
-    textTransform: "uppercase",
-  },
-  infoValue: {
-    display: "block",
-    marginTop: 4,
-    fontSize: 13,
-  },
-  tagRow: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: 6,
-    marginBottom: 16,
-  },
-  tag: {
-    borderRadius: 999,
-    padding: "5px 8px",
-    background: "#e2e8f0",
-    color: "#334155",
-    fontSize: 11,
-    fontWeight: 800,
-  },
-  apiTag: {
-    borderRadius: 999,
-    padding: "5px 8px",
-    background: "#dbeafe",
-    color: "#1d4ed8",
-    fontSize: 11,
-    fontWeight: 800,
-  },
-  activeBadge: {
-    borderRadius: 999,
-    padding: "5px 8px",
-    background: "#dcfce7",
-    color: "#166534",
-    fontSize: 11,
-    fontWeight: 800,
-  },
-  inactiveBadge: {
-    borderRadius: 999,
-    padding: "5px 8px",
-    background: "#e2e8f0",
-    color: "#475569",
-    fontSize: 11,
-    fontWeight: 800,
-  },
-  holdBadge: {
-    borderRadius: 999,
-    padding: "5px 8px",
-    background: "#fee2e2",
-    color: "#991b1b",
-    fontSize: 11,
-    fontWeight: 800,
-  },
-  actions: {
-    display: "flex",
-    gap: 8,
-  },
-  success: {
-    marginBottom: 18,
-    padding: 12,
-    borderRadius: 10,
-    background: "#dcfce7",
-    color: "#166534",
-  },
-  error: {
-    marginBottom: 18,
-    padding: 12,
-    borderRadius: 10,
-    background: "#fee2e2",
-    color: "#991b1b",
-  },
-  empty: {
-    padding: 40,
-    textAlign: "center",
-    color: "#64748b",
-  },
-};
