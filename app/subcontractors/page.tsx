@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CSSProperties, FormEvent } from "react";
+import type { FormEvent } from "react";
 import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
+import Badge from "../../components/Badge";
+import Button from "../../components/Button";
+import MessageBanner from "../../components/MessageBanner";
 
 type Subcontractor = {
   id: string;
@@ -598,41 +601,48 @@ export default function SubcontractorsPage() {
 
   return (
     <TenantGate>
-      <main style={styles.page}>
-        <div style={styles.container}>
-          <header style={styles.header}>
+      <div className="ds min-h-screen bg-canvas font-sans text-ink">
+        <main className="mx-auto max-w-[1480px] px-6 py-8">
+          <header className="mb-4">
             <div>
-              <p style={styles.eyebrow}>Carrier Network</p>
-              <h1 style={styles.title}>Subcontractors</h1>
-              <p style={styles.subtitle}>
+              <div className="text-kicker uppercase text-ink-3">
+                Carrier Network
+              </div>
+              <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">
+                Subcontractors
+              </h1>
+              <p className="m-0 text-sm text-ink-3">
                 Manage owner-drivers and fleet subcontractors, their compliance,
                 employees, vehicles and commercial terms.
               </p>
             </div>
           </header>
 
-          {message ? <div style={styles.message}>{message}</div> : null}
+          <MessageBanner tone="neutral">{message}</MessageBanner>
 
           {isAdmin ? (
-            <form onSubmit={saveSubcontractor} style={styles.card}>
-              <div style={styles.sectionHeader}>
-                <h2 style={styles.sectionTitle}>
+            <form
+              onSubmit={saveSubcontractor}
+              className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="m-0 text-md font-semibold text-ink">
                   {editingId ? "Edit Subcontractor" : "Add Subcontractor"}
                 </h2>
 
                 {editingId ? (
-                  <button
+                  <Button
+                    variant="secondary"
                     type="button"
                     onClick={resetSubcontractorForm}
-                    style={styles.secondaryButton}
                   >
                     Cancel
-                  </button>
+                  </Button>
                 ) : null}
               </div>
 
               <Section title="Company">
-                <div style={styles.grid}>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <TextField
                     label="Display Name"
                     value={form.name}
@@ -682,7 +692,7 @@ export default function SubcontractorsPage() {
               </Section>
 
               <Section title="Contacts">
-                <div style={styles.grid}>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <TextField
                     label="Main Contact"
                     value={form.contact_name}
@@ -729,7 +739,7 @@ export default function SubcontractorsPage() {
               </Section>
 
               <Section title="Compliance">
-                <div style={styles.grid}>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <TextField
                     label="Operator Licence"
                     value={form.operator_licence_number}
@@ -849,7 +859,7 @@ export default function SubcontractorsPage() {
               </Section>
 
               <Section title="Commercial">
-                <div style={styles.grid}>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <TextField
                     label="Payment Terms Days"
                     value={form.payment_terms_days}
@@ -896,33 +906,37 @@ export default function SubcontractorsPage() {
                 </div>
               </Section>
 
-              <TextareaField
-                label="Notes"
-                value={form.notes}
-                onChange={(value) => setForm({ ...form, notes: value })}
-              />
+              <div className="mt-4 grid gap-3">
+                <TextareaField
+                  label="Notes"
+                  value={form.notes}
+                  onChange={(value) => setForm({ ...form, notes: value })}
+                />
 
-              <CheckboxField
-                label="Active"
-                checked={form.active}
-                onChange={(checked) => setForm({ ...form, active: checked })}
-              />
+                <CheckboxField
+                  label="Active"
+                  checked={form.active}
+                  onChange={(checked) => setForm({ ...form, active: checked })}
+                />
+              </div>
 
-              <button type="submit" style={styles.primaryButton} disabled={saving}>
+              <Button type="submit" disabled={saving} className="mt-4">
                 {saving
                   ? "Saving..."
                   : editingId
                     ? "Update Subcontractor"
                     : "Create Subcontractor"}
-              </button>
+              </Button>
             </form>
           ) : null}
 
-          <section style={styles.card}>
-            <div style={styles.sectionHeader}>
+          <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 style={styles.sectionTitle}>Subcontractor Accounts</h2>
-                <p style={styles.muted}>
+                <h2 className="m-0 text-md font-semibold text-ink">
+                  Subcontractor Accounts
+                </h2>
+                <p className="m-0 text-sm text-ink-3">
                   {subcontractors.length} subcontractor
                   {subcontractors.length === 1 ? "" : "s"}
                 </p>
@@ -930,11 +944,15 @@ export default function SubcontractorsPage() {
             </div>
 
             {loading ? (
-              <div style={styles.empty}>Loading subcontractors...</div>
+              <p className="py-10 text-center text-sm text-ink-3">
+                Loading subcontractors...
+              </p>
             ) : subcontractors.length === 0 ? (
-              <div style={styles.empty}>No subcontractors found.</div>
+              <p className="py-10 text-center text-sm text-ink-3">
+                No subcontractors found.
+              </p>
             ) : (
-              <div style={styles.subGrid}>
+              <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {subcontractors.map((subcontractor) => {
                   const compliance = mostUrgent([
                     getCompliance(subcontractor.goods_in_transit_expiry),
@@ -947,12 +965,14 @@ export default function SubcontractorsPage() {
                   return (
                     <article
                       key={subcontractor.id}
-                      style={subcontractorCardStyle(compliance.level)}
+                      className={subcontractorCardStyle(compliance.level)}
                     >
-                      <div style={styles.subHeader}>
+                      <div className="flex flex-wrap items-start justify-between gap-2">
                         <div>
-                          <h3 style={styles.subName}>{subcontractor.name}</h3>
-                          <span style={styles.muted}>
+                          <h3 className="m-0 text-md font-semibold text-ink">
+                            {subcontractor.name}
+                          </h3>
+                          <span className="text-sm text-ink-2">
                             {subcontractor.subcontractor_type === "owner_driver"
                               ? "Owner Driver"
                               : "Fleet Subcontractor"}
@@ -961,7 +981,7 @@ export default function SubcontractorsPage() {
                         <StatusBadge result={compliance} />
                       </div>
 
-                      <div style={styles.infoGrid}>
+                      <div className="my-2 grid grid-cols-2 gap-2">
                         <Info
                           label="Contact"
                           value={subcontractor.contact_name || subcontractor.email}
@@ -977,27 +997,29 @@ export default function SubcontractorsPage() {
                         />
                       </div>
 
-                      <div style={styles.actions}>
-                        <button
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
                           type="button"
-                          style={styles.secondaryButton}
                           onClick={() => {
                             setSelectedSubcontractorId(subcontractor.id);
                             startEdit(subcontractor);
                           }}
                         >
                           Edit
-                        </button>
+                        </Button>
 
-                        <button
+                        <Button
+                          variant="secondary"
+                          size="sm"
                           type="button"
-                          style={styles.secondaryButton}
                           onClick={() =>
                             setSelectedSubcontractorId(subcontractor.id)
                           }
                         >
                           Manage
-                        </button>
+                        </Button>
                       </div>
                     </article>
                   );
@@ -1008,21 +1030,24 @@ export default function SubcontractorsPage() {
 
           {selectedSubcontractor ? (
             <>
-              <section style={styles.card}>
-                <div style={styles.sectionHeader}>
+              <section className="mt-4 rounded-lg border border-line bg-surface p-4 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h2 style={styles.sectionTitle}>
+                    <h2 className="m-0 text-md font-semibold text-ink">
                       Employees · {selectedSubcontractor.name}
                     </h2>
-                    <p style={styles.muted}>
+                    <p className="m-0 text-sm text-ink-3">
                       Portal access should only be granted to active, directly
                       employed people.
                     </p>
                   </div>
                 </div>
 
-                <form onSubmit={saveEmployee} style={styles.inlineForm}>
-                  <div style={styles.grid}>
+                <form
+                  onSubmit={saveEmployee}
+                  className="mb-3 mt-3 rounded-lg border border-line bg-surface-2 p-3"
+                >
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     <TextField
                       label="Full Name"
                       value={employeeForm.full_name}
@@ -1075,7 +1100,7 @@ export default function SubcontractorsPage() {
                     />
                   </div>
 
-                  <div style={styles.checkboxGrid}>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                     <CheckboxField
                       label="Directly employed"
                       checked={employeeForm.directly_employed}
@@ -1102,56 +1127,51 @@ export default function SubcontractorsPage() {
                     />
                   </div>
 
-                  <div style={styles.actions}>
-                    <button
-                      type="submit"
-                      style={styles.primaryButton}
-                      disabled={employeeSaving}
-                    >
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button type="submit" disabled={employeeSaving}>
                       {employeeSaving
                         ? "Saving..."
                         : editingEmployeeId
                           ? "Update Employee"
                           : "Add Employee"}
-                    </button>
+                    </Button>
 
                     {editingEmployeeId ? (
-                      <button
+                      <Button
+                        variant="secondary"
                         type="button"
-                        style={styles.secondaryButton}
                         onClick={resetEmployeeForm}
                       >
                         Cancel
-                      </button>
+                      </Button>
                     ) : null}
                   </div>
                 </form>
 
-                <div style={styles.listGrid}>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {selectedEmployees.map((employee) => (
-                    <article key={employee.id} style={styles.listCard}>
-                      <div style={styles.subHeader}>
+                    <article
+                      key={employee.id}
+                      className="rounded-lg border border-line bg-surface-2 p-3"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
                         <div>
-                          <strong>{employee.full_name}</strong>
-                          <div style={styles.muted}>
+                          <h3 className="m-0 text-md font-semibold text-ink">
+                            {employee.full_name}
+                          </h3>
+                          <div className="text-sm text-ink-2">
                             {employee.job_title || "Employee"}
                           </div>
                         </div>
 
-                        <span
-                          style={
-                            employee.directly_employed && employee.active
-                              ? styles.goodBadge
-                              : styles.warnBadge
-                          }
-                        >
-                          {employee.directly_employed && employee.active
-                            ? "Eligible"
-                            : "No Portal Access"}
-                        </span>
+                        {employee.directly_employed && employee.active ? (
+                          <Badge tone="success">Eligible</Badge>
+                        ) : (
+                          <Badge tone="danger">No Portal Access</Badge>
+                        )}
                       </div>
 
-                      <div style={styles.infoGrid}>
+                      <div className="my-2 grid grid-cols-2 gap-2">
                         <Info label="Email" value={employee.email} />
                         <Info label="Phone" value={employee.phone} />
                         <Info
@@ -1164,33 +1184,37 @@ export default function SubcontractorsPage() {
                         />
                       </div>
 
-                      <button
+                      <Button
+                        variant="secondary"
+                        size="sm"
                         type="button"
-                        style={styles.secondaryButton}
                         onClick={() => startEditEmployee(employee)}
                       >
                         Edit Employee
-                      </button>
+                      </Button>
                     </article>
                   ))}
                 </div>
               </section>
 
-              <section style={styles.card}>
-                <div style={styles.sectionHeader}>
+              <section className="mt-4 rounded-lg border border-line bg-surface p-4 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h2 style={styles.sectionTitle}>
+                    <h2 className="m-0 text-md font-semibold text-ink">
                       Vehicles · {selectedSubcontractor.name}
                     </h2>
-                    <p style={styles.muted}>
+                    <p className="m-0 text-sm text-ink-3">
                       Track MOT, tax, insurance and VOR status for subcontractor
                       vehicles.
                     </p>
                   </div>
                 </div>
 
-                <form onSubmit={saveVehicle} style={styles.inlineForm}>
-                  <div style={styles.grid}>
+                <form
+                  onSubmit={saveVehicle}
+                  className="mb-3 mt-3 rounded-lg border border-line bg-surface-2 p-3"
+                >
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     <TextField
                       label="Registration"
                       value={vehicleForm.registration}
@@ -1249,7 +1273,7 @@ export default function SubcontractorsPage() {
                     />
                   </div>
 
-                  <div style={styles.checkboxGrid}>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                     <CheckboxField
                       label="VOR"
                       checked={vehicleForm.vor}
@@ -1266,32 +1290,28 @@ export default function SubcontractorsPage() {
                     />
                   </div>
 
-                  <div style={styles.actions}>
-                    <button
-                      type="submit"
-                      style={styles.primaryButton}
-                      disabled={vehicleSaving}
-                    >
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button type="submit" disabled={vehicleSaving}>
                       {vehicleSaving
                         ? "Saving..."
                         : editingVehicleId
                           ? "Update Vehicle"
                           : "Add Vehicle"}
-                    </button>
+                    </Button>
 
                     {editingVehicleId ? (
-                      <button
+                      <Button
+                        variant="secondary"
                         type="button"
-                        style={styles.secondaryButton}
                         onClick={resetVehicleForm}
                       >
                         Cancel
-                      </button>
+                      </Button>
                     ) : null}
                   </div>
                 </form>
 
-                <div style={styles.listGrid}>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {selectedVehicles.map((vehicle) => {
                     const compliance = mostUrgent([
                       getCompliance(vehicle.mot_expiry),
@@ -1302,12 +1322,14 @@ export default function SubcontractorsPage() {
                     return (
                       <article
                         key={vehicle.id}
-                        style={subcontractorCardStyle(compliance.level)}
+                        className={subcontractorCardStyle(compliance.level)}
                       >
-                        <div style={styles.subHeader}>
+                        <div className="flex flex-wrap items-start justify-between gap-2">
                           <div>
-                            <strong>{vehicle.registration}</strong>
-                            <div style={styles.muted}>
+                            <h3 className="m-0 font-mono text-md font-semibold text-ink">
+                              {vehicle.registration}
+                            </h3>
+                            <div className="text-sm text-ink-2">
                               {[vehicle.vehicle_type, vehicle.make, vehicle.model]
                                 .filter(Boolean)
                                 .join(" • ") || "Vehicle"}
@@ -1317,7 +1339,7 @@ export default function SubcontractorsPage() {
                           <StatusBadge result={compliance} />
                         </div>
 
-                        <div style={styles.infoGrid}>
+                        <div className="my-2 grid grid-cols-2 gap-2">
                           <Info
                             label="MOT"
                             value={
@@ -1348,13 +1370,14 @@ export default function SubcontractorsPage() {
                           />
                         </div>
 
-                        <button
+                        <Button
+                          variant="secondary"
+                          size="sm"
                           type="button"
-                          style={styles.secondaryButton}
                           onClick={() => startEditVehicle(vehicle)}
                         >
                           Edit Vehicle
-                        </button>
+                        </Button>
                       </article>
                     );
                   })}
@@ -1362,8 +1385,8 @@ export default function SubcontractorsPage() {
               </section>
             </>
           ) : null}
-        </div>
-      </main>
+        </main>
+      </div>
     </TenantGate>
   );
 }
@@ -1376,9 +1399,9 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section style={styles.section}>
-      <h3 style={styles.subheading}>{title}</h3>
-      {children}
+    <section className="mt-4 border-t border-line pt-4">
+      <h3 className="mb-3 text-kicker uppercase text-ink-3">{title}</h3>
+      <div className="grid gap-3">{children}</div>
     </section>
   );
 }
@@ -1397,14 +1420,14 @@ function TextField({
   required?: boolean;
 }) {
   return (
-    <label style={styles.field}>
-      <span style={styles.label}>{label}</span>
+    <label className="grid gap-1.5">
+      <span className="text-sm font-medium text-ink-2">{label}</span>
       <input
         type={type}
         required={required}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        style={styles.input}
+        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
       />
     </label>
   );
@@ -1420,13 +1443,13 @@ function TextareaField({
   onChange: (value: string) => void;
 }) {
   return (
-    <label style={styles.field}>
-      <span style={styles.label}>{label}</span>
+    <label className="grid gap-1.5">
+      <span className="text-sm font-medium text-ink-2">{label}</span>
       <textarea
         rows={4}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        style={{ ...styles.input, resize: "vertical" }}
+        className="min-h-24 w-full min-w-0 resize-y rounded-md border border-ink-3 bg-surface px-3 py-2 text-base text-ink"
       />
     </label>
   );
@@ -1444,12 +1467,12 @@ function SelectField({
   options: [string, string][];
 }) {
   return (
-    <label style={styles.field}>
-      <span style={styles.label}>{label}</span>
+    <label className="grid gap-1.5">
+      <span className="text-sm font-medium text-ink-2">{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        style={styles.input}
+        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
       >
         {options.map(([valueOption, labelOption]) => (
           <option key={valueOption} value={valueOption}>
@@ -1471,13 +1494,13 @@ function DateField({
   onChange: (value: string) => void;
 }) {
   return (
-    <label style={styles.field}>
-      <span style={styles.label}>{label}</span>
+    <label className="grid gap-1.5">
+      <span className="text-sm font-medium text-ink-2">{label}</span>
       <input
         type="date"
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        style={styles.input}
+        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
       />
     </label>
   );
@@ -1493,7 +1516,7 @@ function CheckboxField({
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <label style={styles.checkbox}>
+    <label className="flex min-h-10 items-center gap-2 rounded-md border border-ink-3 bg-surface px-3 text-sm text-ink-2">
       <input
         type="checkbox"
         checked={checked}
@@ -1512,9 +1535,9 @@ function Info({
   value: string | null | undefined;
 }) {
   return (
-    <div>
-      <span style={styles.smallLabel}>{label}</span>
-      <strong style={styles.infoValue}>{value || "—"}</strong>
+    <div className="text-sm">
+      <span className="text-kicker uppercase text-ink-3">{label}</span>{" "}
+      <strong className="block text-ink">{value || "—"}</strong>
     </div>
   );
 }
@@ -1578,272 +1601,34 @@ function mostUrgent(results: ComplianceResult[]): ComplianceResult {
 }
 
 function StatusBadge({ result }: { result: ComplianceResult }) {
-  const palette =
-    result.level === "red"
-      ? { background: "#fee2e2", color: "#991b1b", border: "#fca5a5" }
-      : result.level === "amber"
-        ? { background: "#fef3c7", color: "#92400e", border: "#fcd34d" }
-        : { background: "#dcfce7", color: "#166534", border: "#86efac" };
-
   return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        padding: "6px 9px",
-        borderRadius: 999,
-        border: `1px solid ${palette.border}`,
-        background: palette.background,
-        color: palette.color,
-        fontWeight: 900,
-        fontSize: 11,
-      }}
+    <Badge
+      tone={
+        result.level === "red"
+          ? "danger"
+          : result.level === "amber"
+            ? "warning"
+            : "success"
+      }
     >
       {result.label}
-    </span>
+    </Badge>
   );
 }
 
-function subcontractorCardStyle(level: ComplianceLevel): CSSProperties {
+function subcontractorCardStyle(level: ComplianceLevel): string {
   if (level === "red") {
-    return {
-      background: "#fff1f2",
-      border: "2px solid #dc2626",
-      borderRadius: 14,
-      padding: 16,
-    };
+    return "rounded-lg border-2 border-danger bg-danger-tint p-3";
   }
 
   if (level === "amber") {
-    return {
-      background: "#fffbeb",
-      border: "2px solid #f59e0b",
-      borderRadius: 14,
-      padding: 16,
-    };
+    return "rounded-lg border-2 border-warning bg-warning-tint p-3";
   }
 
-  return {
-    background: "#f8fafc",
-    border: "1px solid #e2e8f0",
-    borderRadius: 14,
-    padding: 16,
-  };
+  return "rounded-lg border border-line bg-surface-2 p-3";
 }
 
 function formatDate(value: string) {
   const date = new Date(`${value}T00:00:00`);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-GB");
 }
-
-const styles: Record<string, CSSProperties> = {
-  page: {
-    minHeight: "100vh",
-    padding: "32px 20px 60px",
-    background: "#f8fafc",
-    color: "#0f172a",
-  },
-  container: {
-    maxWidth: 1500,
-    margin: "0 auto",
-  },
-  header: {
-    marginBottom: 24,
-  },
-  eyebrow: {
-    margin: "0 0 6px",
-    color: "#2563eb",
-    fontSize: 12,
-    fontWeight: 900,
-    textTransform: "uppercase",
-    letterSpacing: "0.08em",
-  },
-  title: {
-    margin: 0,
-    fontSize: "clamp(34px, 5vw, 48px)",
-    letterSpacing: "-0.04em",
-  },
-  subtitle: {
-    maxWidth: 820,
-    margin: "8px 0 0",
-    color: "#64748b",
-    lineHeight: 1.6,
-  },
-  card: {
-    background: "#ffffff",
-    border: "1px solid #e2e8f0",
-    borderRadius: 18,
-    padding: 22,
-    marginBottom: 22,
-    boxShadow: "0 8px 28px rgba(15,23,42,0.06)",
-  },
-  section: {
-    borderTop: "1px solid #e2e8f0",
-    paddingTop: 18,
-    marginTop: 18,
-  },
-  sectionHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 14,
-    flexWrap: "wrap",
-  },
-  sectionTitle: {
-    margin: 0,
-    fontSize: 22,
-  },
-  subheading: {
-    margin: "0 0 14px",
-    fontSize: 17,
-  },
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
-    gap: 14,
-    marginBottom: 14,
-  },
-  checkboxGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
-    gap: 8,
-    marginBottom: 14,
-  },
-  field: {
-    display: "grid",
-    gap: 6,
-  },
-  label: {
-    color: "#334155",
-    fontSize: 12,
-    fontWeight: 800,
-  },
-  input: {
-    width: "100%",
-    boxSizing: "border-box",
-    border: "1px solid #cbd5e1",
-    borderRadius: 10,
-    padding: "11px 12px",
-    background: "#ffffff",
-    color: "#0f172a",
-    fontSize: 14,
-  },
-  checkbox: {
-    display: "flex",
-    gap: 8,
-    alignItems: "center",
-    padding: 10,
-    border: "1px solid #e2e8f0",
-    borderRadius: 10,
-    background: "#f8fafc",
-    fontSize: 13,
-    fontWeight: 700,
-  },
-  primaryButton: {
-    border: "none",
-    borderRadius: 10,
-    background: "#2563eb",
-    color: "#ffffff",
-    padding: "12px 16px",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-  secondaryButton: {
-    border: "1px solid #cbd5e1",
-    borderRadius: 9,
-    background: "#ffffff",
-    color: "#0f172a",
-    padding: "9px 12px",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-  message: {
-    marginBottom: 18,
-    padding: 12,
-    borderRadius: 10,
-    background: "#ffffff",
-    border: "1px solid #e2e8f0",
-  },
-  muted: {
-    margin: "4px 0 0",
-    color: "#64748b",
-    fontSize: 12,
-  },
-  subGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(330px, 1fr))",
-    gap: 14,
-    marginTop: 18,
-  },
-  listGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-    gap: 14,
-    marginTop: 18,
-  },
-  listCard: {
-    border: "1px solid #e2e8f0",
-    borderRadius: 14,
-    padding: 16,
-    background: "#f8fafc",
-  },
-  subHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 12,
-  },
-  subName: {
-    margin: 0,
-    fontSize: 20,
-  },
-  infoGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-    gap: 12,
-    margin: "16px 0",
-  },
-  smallLabel: {
-    display: "block",
-    color: "#64748b",
-    fontSize: 10,
-    fontWeight: 900,
-    textTransform: "uppercase",
-  },
-  infoValue: {
-    display: "block",
-    marginTop: 4,
-    fontSize: 13,
-  },
-  actions: {
-    display: "flex",
-    gap: 8,
-    flexWrap: "wrap",
-  },
-  inlineForm: {
-    marginTop: 16,
-    paddingTop: 16,
-    borderTop: "1px solid #e2e8f0",
-  },
-  goodBadge: {
-    borderRadius: 999,
-    padding: "5px 8px",
-    background: "#dcfce7",
-    color: "#166534",
-    fontSize: 11,
-    fontWeight: 800,
-  },
-  warnBadge: {
-    borderRadius: 999,
-    padding: "5px 8px",
-    background: "#fee2e2",
-    color: "#991b1b",
-    fontSize: 11,
-    fontWeight: 800,
-  },
-  empty: {
-    padding: 40,
-    textAlign: "center",
-    color: "#64748b",
-  },
-};
