@@ -105,3 +105,16 @@ bg-surface context for card-level badges.
 Three bare badges ("31+ days" etc.) with no aria-label on the wrapper;
 meaningless out of context to a screen reader. Pre-existing shape; add
 aria-label="Compliance legend" when the freeze lifts.
+
+### 18. Tinted compliance cards render at two paddings
+/vehicles tinted cards use p-4, /subcontractors uses p-3 (nested-card
+scale). Each page is internally consistent; unify when the card
+pattern is extracted to a shared component.
+
+### 19. Kicker labels at ink-3 on bg-surface-2 sub-cards
+The Info detail-pair kicker measures ~3.6:1 in light theme on
+bg-surface-2 (vehicles policy cards, and the pre-fix customers and
+subcontractors helpers; the latter two now use ink-2). ink-3 is only
+contrast-tested against bg-surface. Sweep the remaining surface-2
+kickers (vehicles Info pairs, licences-style detail pairs) to ink-2
+when the freeze lifts.

@@ -1536,7 +1536,7 @@ function Info({
 }) {
   return (
     <div className="text-sm">
-      <span className="text-kicker uppercase text-ink-3">{label}</span>{" "}
+      <span className="text-kicker uppercase text-ink-2">{label}</span>{" "}
       <strong className="block text-ink">{value || "—"}</strong>
     </div>
   );
