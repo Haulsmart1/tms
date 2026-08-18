@@ -71,3 +71,10 @@ when the freeze lifts.
 This batch's settings pages use the kicker "Admin" (per the plan);
 the earlier-restyled /settings/users uses "Settings". Reconcile the
 convention family-wide when the freeze lifts.
+
+### 12. MessageBanner's baked-in mb-4 doubles up inside gap grids
+Inside a `grid gap-4` form (settings/company) a visible banner gets
+32px below it (own margin + grid gap) versus 16px between other rows,
+and `cn` composes rather than merges so callers cannot reliably zero
+it. Fix in the component (spacing prop or caller-owned margin), then
+sweep call sites.
