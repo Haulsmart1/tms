@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { useTenant } from "../../components/TenantProvider";
 import TenantGate from "../../components/TenantGate";
+import Button from "../../../components/Button";
+import Badge from "../../../components/Badge";
 
 type TenantUser = {
   membership_id: string;
@@ -204,33 +206,46 @@ export default function UsersPage() {
 
   return (
     <TenantGate>
-      <main style={pageStyle}>
-        <div style={overlayStyle}>
-          <h1 style={titleStyle}>Users</h1>
+      <div className="ds min-h-screen bg-canvas font-sans text-ink">
+        <main className="mx-auto max-w-[1480px] px-6 py-8">
+          <header className="mb-4">
+            <div className="text-kicker uppercase text-ink-3">Settings</div>
+            <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">
+              Users
+            </h1>
+            <p className="text-sm text-ink-3">
+              Invite users and manage tenant roles and contact details.
+            </p>
+          </header>
 
           {canInvite ? (
-            <form onSubmit={inviteUser} style={cardStyle}>
-              <h2 style={{ marginTop: 0 }}>Invite User</h2>
+            <form
+              onSubmit={inviteUser}
+              className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm"
+            >
+              <h2 className="mb-3 mt-0 text-md font-semibold text-ink">
+                Invite User
+              </h2>
 
-              <div style={formGridStyle}>
-                <label style={fieldStyle}>
-                  <span style={labelStyle}>Email</span>
+              <div className="grid items-end gap-3 sm:grid-cols-2">
+                <label className="grid gap-1.5">
+                  <span className="text-sm font-medium text-ink-2">Email</span>
                   <input
                     type="email"
                     required
                     placeholder="user@example.com"
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
-                    style={inputStyle}
+                    className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
                   />
                 </label>
 
-                <label style={fieldStyle}>
-                  <span style={labelStyle}>Role</span>
+                <label className="grid gap-1.5">
+                  <span className="text-sm font-medium text-ink-2">Role</span>
                   <select
                     value={role}
                     onChange={(event) => setRole(event.target.value)}
-                    style={inputStyle}
+                    className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                   >
                     <option value="staff">Staff</option>
                     <option value="driver">Driver</option>
@@ -238,28 +253,30 @@ export default function UsersPage() {
                   </select>
                 </label>
 
-                <button
-                  type="submit"
-                  disabled={inviting}
-                  style={{
-                    ...buttonStyle,
-                    opacity: inviting ? 0.65 : 1,
-                    cursor: inviting ? "wait" : "pointer",
-                  }}
-                >
-                  {inviting ? "Sending..." : "Invite User"}
-                </button>
+                <div>
+                  <Button type="submit" disabled={inviting}>
+                    {inviting ? "Sending..." : "Invite User"}
+                  </Button>
+                </div>
               </div>
             </form>
           ) : null}
 
-          {message ? <div style={messageStyle}>{message}</div> : null}
+          {message ? (
+            <div className="mb-4 rounded-lg border border-line bg-surface p-3 text-sm text-ink shadow-sm">
+              {message}
+            </div>
+          ) : null}
 
-          <div style={gridStyle}>
+          <div className="grid gap-3">
             {loading ? (
-              <div style={cardStyle}>Loading users...</div>
+              <div className="rounded-lg border border-line bg-surface p-4 text-sm text-ink-3 shadow-sm">
+                Loading users...
+              </div>
             ) : users.length === 0 ? (
-              <div style={cardStyle}>No users found for this tenant.</div>
+              <div className="rounded-lg border border-line bg-surface p-4 text-sm text-ink-3 shadow-sm">
+                No users found for this tenant.
+              </div>
             ) : (
               users.map((user) => {
                 const isEditing =
@@ -267,77 +284,89 @@ export default function UsersPage() {
                   editingUserId === user.user_id;
 
                 return (
-                  <div key={user.membership_id} style={cardStyle}>
-                    <div style={userHeaderStyle}>
-                      <div>
-                        <strong style={{ fontSize: 18 }}>
+                  <article
+                    key={user.membership_id}
+                    className="rounded-lg border border-line bg-surface-2 p-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <strong className="break-words text-md font-semibold text-ink">
                           {user.full_name || user.email || "TMS User"}
                         </strong>
 
                         {user.email ? (
-                          <div style={mutedStyle}>{user.email}</div>
+                          <div className="mt-1 break-words text-sm text-ink-3">
+                            {user.email}
+                          </div>
                         ) : null}
 
                         {user.phone ? (
-                          <div style={mutedStyle}>{user.phone}</div>
+                          <div className="mt-1 break-words text-sm text-ink-3">
+                            {user.phone}
+                          </div>
                         ) : null}
                       </div>
 
-                      <div style={userActionsStyle}>
-                        <span style={roleBadgeStyle}>
-                          {formatRole(user.role)}
-                        </span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge tone="info">{formatRole(user.role)}</Badge>
 
                         {canInvite && user.user_id ? (
-                          <button
+                          <Button
                             type="button"
+                            variant="secondary"
+                            size="sm"
                             onClick={() =>
                               isEditing
                                 ? cancelEdit()
                                 : beginEdit(user)
                             }
-                            style={secondaryButtonStyle}
                           >
                             {isEditing ? "Cancel" : "Edit"}
-                          </button>
+                          </Button>
                         ) : null}
                       </div>
                     </div>
 
                     {isEditing && user.user_id ? (
-                      <div style={editorStyle}>
-                        <label style={fieldStyle}>
-                          <span style={labelStyle}>Full name</span>
+                      <div className="mt-3 grid items-end gap-3 border-t border-line pt-3 sm:grid-cols-2">
+                        <label className="grid gap-1.5">
+                          <span className="text-sm font-medium text-ink-2">
+                            Full name
+                          </span>
                           <input
                             value={editFullName}
                             onChange={(event) =>
                               setEditFullName(event.target.value)
                             }
-                            style={inputStyle}
+                            className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
                             placeholder="Full name"
                           />
                         </label>
 
-                        <label style={fieldStyle}>
-                          <span style={labelStyle}>Phone</span>
+                        <label className="grid gap-1.5">
+                          <span className="text-sm font-medium text-ink-2">
+                            Phone
+                          </span>
                           <input
                             value={editPhone}
                             onChange={(event) =>
                               setEditPhone(event.target.value)
                             }
-                            style={inputStyle}
+                            className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
                             placeholder="Phone number"
                           />
                         </label>
 
-                        <label style={fieldStyle}>
-                          <span style={labelStyle}>Tenant role</span>
+                        <label className="grid gap-1.5">
+                          <span className="text-sm font-medium text-ink-2">
+                            Tenant role
+                          </span>
                           <select
                             value={editRole}
                             onChange={(event) =>
                               setEditRole(event.target.value)
                             }
-                            style={inputStyle}
+                            className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                           >
                             <option value="staff">Staff</option>
                             <option value="driver">Driver</option>
@@ -345,27 +374,24 @@ export default function UsersPage() {
                           </select>
                         </label>
 
-                        <button
-                          type="button"
-                          disabled={savingUser}
-                          onClick={() => void saveUser(user.user_id!)}
-                          style={{
-                            ...buttonStyle,
-                            opacity: savingUser ? 0.65 : 1,
-                            cursor: savingUser ? "wait" : "pointer",
-                          }}
-                        >
-                          {savingUser ? "Saving..." : "Save Changes"}
-                        </button>
+                        <div>
+                          <Button
+                            type="button"
+                            disabled={savingUser}
+                            onClick={() => void saveUser(user.user_id!)}
+                          >
+                            {savingUser ? "Saving..." : "Save Changes"}
+                          </Button>
+                        </div>
                       </div>
                     ) : null}
-                  </div>
+                  </article>
                 );
               })
             )}
           </div>
-        </div>
-      </main>
+        </main>
+      </div>
     </TenantGate>
   );
 }
@@ -375,115 +401,3 @@ function formatRole(role: string) {
     .replaceAll("_", " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
-
-const pageStyle = {
-  minHeight: "100vh",
-  padding: 30,
-  backgroundImage:
-    "url('https://images.unsplash.com/photo-1553413077-190dd305871c')",
-  backgroundSize: "cover",
-  backgroundPosition: "center",
-};
-
-const overlayStyle = {
-  background: "rgba(0,0,0,0.65)",
-  padding: 30,
-  borderRadius: 20,
-};
-
-const titleStyle = { color: "white" };
-
-const cardStyle = {
-  background: "white",
-  padding: 20,
-  borderRadius: 14,
-  marginBottom: 20,
-};
-
-const formGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: 12,
-  alignItems: "end",
-};
-
-const fieldStyle = { display: "grid", gap: 6 };
-
-const labelStyle = {
-  fontSize: 12,
-  fontWeight: 800,
-  color: "#475569",
-};
-
-const inputStyle = {
-  padding: "12px 14px",
-  borderRadius: 10,
-  border: "1px solid #d1d5db",
-  background: "white",
-};
-
-const buttonStyle = {
-  padding: "12px 14px",
-  borderRadius: 10,
-  border: "none",
-  background: "#111827",
-  color: "white",
-  fontWeight: 700,
-};
-
-const messageStyle = {
-  background: "white",
-  padding: 12,
-  borderRadius: 10,
-  marginBottom: 20,
-};
-
-const gridStyle = { display: "grid", gap: 12 };
-
-const userHeaderStyle = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "flex-start",
-  gap: 12,
-};
-
-const userActionsStyle = {
-  display: "flex",
-  alignItems: "center",
-  gap: 10,
-  flexWrap: "wrap" as const,
-};
-
-const secondaryButtonStyle = {
-  padding: "7px 11px",
-  borderRadius: 9,
-  border: "1px solid #cbd5e1",
-  background: "white",
-  color: "#0f172a",
-  fontWeight: 700,
-  cursor: "pointer",
-};
-
-const editorStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 12,
-  alignItems: "end",
-  marginTop: 18,
-  paddingTop: 18,
-  borderTop: "1px solid #e2e8f0",
-};
-
-const mutedStyle = {
-  marginTop: 5,
-  color: "#64748b",
-};
-
-const roleBadgeStyle = {
-  padding: "6px 10px",
-  borderRadius: 999,
-  background: "#e0e7ff",
-  color: "#3730a3",
-  fontSize: 12,
-  fontWeight: 800,
-};
