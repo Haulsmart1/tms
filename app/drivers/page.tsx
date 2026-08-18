@@ -6,11 +6,10 @@ import {
   useMemo,
   useState,
 } from "react";
-import type {
-  CSSProperties,
-  FormEvent,
-} from "react";
+import type { FormEvent } from "react";
 import { createClient } from "../../lib/supabase/browser";
+import Badge from "../../components/Badge";
+import Button from "../../components/Button";
 
 type Driver = {
   id: string;
@@ -1082,13 +1081,17 @@ export default function DriversPage() {
   );
 
   return (
-    <main style={styles.page}>
-      <div style={styles.container}>
-        <header style={styles.header}>
+    <div className="ds min-h-screen bg-canvas font-sans text-ink">
+      <main className="mx-auto max-w-[1480px] px-6 py-8">
+        <header className="mb-4">
           <div>
-            <p style={styles.eyebrow}>Fleet Compliance</p>
-            <h1 style={styles.title}>Drivers</h1>
-            <p style={styles.subtitle}>
+            <div className="text-kicker uppercase text-ink-3">
+              Fleet Compliance
+            </div>
+            <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">
+              Drivers
+            </h1>
+            <p className="text-sm text-ink-3">
               Driver records, licence checks, tachograph, CPC, ADR,
               medical compliance and vehicle allocation.
             </p>
@@ -1096,32 +1099,39 @@ export default function DriversPage() {
         </header>
 
         {errorMessage ? (
-          <div style={styles.error}>{errorMessage}</div>
+          <div className="mb-4 rounded-lg border border-danger-border bg-danger-tint p-3 text-sm text-danger-strong">
+            {errorMessage}
+          </div>
         ) : null}
 
         {message ? (
-          <div style={styles.success}>{message}</div>
+          <div className="mb-4 rounded-lg border border-success-border bg-success-tint p-3 text-sm text-success-strong">
+            {message}
+          </div>
         ) : null}
 
-        <form onSubmit={saveDriver} style={styles.card}>
-          <div style={styles.sectionHeader}>
-            <h2 style={styles.sectionTitle}>
+        <form
+          onSubmit={saveDriver}
+          className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-md font-semibold text-ink">
               {editingId ? "Edit Driver" : "Add Driver"}
             </h2>
 
             {editingId ? (
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={resetForm}
-                style={styles.secondaryButton}
               >
                 Cancel
-              </button>
+              </Button>
             ) : null}
           </div>
 
           <Section title="Driver Profile">
-            <div style={styles.grid}>
+            <div className="mb-3 grid gap-3 sm:grid-cols-2">
               <TextField
                 label="Full Name"
                 value={form.name}
@@ -1189,7 +1199,7 @@ export default function DriversPage() {
               />
             </div>
 
-            <div style={styles.grid}>
+            <div className="grid gap-3 sm:grid-cols-2">
               <TextField
                 label="Address Line 1"
                 value={form.address_line_1}
@@ -1223,7 +1233,7 @@ export default function DriversPage() {
           </Section>
 
           <Section title="Driving Licence">
-            <div style={styles.grid}>
+            <div className="mb-3 grid gap-3 sm:grid-cols-2">
               <TextField
                 label="Licence Number"
                 value={form.licence_number}
@@ -1327,7 +1337,7 @@ export default function DriversPage() {
               }
             />
 
-            <div style={styles.grid}>
+            <div className="grid gap-3 sm:grid-cols-2">
               <TextField
                 label="Tacho Card Number"
                 value={form.tachograph_card_number}
@@ -1375,7 +1385,7 @@ export default function DriversPage() {
           </Section>
 
           <Section title="CPC & ADR">
-            <div style={styles.grid}>
+            <div className="grid gap-3 sm:grid-cols-2">
               <CheckboxField
                 label="CPC Required"
                 checked={form.cpc_required}
@@ -1455,7 +1465,7 @@ export default function DriversPage() {
           </Section>
 
           <Section title="Medical & Right to Work">
-            <div style={styles.grid}>
+            <div className="grid gap-3 sm:grid-cols-2">
               <TextField
                 label="Last Medical"
                 value={form.last_medical_date}
@@ -1503,7 +1513,7 @@ export default function DriversPage() {
           </Section>
 
           <Section title="Emergency Contact & Notes">
-            <div style={styles.grid}>
+            <div className="mb-3 grid gap-3 sm:grid-cols-2">
               <TextField
                 label="Emergency Contact"
                 value={form.emergency_contact_name}
@@ -1528,39 +1538,39 @@ export default function DriversPage() {
               }
               rows={4}
               placeholder="Driver notes..."
-              style={styles.input}
+              className="min-h-24 w-full resize-y rounded-md border border-ink-3 bg-surface px-3 py-2 text-base text-ink placeholder:text-ink-3"
             />
           </Section>
 
-          <button
+          <Button
             type="submit"
             disabled={saving}
-            style={styles.primaryButton}
+            className="mt-4"
           >
             {saving
               ? "Saving..."
               : editingId
                 ? "Update Driver"
                 : "Add Driver"}
-          </button>
+          </Button>
         </form>
 
-        <section style={styles.card}>
-          <div style={styles.sectionHeader}>
-            <h2 style={styles.sectionTitle}>Driver Records</h2>
+        <section className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-md font-semibold text-ink">Driver Records</h2>
 
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search drivers..."
-              style={styles.search}
+              className="h-10 w-72 max-w-full rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
             />
           </div>
 
           {loading ? (
-            <div style={styles.empty}>Loading drivers...</div>
+            <div className="py-10 text-center text-sm text-ink-3">Loading drivers...</div>
           ) : (
-            <div style={styles.driverGrid}>
+            <div className="mt-4 grid gap-3 grid-cols-[repeat(auto-fit,minmax(300px,1fr))]">
               {filteredDrivers.map((driver) => {
                 const warnings = getDriverWarnings(driver);
 
@@ -1575,37 +1585,32 @@ export default function DriversPage() {
                 return (
                   <article
                     key={driver.id}
-                    style={{
-                      ...styles.driverCard,
-                      ...(selectedDriverId === driver.id
-                        ? styles.selectedDriverCard
-                        : {}),
-                    }}
+                    className={
+                      selectedDriverId === driver.id
+                        ? "cursor-pointer rounded-lg border border-primary bg-primary-tint p-3"
+                        : "cursor-pointer rounded-lg border border-line bg-surface-2 p-3"
+                    }
                     onClick={() => setSelectedDriverId(driver.id)}
                   >
-                    <div style={styles.driverCardHeader}>
-                      <div>
-                        <h3 style={styles.driverName}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="break-words text-base font-semibold text-ink">
                           {driver.name}
                         </h3>
 
-                        <span style={styles.muted}>
+                        <span className="text-xs text-ink-2">
                           {driver.employee_number || driver.driver_type || ""}
                         </span>
                       </div>
 
-                      <span
-                        style={
-                          driver.active
-                            ? styles.activeBadge
-                            : styles.inactiveBadge
-                        }
+                      <Badge
+                        tone={driver.active ? "success" : "neutral"}
                       >
                         {driver.active ? "Active" : "Inactive"}
-                      </span>
+                      </Badge>
                     </div>
 
-                    <div style={styles.driverDetails}>
+                    <div className="my-4 grid grid-cols-3 gap-2.5">
                       <Info label="Licence" value={driver.licence_number} />
                       <Info
                         label="Points"
@@ -1617,33 +1622,33 @@ export default function DriversPage() {
                       />
                     </div>
 
-                    <div style={styles.warningList}>
+                    <div className="mb-3 flex flex-wrap gap-1.5">
                       {warnings.length === 0 ? (
-                        <span style={styles.goodBadge}>
+                        <Badge tone="success">
                           ✓ Compliance current
-                        </span>
+                        </Badge>
                       ) : (
                         warnings.map((warning) => (
-                          <span
+                          <Badge
                             key={warning}
-                            style={styles.warningBadge}
+                            tone="warning"
                           >
                             ⚠ {warning}
-                          </span>
+                          </Badge>
                         ))
                       )}
                     </div>
 
-                    <button
-                      type="button"
+                    <Button
+                      variant="secondary"
+                      size="sm"
                       onClick={(event) => {
                         event.stopPropagation();
                         editDriver(driver);
                       }}
-                      style={styles.secondaryButton}
                     >
                       Edit Driver
-                    </button>
+                    </Button>
                   </article>
                 );
               })}
@@ -1653,32 +1658,31 @@ export default function DriversPage() {
 
         {selectedDriver ? (
           <>
-            <section style={styles.card}>
-              <h2 style={styles.sectionTitle}>
+            <section className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm">
+              <h2 className="text-md font-semibold text-ink">
                 {selectedDriver.name} — Vehicle Assignment
               </h2>
 
               {selectedVehicle ? (
-                <div style={styles.assignmentBox}>
-                  <div>
-                    <span style={styles.muted}>Current Vehicle</span>
-                    <strong style={styles.vehicleRegistration}>
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-success-border bg-success-tint p-4">
+                  <div className="min-w-0">
+                    <span className="text-sm text-success-strong">Current Vehicle</span>
+                    <strong className="mt-1 block break-words text-lg font-semibold text-ink">
                       {selectedVehicle.registration}
                     </strong>
                   </div>
 
-                  <button
-                    type="button"
+                  <Button
+                    variant="danger"
                     onClick={() =>
                       void unassignVehicle(selectedVehicle.id)
                     }
-                    style={styles.dangerButton}
                   >
                     Unassign
-                  </button>
+                  </Button>
                 </div>
               ) : (
-                <div style={styles.grid}>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <SelectField
                     label="Assign Vehicle"
                     value={vehicleToAssign}
@@ -1709,8 +1713,7 @@ export default function DriversPage() {
                     onChange={setAssignmentNotes}
                   />
 
-                  <button
-                    type="button"
+                  <Button
                     disabled={assignmentSaving}
                     onClick={() => {
                       console.log(
@@ -1721,28 +1724,24 @@ export default function DriversPage() {
                       );
                       void assignVehicle();
                     }}
-                    style={{
-                      ...styles.primaryButton,
-                      opacity: assignmentSaving ? 0.65 : 1,
-                      cursor: assignmentSaving ? "wait" : "pointer",
-                    }}
+                    className="self-end"
                   >
                     {assignmentSaving
                       ? "Assigning..."
                       : "Assign Vehicle"}
-                  </button>
+                  </Button>
 
-                  <pre style={styles.assignmentDebug}>
+                  <pre className="m-0 min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere] rounded-lg border border-line bg-surface-2 p-3 text-xs leading-relaxed text-ink-2 sm:col-span-2">
                     {assignmentDebug}
                   </pre>
                 </div>
               )}
             </section>
 
-            <section style={styles.card}>
-              <h2 style={styles.sectionTitle}>Licence Checks</h2>
+            <section className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm">
+              <h2 className="mb-3 text-md font-semibold text-ink">Licence Checks</h2>
 
-              <div style={styles.grid}>
+              <div className="grid gap-3 sm:grid-cols-2">
                 <TextField
                   label="Check Code"
                   value={checkCode}
@@ -1755,25 +1754,27 @@ export default function DriversPage() {
                   onChange={setCheckNotes}
                 />
 
-                <button
-                  type="button"
+                <Button
                   onClick={() =>
                     void recordLicenceCheck(selectedDriver)
                   }
-                  style={styles.primaryButton}
+                  className="self-end"
                 >
                   Record Licence Check
-                </button>
+                </Button>
               </div>
 
-              <div style={styles.list}>
+              <div className="mt-4 grid gap-2">
                 {selectedChecks.map((check) => (
-                  <div key={check.id} style={styles.listItem}>
-                    <strong>
+                  <div
+                    key={check.id}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-surface-2 p-3"
+                  >
+                    <strong className="text-sm font-semibold text-ink">
                       Checked {formatDate(check.checked_at)}
                     </strong>
 
-                    <span>
+                    <span className="text-sm text-ink-2">
                       Points: {check.points_total} • Next due:{" "}
                       {formatDate(check.next_check_due)}
                     </span>
@@ -1782,12 +1783,12 @@ export default function DriversPage() {
               </div>
             </section>
 
-            <section style={styles.card}>
-              <h2 style={styles.sectionTitle}>
+            <section className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm">
+              <h2 className="mb-3 text-md font-semibold text-ink">
                 Licence Endorsements / Points
               </h2>
 
-              <div style={styles.grid}>
+              <div className="grid gap-3 sm:grid-cols-2">
                 <TextField
                   label="Code"
                   value={endorsementCode}
@@ -1815,48 +1816,50 @@ export default function DriversPage() {
                   type="date"
                 />
 
-                <button
-                  type="button"
+                <Button
                   onClick={() => void addEndorsement()}
-                  style={styles.primaryButton}
+                  className="self-end"
                 >
                   Add Endorsement
-                </button>
+                </Button>
               </div>
 
-              <div style={styles.list}>
+              <div className="mt-4 grid gap-2">
                 {selectedEndorsements.map((item) => (
-                  <div key={item.id} style={styles.listItem}>
-                    <div>
-                      <strong>
+                  <div
+                    key={item.id}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-surface-2 p-3"
+                  >
+                    <div className="min-w-0">
+                      <strong className="break-words text-sm font-semibold text-ink">
                         {item.code} — {item.points} points
                       </strong>
 
-                      <div style={styles.muted}>
+                      <div className="text-xs text-ink-3">
                         {item.description || "No description"}
                       </div>
                     </div>
 
-                    <button
-                      type="button"
+                    <Button
+                      variant="danger"
+                      size="sm"
                       onClick={() =>
                         void deleteEndorsement(item)
                       }
-                      style={styles.dangerButton}
                     >
                       Remove
-                    </button>
+                    </Button>
                   </div>
                 ))}
               </div>
             </section>
 
-            <section style={styles.card}>
-              <h2 style={styles.sectionTitle}>
+            <section className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm">
+              <h2 className="mb-3 text-md font-semibold text-ink">
                 Training & Qualifications
               </h2>
 
-              <div style={styles.grid}>
+              <div className="grid gap-3 sm:grid-cols-2">
                 <TextField
                   label="Training Type"
                   value={trainingType}
@@ -1890,21 +1893,23 @@ export default function DriversPage() {
                   type="date"
                 />
 
-                <button
-                  type="button"
+                <Button
                   onClick={() => void addTraining()}
-                  style={styles.primaryButton}
+                  className="self-end"
                 >
                   Add Training
-                </button>
+                </Button>
               </div>
 
-              <div style={styles.list}>
+              <div className="mt-4 grid gap-2">
                 {selectedTraining.map((item) => (
-                  <div key={item.id} style={styles.listItem}>
-                    <div>
-                      <strong>{item.training_type}</strong>
-                      <div style={styles.muted}>
+                  <div
+                    key={item.id}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-surface-2 p-3"
+                  >
+                    <div className="min-w-0">
+                      <strong className="break-words text-sm font-semibold text-ink">{item.training_type}</strong>
+                      <div className="text-xs text-ink-3">
                         {item.course_name || ""}
                         {item.provider
                           ? ` • ${item.provider}`
@@ -1912,7 +1917,7 @@ export default function DriversPage() {
                       </div>
                     </div>
 
-                    <span>
+                    <span className="text-sm text-ink-2">
                       {item.expiry_date
                         ? `Expires ${formatDate(item.expiry_date)}`
                         : "No expiry"}
@@ -1923,8 +1928,8 @@ export default function DriversPage() {
             </section>
           </>
         ) : null}
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }
 
@@ -1936,8 +1941,8 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section style={styles.section}>
-      <h3 style={styles.subheading}>{title}</h3>
+    <section className="mt-4 rounded-lg border border-line bg-surface-2 p-4">
+      <h3 className="mb-3 text-md font-semibold text-ink">{title}</h3>
       {children}
     </section>
   );
@@ -1959,8 +1964,8 @@ function TextField({
   required?: boolean;
 }) {
   return (
-    <label style={styles.field}>
-      <span style={styles.label}>{label}</span>
+    <label className="grid gap-1.5">
+      <span className="text-sm font-medium text-ink-2">{label}</span>
 
       <input
         type={type}
@@ -1968,7 +1973,7 @@ function TextField({
         required={required}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
-        style={styles.input}
+        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
       />
     </label>
   );
@@ -1986,13 +1991,13 @@ function SelectField({
   options: [string, string][];
 }) {
   return (
-    <label style={styles.field}>
-      <span style={styles.label}>{label}</span>
+    <label className="grid gap-1.5">
+      <span className="text-sm font-medium text-ink-2">{label}</span>
 
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        style={styles.input}
+        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
       >
         {options.map(([optionValue, text]) => (
           <option key={optionValue} value={optionValue}>
@@ -2014,7 +2019,7 @@ function CheckboxField({
   onChange: (value: boolean) => void;
 }) {
   return (
-    <label style={styles.checkbox}>
+    <label className="my-2 flex items-center gap-2 text-sm font-semibold text-ink">
       <input
         type="checkbox"
         checked={checked}
@@ -2034,9 +2039,9 @@ function Info({
   value: string | null | undefined;
 }) {
   return (
-    <div>
-      <span style={styles.smallLabel}>{label}</span>
-      <strong style={styles.infoValue}>{value || "—"}</strong>
+    <div className="min-w-0">
+      <span className="block text-kicker uppercase text-ink-2">{label}</span>
+      <strong className="mt-1 block break-words text-sm font-semibold text-ink">{value || "—"}</strong>
     </div>
   );
 }
@@ -2133,322 +2138,13 @@ function checkDateWarning(
       (1000 * 60 * 60 * 24)
   );
 
+  const formattedDate = formatDate(date);
+
   if (days < 0) {
-    warnings.push(`${label} overdue`);
+    warnings.push(`${label} overdue — ${formattedDate}`);
   } else if (days <= 30) {
-    warnings.push(`${label} due in ${days} days`);
+    warnings.push(
+      `${label} due in ${days} days — ${formattedDate}`
+    );
   }
 }
-
-const styles: Record<string, CSSProperties> = {
-  page: {
-    minHeight: "100vh",
-    background: "#f8fafc",
-    padding: "32px 20px 60px",
-  },
-
-  container: {
-    maxWidth: 1450,
-    margin: "0 auto",
-  },
-
-  header: {
-    marginBottom: 24,
-  },
-
-  eyebrow: {
-    margin: "0 0 6px",
-    color: "#2563eb",
-    fontWeight: 900,
-    textTransform: "uppercase",
-    fontSize: 12,
-    letterSpacing: "0.08em",
-  },
-
-  title: {
-    margin: 0,
-    fontSize: 46,
-    color: "#0f172a",
-  },
-
-  subtitle: {
-    color: "#64748b",
-    maxWidth: 800,
-  },
-
-  card: {
-    background: "#ffffff",
-    border: "1px solid #e2e8f0",
-    borderRadius: 18,
-    padding: 22,
-    marginBottom: 22,
-    boxShadow: "0 8px 28px rgba(15,23,42,0.06)",
-  },
-
-  section: {
-    paddingTop: 18,
-    marginTop: 18,
-    borderTop: "1px solid #e2e8f0",
-  },
-
-  sectionHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 15,
-    flexWrap: "wrap",
-  },
-
-  sectionTitle: {
-    margin: 0,
-    color: "#0f172a",
-    fontSize: 22,
-  },
-
-  subheading: {
-    margin: "0 0 14px",
-    color: "#0f172a",
-  },
-
-  grid: {
-    display: "grid",
-    gridTemplateColumns:
-      "repeat(auto-fit, minmax(210px, 1fr))",
-    gap: 14,
-    marginBottom: 14,
-  },
-
-  field: {
-    display: "grid",
-    gap: 6,
-  },
-
-  label: {
-    fontWeight: 800,
-    color: "#334155",
-    fontSize: 12,
-  },
-
-  input: {
-    width: "100%",
-    boxSizing: "border-box",
-    border: "1px solid #cbd5e1",
-    borderRadius: 10,
-    padding: "11px 12px",
-    fontSize: 14,
-  },
-
-  checkbox: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    margin: "9px 0",
-    fontWeight: 700,
-  },
-
-  primaryButton: {
-    border: "none",
-    borderRadius: 10,
-    background: "#2563eb",
-    color: "#ffffff",
-    padding: "12px 16px",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-
-  secondaryButton: {
-    border: "1px solid #cbd5e1",
-    borderRadius: 9,
-    background: "#ffffff",
-    padding: "9px 12px",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-
-  dangerButton: {
-    border: "1px solid #fecaca",
-    borderRadius: 9,
-    background: "#fef2f2",
-    color: "#b91c1c",
-    padding: "9px 12px",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-
-  search: {
-    border: "1px solid #cbd5e1",
-    borderRadius: 10,
-    padding: "10px 12px",
-    width: 280,
-    maxWidth: "100%",
-  },
-
-  driverGrid: {
-    display: "grid",
-    gridTemplateColumns:
-      "repeat(auto-fit, minmax(300px, 1fr))",
-    gap: 14,
-    marginTop: 18,
-  },
-
-  driverCard: {
-    border: "1px solid #e2e8f0",
-    borderRadius: 14,
-    padding: 16,
-    cursor: "pointer",
-    background: "#f8fafc",
-  },
-
-  selectedDriverCard: {
-    border: "2px solid #2563eb",
-    background: "#eff6ff",
-  },
-
-  driverCardHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-
-  driverName: {
-    margin: 0,
-  },
-
-  driverDetails: {
-    display: "grid",
-    gridTemplateColumns: "repeat(3, 1fr)",
-    gap: 10,
-    margin: "16px 0",
-  },
-
-  smallLabel: {
-    display: "block",
-    color: "#64748b",
-    fontSize: 10,
-    fontWeight: 900,
-    textTransform: "uppercase",
-  },
-
-  infoValue: {
-    display: "block",
-    marginTop: 4,
-  },
-
-  muted: {
-    color: "#64748b",
-    fontSize: 12,
-  },
-
-  warningList: {
-    display: "flex",
-    gap: 6,
-    flexWrap: "wrap",
-    marginBottom: 14,
-  },
-
-  warningBadge: {
-    background: "#fef3c7",
-    color: "#92400e",
-    padding: "5px 8px",
-    borderRadius: 999,
-    fontSize: 11,
-    fontWeight: 800,
-  },
-
-  goodBadge: {
-    background: "#dcfce7",
-    color: "#166534",
-    padding: "5px 8px",
-    borderRadius: 999,
-    fontSize: 11,
-    fontWeight: 800,
-  },
-
-  activeBadge: {
-    background: "#dcfce7",
-    color: "#166534",
-    padding: "5px 8px",
-    borderRadius: 999,
-    fontSize: 11,
-    fontWeight: 800,
-  },
-
-  inactiveBadge: {
-    background: "#e2e8f0",
-    color: "#475569",
-    padding: "5px 8px",
-    borderRadius: 999,
-    fontSize: 11,
-    fontWeight: 800,
-  },
-
-  assignmentBox: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    background: "#f0fdf4",
-    border: "1px solid #86efac",
-    borderRadius: 12,
-    padding: 16,
-    marginTop: 16,
-  },
-
-  vehicleRegistration: {
-    display: "block",
-    fontSize: 22,
-    marginTop: 4,
-  },
-
-  list: {
-    display: "grid",
-    gap: 8,
-    marginTop: 16,
-  },
-
-  listItem: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: 14,
-    alignItems: "center",
-    padding: 12,
-    border: "1px solid #e2e8f0",
-    borderRadius: 10,
-    background: "#f8fafc",
-  },
-
-  assignmentDebug: {
-    gridColumn: "1 / -1",
-    margin: 0,
-    padding: 12,
-    borderRadius: 10,
-    border: "1px solid #cbd5e1",
-    background: "#0f172a",
-    color: "#e2e8f0",
-    fontSize: 12,
-    lineHeight: 1.5,
-    whiteSpace: "pre-wrap",
-    overflowWrap: "anywhere",
-  },
-
-  success: {
-    marginBottom: 18,
-    padding: 12,
-    borderRadius: 10,
-    background: "#dcfce7",
-    color: "#166534",
-  },
-
-  error: {
-    marginBottom: 18,
-    padding: 12,
-    borderRadius: 10,
-    background: "#fee2e2",
-    color: "#991b1b",
-  },
-
-  empty: {
-    padding: 40,
-    textAlign: "center",
-    color: "#64748b",
-  },
-};

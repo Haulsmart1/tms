@@ -55,9 +55,10 @@ const AUTH_URL = process.env.POD_AUTH_URL || "";
 const KNOWN_SQUEEZE_WIDTHS = new Set([375]);
 
 /* Inject pathologically long free text before measuring. Seed data is usually
-   too tidy to catch a truncation failure, and the entire point of the
-   fixed-width columns is that overlong text truncates instead of pushing into
-   the next column. Set POD_NO_STRESS=1 to measure the real data instead. */
+   too tidy to catch a wrapping failure, and the entire point of the stop
+   cards' min-w-0/break-words plumbing is that overlong text wraps inside its
+   card instead of widening it. Set POD_NO_STRESS=1 to measure the real data
+   instead. */
 const LONG_NAME = "Cambridge Audio International Logistics Group Limited";
 const LONG_VEHICLE = "Mercedes-Benz Actros 2545 BigSpace Nightrunner";
 
@@ -111,9 +112,13 @@ export async function assertOnRealPage(page) {
     return `redirected to ${landed} — not signed in`;
   }
   const hasQueue = await page.evaluate(
-    () => Boolean(document.querySelector('[role="tablist"]') && document.querySelector("table")),
+    () =>
+      Boolean(
+        document.querySelector('section[aria-label="POD summary"]') &&
+          document.querySelector("main h1"),
+      ),
   );
-  if (!hasQueue) return "/pod rendered without the queue table";
+  if (!hasQueue) return "/pod rendered without its summary tiles";
   return null;
 }
 
@@ -151,16 +156,18 @@ if (isMain) {
       process.exit(2);
     }
 
-    const rowCount = await page.evaluate(() => document.querySelectorAll("tbody tr").length);
+    const cardCount = await page.evaluate(
+      () => document.querySelectorAll("[data-stop-card]").length,
+    );
 
     if (stress) {
       await page.evaluate(
         ([name, vehicle]) => {
-          for (const row of document.querySelectorAll("tbody tr")) {
-            const route = row.querySelector("td:nth-child(2) span span");
-            if (route) route.textContent = name;
-            const veh = row.querySelector("td:nth-child(4) span span");
-            if (veh) veh.textContent = vehicle;
+          for (const card of document.querySelectorAll("[data-stop-card]")) {
+            const n = card.querySelector('[data-stress="name"]');
+            if (n) n.textContent = name;
+            const v = card.querySelector('[data-stress="vehicle"]');
+            if (v) v.textContent = vehicle;
           }
         },
         [LONG_NAME, LONG_VEHICLE],
@@ -178,12 +185,12 @@ if (isMain) {
 
     const verdict = realProblem ? "FAIL " : clean ? "PASS " : "KNOWN";
     console.log(
-      `${verdict}  ${width}px  (${rowCount} rows${stress ? ", stressed" : ""})`,
+      `${verdict}  ${width}px  (${cardCount} cards${stress ? ", stressed" : ""})`,
     );
-    if (rowCount === 0) {
-      // Not a failure, but an empty queue exercises none of the column
-      // geometry, so a PASS on zero rows is not evidence the row layout holds.
-      console.log("  NOTE: queue was empty, so no row geometry was measured at this width.");
+    if (cardCount === 0) {
+      // Not a failure, but with no stop cards none of the card geometry is
+      // exercised, so a PASS on zero cards is not evidence the layout holds.
+      console.log("  NOTE: no stop cards rendered, so no card geometry was measured at this width.");
     }
     if (!clean) {
       if (verdict === "KNOWN") {
