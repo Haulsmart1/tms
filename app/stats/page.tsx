@@ -1057,7 +1057,7 @@ export default function StatsPage() {
                       }
                       className={
                         period === option.key
-                          ? "rounded-full border border-primary bg-primary px-3 py-1.5 text-sm font-medium text-white"
+                          ? "rounded-full border border-primary bg-primary px-3 py-1.5 text-sm font-medium text-on-primary"
                           : "rounded-full border border-line bg-surface px-3 py-1.5 text-sm font-medium text-ink-2"
                       }
                     >
@@ -1329,7 +1329,7 @@ export default function StatsPage() {
                             Completed
                           </th>
 
-                          <th className="border-b border-line px-3 py-2 text-kicker uppercase text-ink-3 text-right font-mono tabular-nums">
+                          <th className="border-b border-line px-3 py-2 text-kicker uppercase text-ink-3 text-right">
                             Revenue
                           </th>
                         </tr>
@@ -1395,7 +1395,7 @@ export default function StatsPage() {
                             Completed
                           </th>
 
-                          <th className="border-b border-line px-3 py-2 text-kicker uppercase text-ink-3 text-right font-mono tabular-nums">
+                          <th className="border-b border-line px-3 py-2 text-kicker uppercase text-ink-3 text-right">
                             Revenue
                           </th>
                         </tr>

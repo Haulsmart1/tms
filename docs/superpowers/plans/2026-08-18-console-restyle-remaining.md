@@ -614,7 +614,7 @@ Read-only page: 24 `StatCard` tiles with emoji icons, a period filter bar, two t
 ```tsx
 className={
   period === option.key
-    ? "rounded-full border border-primary bg-primary px-3 py-1.5 text-sm font-medium text-white"
+    ? "rounded-full border border-primary bg-primary px-3 py-1.5 text-sm font-medium text-on-primary"
     : "rounded-full border border-line bg-surface px-3 py-1.5 text-sm font-medium text-ink-2"
 }
 ```

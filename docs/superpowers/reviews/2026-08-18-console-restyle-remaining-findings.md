@@ -78,3 +78,18 @@ Inside a `grid gap-4` form (settings/company) a visible banner gets
 and `cn` composes rather than merges so callers cannot reliably zero
 it. Fix in the component (spacing prop or caller-owned margin), then
 sweep call sites.
+
+### 13. /stats StatCard renders its value as an h2
+24 tiles put numbers like "£3,400" into the document outline as h2
+headings, interleaved with the real section h2s. Byte-identical role
+to the pre-restyle page (no regression) but now clearly wrong; swap
+the tag to a span/p (Stat.tsx's shape) when the freeze lifts.
+
+### 14. Table headers lack scope="col" app-wide
+/stats' two tables (and pre-existing siblings like
+/super-admin/requests) omit scope="col" on th cells. App-wide
+markup-only pass candidate.
+
+### 15. /stats period pills have no hover or transition states
+Button carries transition-colors and hover treatments; the period
+pills have none. Cosmetic polish alongside the finding-13 fix.
