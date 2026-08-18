@@ -661,11 +661,13 @@ export default function PodPage() {
               label="Pending POD"
               value={String(summary.pending)}
               subTone={summary.pending > 0 ? "warning" : undefined}
+              sub={summary.pending > 0 ? "awaiting POD" : undefined}
             />
             <Stat
               label="Delivered"
               value={String(summary.delivered)}
               subTone="positive"
+              sub={summary.delivered > 0 ? "delivered" : undefined}
             />
             <Stat
               label="Missing Evidence"
@@ -741,13 +743,13 @@ export default function PodPage() {
                   className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm"
                 >
                   <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
-                    <div>
+                    <div className="min-w-0">
                       <div className="text-kicker uppercase text-primary-deep">
                         {job.reference ||
                           "No job reference"}
                       </div>
 
-                      <h2 className="mb-2 text-md font-semibold text-ink">
+                      <h2 className="mb-2 break-words text-md font-semibold text-ink">
                         {job.customers?.name ||
                           "No customer"}
                       </h2>
@@ -803,6 +805,7 @@ export default function PodPage() {
                         >
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div className="min-w-0">
+                              {/* stress hooks for tests/pod-layout.spec.mjs; values are historical anchors, not semantics */}
                               <div
                                 data-stress="vehicle"
                                 className="text-sm font-semibold text-ink"
