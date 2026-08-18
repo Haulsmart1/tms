@@ -826,7 +826,7 @@ export default function CustomerAccountsPage() {
             </div>
           </header>
 
-          <div className="mb-4 overflow-x-auto">
+          <div className="-m-0.5 mb-4 overflow-x-auto p-0.5">
             <Tabs
               label="Accounts sections"
               tabs={TABS.map(([key, label]) => ({ id: key, label }))}
@@ -1626,7 +1626,7 @@ function InvoicesPanel({ invoices }: { invoices: Invoice[] }) {
 
       <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {invoices.length === 0 ? (
-          <p className="py-10 text-center text-sm text-ink-3">No invoices yet.</p>
+          <p className="col-span-full py-10 text-center text-sm text-ink-3">No invoices yet.</p>
         ) : (
           invoices.map((invoice) => (
             <article
@@ -1683,14 +1683,14 @@ function RecordCards({ rows }: { rows: GenericRow[] }) {
   return (
     <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
       {rows.length === 0 ? (
-        <p className="py-10 text-center text-sm text-ink-3">No records yet.</p>
+        <p className="col-span-full py-10 text-center text-sm text-ink-3">No records yet.</p>
       ) : (
         rows.map((row, index) => (
           <article
             key={String(row.id ?? index)}
             className="rounded-lg border border-line bg-surface-2 p-3"
           >
-            <pre className="m-0 whitespace-pre-wrap break-all font-mono text-xs text-ink-2">
+            <pre className="m-0 whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-xs text-ink-2">
               {JSON.stringify(row, null, 2)}
             </pre>
           </article>

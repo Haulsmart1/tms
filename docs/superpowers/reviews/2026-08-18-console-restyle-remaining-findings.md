@@ -118,3 +118,16 @@ subcontractors helpers; the latter two now use ink-2). ink-3 is only
 contrast-tested against bg-surface. Sweep the remaining surface-2
 kickers (vehicles Info pairs, licences-style detail pairs) to ink-2
 when the freeze lifts.
+
+### 20. Tabs component's ARIA pattern is incomplete
+components/Tabs.tsx emits role="tablist"/"tab"/aria-selected but no
+aria-controls, no roving tabindex, no arrow-key handling, and /invoices
+(its first consumer) has no tabpanel roles. Equal-or-better than the
+plain buttons it replaced, but a half-implemented APG pattern; finish
+it in the component when the freeze lifts.
+
+### 21. /invoices header Stat trio: unlabeled group, no truncation
+The three Stats sit in a bare div (POD labels its group with
+section[aria-label]) and the mono value has no truncation, so a very
+wide Outstanding figure can escape its card at narrow widths. Polish
+pass candidates.
