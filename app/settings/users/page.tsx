@@ -223,7 +223,7 @@ export default function UsersPage() {
               onSubmit={inviteUser}
               className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm"
             >
-              <h2 className="mb-3 mt-0 text-md font-semibold text-ink">
+              <h2 className="mb-3 text-md font-semibold text-ink">
                 Invite User
               </h2>
 

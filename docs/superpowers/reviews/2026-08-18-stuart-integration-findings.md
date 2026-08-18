@@ -124,3 +124,55 @@ on the shared components in the post-freeze consolidation pass.
 ### 23. Driver cards are click-only
 /drivers driver cards are clickable articles with onClick but no
 keyboard access or role. Pre-existing; a11y pass candidate.
+
+### 24. Debug scaffolding shipped in the drivers assignment flow
+`app/drivers/page.tsx` vehicle assignment still carries console.log
+calls, window.alert error reporting, and a permanently visible on-page
+debug pre fed by setAssignmentDebug. Clearly temporary diagnostics;
+remove or gate behind a dev flag when the freeze lifts.
+
+### 25. recordLicenceCheck reads the add/edit form's state
+`app/drivers/page.tsx` recordLicenceCheck takes licence_check_due and
+licence_check_reference from the shared form state even when that form
+is not editing the selected driver, so a stale form can silently set
+the next check date. Pre-existing logic; needs its own inputs.
+
+### 26. Endorsement points recomputed client-side
+`app/drivers/page.tsx` addEndorsement/deleteEndorsement recompute
+points_total from client state, racing concurrent edits. Pre-existing.
+
+### 27. Em-dashes in Stuart's UI copy
+`app/drivers/page.tsx` renders em-dash characters in visible copy
+(vehicle assignment heading, points suffix, warning strings). Left
+verbatim under the content freeze despite the no-em-dash convention;
+sweep the copy when the freeze lifts.
+
+### 28. Maintenance create form does not validate cost
+`app/maintenance/page.tsx` createRecord validates mileage and hours but
+passes cost straight to Number(); the edit path does validate cost.
+Pre-existing asymmetry.
+
+### 29. maintenance_records query relies on RLS alone
+`app/maintenance/page.tsx` selects maintenance_records with no
+tenant_id filter; scoping happens client-side via the vehicle/asset
+maps. Verify the RLS policy or add the filter when the freeze lifts.
+
+### 30. /settings/users has one undifferentiated message string
+Load errors, invite errors, and successes share one message state, so
+the restyled banner is neutral where siblings show danger/success
+tints. Split the state after the freeze, then adopt the tinted banners.
+
+### 31. Repeated row actions share accessible names
+/settings/users renders "Edit"/"Save Changes" for every user row (and
+siblings do the like). An aria-label naming the row's subject would fix
+it markup-only; fleet-wide pass candidate.
+
+### 32. saveUser leans on a non-null assertion
+`app/settings/users/page.tsx` calls saveUser(user.user_id!) guarded by
+a conditional; beginEdit likewise double-guards admin and null user_id.
+Pre-existing; tighten the types when the freeze lifts.
+
+### 33. Invite authorization is client-advisory
+`app/settings/users/page.tsx` hides the invite form for non-admins and
+re-checks canInvite in the handler; enforcement must live in the invite
+API route. Verify the route's server-side check.
