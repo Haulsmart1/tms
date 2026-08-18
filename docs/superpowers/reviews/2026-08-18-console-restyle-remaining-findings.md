@@ -131,3 +131,11 @@ The three Stats sit in a bare div (POD labels its group with
 section[aria-label]) and the mono value has no truncation, so a very
 wide Outstanding figure can escape its card at narrow widths. Polish
 pass candidates.
+
+### 22. Small mobile overflows measured on three restyled pages
+Signed-in walk at 390px (2026-08-18): /settings/permissions overflows
+67px (grid-cols-2 checkbox grid at min-content), /stats 27px,
+/subcontractors 16px. All inside the documented AppShell
+mobile-sidebar squeeze (docs/issues/2026-08-13-appshell-mobile-
+sidebar.md), which leaves ~150px of content column; retest these three
+after the mobile-nav branch lands before changing any page markup.
