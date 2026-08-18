@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CSSProperties } from "react";
 import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
 import { applyTenantFilter } from "../../lib/tenant/filter";
+import Button from "../../components/Button";
+import Card from "../../components/Card";
+import MessageBanner from "../../components/MessageBanner";
 
 const DAILY_DRIVING_LIMIT_MINUTES = 540;
 const SPEED_ALERT_THRESHOLD = 90;
@@ -271,43 +273,20 @@ function StatCard({
   caption: string;
 }) {
   return (
-    <div style={statCardStyle}>
-      <div
-        style={{
-          fontSize: 28,
-          marginBottom: 8,
-        }}
-        aria-hidden="true"
-      >
+    <div className="flex min-w-0 flex-col items-start gap-1 rounded-lg border border-line bg-surface p-4 shadow-sm">
+      <div aria-hidden="true" className="text-2xl">
         {icon}
       </div>
 
-      <h2
-        style={{
-          margin: 0,
-          color: "#0f172a",
-        }}
-      >
+      <h2 className="m-0 font-mono text-2xl font-semibold tabular-nums slashed-zero text-ink">
         {value}
       </h2>
 
-      <p
-        style={{
-          margin: "4px 0 0",
-          fontWeight: 700,
-          color: "#0f172a",
-        }}
-      >
+      <p className="m-0 text-sm font-semibold text-ink">
         {title}
       </p>
 
-      <p
-        style={{
-          margin: 0,
-          color: "#64748b",
-          fontSize: 14,
-        }}
-      >
+      <p className="m-0 text-xs text-ink-3">
         {caption}
       </p>
     </div>
@@ -998,31 +977,34 @@ export default function StatsPage() {
 
   return (
     <TenantGate>
-      <main style={pageStyle}>
-        <div style={overlayStyle}>
-          <header style={headerStyle}>
+      <div className="ds min-h-screen bg-canvas font-sans text-ink">
+        <main className="mx-auto max-w-[1480px] px-6 py-8">
+          <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h1 style={titleStyle}>
+              <div className="text-kicker uppercase text-ink-3">
+                Insights
+              </div>
+
+              <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">
                 Company Stats
               </h1>
 
-              <p style={subtitleStyle}>
+              <p className="m-0 text-sm text-ink-3">
                 Performance across jobs,
                 deliveries, invoicing,
                 customers, drivers and fleet.
               </p>
 
               {resolvedTenantId ? (
-                <p style={tenantLabelStyle}>
+                <p className="m-0 font-mono text-xs text-ink-3">
                   Tenant:{" "}
                   {resolvedTenantId}
                 </p>
               ) : null}
             </div>
 
-            <button
-              type="button"
-              style={refreshButtonStyle}
+            <Button
+              variant="secondary"
               disabled={
                 status === "loading"
               }
@@ -1035,32 +1017,30 @@ export default function StatsPage() {
               {status === "loading"
                 ? "Loading..."
                 : "Refresh"}
-            </button>
+            </Button>
           </header>
 
-          {message ? (
-            <div style={messageStyle}>
-              <strong>
-                Stats error
-              </strong>
+          <MessageBanner tone="danger">
+            {message ? (
+              <>
+                <strong>
+                  Stats error
+                </strong>
 
-              <div
-                style={{
-                  marginTop: 4,
-                }}
-              >
-                {message}
-              </div>
-            </div>
-          ) : null}
+                <div className="mt-1">
+                  {message}
+                </div>
+              </>
+            ) : null}
+          </MessageBanner>
 
           {status === "loading" ? (
-            <div style={loadingStyle}>
+            <Card>
               Loading statistics...
-            </div>
+            </Card>
           ) : (
             <>
-              <div style={periodBarStyle}>
+              <div className="mb-4 flex flex-wrap gap-2">
                 {PERIODS.map(
                   (option) => (
                     <button
@@ -1075,11 +1055,10 @@ export default function StatsPage() {
                           option.key
                         )
                       }
-                      style={
-                        period ===
-                        option.key
-                          ? periodButtonActiveStyle
-                          : periodButtonStyle
+                      className={
+                        period === option.key
+                          ? "rounded-full border border-primary bg-primary px-3 py-1.5 text-sm font-medium text-white"
+                          : "rounded-full border border-line bg-surface px-3 py-1.5 text-sm font-medium text-ink-2"
                       }
                     >
                       {option.label}
@@ -1092,7 +1071,7 @@ export default function StatsPage() {
                 Jobs & revenue
               </SectionTitle>
 
-              <div style={statGridStyle}>
+              <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
                 <StatCard
                   icon="📦"
                   value={
@@ -1161,7 +1140,7 @@ export default function StatsPage() {
                 Delivery & POD
               </SectionTitle>
 
-              <div style={statGridStyle}>
+              <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
                 <StatCard
                   icon="📍"
                   value={`${deliveredStops.length} / ${deliveryStops.length}`}
@@ -1188,7 +1167,7 @@ export default function StatsPage() {
                 Invoicing
               </SectionTitle>
 
-              <div style={statGridStyle}>
+              <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
                 <StatCard
                   icon="💷"
                   value={formatMoney(
@@ -1228,7 +1207,7 @@ export default function StatsPage() {
                 Growth & compliance
               </SectionTitle>
 
-              <div style={statGridStyle}>
+              <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
                 <StatCard
                   icon="🆕"
                   value={newCustomers}
@@ -1273,13 +1252,13 @@ export default function StatsPage() {
                 Fleet — right now
               </SectionTitle>
 
-              <p style={sectionCaptionStyle}>
+              <p className="mb-2 text-sm text-ink-3">
                 Snapshot figures are not
                 affected by the period
                 selector.
               </p>
 
-              <div style={statGridStyle}>
+              <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
                 <StatCard
                   icon="🚛"
                   value={`${activeVehicles} / ${vehicles.length}`}
@@ -1326,169 +1305,137 @@ export default function StatsPage() {
                 Driver leaderboard
               </SectionTitle>
 
-              <div style={tableCardStyle}>
+              <Card flush>
                 {driverLeaderboard.length ===
                 0 ? (
-                  <p style={emptyTextStyle}>
+                  <p className="p-4 text-sm text-ink-3">
                     No jobs with assigned
                     drivers in this period.
                   </p>
                 ) : (
-                  <table
-                    style={tableStyle}
-                  >
-                    <thead>
-                      <tr>
-                        <th style={thStyle}>
-                          Driver
-                        </th>
+                  <div className="overflow-x-auto">
+                    <table className="w-full border-collapse text-sm">
+                      <thead>
+                        <tr>
+                          <th className="border-b border-line px-3 py-2 text-left text-kicker uppercase text-ink-3">
+                            Driver
+                          </th>
 
-                        <th style={thStyle}>
-                          Jobs
-                        </th>
+                          <th className="border-b border-line px-3 py-2 text-left text-kicker uppercase text-ink-3">
+                            Jobs
+                          </th>
 
-                        <th style={thStyle}>
-                          Completed
-                        </th>
+                          <th className="border-b border-line px-3 py-2 text-left text-kicker uppercase text-ink-3">
+                            Completed
+                          </th>
 
-                        <th style={thStyle}>
-                          Revenue
-                        </th>
-                      </tr>
-                    </thead>
+                          <th className="border-b border-line px-3 py-2 text-kicker uppercase text-ink-3 text-right font-mono tabular-nums">
+                            Revenue
+                          </th>
+                        </tr>
+                      </thead>
 
-                    <tbody>
-                      {driverLeaderboard.map(
-                        (row) => (
-                          <tr key={row.id}>
-                            <td
-                              style={
-                                tdStyle
-                              }
-                            >
-                              {row.name}
-                            </td>
+                      <tbody>
+                        {driverLeaderboard.map(
+                          (row) => (
+                            <tr key={row.id}>
+                              <td className="border-b border-line px-3 py-2 text-ink">
+                                {row.name}
+                              </td>
 
-                            <td
-                              style={
-                                tdStyle
-                              }
-                            >
-                              {row.jobs}
-                            </td>
+                              <td className="border-b border-line px-3 py-2 text-ink font-mono tabular-nums">
+                                {row.jobs}
+                              </td>
 
-                            <td
-                              style={
-                                tdStyle
-                              }
-                            >
-                              {
-                                row.completed
-                              }
-                            </td>
+                              <td className="border-b border-line px-3 py-2 text-ink font-mono tabular-nums">
+                                {
+                                  row.completed
+                                }
+                              </td>
 
-                            <td
-                              style={
-                                tdStyle
-                              }
-                            >
-                              {formatMoney(
-                                row.revenue
-                              )}
-                            </td>
-                          </tr>
-                        )
-                      )}
-                    </tbody>
-                  </table>
+                              <td className="border-b border-line px-3 py-2 text-ink text-right font-mono tabular-nums">
+                                {formatMoney(
+                                  row.revenue
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
-              </div>
+              </Card>
 
               <SectionTitle>
                 Top customers
               </SectionTitle>
 
-              <div style={tableCardStyle}>
+              <Card flush>
                 {topCustomers.length ===
                 0 ? (
-                  <p style={emptyTextStyle}>
+                  <p className="p-4 text-sm text-ink-3">
                     No jobs in this
                     period.
                   </p>
                 ) : (
-                  <table
-                    style={tableStyle}
-                  >
-                    <thead>
-                      <tr>
-                        <th style={thStyle}>
-                          Customer
-                        </th>
+                  <div className="overflow-x-auto">
+                    <table className="w-full border-collapse text-sm">
+                      <thead>
+                        <tr>
+                          <th className="border-b border-line px-3 py-2 text-left text-kicker uppercase text-ink-3">
+                            Customer
+                          </th>
 
-                        <th style={thStyle}>
-                          Jobs
-                        </th>
+                          <th className="border-b border-line px-3 py-2 text-left text-kicker uppercase text-ink-3">
+                            Jobs
+                          </th>
 
-                        <th style={thStyle}>
-                          Completed
-                        </th>
+                          <th className="border-b border-line px-3 py-2 text-left text-kicker uppercase text-ink-3">
+                            Completed
+                          </th>
 
-                        <th style={thStyle}>
-                          Revenue
-                        </th>
-                      </tr>
-                    </thead>
+                          <th className="border-b border-line px-3 py-2 text-kicker uppercase text-ink-3 text-right font-mono tabular-nums">
+                            Revenue
+                          </th>
+                        </tr>
+                      </thead>
 
-                    <tbody>
-                      {topCustomers.map(
-                        (row) => (
-                          <tr key={row.id}>
-                            <td
-                              style={
-                                tdStyle
-                              }
-                            >
-                              {row.name}
-                            </td>
+                      <tbody>
+                        {topCustomers.map(
+                          (row) => (
+                            <tr key={row.id}>
+                              <td className="border-b border-line px-3 py-2 text-ink">
+                                {row.name}
+                              </td>
 
-                            <td
-                              style={
-                                tdStyle
-                              }
-                            >
-                              {row.jobs}
-                            </td>
+                              <td className="border-b border-line px-3 py-2 text-ink font-mono tabular-nums">
+                                {row.jobs}
+                              </td>
 
-                            <td
-                              style={
-                                tdStyle
-                              }
-                            >
-                              {
-                                row.completed
-                              }
-                            </td>
+                              <td className="border-b border-line px-3 py-2 text-ink font-mono tabular-nums">
+                                {
+                                  row.completed
+                                }
+                              </td>
 
-                            <td
-                              style={
-                                tdStyle
-                              }
-                            >
-                              {formatMoney(
-                                row.revenue
-                              )}
-                            </td>
-                          </tr>
-                        )
-                      )}
-                    </tbody>
-                  </table>
+                              <td className="border-b border-line px-3 py-2 text-ink text-right font-mono tabular-nums">
+                                {formatMoney(
+                                  row.revenue
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
-              </div>
+              </Card>
             </>
           )}
-        </div>
-      </main>
+        </main>
+      </div>
     </TenantGate>
   );
 }
@@ -1499,165 +1446,8 @@ function SectionTitle({
   children: React.ReactNode;
 }) {
   return (
-    <h2 style={sectionTitleStyle}>
+    <h2 className="mb-2 mt-6 text-md font-semibold text-ink">
       {children}
     </h2>
   );
 }
-
-const pageStyle: CSSProperties = {
-  minHeight: "100vh",
-  padding: 30,
-  backgroundImage:
-    "url('https://images.unsplash.com/photo-1553413077-190dd305871c')",
-  backgroundSize: "cover",
-  backgroundPosition: "center",
-  backgroundAttachment: "fixed",
-};
-
-const overlayStyle: CSSProperties = {
-  background: "rgba(0,0,0,0.60)",
-  padding: 30,
-  borderRadius: 20,
-};
-
-const headerStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "flex-start",
-  gap: 20,
-  flexWrap: "wrap",
-  color: "white",
-  marginBottom: 24,
-};
-
-const titleStyle: CSSProperties = {
-  margin: 0,
-  fontSize: 38,
-};
-
-const subtitleStyle: CSSProperties = {
-  opacity: 0.85,
-  margin: "6px 0 0",
-};
-
-const tenantLabelStyle: CSSProperties = {
-  opacity: 0.55,
-  fontSize: 11,
-  margin: "7px 0 0",
-};
-
-const refreshButtonStyle: CSSProperties = {
-  border: "1px solid rgba(255,255,255,0.5)",
-  background: "rgba(255,255,255,0.95)",
-  color: "#0f172a",
-  borderRadius: 10,
-  padding: "10px 15px",
-  fontWeight: 700,
-  cursor: "pointer",
-};
-
-const messageStyle: CSSProperties = {
-  background: "#fee2e2",
-  border: "1px solid #fecaca",
-  padding: 14,
-  borderRadius: 12,
-  color: "#991b1b",
-  marginBottom: 20,
-};
-
-const loadingStyle: CSSProperties = {
-  color: "white",
-  padding: "30px 0",
-  fontWeight: 600,
-};
-
-const periodBarStyle: CSSProperties = {
-  display: "flex",
-  gap: 10,
-  flexWrap: "wrap",
-  marginBottom: 24,
-};
-
-const periodButtonStyle: CSSProperties = {
-  padding: "10px 14px",
-  borderRadius: 10,
-  border: "1px solid #d1d5db",
-  background: "white",
-  color: "#111827",
-  fontWeight: 600,
-  cursor: "pointer",
-};
-
-const periodButtonActiveStyle: CSSProperties = {
-  ...periodButtonStyle,
-  border: "1px solid #2563eb",
-  background: "#2563eb",
-  color: "white",
-};
-
-const statGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns:
-    "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: 20,
-  marginBottom: 30,
-};
-
-const statCardStyle: CSSProperties = {
-  background: "rgba(255,255,255,0.95)",
-  padding: 20,
-  borderRadius: 14,
-  boxShadow:
-    "0 8px 30px rgba(0,0,0,0.25)",
-};
-
-const sectionTitleStyle: CSSProperties = {
-  color: "white",
-  marginTop: 0,
-  marginBottom: 14,
-};
-
-const sectionCaptionStyle: CSSProperties = {
-  color: "white",
-  opacity: 0.85,
-  marginTop: -8,
-};
-
-const tableCardStyle: CSSProperties = {
-  background: "rgba(255,255,255,0.95)",
-  padding: 22,
-  borderRadius: 16,
-  boxShadow:
-    "0 10px 30px rgba(0,0,0,0.18)",
-  overflowX: "auto",
-  marginBottom: 30,
-};
-
-const tableStyle: CSSProperties = {
-  width: "100%",
-  borderCollapse: "collapse",
-  background: "transparent",
-};
-
-const thStyle: CSSProperties = {
-  textAlign: "left",
-  padding: 12,
-  borderBottom:
-    "1px solid #e5e7eb",
-  color: "#111827",
-  fontSize: 14,
-};
-
-const tdStyle: CSSProperties = {
-  padding: 12,
-  borderBottom:
-    "1px solid #f1f5f9",
-  color: "#111827",
-  verticalAlign: "top",
-};
-
-const emptyTextStyle: CSSProperties = {
-  margin: 0,
-  color: "#555",
-};
