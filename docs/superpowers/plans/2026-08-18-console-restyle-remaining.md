@@ -1,4 +1,4 @@
-﻿# Console Restyle, Remaining Pages: Implementation Plan
+# Console Restyle, Remaining Pages: Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -37,7 +37,7 @@ Every restyle task follows this recipe. It is the single source of truth for con
 7. **Keep each page's existing gate wrapper** (`TenantGate`, role checks, tenant filters) exactly where it is. Adding or removing a gate is logic. Pages with NO gate (tachograph, telematics, settings hub, permissions, settings/invoices, company) stay ungated; that is a findings entry, not a fix.
 8. **Data-driven styling survives as data-driven classes.** Where a style is computed from data (compliance level, active tab, message tone), re-express it as a ternary/lookup that picks className strings. The *condition* is copied verbatim; only the chosen values change from hex objects to token classes.
 9. **Placeholder-only inputs stay raw.** Shared `Field`/`Select` require a `label`. Inputs whose only name is a placeholder (vehicles' 4 detail inputs, licences' whole form, customers' search, portal-invites' selects) keep their raw element with the token input/select classes below. Adding a visible label changes the UI; adding aria-labels is the queued findings-21/31 pass. Log, don't fix.
-10. **Do not retype emoji or suspect characters.** `/stats` icons include ZWJ sequences (ðŸ§‘â€âœˆï¸) and variation selectors; `/invoices` contains mojibake literals (`Ã¢â‚¬â€` in `formatDate`, `Ã‚Â·` in option labels). Edit surgically around them; never rewrite the line by hand. The mojibake gets a findings entry.
+10. **Do not retype emoji or suspect characters.** `/stats` icons include ZWJ sequences (🧑‍✈️) and variation selectors; `/invoices` contains mojibake literals (`â€”` in `formatDate`, `Â·` in option labels). Edit surgically around them; never rewrite the line by hand. The mojibake gets a findings entry.
 11. **The Unsplash background image is removed** wherever it appears (tachograph, telematics, settings hub, permissions, licences, company, stats, vehicles). The dark scrim div and hardcoded white text go with it: with the image gone the page sits on `bg-canvas` and text becomes standard ink classes. This is styling, not logic.
 12. **MessageBanner stays mounted.** Replace `{message ? <div style={styles.message}>{message}</div> : null}` with an always-rendered `<MessageBanner ...>{message}</MessageBanner>` (it renders `sr-only` when empty). Mounting the live region permanently is what makes announcements work. Do NOT keep the conditional.
 
@@ -65,7 +65,7 @@ Every restyle task follows this recipe. It is the single source of truth for con
 | primary action button | `<Button type="submit">` / `<Button onClick={...}>` |
 | neutral / cancel button | `<Button variant="secondary">` |
 | destructive button | `<Button variant="danger">` |
-| status pill | `<Badge tone={...}>`: red/expired/hold â†’ `danger`, amber/warning â†’ `warning`, ok/valid/active/eligible â†’ `success`, else `neutral` |
+| status pill | `<Badge tone={...}>`: red/expired/hold → `danger`, amber/warning → `warning`, ok/valid/active/eligible → `success`, else `neutral` |
 | summary tile (value + label, no icon) | `<Stat label="..." value={String(...)} />`, tiles in `<div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">` |
 | `<table>` | keep the table, wrap in `<Card flush><div className="overflow-x-auto"><table className="w-full border-collapse text-sm">`; `<th className="border-b border-line px-3 py-2 text-left text-kicker uppercase text-ink-3">`; `<td className="border-b border-line px-3 py-2 text-ink">`; right-aligned money columns add `text-right font-mono tabular-nums` |
 | operational data (registrations, references, money, dates, coordinates) | add `font-mono` (`tabular-nums` for figures) |
@@ -176,8 +176,8 @@ not go through `tenant.filterByTenant`, unlike the fleet-policy writes
 on the same page. RLS is the only guard on the update's row scope.
 
 ### 7. Mojibake and em-dashes in /invoices copy
-`formatDate` returns the literal `Ã¢â‚¬â€` (corrupted em-dash) and option
-labels use `Ã‚Â·` (corrupted middot). Carried verbatim under the content
+`formatDate` returns the literal `â€”` (corrupted em-dash) and option
+labels use `Â·` (corrupted middot). Carried verbatim under the content
 freeze; fix the encoding and sweep for the no-em-dash convention when
 the freeze lifts.
 
@@ -474,7 +474,7 @@ Kicker "Admin", `<h1>` "Billing". The single card becomes a `Stat`-style block; 
 
 ```tsx
 <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
-  <Stat label="Monthly Charge" value={`Â£${count * PRICE}`} sub={`${count} licensed vehicles`} />
+  <Stat label="Monthly Charge" value={`£${count * PRICE}`} sub={`${count} licensed vehicles`} />
 </div>
 ```
 
@@ -501,12 +501,12 @@ Already flat-light and tenant-gated; a `styles` object page with two invite sect
 - [x] **Step 1: Convert the page**
 
 - Shell per token map, keep `max-w-[1000px]` (had `maxWidth: 1000`); kicker "Admin", `<h1>` "Portal Invitations", existing subtitle copy.
-- `{message ? <div style={styles.message}>...}` â†’ always-mounted `<MessageBanner tone="neutral">{message}</MessageBanner>` (hard rule 12; the single string carries both errors and successes, so neutral; the tone split is queued, finding-30 pattern).
-- The `!canManage` card â†’ `<Card>Only tenant admins can manage invites.</Card>` (same condition).
-- Both invite sections â†’ `<section className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm">` with `<h2 className="mb-3 text-md font-semibold text-ink">`.
+- `{message ? <div style={styles.message}>...}` → always-mounted `<MessageBanner tone="neutral">{message}</MessageBanner>` (hard rule 12; the single string carries both errors and successes, so neutral; the tone split is queued, finding-30 pattern).
+- The `!canManage` card → `<Card>Only tenant admins can manage invites.</Card>` (same condition).
+- Both invite sections → `<section className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm">` with `<h2 className="mb-3 text-md font-semibold text-ink">`.
 - All four selects: raw select classes per token map (no labels exist; hard rule 9). Keep every option-building expression, including the "NO EMAIL"/"PORTAL ACTIVE" suffix logic, byte-identical.
-- The subcontractor grid `styles.grid` â†’ `<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">`.
-- Both buttons â†’ `<Button disabled={...} onClick={...}>` with the exact existing `disabled` and `onClick` expressions and the `busy ? "Working..." : ...` labels.
+- The subcontractor grid `styles.grid` → `<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">`.
+- Both buttons → `<Button disabled={...} onClick={...}>` with the exact existing `disabled` and `onClick` expressions and the `busy ? "Working..." : ...` labels.
 - Delete the `styles` object once unreferenced.
 
 - [x] **Step 2: Verification loop**, then commit:
@@ -530,11 +530,11 @@ Tenant-gated, Unsplash background, three-figure summary card, an all-placeholder
 - [x] **Step 1: Convert the page**
 
 - Shell per token map (Unsplash + scrim removed); kicker "Admin", `<h1>` "Vehicle Licences", existing subtitle copy.
-- Summary card â†’ three `Stat` tiles in the Stat grid: `Stat label="Licensed Vehicles" value={String(billableVehicleCount)}`, `Stat label="Monthly Charge" value={`Â£${monthlyTotal}`}`, `Stat label="Billing Rule" value="Â£10" sub="per licensed vehicle"`. Values keep the exact existing expressions.
-- The `<form onSubmit={createLicence}>` â†’ `<form onSubmit={createLicence} className="mb-4 grid gap-3 rounded-lg border border-line bg-surface p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-3">`. All five placeholder-only controls stay raw with token input/select classes (`required` attributes carried). The "Active for billing" checkbox label per the token-map checkbox row. Submit â†’ `<Button type="submit" disabled={saving}>{saving ? "Saving..." : "Add Licence"}</Button>` spanning `sm:col-span-2 lg:col-span-3` wrapped in a `<div>` so the grid keeps its shape.
-- Message box â†’ always-mounted `<MessageBanner tone="neutral">{message}</MessageBanner>`.
-- Loading card â†’ `<Card>Loading...</Card>` (same condition).
-- Licence cards â†’ `<article className="rounded-lg border border-line bg-surface p-4 shadow-sm">` in `<div className="grid gap-3">`; `<h3 className="m-0 text-md font-semibold text-ink">{licence.licence_type}</h3>`; the five detail lines as Info-style pairs (kicker span + value; dates get `font-mono`). Buttons: toggle â†’ `<Button variant="secondary" onClick={...}>` with the existing ternary label; delete â†’ `<Button variant="danger" onClick={...}>`. `window.confirm` in `deleteLicence` is a handler, untouched.
+- Summary card → three `Stat` tiles in the Stat grid: `Stat label="Licensed Vehicles" value={String(billableVehicleCount)}`, `Stat label="Monthly Charge" value={`£${monthlyTotal}`}`, `Stat label="Billing Rule" value="£10" sub="per licensed vehicle"`. Values keep the exact existing expressions.
+- The `<form onSubmit={createLicence}>` → `<form onSubmit={createLicence} className="mb-4 grid gap-3 rounded-lg border border-line bg-surface p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-3">`. All five placeholder-only controls stay raw with token input/select classes (`required` attributes carried). The "Active for billing" checkbox label per the token-map checkbox row. Submit → `<Button type="submit" disabled={saving}>{saving ? "Saving..." : "Add Licence"}</Button>` spanning `sm:col-span-2 lg:col-span-3` wrapped in a `<div>` so the grid keeps its shape.
+- Message box → always-mounted `<MessageBanner tone="neutral">{message}</MessageBanner>`.
+- Loading card → `<Card>Loading...</Card>` (same condition).
+- Licence cards → `<article className="rounded-lg border border-line bg-surface p-4 shadow-sm">` in `<div className="grid gap-3">`; `<h3 className="m-0 text-md font-semibold text-ink">{licence.licence_type}</h3>`; the five detail lines as Info-style pairs (kicker span + value; dates get `font-mono`). Buttons: toggle → `<Button variant="secondary" onClick={...}>` with the existing ternary label; delete → `<Button variant="danger" onClick={...}>`. `window.confirm` in `deleteLicence` is a handler, untouched.
 - Delete `pageBackground` and the five style constants once unreferenced.
 
 - [x] **Step 2: Verification loop**, then commit:
@@ -558,8 +558,8 @@ The big settings form: 7 sections, ~23 labelled inputs, 3 labelled selects, 1 te
 - [x] **Step 1: Convert the page**
 
 - Shell per token map (Unsplash + scrim + white header text removed); kicker "Admin", `<h1>` "Company Profile", existing subtitle copy.
-- The two pre-form fallback cards (`!companyId`, `loading || !profile`) â†’ `<Card className="font-medium">{...}</Card>` with the same conditions and children.
-- The form stays `<form onSubmit={saveProfile} className="grid gap-4">`. Each `<section>` â†’ the section card classes with `<h2 className="mb-3 text-md font-semibold text-ink">` (replacing `sectionTitleStyle`); each of the six literal grid divs â†’ `<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">`.
+- The two pre-form fallback cards (`!companyId`, `loading || !profile`) → `<Card className="font-medium">{...}</Card>` with the same conditions and children.
+- The form stays `<form onSubmit={saveProfile} className="grid gap-4">`. Each `<section>` → the section card classes with `<h2 className="mb-3 text-md font-semibold text-ink">` (replacing `sectionTitleStyle`); each of the six literal grid divs → `<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">`.
 - Every labelled field converts to the shared components with `co-` ids derived from the profile key: e.g. `<Field id="co-company-name" label="Company Name" required value={profile.company_name} onChange={...} />`, `<Select id="co-country" label="Country">{countryOptions.map(...)}</Select>`, `<Textarea id="co-notes" label="Notes" ... />`. Dynamic label text (the `isUS` swaps at old lines 672-674, 777, 788) moves into the `label` prop expression verbatim. Conditional fields/sections keep their exact `isUS`/`isGB`/`isTransportRelated` conditions.
 - Message banner: replace the conditional `messageCardStyle` div with an always-mounted banner mapping the EXISTING `messageType` state:
 
@@ -578,7 +578,7 @@ The big settings form: 7 sections, ~23 labelled inputs, 3 labelled selects, 1 te
 ```
 
 Keep it where it is in the form (near the submit button); moving it is gratuitous churn.
-- Submit â†’ `<Button type="submit" disabled={saving}>{saving ? "Saving..." : "Save Profile"}</Button>` (existing label expressions; the opacity/cursor styling is replaced by Button's own disabled treatment, which is styling, not logic).
+- Submit → `<Button type="submit" disabled={saving}>{saving ? "Saving..." : "Save Profile"}</Button>` (existing label expressions; the opacity/cursor styling is replaced by Button's own disabled treatment, which is styling, not logic).
 - Delete all eight in-component style constants once unreferenced. Do NOT touch `resolveCompanyId`, the console.logs, or the diagnostic strings.
 
 - [x] **Step 2: Verification loop** (leftover grep must cover `Style}` names), then commit:
@@ -605,11 +605,11 @@ Read-only page: 24 `StatCard` tiles with emoji icons, a period filter bar, two t
 
 - [x] **Step 1: Convert the page**
 
-- Shell per token map (Unsplash + fixed-attachment background + scrim removed); kicker "Insights", `<h1>` "Company Stats", existing subtitle; the conditional tenant line â†’ `<p className="font-mono text-xs text-ink-3">` with the same condition and content.
-- Refresh button â†’ `<Button variant="secondary" disabled={status === "loading"} onClick={...}>` with the existing label ternary.
+- Shell per token map (Unsplash + fixed-attachment background + scrim removed); kicker "Insights", `<h1>` "Company Stats", existing subtitle; the conditional tenant line → `<p className="font-mono text-xs text-ink-3">` with the same condition and content.
+- Refresh button → `<Button variant="secondary" disabled={status === "loading"} onClick={...}>` with the existing label ternary.
 - Error banner: `message` is error-only here, so the always-mounted banner is `<MessageBanner tone="danger">{message ? <><strong>Stats error</strong><div className="mt-1">{message}</div></> : null}</MessageBanner>` (same two-part content, same "Stats error" copy).
-- Loading branch â†’ `<Card>Loading statistics...</Card>` (same condition).
-- Period bar â†’ `<div className="mb-4 flex flex-wrap gap-2">`; each button keeps `type="button"`, `aria-pressed`, `onClick`, and label, with the whole-object style ternary re-expressed as a className ternary (hard rule 8):
+- Loading branch → `<Card>Loading statistics...</Card>` (same condition).
+- Period bar → `<div className="mb-4 flex flex-wrap gap-2">`; each button keeps `type="button"`, `aria-pressed`, `onClick`, and label, with the whole-object style ternary re-expressed as a className ternary (hard rule 8):
 
 ```tsx
 className={
@@ -619,9 +619,9 @@ className={
 }
 ```
 
-- `SectionTitle` helper internals â†’ `<h2 className="mb-2 mt-6 text-md font-semibold text-ink">`; the fleet caption `<p className="mb-2 text-sm text-ink-3">`.
-- Stat grids â†’ `<div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">`.
-- `StatCard` internals â†’ tile markup mirroring shared `Stat`'s classes with the extra slots:
+- `SectionTitle` helper internals → `<h2 className="mb-2 mt-6 text-md font-semibold text-ink">`; the fleet caption `<p className="mb-2 text-sm text-ink-3">`.
+- Stat grids → `<div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">`.
+- `StatCard` internals → tile markup mirroring shared `Stat`'s classes with the extra slots:
 
 ```tsx
 <div className="flex min-w-0 flex-col items-start gap-1 rounded-lg border border-line bg-surface p-4 shadow-sm">
@@ -660,19 +660,19 @@ Card-list page with compliance-driven card tinting (hard rule 8's biggest test),
 
 - [x] **Step 1: Convert the page**
 
-- Shell per token map (Unsplash + scrim removed, white text â†’ ink classes); kicker "Fleet", `<h1>` "Vehicles", existing subtitle; `ComplianceLegend` stays in the header row (`flex flex-wrap items-start justify-between gap-3`).
+- Shell per token map (Unsplash + scrim removed, white text → ink classes); kicker "Fleet", `<h1>` "Vehicles", existing subtitle; `ComplianceLegend` stays in the header row (`flex flex-wrap items-start justify-between gap-3`).
 - Helper conversions (do these first; most call sites inherit):
-  - `SectionTitle` â†’ `<h3 className="mb-2 text-kicker uppercase text-ink-3">`.
-  - `DateField` â†’ keep the wrapped-label structure with Field's classes: `<label className="grid gap-1.5"><span className="text-sm font-medium text-ink-2">{label}</span><input type="date" className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink" ... /></label>`.
-  - `StatusBadge` internals â†’ `<Badge tone={result.level === "red" ? "danger" : result.level === "amber" ? "warning" : "success"}>{result.label}</Badge>`. The `small` prop becomes a no-op parameter kept for call-site compatibility (Badge has one size; visually equivalent at text-xs).
-  - `ComplianceLegend` pills â†’ three `<Badge>` with tones `success`/`warning`/`danger` and the same three label strings.
-  - `ComplianceItem` â†’ `<div className="rounded-md border border-line bg-surface p-2.5">` with kicker label span, `font-mono` date line (`formatDate(expiry)` or "Not set"), optional `extra` line `text-xs text-ink-3`, then the `StatusBadge` call unchanged.
-  - `vehicleCardStyle(level)` â†’ returns className strings instead of style objects (same `level` switch): red â†’ `"rounded-lg border-2 border-danger bg-danger-tint p-4"`, amber â†’ `"rounded-lg border-2 border-warning bg-warning-tint p-4"`, default â†’ `"rounded-lg border border-line bg-surface p-4 shadow-sm"`. (2px, not the old 3px, both non-default cases so the layout shift between states stays consistent; the ok case keeps 1px like today.)
-- Fleet Insurance section (admin-gated condition untouched): section card + `<h2>`; policy cards â†’ `<article className="rounded-lg border border-line bg-surface-2 p-3">` in the card-list grid, detail rows as Info-style pairs (`font-mono` for dates/counts), `StatusBadge` call sites unchanged; empty state â†’ a plain tinted div, NOT a MessageBanner (static content must not get a live region): `<div className="rounded-lg border border-warning-border bg-warning-tint p-3 text-sm text-warning-strong">` (same copy, same condition).
-- Fleet policy form: labelled pairs â†’ `Field`/`DateField`(converted)/`Textarea id="veh-policy-notes"`; the renewal-days input keeps `type="number" min={0} max={365}`; the auto-renew checkbox row per the token-map checkbox row (the faux-input span wrapper is styling, replaceable). Submit/cancel â†’ `Button` per token map with existing types/handlers/disabled.
-- Vehicle form: the four placeholder-only inputs â†’ raw inputs with token input classes (hard rule 9). The Insurance Type and Fleet Insurance Policy selects both sit inside `<label>` wrappers with span labels (verified, lines 974-1015 pre-restyle): convert them like `DateField` (wrapped label, span gets the label classes, select gets the token select classes). The `insurance_type === "fleet"` conditional branch structure is untouched, and the fleet-policy option-label expression (with its `â€¢` separators) is carried byte-identical.
-- Message box â†’ always-mounted `<MessageBanner tone="neutral">{message}</MessageBanner>`; loading card â†’ `<Card>Loading vehicles...</Card>`.
-- Vehicle cards: `className={cn(vehicleCardStyle(cardCompliance.level), !vehicle.active && "opacity-70")}`, keeping the `opacity` condition verbatim as a class. Registration `<h3 className="m-0 font-mono text-md font-semibold text-ink">`; "type â€¢ make model" line `text-sm text-ink-3`; ComplianceItems grid `<div className="my-3 grid gap-2 sm:grid-cols-3">`; status line `text-sm text-ink-2`; action buttons â†’ `Button size="sm"` variants (`secondary` edit/toggle, `danger` delete) with existing conditions and handlers.
+  - `SectionTitle` → `<h3 className="mb-2 text-kicker uppercase text-ink-3">`.
+  - `DateField` → keep the wrapped-label structure with Field's classes: `<label className="grid gap-1.5"><span className="text-sm font-medium text-ink-2">{label}</span><input type="date" className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink" ... /></label>`.
+  - `StatusBadge` internals → `<Badge tone={result.level === "red" ? "danger" : result.level === "amber" ? "warning" : "success"}>{result.label}</Badge>`. The `small` prop becomes a no-op parameter kept for call-site compatibility (Badge has one size; visually equivalent at text-xs).
+  - `ComplianceLegend` pills → three `<Badge>` with tones `success`/`warning`/`danger` and the same three label strings.
+  - `ComplianceItem` → `<div className="rounded-md border border-line bg-surface p-2.5">` with kicker label span, `font-mono` date line (`formatDate(expiry)` or "Not set"), optional `extra` line `text-xs text-ink-3`, then the `StatusBadge` call unchanged.
+  - `vehicleCardStyle(level)` → returns className strings instead of style objects (same `level` switch): red → `"rounded-lg border-2 border-danger bg-danger-tint p-4"`, amber → `"rounded-lg border-2 border-warning bg-warning-tint p-4"`, default → `"rounded-lg border border-line bg-surface p-4 shadow-sm"`. (2px, not the old 3px, both non-default cases so the layout shift between states stays consistent; the ok case keeps 1px like today.)
+- Fleet Insurance section (admin-gated condition untouched): section card + `<h2>`; policy cards → `<article className="rounded-lg border border-line bg-surface-2 p-3">` in the card-list grid, detail rows as Info-style pairs (`font-mono` for dates/counts), `StatusBadge` call sites unchanged; empty state → a plain tinted div, NOT a MessageBanner (static content must not get a live region): `<div className="rounded-lg border border-warning-border bg-warning-tint p-3 text-sm text-warning-strong">` (same copy, same condition).
+- Fleet policy form: labelled pairs → `Field`/`DateField`(converted)/`Textarea id="veh-policy-notes"`; the renewal-days input keeps `type="number" min={0} max={365}`; the auto-renew checkbox row per the token-map checkbox row (the faux-input span wrapper is styling, replaceable). Submit/cancel → `Button` per token map with existing types/handlers/disabled.
+- Vehicle form: the four placeholder-only inputs → raw inputs with token input classes (hard rule 9). The Insurance Type and Fleet Insurance Policy selects both sit inside `<label>` wrappers with span labels (verified, lines 974-1015 pre-restyle): convert them like `DateField` (wrapped label, span gets the label classes, select gets the token select classes). The `insurance_type === "fleet"` conditional branch structure is untouched, and the fleet-policy option-label expression (with its `•` separators) is carried byte-identical.
+- Message box → always-mounted `<MessageBanner tone="neutral">{message}</MessageBanner>`; loading card → `<Card>Loading vehicles...</Card>`.
+- Vehicle cards: `className={cn(vehicleCardStyle(cardCompliance.level), !vehicle.active && "opacity-70")}`, keeping the `opacity` condition verbatim as a class. Registration `<h3 className="m-0 font-mono text-md font-semibold text-ink">`; "type • make model" line `text-sm text-ink-3`; ComplianceItems grid `<div className="my-3 grid gap-2 sm:grid-cols-3">`; status line `text-sm text-ink-2`; action buttons → `Button size="sm"` variants (`secondary` edit/toggle, `danger` delete) with existing conditions and handlers.
 - Delete the loose style constants and both style functions' old bodies once unreferenced.
 
 - [x] **Step 2: Verification loop** (grep also for `legendStyle\|vehicleCardStyle(`; both must now return/consume classNames only), then commit:
@@ -699,12 +699,12 @@ Single-`styles`-object page with local helpers (the leverage point), separate er
 
 - [x] **Step 1: Convert the page**
 
-- Shell per token map, keep `max-w-[1450px]`; header: kicker "Commercial", `<h1>` "Customers", subtitle, "+ Add Customer" â†’ `<Button type="button" onClick={...}>`.
-- Banners â†’ two always-mounted banners in the existing order: `<MessageBanner tone="danger">{errorMessage}</MessageBanner>` then `<MessageBanner tone="success">{message}</MessageBanner>`.
-- Helper conversions (all call sites inherit): `Section` â†’ `<section className="border-t border-line pt-4 mt-4">` with `<h3 className="mb-3 text-kicker uppercase text-ink-3">{title}</h3>`; `TextField`/`TextareaField`/`SelectField` keep their wrapped-`<label>` structure with Field's span/input classes (the textarea keeps `rows={4}` and gains `min-h-24 py-2 resize-y`); `CheckboxField` per the token-map checkbox row; `Info` per the token-map Info pair.
-- The form card â†’ `<form onSubmit={saveCustomer} className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm">` behind the same `showForm` condition; grids â†’ `grid gap-3 sm:grid-cols-2 lg:grid-cols-3`; checkbox grids â†’ `grid gap-2 sm:grid-cols-2 lg:grid-cols-3`; Cancel/submit â†’ `Button` with existing explicit types and `disabled={saving}` (the opacity spread is replaced by Button's disabled styling).
-- Customer Accounts section card: heading + count line (`text-sm text-ink-3`) + search input â†’ raw input with token input classes plus `sm:w-64` (hard rule 9, placeholder-only; the debounce effect keys off state, not the element, so classes are safe to change but do not remount or wrap it).
-- Customer cards â†’ `<article className="rounded-lg border border-line bg-surface-2 p-3">` in the card-list grid. Status badge ternary (hard rule 8): same `credit_hold` â†’ `<Badge tone="danger">Credit Hold</Badge>`, `active` â†’ `<Badge tone="success">Active</Badge>`, else `<Badge tone="neutral">Inactive</Badge>` priority order. Info grid `grid grid-cols-2 gap-2`; Credit Limit value keeps its exact `toLocaleString` expression and gains `font-mono`. Tag row â†’ `<Badge tone="neutral">` for ADR/Tail Lift/Timed/POD and `<Badge tone="info">API</Badge>`, same render conditions. Edit â†’ `Button variant="secondary" size="sm"`, Delete â†’ `Button variant="danger" size="sm"`.
+- Shell per token map, keep `max-w-[1450px]`; header: kicker "Commercial", `<h1>` "Customers", subtitle, "+ Add Customer" → `<Button type="button" onClick={...}>`.
+- Banners → two always-mounted banners in the existing order: `<MessageBanner tone="danger">{errorMessage}</MessageBanner>` then `<MessageBanner tone="success">{message}</MessageBanner>`.
+- Helper conversions (all call sites inherit): `Section` → `<section className="border-t border-line pt-4 mt-4">` with `<h3 className="mb-3 text-kicker uppercase text-ink-3">{title}</h3>`; `TextField`/`TextareaField`/`SelectField` keep their wrapped-`<label>` structure with Field's span/input classes (the textarea keeps `rows={4}` and gains `min-h-24 py-2 resize-y`); `CheckboxField` per the token-map checkbox row; `Info` per the token-map Info pair.
+- The form card → `<form onSubmit={saveCustomer} className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm">` behind the same `showForm` condition; grids → `grid gap-3 sm:grid-cols-2 lg:grid-cols-3`; checkbox grids → `grid gap-2 sm:grid-cols-2 lg:grid-cols-3`; Cancel/submit → `Button` with existing explicit types and `disabled={saving}` (the opacity spread is replaced by Button's disabled styling).
+- Customer Accounts section card: heading + count line (`text-sm text-ink-3`) + search input → raw input with token input classes plus `sm:w-64` (hard rule 9, placeholder-only; the debounce effect keys off state, not the element, so classes are safe to change but do not remount or wrap it).
+- Customer cards → `<article className="rounded-lg border border-line bg-surface-2 p-3">` in the card-list grid. Status badge ternary (hard rule 8): same `credit_hold` → `<Badge tone="danger">Credit Hold</Badge>`, `active` → `<Badge tone="success">Active</Badge>`, else `<Badge tone="neutral">Inactive</Badge>` priority order. Info grid `grid grid-cols-2 gap-2`; Credit Limit value keeps its exact `toLocaleString` expression and gains `font-mono`. Tag row → `<Badge tone="neutral">` for ADR/Tail Lift/Timed/POD and `<Badge tone="info">API</Badge>`, same render conditions. Edit → `Button variant="secondary" size="sm"`, Delete → `Button variant="danger" size="sm"`.
 - Delete the `styles` object once unreferenced.
 
 - [x] **Step 2: Verification loop**, then commit:
@@ -728,13 +728,13 @@ Largest helper-component page: 40+ fields across three forms, compliance badges,
 - [x] **Step 1: Convert the page**
 
 - Shell per token map; kicker "Carrier Network", `<h1>` "Subcontractors", subtitle.
-- Banner â†’ always-mounted `<MessageBanner tone="neutral">{message}</MessageBanner>` (single undifferentiated string; tone split is queued. Add a findings entry mirroring Stuart finding 30 covering this page plus /vehicles, /settings/licences, and /settings/portal-invites, since entry 8 covers labels, not message tones).
+- Banner → always-mounted `<MessageBanner tone="neutral">{message}</MessageBanner>` (single undifferentiated string; tone split is queued. Add a findings entry mirroring Stuart finding 30 covering this page plus /vehicles, /settings/licences, and /settings/portal-invites, since entry 8 covers labels, not message tones).
 - Helper conversions, identical treatment to /customers: `Section` (here it renders `<h3 styles.subheading>`), `TextField`, `TextareaField`, `SelectField`, `DateField` (wrapped-label + Field classes), `CheckboxField` (token-map checkbox row), `Info` (token-map pair).
-- `StatusBadge` internals â†’ `<Badge tone={...}>` with the same redâ†’danger / amberâ†’warning / okâ†’success mapping and `result.label` children (labels like "EXPIRED 12d" are content, untouched). The employee eligibility badge ternary â†’ `<Badge tone="success">Eligible</Badge>` / `<Badge tone="danger">No Portal Access</Badge>`, same condition.
-- `subcontractorCardStyle(level)` â†’ className-returning, same switch: red â†’ `"rounded-lg border-2 border-danger bg-danger-tint p-3"`, amber â†’ `"rounded-lg border-2 border-warning bg-warning-tint p-3"`, default â†’ `"rounded-lg border border-line bg-surface-2 p-3"`.
-- The admin-gated main form (same `isAdmin` condition) â†’ form card with the section/grid classes from Task 10; submit/cancel buttons keep their explicit types.
-- Subcontractor Accounts section: card list per token map; each card keeps name/type/StatusBadge/4 Info pairs; Edit + Manage â†’ `Button variant="secondary" size="sm"` (Manage's `onClick` only sets `selectedSubcontractorId`; untouched).
-- The conditional `selectedSubcontractor` block: both sections (Employees, Vehicles) â†’ section cards; inline forms â†’ `grid gap-3 sm:grid-cols-2 lg:grid-cols-3` inside a `bg-surface-2` sub-card (`rounded-lg border border-line bg-surface-2 p-3 mb-3`); list cards per the card-list treatment; vehicle cards use the converted `subcontractorCardStyle`.
+- `StatusBadge` internals → `<Badge tone={...}>` with the same red→danger / amber→warning / ok→success mapping and `result.label` children (labels like "EXPIRED 12d" are content, untouched). The employee eligibility badge ternary → `<Badge tone="success">Eligible</Badge>` / `<Badge tone="danger">No Portal Access</Badge>`, same condition.
+- `subcontractorCardStyle(level)` → className-returning, same switch: red → `"rounded-lg border-2 border-danger bg-danger-tint p-3"`, amber → `"rounded-lg border-2 border-warning bg-warning-tint p-3"`, default → `"rounded-lg border border-line bg-surface-2 p-3"`.
+- The admin-gated main form (same `isAdmin` condition) → form card with the section/grid classes from Task 10; submit/cancel buttons keep their explicit types.
+- Subcontractor Accounts section: card list per token map; each card keeps name/type/StatusBadge/4 Info pairs; Edit + Manage → `Button variant="secondary" size="sm"` (Manage's `onClick` only sets `selectedSubcontractorId`; untouched).
+- The conditional `selectedSubcontractor` block: both sections (Employees, Vehicles) → section cards; inline forms → `grid gap-3 sm:grid-cols-2 lg:grid-cols-3` inside a `bg-surface-2` sub-card (`rounded-lg border border-line bg-surface-2 p-3 mb-3`); list cards per the card-list treatment; vehicle cards use the converted `subcontractorCardStyle`.
 - `window.scrollTo` in `startEdit` untouched. Delete the `styles` object once unreferenced.
 
 - [x] **Step 2: Verification loop**, then commit:
@@ -760,8 +760,8 @@ The largest commit: Stuart's 9-tab accounts page. No `<form>` elements exist (ev
 
 - [x] **Step 1: Convert the page**
 
-- Shell per token map, keep `max-w-[1500px]`; header: kicker "Customer Accounts", `<h1>` "Invoices & Accounts", subtitle; the three header `Metric` tiles â†’ shared `Stat` (they are exactly value+label): `<Stat label="Outstanding" value={money(outstandingTotal, "GBP")} />`, `<Stat label="Overdue invoices" value={String(overdueInvoices.length)} />`, `<Stat label="Ready to invoice" value={String(readyJobs.length)} />` in `<div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">`. Delete the local `Metric` component once unreferenced.
-- Tab strip â†’ shared `Tabs`:
+- Shell per token map, keep `max-w-[1500px]`; header: kicker "Customer Accounts", `<h1>` "Invoices & Accounts", subtitle; the three header `Metric` tiles → shared `Stat` (they are exactly value+label): `<Stat label="Outstanding" value={money(outstandingTotal, "GBP")} />`, `<Stat label="Overdue invoices" value={String(overdueInvoices.length)} />`, `<Stat label="Ready to invoice" value={String(readyJobs.length)} />` in `<div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">`. Delete the local `Metric` component once unreferenced.
+- Tab strip → shared `Tabs`:
 
 ```tsx
 <div className="mb-4 overflow-x-auto">
@@ -775,17 +775,17 @@ The largest commit: Stuart's 9-tab accounts page. No `<form>` elements exist (ev
 ```
 
 `TABS`, `tab`, `setTab`, and the programmatic `setTab("invoices")` after invoice creation are untouched.
-- Banner â†’ always-mounted `<MessageBanner tone="neutral">{message}</MessageBanner>` (single string, no tone data; queued).
+- Banner → always-mounted `<MessageBanner tone="neutral">{message}</MessageBanner>` (single string, no tone data; queued).
 - Local helper conversions (used across all tabs):
-  - `Field` (label + children wrapper) â†’ `<label className="grid gap-1.5"><span className="text-sm font-medium text-ink-2">{label}</span>{children}</label>`.
-  - Raw selects/inputs inside those Fields â†’ token select/input classes; the textarea keeps `rows` behavior and gains `min-h-24 py-2 resize-y`.
-  - `ActionButton` â†’ renders `<Button type="button" onClick={onClick} disabled={working || disabled}>{working ? "Working..." : label}</Button>` (exact existing expressions).
-  - `Status` â†’ `<Badge tone="neutral"><span className="capitalize">{value.replaceAll("_", " ")}</span></Badge>` (no valueâ†’color mapping exists today; inventing one is a behavior change. This mirrors Stuart finding 8, StatusBadge with no danger branch; add a findings entry for it).
-  - `Info` â†’ token-map Info pair (money/date values get `font-mono` where the call site formats them).
-  - `RecordCards` â†’ `<article className="rounded-lg border border-line bg-surface-2 p-3">` grid; the `<pre>` becomes `<pre className="m-0 whitespace-pre-wrap break-all font-mono text-xs text-ink-2">` (`whitespace-pre-wrap` + `break-all` preserve the load-bearing wrap behavior).
+  - `Field` (label + children wrapper) → `<label className="grid gap-1.5"><span className="text-sm font-medium text-ink-2">{label}</span>{children}</label>`.
+  - Raw selects/inputs inside those Fields → token select/input classes; the textarea keeps `rows` behavior and gains `min-h-24 py-2 resize-y`.
+  - `ActionButton` → renders `<Button type="button" onClick={onClick} disabled={working || disabled}>{working ? "Working..." : label}</Button>` (exact existing expressions).
+  - `Status` → `<Badge tone="neutral"><span className="capitalize">{value.replaceAll("_", " ")}</span></Badge>` (no value→color mapping exists today; inventing one is a behavior change. This mirrors Stuart finding 8, StatusBadge with no danger branch; add a findings entry for it).
+  - `Info` → token-map Info pair (money/date values get `font-mono` where the call site formats them).
+  - `RecordCards` → `<article className="rounded-lg border border-line bg-surface-2 p-3">` grid; the `<pre>` becomes `<pre className="m-0 whitespace-pre-wrap break-all font-mono text-xs text-ink-2">` (`whitespace-pre-wrap` + `break-all` preserve the load-bearing wrap behavior).
 - `ReadyToInvoicePanel`: card + `rowBetween` header (`flex flex-wrap items-center justify-between gap-3`), the "N selected / total" summary line with `font-mono` figures, 2-Field grid, ActionButton, and the one real table per the token-map table treatment (checkbox column header stays empty; Price th/td get `text-right font-mono tabular-nums`). Row checkboxes untouched.
 - `InvoicesPanel` and the accounting tab's cards: `<article className="rounded-lg border border-line bg-surface-2 p-3">`, invoice number `font-mono font-semibold`, `Status` call sites unchanged, Info grid `grid grid-cols-2 gap-2`.
-- Xero card: same structure in a `Card`; Connect/Test â†’ `Button variant="secondary" type="button"` (Connect keeps its `window.location.assign` handler); Disconnect â†’ `Button variant="danger" type="button"` (its `window.confirm` handler untouched); button row `flex flex-wrap gap-2.5 mt-3`.
+- Xero card: same structure in a `Card`; Connect/Test → `Button variant="secondary" type="button"` (Connect keeps its `window.location.assign` handler); Disconnect → `Button variant="danger" type="button"` (its `window.confirm` handler untouched); button row `flex flex-wrap gap-2.5 mt-3`.
 - The 6 form-tab sections (payments, credits, statements, chase, customer-pos, supplier-pos) all follow: section card + `<h2>` + `grid gap-3 sm:grid-cols-2 lg:grid-cols-3` + ActionButton + RecordCards. Every `value`/`onChange`/option expression byte-identical, mojibake included.
 - Delete the `styles` object once unreferenced.
 
