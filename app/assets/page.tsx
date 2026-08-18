@@ -1,7 +1,6 @@
 "use client";
 
 import {
-    CSSProperties,
     FormEvent,
     useCallback,
     useEffect,
@@ -9,6 +8,10 @@ import {
     useState,
 } from "react";
 import { createClient } from "../../lib/supabase/browser";
+import Badge, { type Tone } from "../../components/Badge";
+import Button from "../../components/Button";
+import Field from "../../components/Field";
+import Textarea from "../../components/Textarea";
 
 type AssetType = {
     id: string;
@@ -385,88 +388,82 @@ export default function AssetsPage() {
     }
 
     return (
-        <main style={styles.page}>
-            <div style={styles.shell}>
-                <header style={styles.header}>
-                    <div>
-                        <h1 style={styles.title}>Assets</h1>
-                        <p style={styles.subtitle}>
+        <div className="ds min-h-screen bg-canvas font-sans text-ink">
+            <main className="mx-auto max-w-[1480px] px-6 py-8">
+                <header className="mb-4 flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0">
+                        <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">
+                            Assets
+                        </h1>
+                        <p className="text-sm text-ink-3">
                             Track trailers, containers, pallets, plant,
                             machinery and equipment.
                         </p>
                     </div>
 
-                    <div style={styles.counter}>
+                    <Badge tone="neutral">
                         {assets.length} asset
                         {assets.length === 1 ? "" : "s"}
-                    </div>
+                    </Badge>
                 </header>
 
                 {errorMessage ? (
-                    <div style={styles.error}>{errorMessage}</div>
+                    <div className="mb-4 rounded-lg border border-danger-border bg-danger-tint p-3 text-sm text-danger-strong">
+                        {errorMessage}
+                    </div>
                 ) : null}
 
                 {message ? (
-                    <div style={styles.success}>{message}</div>
+                    <div className="mb-4 rounded-lg border border-success-border bg-success-tint p-3 text-sm text-success-strong">
+                        {message}
+                    </div>
                 ) : null}
 
-                <section style={styles.panel}>
-                    <div style={styles.sectionHeading}>
-                        <div>
-                            <h2 style={styles.sectionTitle}>
-                                {editingAssetId
-                                    ? "Edit Asset"
-                                    : "Add Asset"}
-                            </h2>
+                <section className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm">
+                    <div className="min-w-0">
+                        <h2 className="mb-1 text-md font-semibold text-ink">
+                            {editingAssetId
+                                ? "Edit Asset"
+                                : "Add Asset"}
+                        </h2>
 
-                            <p style={styles.sectionDescription}>
-                                Asset numbers can be a VRM, trailer number,
-                                container number, pallet number, barcode,
-                                serial number or internal reference.
-                            </p>
-                        </div>
+                        <p className="mb-3 text-sm text-ink-3">
+                            Asset numbers can be a VRM, trailer number,
+                            container number, pallet number, barcode,
+                            serial number or internal reference.
+                        </p>
                     </div>
 
                     <form
                         onSubmit={saveAsset}
-                        style={styles.form}
+                        className="grid gap-3 sm:grid-cols-2"
                     >
-                        <label style={styles.field}>
-                            <span style={styles.label}>
-                                Asset Name
-                            </span>
+                        <Field
+                            id="asset-name"
+                            label="Asset Name"
+                            value={name}
+                            onChange={(event) =>
+                                setName(event.target.value)
+                            }
+                            placeholder="e.g. Curtainsider Trailer 12"
+                            required
+                        />
 
-                            <input
-                                value={name}
-                                onChange={(event) =>
-                                    setName(event.target.value)
-                                }
-                                placeholder="e.g. Curtainsider Trailer 12"
-                                style={styles.input}
-                                required
-                            />
-                        </label>
+                        <Field
+                            id="asset-number"
+                            label="Asset Number"
+                            value={assetNumber}
+                            onChange={(event) =>
+                                setAssetNumber(
+                                    event.target.value
+                                )
+                            }
+                            placeholder="e.g. TRL-012"
+                            required
+                        />
 
-                        <label style={styles.field}>
-                            <span style={styles.label}>
-                                Asset Number
-                            </span>
-
-                            <input
-                                value={assetNumber}
-                                onChange={(event) =>
-                                    setAssetNumber(
-                                        event.target.value
-                                    )
-                                }
-                                placeholder="e.g. TRL-012"
-                                style={styles.input}
-                                required
-                            />
-                        </label>
-
-                        <label style={styles.field}>
-                            <span style={styles.label}>
+                        <label className="grid gap-1.5">
+                            <span className="text-sm font-medium text-ink-2">
                                 Identifier Type
                             </span>
 
@@ -477,7 +474,7 @@ export default function AssetsPage() {
                                         event.target.value
                                     )
                                 }
-                                style={styles.input}
+                                className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                             >
                                 {IDENTIFIER_TYPES.map(
                                     ([value, label]) => (
@@ -492,8 +489,8 @@ export default function AssetsPage() {
                             </select>
                         </label>
 
-                        <label style={styles.field}>
-                            <span style={styles.label}>
+                        <label className="grid gap-1.5">
+                            <span className="text-sm font-medium text-ink-2">
                                 Asset Type
                             </span>
 
@@ -504,7 +501,7 @@ export default function AssetsPage() {
                                         event.target.value
                                     )
                                 }
-                                style={styles.input}
+                                className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                                 required
                             >
                                 <option value="">
@@ -522,40 +519,30 @@ export default function AssetsPage() {
                             </select>
                         </label>
 
-                        <label style={styles.field}>
-                            <span style={styles.label}>
-                                Serial Number
-                            </span>
+                        <Field
+                            id="asset-serial-number"
+                            label="Serial Number"
+                            value={serialNumber}
+                            onChange={(event) =>
+                                setSerialNumber(
+                                    event.target.value
+                                )
+                            }
+                            placeholder="Optional serial number"
+                        />
 
-                            <input
-                                value={serialNumber}
-                                onChange={(event) =>
-                                    setSerialNumber(
-                                        event.target.value
-                                    )
-                                }
-                                placeholder="Optional serial number"
-                                style={styles.input}
-                            />
-                        </label>
+                        <Field
+                            id="asset-barcode"
+                            label="Barcode"
+                            value={barcode}
+                            onChange={(event) =>
+                                setBarcode(event.target.value)
+                            }
+                            placeholder="Scan or enter barcode"
+                        />
 
-                        <label style={styles.field}>
-                            <span style={styles.label}>
-                                Barcode
-                            </span>
-
-                            <input
-                                value={barcode}
-                                onChange={(event) =>
-                                    setBarcode(event.target.value)
-                                }
-                                placeholder="Scan or enter barcode"
-                                style={styles.input}
-                            />
-                        </label>
-
-                        <label style={styles.field}>
-                            <span style={styles.label}>
+                        <label className="grid gap-1.5">
+                            <span className="text-sm font-medium text-ink-2">
                                 Status
                             </span>
 
@@ -564,7 +551,7 @@ export default function AssetsPage() {
                                 onChange={(event) =>
                                     setStatus(event.target.value)
                                 }
-                                style={styles.input}
+                                className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                             >
                                 <option value="active">
                                     Active
@@ -578,7 +565,7 @@ export default function AssetsPage() {
                             </select>
                         </label>
 
-                        <label style={styles.checkboxField}>
+                        <label className="flex items-start gap-2.5 rounded-lg border border-line bg-surface-2 p-3">
                             <input
                                 type="checkbox"
                                 checked={mechanical}
@@ -587,123 +574,102 @@ export default function AssetsPage() {
                                         event.target.checked
                                     )
                                 }
+                                className="mt-1"
                             />
 
-                            <span>
-                                <strong>
+                            <span className="min-w-0 text-sm text-ink">
+                                <strong className="font-semibold">
                                     Mechanical Asset
                                 </strong>
-                                <small style={styles.helper}>
+                                <small className="mt-0.5 block text-xs font-normal leading-relaxed text-ink-3">
                                     Mechanical assets can be linked to
                                     maintenance records.
                                 </small>
                             </span>
                         </label>
 
-                        <label
-                            style={{
-                                ...styles.field,
-                                gridColumn: "1 / -1",
-                            }}
-                        >
-                            <span style={styles.label}>
-                                Notes
-                            </span>
+                        <Textarea
+                            id="asset-notes"
+                            label="Notes"
+                            wrapperClassName="sm:col-span-2"
+                            value={notes}
+                            onChange={(event) =>
+                                setNotes(event.target.value)
+                            }
+                            placeholder="Asset notes..."
+                            rows={4}
+                            className="resize-y"
+                        />
 
-                            <textarea
-                                value={notes}
-                                onChange={(event) =>
-                                    setNotes(event.target.value)
-                                }
-                                placeholder="Asset notes..."
-                                rows={4}
-                                style={{
-                                    ...styles.input,
-                                    resize: "vertical",
-                                }}
-                            />
-                        </label>
-
-                        <div style={styles.actions}>
-                            <button
+                        <div className="flex flex-wrap gap-2.5 sm:col-span-2">
+                            <Button
                                 type="submit"
                                 disabled={saving}
-                                style={{
-                                    ...styles.primaryButton,
-                                    opacity: saving ? 0.65 : 1,
-                                }}
                             >
                                 {saving
                                     ? "Saving..."
                                     : editingAssetId
                                       ? "Save Changes"
                                       : "Add Asset"}
-                            </button>
+                            </Button>
 
                             {editingAssetId ? (
-                                <button
-                                    type="button"
+                                <Button
+                                    variant="secondary"
                                     disabled={saving}
                                     onClick={() => {
                                         resetForm();
                                         clearMessages();
                                     }}
-                                    style={styles.secondaryButton}
                                 >
                                     Cancel
-                                </button>
+                                </Button>
                             ) : null}
                         </div>
                     </form>
                 </section>
 
-                <section style={styles.panel}>
-                    <div style={styles.sectionHeading}>
-                        <div>
-                            <h2 style={styles.sectionTitle}>
-                                Asset Register
-                            </h2>
+                <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+                    <div className="min-w-0">
+                        <h2 className="mb-1 text-md font-semibold text-ink">
+                            Asset Register
+                        </h2>
 
-                            <p style={styles.sectionDescription}>
-                                {assets.length} registered asset
-                                {assets.length === 1 ? "" : "s"}.
-                            </p>
-                        </div>
+                        <p className="mb-3 text-sm text-ink-3">
+                            {assets.length} registered asset
+                            {assets.length === 1 ? "" : "s"}.
+                        </p>
                     </div>
 
                     {loading ? (
-                        <div style={styles.empty}>
+                        <div className="rounded-lg bg-surface-2 p-8 text-center text-sm text-ink-3">
                             Loading assets...
                         </div>
                     ) : assets.length === 0 ? (
-                        <div style={styles.empty}>
+                        <div className="rounded-lg bg-surface-2 p-8 text-center text-sm text-ink-3">
                             No assets have been added yet.
                         </div>
                     ) : (
-                        <div style={styles.grid}>
+                        <div className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-4">
                             {assets.map((asset) => (
                                 <article
                                     key={asset.id}
-                                    style={styles.card}
+                                    className="grid content-start gap-4 rounded-lg border border-line bg-surface-2 p-4"
                                 >
-                                    <div style={styles.cardHeader}>
-                                        <div>
-                                            <h3 style={styles.cardTitle}>
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <h3 className="break-words text-md font-semibold text-ink">
                                                 {asset.name}
                                             </h3>
 
-                                            <div
-                                                style={
-                                                    styles.assetNumber
-                                                }
-                                            >
+                                            <div className="mt-1 break-words text-sm font-semibold text-primary-deep">
                                                 {asset.asset_number ||
                                                     "No asset number"}
                                             </div>
                                         </div>
 
-                                        <span
-                                            style={statusBadgeStyle(
+                                        <Badge
+                                            tone={statusTone(
                                                 asset.status
                                             )}
                                         >
@@ -711,10 +677,10 @@ export default function AssetsPage() {
                                                 asset.status ||
                                                     "active"
                                             )}
-                                        </span>
+                                        </Badge>
                                     </div>
 
-                                    <div style={styles.details}>
+                                    <div className="grid grid-cols-2 gap-3">
                                         <AssetDetail
                                             label="Type"
                                             value={
@@ -764,33 +730,35 @@ export default function AssetsPage() {
                                     </div>
 
                                     {asset.notes ? (
-                                        <div style={styles.notes}>
+                                        <div className="break-words rounded-md border border-line bg-surface p-3 text-sm leading-relaxed text-ink-2">
                                             {asset.notes}
                                         </div>
                                     ) : null}
 
                                     {asset.mechanical ? (
-                                        <div style={styles.mechanicalTag}>
-                                            Maintenance enabled
+                                        <div>
+                                            <Badge tone="info">
+                                                Maintenance enabled
+                                            </Badge>
                                         </div>
                                     ) : null}
 
-                                    <button
-                                        type="button"
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
                                         onClick={() =>
                                             beginEdit(asset)
                                         }
-                                        style={styles.secondaryButton}
                                     >
                                         Edit Asset
-                                    </button>
+                                    </Button>
                                 </article>
                             ))}
                         </div>
                     )}
                 </section>
-            </div>
-        </main>
+            </main>
+        </div>
     );
 }
 
@@ -802,12 +770,12 @@ function AssetDetail({
     value: string;
 }) {
     return (
-        <div>
-            <span style={styles.smallLabel}>
+        <div className="min-w-0">
+            <span className="mb-0.5 block text-kicker uppercase text-ink-3">
                 {label}
             </span>
 
-            <strong style={styles.detailValue}>
+            <strong className="block break-words text-sm font-semibold text-ink-2">
                 {value}
             </strong>
         </div>
@@ -822,280 +790,14 @@ function formatLabel(value: string) {
         );
 }
 
-function statusBadgeStyle(
-    status: string | null
-): CSSProperties {
-    const base: CSSProperties = {
-        display: "inline-flex",
-        padding: "6px 10px",
-        borderRadius: 999,
-        fontSize: 12,
-        fontWeight: 800,
-        whiteSpace: "nowrap",
-    };
-
+function statusTone(status: string | null): Tone {
     if (status === "inactive") {
-        return {
-            ...base,
-            background: "#fee2e2",
-            color: "#991b1b",
-        };
+        return "danger";
     }
 
     if (status === "maintenance") {
-        return {
-            ...base,
-            background: "#fef3c7",
-            color: "#92400e",
-        };
+        return "warning";
     }
 
-    return {
-        ...base,
-        background: "#dcfce7",
-        color: "#166534",
-    };
+    return "success";
 }
-
-const styles: Record<string, CSSProperties> = {
-    page: {
-        minHeight: "100vh",
-        padding: 30,
-        background:
-            "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)",
-    },
-
-    shell: {
-        maxWidth: 1500,
-        margin: "0 auto",
-        display: "grid",
-        gap: 24,
-    },
-
-    header: {
-        display: "flex",
-        justifyContent: "space-between",
-        gap: 20,
-        alignItems: "flex-start",
-        flexWrap: "wrap",
-        color: "white",
-    },
-
-    title: {
-        margin: 0,
-        fontSize: 34,
-    },
-
-    subtitle: {
-        margin: "7px 0 0",
-        color: "#cbd5e1",
-        lineHeight: 1.5,
-    },
-
-    counter: {
-        padding: "8px 12px",
-        borderRadius: 999,
-        background: "rgba(255,255,255,0.12)",
-        color: "white",
-        fontWeight: 800,
-    },
-
-    panel: {
-        background: "rgba(255,255,255,0.98)",
-        borderRadius: 18,
-        padding: 24,
-        boxShadow: "0 12px 40px rgba(0,0,0,0.22)",
-    },
-
-    sectionHeading: {
-        marginBottom: 20,
-    },
-
-    sectionTitle: {
-        margin: 0,
-        color: "#0f172a",
-        fontSize: 22,
-    },
-
-    sectionDescription: {
-        margin: "6px 0 0",
-        color: "#64748b",
-        lineHeight: 1.5,
-    },
-
-    form: {
-        display: "grid",
-        gridTemplateColumns:
-            "repeat(auto-fit, minmax(220px, 1fr))",
-        gap: 16,
-    },
-
-    field: {
-        display: "grid",
-        gap: 7,
-    },
-
-    checkboxField: {
-        display: "flex",
-        gap: 10,
-        alignItems: "flex-start",
-        padding: 12,
-        border: "1px solid #cbd5e1",
-        borderRadius: 10,
-        background: "#f8fafc",
-    },
-
-    helper: {
-        display: "block",
-        marginTop: 3,
-        color: "#64748b",
-        fontWeight: 400,
-        lineHeight: 1.4,
-    },
-
-    label: {
-        color: "#334155",
-        fontSize: 13,
-        fontWeight: 800,
-    },
-
-    input: {
-        width: "100%",
-        boxSizing: "border-box",
-        border: "1px solid #cbd5e1",
-        borderRadius: 9,
-        padding: "11px 12px",
-        background: "white",
-        color: "#0f172a",
-        fontSize: 14,
-    },
-
-    actions: {
-        gridColumn: "1 / -1",
-        display: "flex",
-        gap: 10,
-        flexWrap: "wrap",
-    },
-
-    primaryButton: {
-        padding: "11px 16px",
-        border: "none",
-        borderRadius: 9,
-        background: "#2563eb",
-        color: "white",
-        fontWeight: 800,
-        cursor: "pointer",
-    },
-
-    secondaryButton: {
-        padding: "9px 13px",
-        border: "1px solid #cbd5e1",
-        borderRadius: 9,
-        background: "white",
-        color: "#0f172a",
-        fontWeight: 800,
-        cursor: "pointer",
-    },
-
-    error: {
-        padding: 14,
-        borderRadius: 10,
-        background: "#fee2e2",
-        color: "#991b1b",
-        fontWeight: 700,
-    },
-
-    success: {
-        padding: 14,
-        borderRadius: 10,
-        background: "#dcfce7",
-        color: "#166534",
-        fontWeight: 700,
-    },
-
-    empty: {
-        padding: 30,
-        textAlign: "center",
-        color: "#64748b",
-        background: "#f8fafc",
-        borderRadius: 12,
-    },
-
-    grid: {
-        display: "grid",
-        gridTemplateColumns:
-            "repeat(auto-fit, minmax(300px, 1fr))",
-        gap: 18,
-    },
-
-    card: {
-        padding: 20,
-        borderRadius: 14,
-        border: "1px solid #e2e8f0",
-        background: "#ffffff",
-        display: "grid",
-        gap: 16,
-    },
-
-    cardHeader: {
-        display: "flex",
-        justifyContent: "space-between",
-        gap: 12,
-        alignItems: "flex-start",
-    },
-
-    cardTitle: {
-        margin: 0,
-        color: "#0f172a",
-        fontSize: 19,
-    },
-
-    assetNumber: {
-        marginTop: 5,
-        color: "#2563eb",
-        fontWeight: 900,
-        fontSize: 15,
-    },
-
-    details: {
-        display: "grid",
-        gridTemplateColumns:
-            "repeat(2, minmax(0, 1fr))",
-        gap: 12,
-    },
-
-    smallLabel: {
-        display: "block",
-        color: "#94a3b8",
-        textTransform: "uppercase",
-        letterSpacing: "0.05em",
-        fontWeight: 800,
-        fontSize: 10,
-        marginBottom: 3,
-    },
-
-    detailValue: {
-        display: "block",
-        color: "#334155",
-        fontSize: 13,
-        overflowWrap: "anywhere",
-    },
-
-    notes: {
-        padding: 12,
-        borderRadius: 9,
-        background: "#f8fafc",
-        color: "#475569",
-        lineHeight: 1.5,
-    },
-
-    mechanicalTag: {
-        width: "fit-content",
-        padding: "6px 9px",
-        borderRadius: 999,
-        background: "#dbeafe",
-        color: "#1d4ed8",
-        fontSize: 12,
-        fontWeight: 800,
-    },
-};
