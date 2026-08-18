@@ -51,3 +51,32 @@ either; add a danger tone when the freeze lifts.
 The plan prescribed `subTone` props on the Pending and Delivered tiles
 without `sub` text, which `Stat` never renders. Fixed in the review
 follow-up commit by adding presentational sub text.
+
+### 10. /assets bypasses the tenant switcher
+`app/assets/page.tsx` never uses TenantGate or useTenant; it resolves
+tenant from a direct `profiles` lookup, so it shows the profile's home
+tenant regardless of the active-tenant selection. Inconsistent with
+/pod. Carried under the freeze; needs the tenant-context treatment.
+
+### 11. `asset_types` queried without a tenant filter
+`app/assets/page.tsx` selects `asset_types` with no `.eq("tenant_id",
+...)`. If that table is tenant-scoped, RLS is the only guard. Verify
+the RLS policy or add the filter when the freeze lifts.
+
+### 12. Unknown asset status renders green
+`app/assets/page.tsx` `statusTone` falls through to `success` for any
+status other than `inactive`/`maintenance`, exactly like Stuart's color
+mapping. If statuses ever arrive from outside this form's three
+options, green is misleading; default should become `neutral`.
+
+### 13. Save/error banners have no live region
+The converted pages' success and error banners (pod, assets, and the
+pattern Tasks 4-6 will repeat) have no `role="status"`/`aria-live`, so
+screen readers announce nothing on save or failure. Stuart's originals
+had none either. One shared banner component would fix every page.
+
+### 14. Select markup is duplicated, not shared
+The raw-select class string now exists at four call sites across /pod
+and /assets and will multiply through Tasks 4-6. Extract a shared
+`components/Select.tsx` (Field-like API) after the freeze, then swap
+the call sites in one pass.

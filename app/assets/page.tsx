@@ -420,7 +420,7 @@ export default function AssetsPage() {
                 ) : null}
 
                 <section className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm">
-                    <div className="min-w-0">
+                    <div>
                         <h2 className="mb-1 text-md font-semibold text-ink">
                             {editingAssetId
                                 ? "Edit Asset"
@@ -630,7 +630,7 @@ export default function AssetsPage() {
                 </section>
 
                 <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
-                    <div className="min-w-0">
+                    <div>
                         <h2 className="mb-1 text-md font-semibold text-ink">
                             Asset Register
                         </h2>
