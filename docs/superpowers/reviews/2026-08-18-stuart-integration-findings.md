@@ -80,3 +80,28 @@ The raw-select class string now exists at four call sites across /pod
 and /assets and will multiply through Tasks 4-6. Extract a shared
 `components/Select.tsx` (Field-like API) after the freeze, then swap
 the call sites in one pass.
+
+### 15. Saving buttons swap labels instead of using Button's loading prop
+/pod, /assets and /maintenance all keep Stuart's `disabled={saving}` plus
+a "Saving..." label swap. Button documents a `loading` prop existing to
+avoid the focus drop and width jump this causes. Family-wide cleanup
+when the freeze lifts.
+
+### 16. Inline edit forms do not manage focus
+/maintenance (and the same pattern elsewhere) reveals its per-record
+edit form without moving focus into it. Same behavior as Stuart's
+original; family-wide a11y pass candidate.
+
+### 17. Maintenance edit-status select offers 3 options, create offers 6
+`app/maintenance/page.tsx`: pre-existing logic, frozen. Verify which
+list is right when the freeze lifts.
+
+### 18. Maintenance record detail cells squeeze at the card floor
+`grid-cols-3` detail cells hit ~82px at the 300px card minimum, wrapping
+kickers onto three lines; /assets uses `grid-cols-2` for the same
+treatment. Stuart-faithful; cosmetic.
+
+### 19. Stat could grow a valueTone prop
+/maintenance hand-builds its Fleet/VOR stat cards because `Stat`
+hard-codes the value color. A `valueTone` prop would let stat cards
+with conditional value color use the shared component.

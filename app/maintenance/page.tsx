@@ -763,20 +763,20 @@ export default function MaintenancePage() {
                             Maintenance Records
                         </h1>
 
-                        <p className="mb-4 text-sm text-ink-3">
+                        <p className="text-sm text-ink-3">
                             Manage maintenance,
                             defects and vehicle
                             off-road status.
                         </p>
                     </div>
 
-                    <div className="flex gap-2.5">
+                    <section aria-label="Fleet summary" className="flex gap-2.5">
                         <div className="min-w-[90px] rounded-lg border border-line bg-surface p-4 shadow-sm">
                             <span className="block text-xs font-medium uppercase text-ink-3">
                                 Fleet
                             </span>
 
-                            <strong className="mt-1 block font-mono text-2xl font-semibold tabular-nums text-ink">
+                            <strong className="mt-1 block font-mono text-2xl font-semibold tabular-nums slashed-zero text-ink">
                                 {vehicles.length}
                             </strong>
                         </div>
@@ -787,7 +787,7 @@ export default function MaintenancePage() {
                             </span>
 
                             <strong
-                                className={`mt-1 block font-mono text-2xl font-semibold tabular-nums ${
+                                className={`mt-1 block font-mono text-2xl font-semibold tabular-nums slashed-zero ${
                                     vorVehicles.length >
                                     0
                                         ? "text-danger-strong"
@@ -799,7 +799,7 @@ export default function MaintenancePage() {
                                 }
                             </strong>
                         </div>
-                    </div>
+                    </section>
                 </header>
 
                 {errorMessage ? (
@@ -821,11 +821,11 @@ export default function MaintenancePage() {
                     >
                         <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
                             <div className="min-w-0">
-                                <h2 className="mb-2 text-md font-semibold text-warning-strong">
+                                <h2 className="mb-1 text-md font-semibold text-warning-strong">
                                     Vehicles Off Road
                                 </h2>
 
-                                <p className="mb-3 text-sm text-ink-3">
+                                <p className="text-sm text-warning-strong">
                                     These vehicles
                                     should not be
                                     allocated to jobs.
@@ -872,7 +872,7 @@ export default function MaintenancePage() {
                                         </div>
 
                                         <div className="grid min-w-0 gap-1 rounded-md bg-danger-tint p-3">
-                                            <span className="block text-kicker uppercase text-ink-3">
+                                            <span className="block text-kicker uppercase text-danger-strong">
                                                 VOR
                                                 reason
                                             </span>
@@ -883,7 +883,7 @@ export default function MaintenancePage() {
                                             </strong>
 
                                             {vehicle.vor_since ? (
-                                                <span className="block text-xs text-ink-3">
+                                                <span className="block text-xs text-danger-strong">
                                                     Since{" "}
                                                     {formatDateTime(
                                                         vehicle.vor_since
@@ -1035,7 +1035,7 @@ export default function MaintenancePage() {
                                 }
                             >
                                 <div className="min-w-0">
-                                    <span className="block text-kicker uppercase text-ink-3">
+                                    <span className="block text-kicker uppercase text-ink-2">
                                         Vehicle
                                         Status
                                     </span>
@@ -1045,7 +1045,7 @@ export default function MaintenancePage() {
                                             "Vehicle"}
                                     </strong>
 
-                                    <span className="mt-0.5 block text-xs text-ink-3">
+                                    <span className="mt-0.5 block text-xs text-ink-2">
                                         {selectedVehicle.vor ||
                                         selectedVehicle.active ===
                                             false
