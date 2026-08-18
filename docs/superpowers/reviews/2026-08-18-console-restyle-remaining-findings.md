@@ -56,4 +56,13 @@ converge on shared Field/Select in the post-freeze pass.
 
 ## Logged during the restyle
 
-(add entries here as they are found)
+### 9. /tachograph heading outline skips levels
+The driver-card h3s precede the page's first h2 ("Recent Activity")
+because the driver grid has no heading of its own. Pre-existing
+structure, reproduced by the restyle. Give the driver grid an h2 when
+the freeze lifts.
+
+### 10. /tachograph and /telematics render silent empty grids
+When the queries return no rows, both pages show an empty grid with no
+empty-state message. Pre-existing; add the standard empty-state line
+when the freeze lifts.

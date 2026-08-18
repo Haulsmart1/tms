@@ -42,11 +42,13 @@ export default function TachographPage() {
         <div className="ds min-h-screen bg-canvas font-sans text-ink">
             <main className="mx-auto max-w-[1480px] px-6 py-8">
 
-                <div className="text-kicker uppercase text-ink-3">Compliance</div>
+                <header className="mb-4">
+                    <div className="text-kicker uppercase text-ink-3">Compliance</div>
 
-                <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">Tachograph</h1>
+                    <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">Tachograph</h1>
 
-                <p className="mb-4 text-sm text-ink-3">EU Drivers Hours &amp; WTD compliance</p>
+                    <p className="m-0 text-sm text-ink-3">EU Drivers Hours & WTD compliance</p>
+                </header>
 
 
                 {loading && <p className="text-sm text-ink-3">Loading...</p>}
