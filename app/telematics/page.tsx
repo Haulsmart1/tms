@@ -31,81 +31,47 @@ export default function TelematicsPage() {
     }, []);
 
 
-    const cardStyle = {
-
-        background: "rgba(255,255,255,0.95)",
-        padding: 20,
-        borderRadius: 14,
-        boxShadow: "0 8px 30px rgba(0,0,0,0.25)"
-
-    };
-
-
     return (
 
-        <main
-            style={{
-                minHeight: "100vh",
-                padding: 30,
-                backgroundImage:
-                    "url('https://images.unsplash.com/photo-1553413077-190dd305871c')",
-                backgroundSize: "cover"
-            }}
-        >
+        <div className="ds min-h-screen bg-canvas font-sans text-ink">
+            <main className="mx-auto max-w-[1480px] px-6 py-8">
 
-            <div
-                style={{
-                    background: "rgba(0,0,0,0.65)",
-                    padding: 30,
-                    borderRadius: 20
-                }}
-            >
+                <div className="text-kicker uppercase text-ink-3">Compliance</div>
 
-                <div style={{ color: "white", marginBottom: 20 }}>
+                <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">Telematics</h1>
 
-                    <h1>Telematics</h1>
-
-                    <p>Vehicle GPS tracking and performance data</p>
-
-                </div>
+                <p className="mb-4 text-sm text-ink-3">Vehicle GPS tracking and performance data</p>
 
 
-                {loading && <p style={{ color: "white" }}>Loading...</p>}
+                {loading && <p className="text-sm text-ink-3">Loading...</p>}
 
 
-                <div
-                    style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))",
-                        gap: 20
-                    }}
-                >
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
 
                     {positions.map(p => (
 
-                        <div key={p.id} style={cardStyle}>
+                        <article key={p.id} className="rounded-lg border border-line bg-surface p-4 shadow-sm">
 
-                            <strong>Vehicle Position</strong>
+                            <strong className="text-sm font-semibold text-ink">Vehicle Position</strong>
 
-                            <p>Latitude: {p.latitude}</p>
+                            <p className="font-mono text-sm text-ink-2">Latitude: {p.latitude}</p>
 
-                            <p>Longitude: {p.longitude}</p>
+                            <p className="font-mono text-sm text-ink-2">Longitude: {p.longitude}</p>
 
-                            <p>Speed: {p.speed} km/h</p>
+                            <p className="font-mono text-sm text-ink-2">Speed: {p.speed} km/h</p>
 
-                            <p>
+                            <p className="font-mono text-sm text-ink-2">
                                 {new Date(p.recorded_at).toLocaleString()}
                             </p>
 
-                        </div>
+                        </article>
 
                     ))}
 
                 </div>
 
-            </div>
-
-        </main>
+            </main>
+        </div>
 
     );
 
