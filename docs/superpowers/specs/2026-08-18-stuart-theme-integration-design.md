@@ -46,7 +46,7 @@ Per page:
 ### 4. Verification
 
 - After every page commit: `npm run build` and the existing unit test suite.
-- New layout regression spec for /pod modeled on `tests/tracking-layout.spec.mjs`.
+- Layout regression coverage for /pod: `tests/pod-layout.spec.mjs` already exists (found during planning). Its measurement logic stays; its page anchors are updated to the restyled markup, since the queue table it navigates by is replaced.
 - Before merge to main: full build, tests, and layout specs.
 - Ethan's signed-in manual pass happens after merge and joins the existing sign-off queue (tracking console, POD redesign, dark theme).
 
