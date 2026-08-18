@@ -1,10 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties, FormEvent } from "react";
+import type { FormEvent } from "react";
 import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
+import Badge from "../../components/Badge";
+import Button from "../../components/Button";
+import Card from "../../components/Card";
+import MessageBanner from "../../components/MessageBanner";
+import { cn } from "../../lib/cn";
 
 type Vehicle = {
   id: string;
@@ -46,41 +51,11 @@ type ComplianceResult = {
   days: number | null;
 };
 
-const inputStyle: CSSProperties = {
-  padding: "12px 14px",
-  borderRadius: 10,
-  border: "1px solid #d1d5db",
-  background: "white",
-  minWidth: 160,
-};
+const inputClasses =
+  "h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3";
 
-const buttonStyle: CSSProperties = {
-  padding: "10px 14px",
-  borderRadius: 10,
-  border: "none",
-  background: "#111827",
-  color: "white",
-  fontWeight: 600,
-  cursor: "pointer",
-};
-
-const secondaryButtonStyle: CSSProperties = {
-  padding: "10px 14px",
-  borderRadius: 10,
-  border: "1px solid #d1d5db",
-  background: "white",
-  cursor: "pointer",
-};
-
-const deleteButtonStyle: CSSProperties = {
-  padding: "10px 14px",
-  borderRadius: 10,
-  border: "none",
-  background: "#dc2626",
-  color: "white",
-  fontWeight: 600,
-  cursor: "pointer",
-};
+const selectClasses =
+  "h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink";
 
 const EMPTY_FORM = {
   registration: "",
@@ -527,98 +502,46 @@ export default function VehiclesPage() {
 
   return (
     <TenantGate>
-      <main
-        style={{
-          minHeight: "100vh",
-          padding: 30,
-          backgroundImage:
-            "url('https://images.unsplash.com/photo-1519003722824-194d4455a60c')",
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-        }}
-      >
-        <div
-          style={{
-            background: "rgba(0,0,0,0.62)",
-            padding: 30,
-            borderRadius: 20,
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "flex-start",
-              gap: 16,
-              flexWrap: "wrap",
-            }}
-          >
+      <div className="ds min-h-screen bg-canvas font-sans text-ink">
+        <main className="mx-auto max-w-[1480px] px-6 py-8">
+          <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h1 style={{ color: "white", marginTop: 0, marginBottom: 6 }}>
+              <div className="text-kicker uppercase text-ink-3">Fleet</div>
+              <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">
                 Vehicles
               </h1>
-              <p style={{ color: "#e5e7eb", marginTop: 0 }}>
+              <p className="m-0 text-sm text-ink-3">
                 Fleet, MOT, tax and insurance compliance.
               </p>
             </div>
 
             <ComplianceLegend />
-          </div>
+          </header>
 
           {isAdmin ? (
-            <section
-              style={{
-                background: "white",
-                padding: 20,
-                borderRadius: 14,
-                marginBottom: 20,
-                display: "grid",
-                gap: 16,
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
-                  gap: 12,
-                  flexWrap: "wrap",
-                }}
-              >
+            <section className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 style={{ margin: 0 }}>Fleet Insurance</h2>
-                  <p
-                    style={{
-                      margin: "6px 0 0",
-                      color: "#64748b",
-                      fontSize: 13,
-                    }}
-                  >
+                  <h2 className="m-0 text-md font-semibold text-ink">Fleet Insurance</h2>
+                  <p className="m-0 mt-1 text-sm text-ink-3">
                     Manage the tenant fleet policy here. Vehicles using Fleet
                     Policy automatically inherit its insurer and expiry date.
                   </p>
                 </div>
 
                 {editingFleetPolicyId ? (
-                  <button
+                  <Button
+                    variant="secondary"
                     type="button"
-                    style={secondaryButtonStyle}
                     onClick={resetFleetPolicyForm}
                   >
                     Cancel Policy Edit
-                  </button>
+                  </Button>
                 ) : null}
               </div>
 
               {fleetPolicies.length > 0 ? (
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      "repeat(auto-fit, minmax(280px, 1fr))",
-                    gap: 10,
-                  }}
-                >
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {fleetPolicies.map((policy) => {
                     const policyCompliance = getCompliance(policy.expiry_date);
                     const linkedCount = vehicles.filter(
@@ -627,28 +550,16 @@ export default function VehiclesPage() {
                     ).length;
 
                     return (
-                      <div
+                      <article
                         key={policy.id}
-                        style={{
-                          border: "1px solid #e2e8f0",
-                          borderRadius: 12,
-                          padding: 14,
-                          background: "#f8fafc",
-                        }}
+                        className="rounded-lg border border-line bg-surface-2 p-3"
                       >
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "flex-start",
-                            gap: 10,
-                          }}
-                        >
+                        <div className="flex flex-wrap items-start justify-between gap-2">
                           <div>
-                            <strong style={{ display: "block", fontSize: 16 }}>
+                            <strong className="block text-ink">
                               {policy.provider}
                             </strong>
-                            <span style={{ color: "#64748b", fontSize: 12 }}>
+                            <span className="font-mono text-sm text-ink-2">
                               {policy.policy_number}
                             </span>
                           </div>
@@ -656,92 +567,71 @@ export default function VehiclesPage() {
                           <StatusBadge result={policyCompliance} small />
                         </div>
 
-                        <div
-                          style={{
-                            display: "grid",
-                            gap: 4,
-                            marginTop: 12,
-                            fontSize: 13,
-                          }}
-                        >
-                          <span>
-                            Start:{" "}
-                            <strong>
+                        <div className="my-3 grid gap-2">
+                          <div className="text-sm">
+                            <span className="text-kicker uppercase text-ink-3">Start</span>{" "}
+                            <strong className="block font-mono text-ink">
                               {policy.start_date
                                 ? formatDate(policy.start_date)
                                 : "Not set"}
                             </strong>
-                          </span>
-                          <span>
-                            Expiry:{" "}
-                            <strong>{formatDate(policy.expiry_date)}</strong>
-                          </span>
-                          <span>
-                            Auto renew:{" "}
-                            <strong>{policy.auto_renew ? "Yes" : "No"}</strong>
-                          </span>
-                          <span>
-                            Renewal warning:{" "}
-                            <strong>
+                          </div>
+                          <div className="text-sm">
+                            <span className="text-kicker uppercase text-ink-3">Expiry</span>{" "}
+                            <strong className="block font-mono text-ink">
+                              {formatDate(policy.expiry_date)}
+                            </strong>
+                          </div>
+                          <div className="text-sm">
+                            <span className="text-kicker uppercase text-ink-3">Auto renew</span>{" "}
+                            <strong className="block text-ink">
+                              {policy.auto_renew ? "Yes" : "No"}
+                            </strong>
+                          </div>
+                          <div className="text-sm">
+                            <span className="text-kicker uppercase text-ink-3">Renewal warning</span>{" "}
+                            <strong className="block font-mono text-ink">
                               {policy.renewal_notice_days} days
                             </strong>
-                          </span>
-                          <span>
-                            Vehicles covered: <strong>{linkedCount}</strong>
-                          </span>
+                          </div>
+                          <div className="text-sm">
+                            <span className="text-kicker uppercase text-ink-3">Vehicles covered</span>{" "}
+                            <strong className="block font-mono text-ink">{linkedCount}</strong>
+                          </div>
                         </div>
 
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: 8,
-                            flexWrap: "wrap",
-                            marginTop: 12,
-                          }}
-                        >
-                          <button
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            variant="secondary"
+                            size="sm"
                             type="button"
-                            style={secondaryButtonStyle}
                             onClick={() => startEditFleetPolicy(policy)}
                           >
                             Edit Policy
-                          </button>
+                          </Button>
 
-                          <button
+                          <Button
+                            variant="danger"
+                            size="sm"
                             type="button"
-                            style={deleteButtonStyle}
                             onClick={() => void deactivateFleetPolicy(policy)}
                           >
                             Deactivate
-                          </button>
+                          </Button>
                         </div>
-                      </div>
+                      </article>
                     );
                   })}
                 </div>
               ) : (
-                <div
-                  style={{
-                    padding: 14,
-                    borderRadius: 10,
-                    background: "#fffbeb",
-                    border: "1px solid #fcd34d",
-                    color: "#92400e",
-                    fontWeight: 700,
-                  }}
-                >
+                <div className="rounded-lg border border-warning-border bg-warning-tint p-3 text-sm text-warning-strong">
                   No active fleet insurance policy is configured yet.
                 </div>
               )}
 
               <form
                 onSubmit={saveFleetPolicy}
-                style={{
-                  display: "grid",
-                  gap: 12,
-                  paddingTop: 14,
-                  borderTop: "1px solid #e2e8f0",
-                }}
+                className="mt-3 grid gap-3 border-t border-line pt-3"
               >
                 <SectionTitle>
                   {editingFleetPolicyId
@@ -749,11 +639,11 @@ export default function VehiclesPage() {
                     : "Add Fleet Policy"}
                 </SectionTitle>
 
-                <div style={formGridStyle}>
-                  <label style={fieldStyle}>
-                    <span style={labelStyle}>Insurance Provider</span>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <label className="grid gap-1.5">
+                    <span className="text-sm font-medium text-ink-2">Insurance Provider</span>
                     <input
-                      style={inputStyle}
+                      className={inputClasses}
                       placeholder="e.g. Aviva"
                       value={fleetPolicyForm.provider}
                       onChange={(event) =>
@@ -765,10 +655,10 @@ export default function VehiclesPage() {
                     />
                   </label>
 
-                  <label style={fieldStyle}>
-                    <span style={labelStyle}>Policy Number</span>
+                  <label className="grid gap-1.5">
+                    <span className="text-sm font-medium text-ink-2">Policy Number</span>
                     <input
-                      style={inputStyle}
+                      className={inputClasses}
                       placeholder="Policy number"
                       value={fleetPolicyForm.policy_number}
                       onChange={(event) =>
@@ -802,13 +692,13 @@ export default function VehiclesPage() {
                     }
                   />
 
-                  <label style={fieldStyle}>
-                    <span style={labelStyle}>Renewal Warning (days)</span>
+                  <label className="grid gap-1.5">
+                    <span className="text-sm font-medium text-ink-2">Renewal Warning (days)</span>
                     <input
                       type="number"
                       min={0}
                       max={365}
-                      style={inputStyle}
+                      className={inputClasses}
                       value={fleetPolicyForm.renewal_notice_days}
                       onChange={(event) =>
                         setFleetPolicyForm({
@@ -819,20 +709,9 @@ export default function VehiclesPage() {
                     />
                   </label>
 
-                  <label style={fieldStyle}>
-                    <span style={labelStyle}>Auto Renew</span>
-                    <span
-                      style={{
-                        minHeight: 44,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        padding: "0 12px",
-                        border: "1px solid #d1d5db",
-                        borderRadius: 10,
-                        background: "white",
-                      }}
-                    >
+                  <label className="grid gap-1.5">
+                    <span className="text-sm font-medium text-ink-2">Auto Renew</span>
+                    <span className="flex min-h-10 items-center gap-2 rounded-md border border-ink-3 bg-surface px-3 text-sm text-ink-2">
                       <input
                         type="checkbox"
                         checked={fleetPolicyForm.auto_renew}
@@ -848,16 +727,11 @@ export default function VehiclesPage() {
                   </label>
                 </div>
 
-                <label style={fieldStyle}>
-                  <span style={labelStyle}>Policy Notes</span>
+                <label className="grid gap-1.5">
+                  <span className="text-sm font-medium text-ink-2">Policy Notes</span>
                   <textarea
                     rows={3}
-                    style={{
-                      ...inputStyle,
-                      width: "100%",
-                      boxSizing: "border-box",
-                      resize: "vertical",
-                    }}
+                    className="min-h-24 w-full min-w-0 resize-y rounded-md border border-ink-3 bg-surface px-3 py-2 text-base text-ink placeholder:text-ink-3"
                     placeholder="Fleet policy notes"
                     value={fleetPolicyForm.notes}
                     onChange={(event) =>
@@ -869,27 +743,23 @@ export default function VehiclesPage() {
                   />
                 </label>
 
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    type="submit"
-                    style={buttonStyle}
-                    disabled={fleetPolicySaving}
-                  >
+                <div className="flex flex-wrap gap-2">
+                  <Button type="submit" disabled={fleetPolicySaving}>
                     {fleetPolicySaving
                       ? "Saving Policy..."
                       : editingFleetPolicyId
                         ? "Update Fleet Policy"
                         : "Add Fleet Policy"}
-                  </button>
+                  </Button>
 
                   {editingFleetPolicyId ? (
-                    <button
+                    <Button
+                      variant="secondary"
                       type="button"
-                      style={secondaryButtonStyle}
                       onClick={resetFleetPolicyForm}
                     >
                       Cancel
-                    </button>
+                    </Button>
                   ) : null}
                 </div>
               </form>
@@ -899,24 +769,17 @@ export default function VehiclesPage() {
           {isAdmin ? (
             <form
               onSubmit={saveVehicle}
-              style={{
-                background: "white",
-                padding: 20,
-                borderRadius: 14,
-                marginBottom: 20,
-                display: "grid",
-                gap: 16,
-              }}
+              className="mb-4 grid gap-3 rounded-lg border border-line bg-surface p-4 shadow-sm"
             >
-              <h2 style={{ margin: 0 }}>
+              <h2 className="m-0 text-md font-semibold text-ink">
                 {editingId ? "Edit Vehicle" : "Add Vehicle"}
               </h2>
 
               <SectionTitle>Vehicle Details</SectionTitle>
 
-              <div style={formGridStyle}>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <input
-                  style={inputStyle}
+                  className={inputClasses}
                   placeholder="Registration"
                   value={form.registration}
                   onChange={(event) =>
@@ -925,7 +788,7 @@ export default function VehiclesPage() {
                 />
 
                 <input
-                  style={inputStyle}
+                  className={inputClasses}
                   placeholder="Vehicle type"
                   value={form.vehicle_type}
                   onChange={(event) =>
@@ -934,7 +797,7 @@ export default function VehiclesPage() {
                 />
 
                 <input
-                  style={inputStyle}
+                  className={inputClasses}
                   placeholder="Make"
                   value={form.make}
                   onChange={(event) =>
@@ -943,7 +806,7 @@ export default function VehiclesPage() {
                 />
 
                 <input
-                  style={inputStyle}
+                  className={inputClasses}
                   placeholder="Model"
                   value={form.model}
                   onChange={(event) =>
@@ -954,7 +817,7 @@ export default function VehiclesPage() {
 
               <SectionTitle>MOT & Tax</SectionTitle>
 
-              <div style={formGridStyle}>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <DateField
                   label="MOT Expiry"
                   value={form.mot_expiry}
@@ -970,11 +833,11 @@ export default function VehiclesPage() {
 
               <SectionTitle>Insurance</SectionTitle>
 
-              <div style={formGridStyle}>
-                <label style={fieldStyle}>
-                  <span style={labelStyle}>Insurance Type</span>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <label className="grid gap-1.5">
+                  <span className="text-sm font-medium text-ink-2">Insurance Type</span>
                   <select
-                    style={inputStyle}
+                    className={selectClasses}
                     value={form.insurance_type}
                     onChange={(event) =>
                       setForm({
@@ -991,10 +854,10 @@ export default function VehiclesPage() {
                 </label>
 
                 {form.insurance_type === "fleet" ? (
-                  <label style={fieldStyle}>
-                    <span style={labelStyle}>Fleet Insurance Policy</span>
+                  <label className="grid gap-1.5">
+                    <span className="text-sm font-medium text-ink-2">Fleet Insurance Policy</span>
                     <select
-                      style={inputStyle}
+                      className={selectClasses}
                       value={form.fleet_insurance_policy_id}
                       onChange={(event) =>
                         setForm({
@@ -1016,7 +879,7 @@ export default function VehiclesPage() {
                 ) : (
                   <>
                     <input
-                      style={inputStyle}
+                      className={inputClasses}
                       placeholder="Insurance provider"
                       value={form.insurance_provider}
                       onChange={(event) =>
@@ -1028,7 +891,7 @@ export default function VehiclesPage() {
                     />
 
                     <input
-                      style={inputStyle}
+                      className={inputClasses}
                       placeholder="Policy number"
                       value={form.insurance_policy_number}
                       onChange={(event) =>
@@ -1058,50 +921,29 @@ export default function VehiclesPage() {
                 )}
               </div>
 
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button type="submit" style={buttonStyle} disabled={saving}>
+              <div className="flex flex-wrap gap-2">
+                <Button type="submit" disabled={saving}>
                   {saving ? "Saving..." : editingId ? "Update" : "Add"}
-                </button>
+                </Button>
 
                 {editingId ? (
-                  <button
+                  <Button
+                    variant="secondary"
                     type="button"
-                    style={secondaryButtonStyle}
                     onClick={resetForm}
                   >
                     Cancel
-                  </button>
+                  </Button>
                 ) : null}
               </div>
             </form>
           ) : null}
 
-          {message ? (
-            <div
-              style={{
-                background: "white",
-                padding: 12,
-                borderRadius: 10,
-                marginBottom: 20,
-              }}
-            >
-              {message}
-            </div>
-          ) : null}
+          <MessageBanner tone="neutral">{message}</MessageBanner>
 
-          {loading ? (
-            <div
-              style={{
-                background: "white",
-                padding: 20,
-                borderRadius: 14,
-              }}
-            >
-              Loading vehicles...
-            </div>
-          ) : null}
+          {loading ? <Card className="mb-4">Loading vehicles...</Card> : null}
 
-          <div style={{ display: "grid", gap: 16 }}>
+          <div className="grid gap-4">
             {vehicles.map((vehicle) => {
               const cardCompliance = getVehicleCardCompliance(vehicle);
               const mot = getCompliance(vehicle.mot_expiry);
@@ -1113,26 +955,18 @@ export default function VehiclesPage() {
               return (
                 <div
                   key={vehicle.id}
-                  style={{
-                    ...vehicleCardStyle(cardCompliance.level),
-                    opacity: vehicle.active ? 1 : 0.7,
-                  }}
+                  className={cn(
+                    vehicleCardStyle(cardCompliance.level),
+                    !vehicle.active && "opacity-70"
+                  )}
                 >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "flex-start",
-                      gap: 16,
-                      flexWrap: "wrap",
-                    }}
-                  >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <h3 style={{ marginTop: 0, marginBottom: 8, fontSize: 24 }}>
+                      <h3 className="m-0 font-mono text-md font-semibold text-ink">
                         {vehicle.registration}
                       </h3>
 
-                      <div style={{ opacity: 0.7 }}>
+                      <div className="text-sm text-ink-3">
                         {vehicle.vehicle_type || "No type"} •{" "}
                         {vehicle.make || "-"} {vehicle.model || ""}
                       </div>
@@ -1141,7 +975,7 @@ export default function VehiclesPage() {
                     <StatusBadge result={cardCompliance} />
                   </div>
 
-                  <div style={complianceGridStyle}>
+                  <div className="my-3 grid gap-2 sm:grid-cols-3">
                     <ComplianceItem
                       label="MOT"
                       expiry={vehicle.mot_expiry}
@@ -1170,71 +1004,57 @@ export default function VehiclesPage() {
                     />
                   </div>
 
-                  <div style={{ marginTop: 10, fontSize: 14, opacity: 0.8 }}>
+                  <div className="text-sm text-ink-2">
                     Status: {vehicle.active ? "Active" : "Inactive"}
                   </div>
 
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 8,
-                      marginTop: 14,
-                      flexWrap: "wrap",
-                    }}
-                  >
+                  <div className="mt-3 flex flex-wrap gap-2">
                     {isAdmin ? (
                       <>
-                        <button
+                        <Button
+                          variant="secondary"
+                          size="sm"
                           type="button"
-                          style={secondaryButtonStyle}
                           onClick={() => startEdit(vehicle)}
                         >
                           Edit
-                        </button>
+                        </Button>
 
-                        <button
+                        <Button
+                          variant="danger"
+                          size="sm"
                           type="button"
-                          style={deleteButtonStyle}
                           onClick={() => void deleteVehicle(vehicle.id)}
                         >
                           Delete
-                        </button>
+                        </Button>
                       </>
                     ) : null}
 
-                    <button
+                    <Button
+                      variant="secondary"
+                      size="sm"
                       type="button"
-                      style={secondaryButtonStyle}
                       onClick={() =>
                         void toggleVehicle(vehicle.id, vehicle.active)
                       }
                     >
                       {vehicle.active ? "Deactivate" : "Activate"}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               );
             })}
           </div>
-        </div>
-      </main>
+        </main>
+      </div>
     </TenantGate>
   );
 }
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      style={{
-        fontSize: 13,
-        fontWeight: 800,
-        color: "#475569",
-        textTransform: "uppercase",
-        letterSpacing: "0.05em",
-      }}
-    >
-      {children}
-    </div>
+    <div className="mb-2 text-kicker uppercase text-ink-3">{children}</div>
   );
 }
 
@@ -1248,11 +1068,11 @@ function DateField({
   onChange: (value: string) => void;
 }) {
   return (
-    <label style={fieldStyle}>
-      <span style={labelStyle}>{label}</span>
+    <label className="grid gap-1.5">
+      <span className="text-sm font-medium text-ink-2">{label}</span>
       <input
         type="date"
-        style={inputStyle}
+        className={inputClasses}
         value={value}
         onChange={(event) => onChange(event.target.value)}
       />
@@ -1262,19 +1082,10 @@ function DateField({
 
 function ComplianceLegend() {
   return (
-    <div
-      style={{
-        display: "flex",
-        gap: 8,
-        flexWrap: "wrap",
-        background: "rgba(255,255,255,0.95)",
-        borderRadius: 12,
-        padding: 10,
-      }}
-    >
-      <span style={legendStyle("#f8fafc", "#334155")}>31+ days</span>
-      <span style={legendStyle("#fef3c7", "#92400e")}>30–8 days</span>
-      <span style={legendStyle("#fee2e2", "#991b1b")}>7 days / expired</span>
+    <div className="flex flex-wrap gap-2">
+      <Badge tone="success">31+ days</Badge>
+      <Badge tone="warning">30–8 days</Badge>
+      <Badge tone="danger">7 days / expired</Badge>
     </div>
   );
 }
@@ -1291,35 +1102,16 @@ function ComplianceItem({
   extra?: string;
 }) {
   return (
-    <div
-      style={{
-        border: "1px solid rgba(15,23,42,0.12)",
-        borderRadius: 12,
-        padding: 12,
-        background: "rgba(255,255,255,0.72)",
-      }}
-    >
-      <div
-        style={{
-          fontSize: 11,
-          fontWeight: 900,
-          color: "#64748b",
-          textTransform: "uppercase",
-          marginBottom: 5,
-        }}
-      >
-        {label}
+    <div className="rounded-md border border-line bg-surface p-2.5">
+      <span className="block text-kicker uppercase text-ink-3">{label}</span>
+
+      <div className="font-mono text-sm font-semibold text-ink">
+        {expiry ? formatDate(expiry) : "Not set"}
       </div>
 
-      <div style={{ fontWeight: 800 }}>{expiry ? formatDate(expiry) : "Not set"}</div>
+      {extra ? <div className="text-xs text-ink-3">{extra}</div> : null}
 
-      {extra ? (
-        <div style={{ fontSize: 12, color: "#64748b", marginTop: 3 }}>
-          {extra}
-        </div>
-      ) : null}
-
-      <div style={{ marginTop: 8 }}>
+      <div className="mt-2">
         <StatusBadge result={result} small />
       </div>
     </div>
@@ -1328,35 +1120,23 @@ function ComplianceItem({
 
 function StatusBadge({
   result,
-  small = false,
 }: {
   result: ComplianceResult;
+  /** Accepted for call-site compatibility; Badge has a single size. */
   small?: boolean;
 }) {
-  const palette =
-    result.level === "red"
-      ? { background: "#fee2e2", color: "#991b1b", border: "#fca5a5" }
-      : result.level === "amber"
-        ? { background: "#fef3c7", color: "#92400e", border: "#fcd34d" }
-        : { background: "#dcfce7", color: "#166534", border: "#86efac" };
-
   return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 5,
-        padding: small ? "4px 7px" : "7px 10px",
-        borderRadius: 999,
-        border: `1px solid ${palette.border}`,
-        background: palette.background,
-        color: palette.color,
-        fontWeight: 900,
-        fontSize: small ? 11 : 12,
-      }}
+    <Badge
+      tone={
+        result.level === "red"
+          ? "danger"
+          : result.level === "amber"
+            ? "warning"
+            : "success"
+      }
     >
       {result.label}
-    </span>
+    </Badge>
   );
 }
 
@@ -1433,66 +1213,14 @@ function formatDate(value: string) {
   return date.toLocaleDateString("en-GB");
 }
 
-function vehicleCardStyle(level: ComplianceLevel): CSSProperties {
+function vehicleCardStyle(level: ComplianceLevel): string {
   if (level === "red") {
-    return {
-      background: "#fff1f2",
-      border: "3px solid #dc2626",
-      boxShadow: "0 10px 28px rgba(220,38,38,0.18)",
-      padding: 20,
-      borderRadius: 14,
-    };
+    return "rounded-lg border-2 border-danger bg-danger-tint p-4";
   }
 
   if (level === "amber") {
-    return {
-      background: "#fffbeb",
-      border: "3px solid #f59e0b",
-      boxShadow: "0 10px 28px rgba(245,158,11,0.15)",
-      padding: 20,
-      borderRadius: 14,
-    };
+    return "rounded-lg border-2 border-warning bg-warning-tint p-4";
   }
 
-  return {
-    background: "white",
-    border: "1px solid #e5e7eb",
-    padding: 20,
-    borderRadius: 14,
-  };
+  return "rounded-lg border border-line bg-surface p-4 shadow-sm";
 }
-
-function legendStyle(background: string, color: string): CSSProperties {
-  return {
-    borderRadius: 999,
-    padding: "5px 8px",
-    background,
-    color,
-    fontWeight: 800,
-    fontSize: 11,
-  };
-}
-
-const formGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
-  gap: 12,
-};
-
-const fieldStyle: CSSProperties = {
-  display: "grid",
-  gap: 6,
-};
-
-const labelStyle: CSSProperties = {
-  fontSize: 12,
-  fontWeight: 800,
-  color: "#475569",
-};
-
-const complianceGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
-  gap: 10,
-  marginTop: 16,
-};
