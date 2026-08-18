@@ -2,6 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../../../lib/supabase/browser";
+import Button from "../../../components/Button";
+import Card from "../../../components/Card";
+import Field from "../../../components/Field";
+import MessageBanner from "../../../components/MessageBanner";
+import Select from "../../../components/Select";
+import Textarea from "../../../components/Textarea";
 
 type CompanyProfile = {
   tenant_id: string;
@@ -491,549 +497,392 @@ export default function CompanySettingsPage() {
     }
   }
 
-  const pageStyle: React.CSSProperties = {
-    minHeight: "100vh",
-    padding: 30,
-    backgroundImage:
-      "url('https://images.unsplash.com/photo-1553413077-190dd305871c')",
-    backgroundSize: "cover",
-    backgroundPosition: "center",
-  };
-
-  const shellStyle: React.CSSProperties = {
-    background: "rgba(0,0,0,0.65)",
-    padding: 30,
-    borderRadius: 20,
-  };
-
-  const cardStyle: React.CSSProperties = {
-    background: "rgba(255,255,255,0.96)",
-    padding: 20,
-    borderRadius: 14,
-    boxShadow: "0 8px 30px rgba(0,0,0,0.22)",
-  };
-
-  const inputStyle: React.CSSProperties = {
-    width: "100%",
-    padding: "12px 14px",
-    borderRadius: 10,
-    border: "1px solid #d1d5db",
-    boxSizing: "border-box",
-    fontSize: 14,
-    background: "white",
-  };
-
-  const labelStyle: React.CSSProperties = {
-    display: "grid",
-    gap: 8,
-    fontWeight: 600,
-    fontSize: 14,
-  };
-
-  const sectionTitleStyle: React.CSSProperties = {
-    marginTop: 0,
-    marginBottom: 14,
-  };
-
-  const buttonStyle: React.CSSProperties = {
-    background: "#2563eb",
-    color: "white",
-    border: "none",
-    borderRadius: 10,
-    padding: "12px 16px",
-    cursor: "pointer",
-    fontWeight: 700,
-  };
-
-  const messageCardStyle: React.CSSProperties = {
-    ...cardStyle,
-    padding: 14,
-    fontWeight: 600,
-    border:
-      messageType === "error"
-        ? "1px solid #fca5a5"
-        : messageType === "success"
-          ? "1px solid #86efac"
-          : "1px solid transparent",
-    color:
-      messageType === "error"
-        ? "#991b1b"
-        : messageType === "success"
-          ? "#166534"
-          : "inherit",
-  };
-
   return (
-    <main style={pageStyle}>
-      <div style={shellStyle}>
-        <div style={{ color: "white", marginBottom: 20 }}>
-          <h1 style={{ marginTop: 0, marginBottom: 8 }}>Company Profile</h1>
-          <p style={{ margin: 0, opacity: 0.9 }}>
+    <div className="ds min-h-screen bg-canvas font-sans text-ink">
+      <main className="mx-auto max-w-[1480px] px-6 py-8">
+        <header className="mb-4">
+          <div className="text-kicker uppercase text-ink-3">Admin</div>
+          <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">
+            Company Profile
+          </h1>
+          <p className="m-0 text-sm text-ink-3">
             Edit your company details, tax details, contact information, and
             country-specific compliance settings.
           </p>
-        </div>
+        </header>
 
         {!companyId ? (
-          <div style={{ ...cardStyle, fontWeight: 600 }}>
+          <Card className="font-medium">
             {message || "No authenticated session found. Please sign in again."}
-          </div>
+          </Card>
         ) : loading || !profile ? (
-          <div style={{ ...cardStyle, fontWeight: 600 }}>
-            {message || "Loading..."}
-          </div>
+          <Card className="font-medium">{message || "Loading..."}</Card>
         ) : (
-          <form onSubmit={saveProfile} style={{ display: "grid", gap: 20 }}>
-            <section style={cardStyle}>
-              <h2 style={sectionTitleStyle}>Company Details</h2>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns:
-                    "repeat(auto-fit, minmax(240px, 1fr))",
-                  gap: 14,
-                }}
-              >
-                <label style={labelStyle}>
-                  Company Name
-                  <input
-                    value={profile.company_name}
-                    onChange={(event) =>
-                      updateField("company_name", event.target.value)
-                    }
-                    style={inputStyle}
-                    required
-                  />
-                </label>
+          <form onSubmit={saveProfile} className="grid gap-4">
+            <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+              <h2 className="mb-3 mt-0 text-md font-semibold text-ink">
+                Company Details
+              </h2>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <Field
+                  id="co-company-name"
+                  label="Company Name"
+                  value={profile.company_name}
+                  onChange={(event) =>
+                    updateField("company_name", event.target.value)
+                  }
+                  required
+                />
 
-                <label style={labelStyle}>
-                  Trading Name / DBA
-                  <input
-                    value={profile.trading_name}
-                    onChange={(event) =>
-                      updateField("trading_name", event.target.value)
-                    }
-                    style={inputStyle}
-                  />
-                </label>
+                <Field
+                  id="co-trading-name"
+                  label="Trading Name / DBA"
+                  value={profile.trading_name}
+                  onChange={(event) =>
+                    updateField("trading_name", event.target.value)
+                  }
+                />
 
-                <label style={labelStyle}>
-                  Country
-                  <select
-                    value={profile.country_code}
-                    onChange={(event) => applyCountryDefaults(event.target.value)}
-                    style={inputStyle}
-                  >
-                    {countryOptions.map((country) => (
-                      <option key={country.value} value={country.value}>
-                        {country.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <Select
+                  id="co-country"
+                  label="Country"
+                  value={profile.country_code}
+                  onChange={(event) => applyCountryDefaults(event.target.value)}
+                >
+                  {countryOptions.map((country) => (
+                    <option key={country.value} value={country.value}>
+                      {country.label}
+                    </option>
+                  ))}
+                </Select>
 
-                <label style={labelStyle}>
-                  Legal Entity Type
-                  <select
-                    value={profile.legal_entity_type}
-                    onChange={(event) =>
-                      updateField("legal_entity_type", event.target.value)
-                    }
-                    style={inputStyle}
-                    required
-                  >
-                    <option value="">Select entity type</option>
-                    {entityOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <Select
+                  id="co-legal-entity-type"
+                  label="Legal Entity Type"
+                  value={profile.legal_entity_type}
+                  onChange={(event) =>
+                    updateField("legal_entity_type", event.target.value)
+                  }
+                  required
+                >
+                  <option value="">Select entity type</option>
+                  {entityOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
 
-                <label style={labelStyle}>
-                  Industry Type
-                  <select
-                    value={profile.industry_type}
-                    onChange={(event) =>
-                      updateField("industry_type", event.target.value)
-                    }
-                    style={inputStyle}
-                  >
-                    {industryOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <Select
+                  id="co-industry-type"
+                  label="Industry Type"
+                  value={profile.industry_type}
+                  onChange={(event) =>
+                    updateField("industry_type", event.target.value)
+                  }
+                >
+                  {industryOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
 
-                <label style={labelStyle}>
-                  {isUS
-                    ? "State Registration Number"
-                    : "Business Registration Number"}
-                  <input
-                    value={profile.registration_number}
-                    onChange={(event) =>
-                      updateField("registration_number", event.target.value)
-                    }
-                    style={inputStyle}
-                  />
-                </label>
+                <Field
+                  id="co-registration-number"
+                  label={
+                    isUS
+                      ? "State Registration Number"
+                      : "Business Registration Number"
+                  }
+                  value={profile.registration_number}
+                  onChange={(event) =>
+                    updateField("registration_number", event.target.value)
+                  }
+                />
               </div>
             </section>
 
-            <section style={cardStyle}>
-              <h2 style={sectionTitleStyle}>Contact Details</h2>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns:
-                    "repeat(auto-fit, minmax(240px, 1fr))",
-                  gap: 14,
-                }}
-              >
-                <label style={labelStyle}>
-                  Business Email
-                  <input
-                    type="email"
-                    value={profile.business_email}
-                    onChange={(event) =>
-                      updateField("business_email", event.target.value)
-                    }
-                    style={inputStyle}
-                  />
-                </label>
+            <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+              <h2 className="mb-3 mt-0 text-md font-semibold text-ink">
+                Contact Details
+              </h2>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <Field
+                  id="co-business-email"
+                  label="Business Email"
+                  type="email"
+                  value={profile.business_email}
+                  onChange={(event) =>
+                    updateField("business_email", event.target.value)
+                  }
+                />
 
-                <label style={labelStyle}>
-                  Business Phone
-                  <input
-                    value={profile.business_phone}
-                    onChange={(event) =>
-                      updateField("business_phone", event.target.value)
-                    }
-                    style={inputStyle}
-                  />
-                </label>
+                <Field
+                  id="co-business-phone"
+                  label="Business Phone"
+                  value={profile.business_phone}
+                  onChange={(event) =>
+                    updateField("business_phone", event.target.value)
+                  }
+                />
 
-                <label style={labelStyle}>
-                  Website
-                  <input
-                    value={profile.website}
-                    onChange={(event) =>
-                      updateField("website", event.target.value)
-                    }
-                    style={inputStyle}
-                    placeholder="https://example.com"
-                  />
-                </label>
+                <Field
+                  id="co-website"
+                  label="Website"
+                  value={profile.website}
+                  onChange={(event) =>
+                    updateField("website", event.target.value)
+                  }
+                  placeholder="https://example.com"
+                />
               </div>
             </section>
 
-            <section style={cardStyle}>
-              <h2 style={sectionTitleStyle}>Address</h2>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns:
-                    "repeat(auto-fit, minmax(240px, 1fr))",
-                  gap: 14,
-                }}
-              >
-                <label style={labelStyle}>
-                  Address Line 1
-                  <input
-                    value={profile.address_line_1}
-                    onChange={(event) =>
-                      updateField("address_line_1", event.target.value)
-                    }
-                    style={inputStyle}
-                  />
-                </label>
+            <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+              <h2 className="mb-3 mt-0 text-md font-semibold text-ink">
+                Address
+              </h2>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <Field
+                  id="co-address-line-1"
+                  label="Address Line 1"
+                  value={profile.address_line_1}
+                  onChange={(event) =>
+                    updateField("address_line_1", event.target.value)
+                  }
+                />
 
-                <label style={labelStyle}>
-                  Address Line 2
-                  <input
-                    value={profile.address_line_2}
-                    onChange={(event) =>
-                      updateField("address_line_2", event.target.value)
-                    }
-                    style={inputStyle}
-                  />
-                </label>
+                <Field
+                  id="co-address-line-2"
+                  label="Address Line 2"
+                  value={profile.address_line_2}
+                  onChange={(event) =>
+                    updateField("address_line_2", event.target.value)
+                  }
+                />
 
-                <label style={labelStyle}>
-                  City
-                  <input
-                    value={profile.city}
-                    onChange={(event) =>
-                      updateField("city", event.target.value)
-                    }
-                    style={inputStyle}
-                  />
-                </label>
+                <Field
+                  id="co-city"
+                  label="City"
+                  value={profile.city}
+                  onChange={(event) =>
+                    updateField("city", event.target.value)
+                  }
+                />
 
-                <label style={labelStyle}>
-                  {isUS ? "State" : "Region / County / State"}
-                  <input
-                    value={profile.region}
-                    onChange={(event) =>
-                      updateField("region", event.target.value)
-                    }
-                    style={inputStyle}
-                  />
-                </label>
+                <Field
+                  id="co-region"
+                  label={isUS ? "State" : "Region / County / State"}
+                  value={profile.region}
+                  onChange={(event) =>
+                    updateField("region", event.target.value)
+                  }
+                />
 
-                <label style={labelStyle}>
-                  {isUS ? "ZIP Code" : "Postcode / ZIP"}
-                  <input
-                    value={profile.postcode}
-                    onChange={(event) =>
-                      updateField("postcode", event.target.value)
-                    }
-                    style={inputStyle}
-                  />
-                </label>
+                <Field
+                  id="co-postcode"
+                  label={isUS ? "ZIP Code" : "Postcode / ZIP"}
+                  value={profile.postcode}
+                  onChange={(event) =>
+                    updateField("postcode", event.target.value)
+                  }
+                />
               </div>
             </section>
 
-            <section style={cardStyle}>
-              <h2 style={sectionTitleStyle}>Tax & Compliance</h2>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns:
-                    "repeat(auto-fit, minmax(240px, 1fr))",
-                  gap: 14,
-                }}
-              >
+            <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+              <h2 className="mb-3 mt-0 text-md font-semibold text-ink">
+                Tax & Compliance
+              </h2>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {isUS ? (
-                  <label style={labelStyle}>
-                    EIN
-                    <input
-                      value={profile.us_ein}
-                      onChange={(event) =>
-                        updateField("us_ein", event.target.value)
-                      }
-                      style={inputStyle}
-                    />
-                  </label>
+                  <Field
+                    id="co-us-ein"
+                    label="EIN"
+                    value={profile.us_ein}
+                    onChange={(event) =>
+                      updateField("us_ein", event.target.value)
+                    }
+                  />
                 ) : (
-                  <label style={labelStyle}>
-                    Tax Number
-                    <input
-                      value={profile.tax_number}
-                      onChange={(event) =>
-                        updateField("tax_number", event.target.value)
-                      }
-                      style={inputStyle}
-                    />
-                  </label>
+                  <Field
+                    id="co-tax-number"
+                    label="Tax Number"
+                    value={profile.tax_number}
+                    onChange={(event) =>
+                      updateField("tax_number", event.target.value)
+                    }
+                  />
                 )}
 
                 {isGB ? (
                   <>
-                    <label style={labelStyle}>
-                      VAT Number
-                      <input
-                        value={profile.vat_number}
-                        onChange={(event) =>
-                          updateField("vat_number", event.target.value)
-                        }
-                        style={inputStyle}
-                      />
-                    </label>
+                    <Field
+                      id="co-vat-number"
+                      label="VAT Number"
+                      value={profile.vat_number}
+                      onChange={(event) =>
+                        updateField("vat_number", event.target.value)
+                      }
+                    />
 
-                    <label style={labelStyle}>
-                      EORI Number
-                      <input
-                        value={profile.eori_number}
-                        onChange={(event) =>
-                          updateField("eori_number", event.target.value)
-                        }
-                        style={inputStyle}
-                      />
-                    </label>
+                    <Field
+                      id="co-eori-number"
+                      label="EORI Number"
+                      value={profile.eori_number}
+                      onChange={(event) =>
+                        updateField("eori_number", event.target.value)
+                      }
+                    />
                   </>
                 ) : null}
               </div>
             </section>
 
             {isTransportRelated ? (
-              <section style={cardStyle}>
-                <h2 style={sectionTitleStyle}>
+              <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+                <h2 className="mb-3 mt-0 text-md font-semibold text-ink">
                   Transport Authority / Licensing
                 </h2>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      "repeat(auto-fit, minmax(240px, 1fr))",
-                    gap: 14,
-                  }}
-                >
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {isGB ? (
-                    <label style={labelStyle}>
-                      Operator Licence Number
-                      <input
-                        value={profile.operator_licence_number}
-                        onChange={(event) =>
-                          updateField(
-                            "operator_licence_number",
-                            event.target.value
-                          )
-                        }
-                        style={inputStyle}
-                      />
-                    </label>
+                    <Field
+                      id="co-operator-licence-number"
+                      label="Operator Licence Number"
+                      value={profile.operator_licence_number}
+                      onChange={(event) =>
+                        updateField(
+                          "operator_licence_number",
+                          event.target.value
+                        )
+                      }
+                    />
                   ) : null}
 
                   {isUS ? (
                     <>
-                      <label style={labelStyle}>
-                        USDOT Number
-                        <input
-                          value={profile.usdot_number}
-                          onChange={(event) =>
-                            updateField("usdot_number", event.target.value)
-                          }
-                          style={inputStyle}
-                        />
-                      </label>
+                      <Field
+                        id="co-usdot-number"
+                        label="USDOT Number"
+                        value={profile.usdot_number}
+                        onChange={(event) =>
+                          updateField("usdot_number", event.target.value)
+                        }
+                      />
 
-                      <label style={labelStyle}>
-                        MC Number
-                        <input
-                          value={profile.mc_number}
-                          onChange={(event) =>
-                            updateField("mc_number", event.target.value)
-                          }
-                          style={inputStyle}
-                        />
-                      </label>
+                      <Field
+                        id="co-mc-number"
+                        label="MC Number"
+                        value={profile.mc_number}
+                        onChange={(event) =>
+                          updateField("mc_number", event.target.value)
+                        }
+                      />
 
-                      <label style={labelStyle}>
-                        IFTA Number
-                        <input
-                          value={profile.ifta_number}
-                          onChange={(event) =>
-                            updateField("ifta_number", event.target.value)
-                          }
-                          style={inputStyle}
-                        />
-                      </label>
+                      <Field
+                        id="co-ifta-number"
+                        label="IFTA Number"
+                        value={profile.ifta_number}
+                        onChange={(event) =>
+                          updateField("ifta_number", event.target.value)
+                        }
+                      />
 
-                      <label style={labelStyle}>
-                        IRP Number
-                        <input
-                          value={profile.irp_number}
-                          onChange={(event) =>
-                            updateField("irp_number", event.target.value)
-                          }
-                          style={inputStyle}
-                        />
-                      </label>
+                      <Field
+                        id="co-irp-number"
+                        label="IRP Number"
+                        value={profile.irp_number}
+                        onChange={(event) =>
+                          updateField("irp_number", event.target.value)
+                        }
+                      />
 
-                      <label style={labelStyle}>
-                        SCAC Code
-                        <input
-                          value={profile.scac_code}
-                          onChange={(event) =>
-                            updateField("scac_code", event.target.value)
-                          }
-                          style={inputStyle}
-                        />
-                      </label>
+                      <Field
+                        id="co-scac-code"
+                        label="SCAC Code"
+                        value={profile.scac_code}
+                        onChange={(event) =>
+                          updateField("scac_code", event.target.value)
+                        }
+                      />
                     </>
                   ) : null}
                 </div>
               </section>
             ) : null}
 
-            <section style={cardStyle}>
-              <h2 style={sectionTitleStyle}>Regional Settings</h2>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns:
-                    "repeat(auto-fit, minmax(240px, 1fr))",
-                  gap: 14,
-                }}
-              >
-                <label style={labelStyle}>
-                  Currency
-                  <input
-                    value={profile.currency_code}
-                    onChange={(event) =>
-                      updateField("currency_code", event.target.value)
-                    }
-                    style={inputStyle}
-                    placeholder="GBP / USD / EUR"
-                  />
-                </label>
+            <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+              <h2 className="mb-3 mt-0 text-md font-semibold text-ink">
+                Regional Settings
+              </h2>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <Field
+                  id="co-currency-code"
+                  label="Currency"
+                  value={profile.currency_code}
+                  onChange={(event) =>
+                    updateField("currency_code", event.target.value)
+                  }
+                  placeholder="GBP / USD / EUR"
+                />
 
-                <label style={labelStyle}>
-                  Timezone
-                  <input
-                    value={profile.timezone}
-                    onChange={(event) =>
-                      updateField("timezone", event.target.value)
-                    }
-                    style={inputStyle}
-                    placeholder="Europe/London"
-                  />
-                </label>
+                <Field
+                  id="co-timezone"
+                  label="Timezone"
+                  value={profile.timezone}
+                  onChange={(event) =>
+                    updateField("timezone", event.target.value)
+                  }
+                  placeholder="Europe/London"
+                />
 
-                <label style={labelStyle}>
-                  Language
-                  <input
-                    value={profile.language_code}
-                    onChange={(event) =>
-                      updateField("language_code", event.target.value)
-                    }
-                    style={inputStyle}
-                    placeholder="en"
-                  />
-                </label>
+                <Field
+                  id="co-language-code"
+                  label="Language"
+                  value={profile.language_code}
+                  onChange={(event) =>
+                    updateField("language_code", event.target.value)
+                  }
+                  placeholder="en"
+                />
               </div>
             </section>
 
-            <section style={cardStyle}>
-              <h2 style={sectionTitleStyle}>Notes</h2>
-              <label style={labelStyle}>
-                Internal Notes
-                <textarea
-                  value={profile.notes}
-                  onChange={(event) =>
-                    updateField("notes", event.target.value)
-                  }
-                  style={{
-                    ...inputStyle,
-                    minHeight: 120,
-                    resize: "vertical",
-                  }}
-                />
-              </label>
+            <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+              <h2 className="mb-3 mt-0 text-md font-semibold text-ink">
+                Notes
+              </h2>
+              <Textarea
+                id="co-notes"
+                label="Internal Notes"
+                value={profile.notes}
+                onChange={(event) =>
+                  updateField("notes", event.target.value)
+                }
+              />
             </section>
 
-            {message ? <div style={messageCardStyle}>{message}</div> : null}
+            <MessageBanner
+              tone={
+                messageType === "error"
+                  ? "danger"
+                  : messageType === "success"
+                    ? "success"
+                    : "info"
+              }
+            >
+              {message}
+            </MessageBanner>
 
             <div>
-              <button
-                type="submit"
-                disabled={saving}
-                style={{
-                  ...buttonStyle,
-                  cursor: saving ? "not-allowed" : "pointer",
-                  opacity: saving ? 0.8 : 1,
-                }}
-              >
+              <Button type="submit" disabled={saving}>
                 {saving ? "Saving..." : "Save Company Profile"}
-              </button>
+              </Button>
             </div>
           </form>
         )}
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }
