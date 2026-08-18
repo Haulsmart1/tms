@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTenant } from "../../components/TenantProvider";
 import TenantGate from "../../components/TenantGate";
+import MessageBanner from "../../../components/MessageBanner";
+import Card from "../../../components/Card";
+import Button from "../../../components/Button";
 
 type Driver = {
   id: string;
@@ -118,24 +121,28 @@ export default function PortalInvitesPage() {
 
   return (
     <TenantGate>
-      <main style={styles.page}>
-        <div style={styles.container}>
-          <h1 style={styles.title}>Portal Invitations</h1>
-          <p style={styles.muted}>
-            Invite ADR drivers or directly-employed subcontractor personnel.
-          </p>
+      <div className="ds min-h-screen bg-canvas font-sans text-ink">
+        <main className="mx-auto max-w-[1000px] px-6 py-8">
+          <header className="mb-4">
+            <div className="text-kicker uppercase text-ink-3">Admin</div>
 
-          {message ? <div style={styles.message}>{message}</div> : null}
+            <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">Portal Invitations</h1>
+            <p className="m-0 text-sm text-ink-3">
+              Invite ADR drivers or directly-employed subcontractor personnel.
+            </p>
+          </header>
+
+          <MessageBanner tone="neutral">{message}</MessageBanner>
 
           {!canManage ? (
-            <div style={styles.card}>Only tenant admins can manage invites.</div>
+            <Card>Only tenant admins can manage invites.</Card>
           ) : (
             <>
-              <section style={styles.card}>
-                <h2>Invite Driver</h2>
+              <section className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm">
+                <h2 className="mb-3 text-md font-semibold text-ink">Invite Driver</h2>
 
                 <select
-                  style={styles.input}
+                  className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink mb-3"
                   value={driverId}
                   onChange={(e) => setDriverId(e.target.value)}
                 >
@@ -155,8 +162,7 @@ export default function PortalInvitesPage() {
                     ))}
                 </select>
 
-                <button
-                  style={styles.button}
+                <Button
                   disabled={busy || !driverId}
                   onClick={() =>
                     void send({
@@ -167,15 +173,15 @@ export default function PortalInvitesPage() {
                   }
                 >
                   {busy ? "Working..." : "Invite Driver"}
-                </button>
+                </Button>
               </section>
 
-              <section style={styles.card}>
-                <h2>Invite Subcontractor User</h2>
+              <section className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm">
+                <h2 className="mb-3 text-md font-semibold text-ink">Invite Subcontractor User</h2>
 
-                <div style={styles.grid}>
+                <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <select
-                    style={styles.input}
+                    className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                     value={subcontractorId}
                     onChange={(e) => {
                       setSubcontractorId(e.target.value);
@@ -191,7 +197,7 @@ export default function PortalInvitesPage() {
                   </select>
 
                   <select
-                    style={styles.input}
+                    className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                     value={employeeId}
                     onChange={(e) => setEmployeeId(e.target.value)}
                     disabled={!subcontractorId}
@@ -211,7 +217,7 @@ export default function PortalInvitesPage() {
                   </select>
 
                   <select
-                    style={styles.input}
+                    className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                     value={role}
                     onChange={(e) => setRole(e.target.value)}
                   >
@@ -222,8 +228,7 @@ export default function PortalInvitesPage() {
                   </select>
                 </div>
 
-                <button
-                  style={styles.button}
+                <Button
                   disabled={busy || !employeeId}
                   onClick={() =>
                     void send({
@@ -235,66 +240,12 @@ export default function PortalInvitesPage() {
                   }
                 >
                   {busy ? "Working..." : "Invite Subcontractor User"}
-                </button>
+                </Button>
               </section>
             </>
           )}
-        </div>
-      </main>
+        </main>
+      </div>
     </TenantGate>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  page: {
-    minHeight: "100vh",
-    padding: 30,
-    background: "#f8fafc",
-  },
-  container: {
-    maxWidth: 1000,
-    margin: "0 auto",
-  },
-  title: {
-    marginBottom: 6,
-  },
-  muted: {
-    color: "#64748b",
-  },
-  message: {
-    background: "white",
-    border: "1px solid #e2e8f0",
-    padding: 12,
-    borderRadius: 10,
-    margin: "18px 0",
-  },
-  card: {
-    background: "white",
-    border: "1px solid #e2e8f0",
-    borderRadius: 16,
-    padding: 20,
-    marginTop: 20,
-  },
-  grid: {
-    display: "grid",
-    gap: 12,
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  },
-  input: {
-    width: "100%",
-    boxSizing: "border-box",
-    padding: "11px 12px",
-    borderRadius: 10,
-    border: "1px solid #cbd5e1",
-    marginBottom: 12,
-  },
-  button: {
-    padding: "11px 16px",
-    border: "none",
-    borderRadius: 10,
-    background: "#2563eb",
-    color: "white",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-};
