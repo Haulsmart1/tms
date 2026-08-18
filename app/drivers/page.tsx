@@ -1570,7 +1570,7 @@ export default function DriversPage() {
           {loading ? (
             <div className="py-10 text-center text-sm text-ink-3">Loading drivers...</div>
           ) : (
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="mt-4 grid gap-3 grid-cols-[repeat(auto-fit,minmax(300px,1fr))]">
               {filteredDrivers.map((driver) => {
                 const warnings = getDriverWarnings(driver);
 
@@ -1731,7 +1731,7 @@ export default function DriversPage() {
                       : "Assign Vehicle"}
                   </Button>
 
-                  <pre className="m-0 whitespace-pre-wrap break-words rounded-lg border border-line bg-surface-2 p-3 text-xs leading-relaxed text-ink-2 sm:col-span-2">
+                  <pre className="m-0 min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere] rounded-lg border border-line bg-surface-2 p-3 text-xs leading-relaxed text-ink-2 sm:col-span-2">
                     {assignmentDebug}
                   </pre>
                 </div>
@@ -1942,7 +1942,7 @@ function Section({
 }) {
   return (
     <section className="mt-4 rounded-lg border border-line bg-surface-2 p-4">
-      <h2 className="mb-3 text-md font-semibold text-ink">{title}</h2>
+      <h3 className="mb-3 text-md font-semibold text-ink">{title}</h3>
       {children}
     </section>
   );

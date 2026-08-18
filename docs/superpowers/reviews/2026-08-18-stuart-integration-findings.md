@@ -105,3 +105,22 @@ treatment. Stuart-faithful; cosmetic.
 /maintenance hand-builds its Fleet/VOR stat cards because `Stat`
 hard-codes the value color. A `valueTone` prop would let stat cards
 with conditional value color use the shared component.
+
+### 20. Compliance badge glyphs are announced by screen readers
+/drivers wraps literal ✓ and ⚠ characters in its compliance Badges, so
+screen readers announce "check mark" / "warning sign" before the label.
+Wrap the glyphs in aria-hidden spans when the freeze lifts.
+
+### 21. Placeholder-only controls on /drivers
+The notes textarea and the Driver Records search input have
+placeholders but no labels. Shared Field/Textarea are the ready-made
+fix after the freeze.
+
+### 22. Label patterns split across the family
+/pod and /maintenance use shared Field/Textarea; /assets and /drivers
+hand-roll wrapped labels (frozen helper props carry no ids). Converge
+on the shared components in the post-freeze consolidation pass.
+
+### 23. Driver cards are click-only
+/drivers driver cards are clickable articles with onClick but no
+keyboard access or role. Pre-existing; a11y pass candidate.
