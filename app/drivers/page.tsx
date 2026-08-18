@@ -2133,10 +2133,14 @@ function checkDateWarning(
       (1000 * 60 * 60 * 24)
   );
 
+  const formattedDate = formatDate(date);
+
   if (days < 0) {
-    warnings.push(`${label} overdue`);
+    warnings.push(`${label} overdue — ${formattedDate}`);
   } else if (days <= 30) {
-    warnings.push(`${label} due in ${days} days`);
+    warnings.push(
+      `${label} due in ${days} days — ${formattedDate}`
+    );
   }
 }
 

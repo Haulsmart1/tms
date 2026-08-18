@@ -18,20 +18,36 @@ type Vehicle = {
     returned_to_service_at: string | null;
 };
 
+type Asset = {
+    id: string;
+    tenant_id: string;
+    name: string;
+    asset_type: string;
+    asset_number: string | null;
+    registration: string | null;
+    barcode: string | null;
+    mechanical: boolean;
+    status: string | null;
+};
+
 type MaintenanceRecord = {
     id: string;
     vehicle_id: string | null;
+    asset_id: string | null;
     maintenance_type: string;
     due_date: string | null;
     completed_date: string | null;
     status: string;
     cost: number | null;
+    mileage: number | null;
+    maintenance_hours: number | null;
     notes: string | null;
     created_at: string;
 };
 
 type MaintenanceRecordWithVehicle = MaintenanceRecord & {
     vehicle: Vehicle | null;
+    asset: Asset | null;
 };
 
 export default function MaintenancePage() {
@@ -40,6 +56,8 @@ export default function MaintenancePage() {
     const [tenantId, setTenantId] = useState<string | null>(null);
 
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+
+    const [assets, setAssets] = useState<Asset[]>([]);
     const [records, setRecords] = useState<MaintenanceRecordWithVehicle[]>([]);
 
     const [loading, setLoading] = useState(true);
@@ -50,14 +68,29 @@ export default function MaintenancePage() {
     const [errorMessage, setErrorMessage] = useState("");
 
     const [vehicleId, setVehicleId] = useState("");
+
+    const [assetId, setAssetId] = useState("");
     const [maintenanceType, setMaintenanceType] = useState("");
     const [dueDate, setDueDate] = useState("");
     const [completedDate, setCompletedDate] = useState("");
     const [status, setStatus] = useState("due");
     const [cost, setCost] = useState("");
+    const [mileage, setMileage] = useState("");
+    const [maintenanceHours, setMaintenanceHours] = useState("");
     const [notes, setNotes] = useState("");
 
     const [vorReason, setVorReason] = useState("");
+
+    const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
+    const [editMaintenanceType, setEditMaintenanceType] = useState("");
+    const [editStatus, setEditStatus] = useState("due");
+    const [editDueDate, setEditDueDate] = useState("");
+    const [editCompletedDate, setEditCompletedDate] = useState("");
+    const [editCost, setEditCost] = useState("");
+    const [editMileage, setEditMileage] = useState("");
+    const [editMaintenanceHours, setEditMaintenanceHours] = useState("");
+    const [editNotes, setEditNotes] = useState("");
+    const [editSaving, setEditSaving] = useState(false);
 
     const selectedVehicle =
         vehicles.find((vehicle) => vehicle.id === vehicleId) ?? null;
@@ -150,11 +183,14 @@ export default function MaintenancePage() {
                             `
                             id,
                             vehicle_id,
+                            asset_id,
                             maintenance_type,
                             due_date,
                             completed_date,
                             status,
                             cost,
+                            mileage,
+                            maintenance_hours,
                             notes,
                             created_at
                             `
@@ -174,6 +210,33 @@ export default function MaintenancePage() {
 
                 const tenantVehicles =
                     (vehicleResult.data ?? []) as Vehicle[];
+                const {
+                    data: assetData,
+                    error: assetError,
+                } = await supabase
+                    .from("assets")
+                    .select(
+                        "id, tenant_id, name, asset_type, asset_number, registration, barcode, mechanical, status"
+                    )
+                    .eq("tenant_id", currentTenantId)
+                    .eq("mechanical", true)
+                    .order("asset_number", {
+                        ascending: true,
+                    });
+
+                if (assetError) {
+                    throw assetError;
+                }
+
+                const tenantAssets =
+                    (assetData ?? []) as Asset[];
+
+                const assetMap = new Map(
+                    tenantAssets.map((asset) => [
+                        asset.id,
+                        asset,
+                    ])
+                );
 
                 const vehicleMap = new Map(
                     tenantVehicles.map((vehicle) => [
@@ -195,14 +258,22 @@ export default function MaintenancePage() {
                                               record.vehicle_id
                                           ) ?? null
                                         : null,
+                                asset:
+                                    record.asset_id
+                                        ? assetMap.get(
+                                              record.asset_id
+                                          ) ?? null
+                                        : null,
                             })
                         )
                         .filter(
                             (record) =>
-                                record.vehicle !== null
+                                record.vehicle !== null ||
+                                record.asset !== null
                         );
 
                 setVehicles(tenantVehicles);
+                setAssets(tenantAssets);
                 setRecords(tenantMaintenance);
             } catch (error) {
                 setErrorMessage(
@@ -246,11 +317,14 @@ export default function MaintenancePage() {
 
     function resetForm() {
         setVehicleId("");
+        setAssetId("");
         setMaintenanceType("");
         setDueDate("");
         setCompletedDate("");
         setStatus("due");
         setCost("");
+        setMileage("");
+        setMaintenanceHours("");
         setNotes("");
         setVorReason("");
     }
@@ -271,10 +345,9 @@ export default function MaintenancePage() {
             setErrorMessage("Tenant not loaded.");
             return;
         }
-
-        if (!vehicleId) {
+        if (!vehicleId && !assetId) {
             setErrorMessage(
-                "Please select a vehicle."
+                "Select a vehicle or mechanical asset."
             );
             return;
         }
@@ -286,11 +359,39 @@ export default function MaintenancePage() {
             return;
         }
 
+        const numericMileage =
+            mileage.trim() === ""
+                ? null
+                : Number(mileage);
+
+        const numericMaintenanceHours =
+            maintenanceHours.trim() === ""
+                ? null
+                : Number(maintenanceHours);
+
+        if (
+            numericMileage !== null &&
+            (!Number.isFinite(numericMileage) || numericMileage < 0)
+        ) {
+            setErrorMessage("Enter a valid mileage.");
+            return;
+        }
+
+        if (
+            numericMaintenanceHours !== null &&
+            (!Number.isFinite(numericMaintenanceHours) ||
+                numericMaintenanceHours < 0)
+        ) {
+            setErrorMessage("Enter valid maintenance hours.");
+            return;
+        }
         setSaving(true);
 
         try {
             const payload = {
-                vehicle_id: vehicleId,
+                vehicle_id: vehicleId || null,
+                asset_id: assetId || null,
+                tenant_id: tenantId,
                 maintenance_type:
                     maintenanceType.trim(),
                 due_date: dueDate || null,
@@ -301,6 +402,8 @@ export default function MaintenancePage() {
                     cost.trim() !== ""
                         ? Number(cost)
                         : null,
+                mileage: numericMileage,
+                maintenance_hours: numericMaintenanceHours,
                 notes: notes.trim() || null,
             };
 
@@ -317,7 +420,7 @@ export default function MaintenancePage() {
              * also mark the vehicle VOR.
              */
 
-            if (status === "vor") {
+            if (status === "vor" && vehicleId) {
                 const reason =
                     vorReason.trim() ||
                     notes.trim() ||
@@ -366,6 +469,142 @@ export default function MaintenancePage() {
         }
     }
 
+    function beginEditRecord(record: MaintenanceRecordWithVehicle) {
+        clearMessages();
+
+        setEditingRecordId(record.id);
+        setEditMaintenanceType(record.maintenance_type ?? "");
+        setEditStatus(record.status ?? "due");
+        setEditDueDate(record.due_date ?? "");
+        setEditCompletedDate(record.completed_date ?? "");
+
+        setEditCost(
+            record.cost !== null && record.cost !== undefined
+                ? String(record.cost)
+                : ""
+        );
+
+        setEditMileage(
+            record.mileage !== null && record.mileage !== undefined
+                ? String(record.mileage)
+                : ""
+        );
+
+        setEditMaintenanceHours(
+            record.maintenance_hours !== null &&
+                record.maintenance_hours !== undefined
+                ? String(record.maintenance_hours)
+                : ""
+        );
+
+        setEditNotes(record.notes ?? "");
+    }
+
+    function cancelEditRecord() {
+        setEditingRecordId(null);
+        setEditMaintenanceType("");
+        setEditStatus("due");
+        setEditDueDate("");
+        setEditCompletedDate("");
+        setEditCost("");
+        setEditMileage("");
+        setEditMaintenanceHours("");
+        setEditNotes("");
+    }
+
+    async function saveEditRecord(recordId: string) {
+        if (!tenantId) {
+            setErrorMessage("Tenant not loaded.");
+            return;
+        }
+
+        const trimmedType = editMaintenanceType.trim();
+
+        if (!trimmedType) {
+            setErrorMessage("Maintenance type is required.");
+            return;
+        }
+
+        const numericCost =
+            editCost.trim() === ""
+                ? null
+                : Number(editCost);
+
+        const numericMileage =
+            editMileage.trim() === ""
+                ? null
+                : Number(editMileage);
+
+        const numericHours =
+            editMaintenanceHours.trim() === ""
+                ? null
+                : Number(editMaintenanceHours);
+
+        if (
+            numericCost !== null &&
+            (!Number.isFinite(numericCost) || numericCost < 0)
+        ) {
+            setErrorMessage("Cost must be a valid positive number.");
+            return;
+        }
+
+        if (
+            numericMileage !== null &&
+            (!Number.isFinite(numericMileage) || numericMileage < 0)
+        ) {
+            setErrorMessage("Mileage must be a valid positive number.");
+            return;
+        }
+
+        if (
+            numericHours !== null &&
+            (!Number.isFinite(numericHours) || numericHours < 0)
+        ) {
+            setErrorMessage(
+                "Maintenance hours must be a valid positive number."
+            );
+            return;
+        }
+
+        clearMessages();
+        setEditSaving(true);
+
+        try {
+            const { error } = await supabase
+                .from("maintenance_records")
+                .update({
+                    maintenance_type: trimmedType,
+                    status: editStatus,
+                    due_date: editDueDate || null,
+                    completed_date: editCompletedDate || null,
+                    cost: numericCost,
+                    mileage: numericMileage,
+                    maintenance_hours: numericHours,
+                    notes: editNotes.trim() || null,
+                })
+                .eq("id", recordId)
+                .eq("tenant_id", tenantId);
+
+            if (error) {
+                throw error;
+            }
+
+            await loadData(tenantId);
+
+            cancelEditRecord();
+            setMessage("Maintenance record updated.");
+        } catch (error) {
+            console.error("Failed to update maintenance record:", error);
+
+            setErrorMessage(
+                error instanceof Error
+                    ? error.message
+                    : "Unable to update maintenance record."
+            );
+        } finally {
+            setEditSaving(false);
+        }
+    }
     async function placeVehicleVor(
         vehicle: Vehicle
     ) {
@@ -745,44 +984,98 @@ export default function MaintenancePage() {
                         onSubmit={createRecord}
                         style={styles.form}
                     >
-                        <label style={styles.field}>
+                                                <label style={styles.field}>
                             <span style={styles.label}>
-                                Vehicle
+                                Maintenance Target
                             </span>
 
                             <select
-                                value={vehicleId}
+                                value={
+                                    assetId
+                                        ? `asset:${assetId}`
+                                        : vehicleId
+                                          ? `vehicle:${vehicleId}`
+                                          : ""
+                                }
                                 onChange={(event) => {
-                                    setVehicleId(
-                                        event.target
-                                            .value
-                                    );
+                                    const value =
+                                        event.target.value;
 
-                                    setVorReason("");
+                                    if (
+                                        value.startsWith(
+                                            "vehicle:"
+                                        )
+                                    ) {
+                                        setVehicleId(
+                                            value.slice(
+                                                "vehicle:".length
+                                            )
+                                        );
+                                        setAssetId("");
+                                        return;
+                                    }
+
+                                    if (
+                                        value.startsWith(
+                                            "asset:"
+                                        )
+                                    ) {
+                                        setAssetId(
+                                            value.slice(
+                                                "asset:".length
+                                            )
+                                        );
+                                        setVehicleId("");
+                                        return;
+                                    }
+
+                                    setVehicleId("");
+                                    setAssetId("");
                                 }}
                                 style={styles.input}
                                 required
                             >
                                 <option value="">
-                                    Select vehicle
+                                    Select vehicle or mechanical asset
                                 </option>
 
-                                {vehicles.map(
-                                    (vehicle) => (
-                                        <option
-                                            key={
-                                                vehicle.id
-                                            }
-                                            value={
-                                                vehicle.id
-                                            }
-                                        >
-                                            {vehicleLabel(
-                                                vehicle
-                                            )}
-                                        </option>
-                                    )
-                                )}
+                                {vehicles.length > 0 ? (
+                                    <optgroup label="Vehicles">
+                                        {vehicles.map(
+                                            (vehicle) => (
+                                                <option
+                                                    key={vehicle.id}
+                                                    value={`vehicle:${vehicle.id}`}
+                                                >
+                                                    {vehicleLabel(
+                                                        vehicle
+                                                    )}
+                                                </option>
+                                            )
+                                        )}
+                                    </optgroup>
+                                ) : null}
+
+                                {assets.length > 0 ? (
+                                    <optgroup label="Mechanical Assets">
+                                        {assets.map(
+                                            (asset) => (
+                                                <option
+                                                    key={asset.id}
+                                                    value={`asset:${asset.id}`}
+                                                >
+                                                    {[
+                                                        asset.asset_number,
+                                                        asset.name,
+                                                        asset.asset_type,
+                                                    ]
+                                                        .filter(Boolean)
+                                                        .join(" — ")}
+                                                </option>
+                                            )
+                                        )}
+                                    </optgroup>
+                                ) : null}
                             </select>
                         </label>
 
@@ -1102,7 +1395,53 @@ export default function MaintenancePage() {
                             </label>
                         ) : null}
 
-                        <label style={styles.field}>
+                                                <div
+                            style={{
+                                display: "grid",
+                                gridTemplateColumns:
+                                    "repeat(auto-fit, minmax(180px, 1fr))",
+                                gap: 12,
+                            }}
+                        >
+                            <label style={styles.field}>
+                                <span style={styles.label}>
+                                    Mileage at Maintenance
+                                </span>
+
+                                <input
+                                    type="number"
+                                    min="0"
+                                    step="1"
+                                    value={mileage}
+                                    onChange={(event) =>
+                                        setMileage(event.target.value)
+                                    }
+                                    placeholder="e.g. 125000"
+                                    style={styles.input}
+                                />
+                            </label>
+
+                            <label style={styles.field}>
+                                <span style={styles.label}>
+                                    Maintenance Hours
+                                </span>
+
+                                <input
+                                    type="number"
+                                    min="0"
+                                    step="0.25"
+                                    value={maintenanceHours}
+                                    onChange={(event) =>
+                                        setMaintenanceHours(
+                                            event.target.value
+                                        )
+                                    }
+                                    placeholder="e.g. 3.5"
+                                    style={styles.input}
+                                />
+                            </label>
+                        </div>
+<label style={styles.field}>
                             <span style={styles.label}>
                                 Notes
                             </span>
@@ -1201,28 +1540,38 @@ export default function MaintenancePage() {
                                                 }
                                             </h3>
 
-                                            <p
+                                                                                        <p
                                                 style={
                                                     styles.recordVehicle
                                                 }
                                             >
-                                                {record.vehicle
-                                                    ?.registration ||
-                                                    [
-                                                        record
-                                                            .vehicle
-                                                            ?.make,
-                                                        record
-                                                            .vehicle
-                                                            ?.model,
-                                                    ]
-                                                        .filter(
-                                                            Boolean
-                                                        )
-                                                        .join(
-                                                            " "
-                                                        ) ||
-                                                    "Vehicle"}
+                                                {record.asset
+                                                    ? [
+                                                          record
+                                                              .asset
+                                                              .asset_number,
+                                                          record
+                                                              .asset
+                                                              .name,
+                                                          record
+                                                              .asset
+                                                              .asset_type,
+                                                      ]
+                                                          .filter(Boolean)
+                                                          .join(" — ")
+                                                    : record.vehicle
+                                                          ?.registration ||
+                                                      [
+                                                          record
+                                                              .vehicle
+                                                              ?.make,
+                                                          record
+                                                              .vehicle
+                                                              ?.model,
+                                                      ]
+                                                          .filter(Boolean)
+                                                          .join(" ") ||
+                                                      "Maintenance target"}
                                             </p>
                                         </div>
 
@@ -1258,7 +1607,30 @@ export default function MaintenancePage() {
                                             }
                                         />
 
+                                                                                <RecordItem
+                                            label="Mileage"
+                                            value={
+                                                record.mileage !== null &&
+                                                record.mileage !== undefined
+                                                    ? `${Number(
+                                                          record.mileage
+                                                      ).toLocaleString()} miles`
+                                                    : "—"
+                                            }
+                                        />
+
                                         <RecordItem
+                                            label="Maintenance Hours"
+                                            value={
+                                                record.maintenance_hours !==
+                                                    null &&
+                                                record.maintenance_hours !==
+                                                    undefined
+                                                    ? `${record.maintenance_hours} hrs`
+                                                    : "—"
+                                            }
+                                        />
+<RecordItem
                                             label="Cost"
                                             value={
                                                 record.cost !==
@@ -1295,7 +1667,350 @@ export default function MaintenancePage() {
                                             VOR
                                         </div>
                                     ) : null}
-                                </article>
+                                
+                                    <div
+                                        style={{
+                                            marginTop: 16,
+                                            paddingTop: 14,
+                                            borderTop: "1px solid #e2e8f0",
+                                        }}
+                                    >
+                                        {editingRecordId !== record.id ? (
+                                            <button
+                                                type="button"
+                                                onClick={() =>
+                                                    beginEditRecord(record)
+                                                }
+                                                style={{
+                                                    padding: "9px 14px",
+                                                    borderRadius: 8,
+                                                    border: "1px solid #cbd5e1",
+                                                    background: "#ffffff",
+                                                    color: "#0f172a",
+                                                    fontWeight: 800,
+                                                    cursor: "pointer",
+                                                }}
+                                            >
+                                                Edit
+                                            </button>
+                                        ) : (
+                                            <div
+                                                style={{
+                                                    display: "grid",
+                                                    gap: 14,
+                                                }}
+                                            >
+                                                <div
+                                                    style={{
+                                                        fontWeight: 900,
+                                                        color: "#0f172a",
+                                                    }}
+                                                >
+                                                    Edit Maintenance Record
+                                                </div>
+
+                                                <label style={styles.field}>
+                                                    <span style={styles.label}>
+                                                        Maintenance Type
+                                                    </span>
+                                                    <input
+                                                        type="text"
+                                                        value={
+                                                            editMaintenanceType
+                                                        }
+                                                        onChange={(event) =>
+                                                            setEditMaintenanceType(
+                                                                event.target
+                                                                    .value
+                                                            )
+                                                        }
+                                                        style={styles.input}
+                                                    />
+                                                </label>
+
+                                                <div
+                                                    style={{
+                                                        display: "grid",
+                                                        gridTemplateColumns:
+                                                            "repeat(auto-fit, minmax(180px, 1fr))",
+                                                        gap: 12,
+                                                    }}
+                                                >
+                                                    <label
+                                                        style={styles.field}
+                                                    >
+                                                        <span
+                                                            style={
+                                                                styles.label
+                                                            }
+                                                        >
+                                                            Status
+                                                        </span>
+                                                        <select
+                                                            value={editStatus}
+                                                            onChange={(event) =>
+                                                                setEditStatus(
+                                                                    event.target
+                                                                        .value
+                                                                )
+                                                            }
+                                                            style={
+                                                                styles.input
+                                                            }
+                                                        >
+                                                            <option value="due">
+                                                                Due
+                                                            </option>
+                                                            <option value="completed">
+                                                                Completed
+                                                            </option>
+                                                            <option value="vor">
+                                                                VOR
+                                                            </option>
+                                                        </select>
+                                                    </label>
+
+                                                    <label
+                                                        style={styles.field}
+                                                    >
+                                                        <span
+                                                            style={
+                                                                styles.label
+                                                            }
+                                                        >
+                                                            Cost (£)
+                                                        </span>
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            step="0.01"
+                                                            value={editCost}
+                                                            onChange={(event) =>
+                                                                setEditCost(
+                                                                    event.target
+                                                                        .value
+                                                                )
+                                                            }
+                                                            style={
+                                                                styles.input
+                                                            }
+                                                        />
+                                                    </label>
+                                                </div>
+
+                                                <div
+                                                    style={{
+                                                        display: "grid",
+                                                        gridTemplateColumns:
+                                                            "repeat(auto-fit, minmax(180px, 1fr))",
+                                                        gap: 12,
+                                                    }}
+                                                >
+                                                    <label
+                                                        style={styles.field}
+                                                    >
+                                                        <span
+                                                            style={
+                                                                styles.label
+                                                            }
+                                                        >
+                                                            Due Date
+                                                        </span>
+                                                        <input
+                                                            type="date"
+                                                            value={editDueDate}
+                                                            onChange={(event) =>
+                                                                setEditDueDate(
+                                                                    event.target
+                                                                        .value
+                                                                )
+                                                            }
+                                                            style={
+                                                                styles.input
+                                                            }
+                                                        />
+                                                    </label>
+
+                                                    <label
+                                                        style={styles.field}
+                                                    >
+                                                        <span
+                                                            style={
+                                                                styles.label
+                                                            }
+                                                        >
+                                                            Completed Date
+                                                        </span>
+                                                        <input
+                                                            type="date"
+                                                            value={
+                                                                editCompletedDate
+                                                            }
+                                                            onChange={(event) =>
+                                                                setEditCompletedDate(
+                                                                    event.target
+                                                                        .value
+                                                                )
+                                                            }
+                                                            style={
+                                                                styles.input
+                                                            }
+                                                        />
+                                                    </label>
+                                                </div>
+
+                                                <div
+                                                    style={{
+                                                        display: "grid",
+                                                        gridTemplateColumns:
+                                                            "repeat(auto-fit, minmax(180px, 1fr))",
+                                                        gap: 12,
+                                                    }}
+                                                >
+                                                    <label
+                                                        style={styles.field}
+                                                    >
+                                                        <span
+                                                            style={
+                                                                styles.label
+                                                            }
+                                                        >
+                                                            Mileage
+                                                        </span>
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            step="1"
+                                                            value={
+                                                                editMileage
+                                                            }
+                                                            onChange={(event) =>
+                                                                setEditMileage(
+                                                                    event.target
+                                                                        .value
+                                                                )
+                                                            }
+                                                            style={
+                                                                styles.input
+                                                            }
+                                                        />
+                                                    </label>
+
+                                                    <label
+                                                        style={styles.field}
+                                                    >
+                                                        <span
+                                                            style={
+                                                                styles.label
+                                                            }
+                                                        >
+                                                            Maintenance Hours
+                                                        </span>
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            step="0.1"
+                                                            value={
+                                                                editMaintenanceHours
+                                                            }
+                                                            onChange={(event) =>
+                                                                setEditMaintenanceHours(
+                                                                    event.target
+                                                                        .value
+                                                                )
+                                                            }
+                                                            style={
+                                                                styles.input
+                                                            }
+                                                        />
+                                                    </label>
+                                                </div>
+
+                                                <label style={styles.field}>
+                                                    <span style={styles.label}>
+                                                        Notes
+                                                    </span>
+                                                    <textarea
+                                                        value={editNotes}
+                                                        onChange={(event) =>
+                                                            setEditNotes(
+                                                                event.target
+                                                                    .value
+                                                            )
+                                                        }
+                                                        rows={4}
+                                                        style={{
+                                                            ...styles.input,
+                                                            resize: "vertical",
+                                                        }}
+                                                    />
+                                                </label>
+
+                                                <div
+                                                    style={{
+                                                        display: "flex",
+                                                        gap: 10,
+                                                        flexWrap: "wrap",
+                                                    }}
+                                                >
+                                                    <button
+                                                        type="button"
+                                                        disabled={editSaving}
+                                                        onClick={() =>
+                                                            void saveEditRecord(
+                                                                record.id
+                                                            )
+                                                        }
+                                                        style={{
+                                                            padding:
+                                                                "10px 16px",
+                                                            borderRadius: 8,
+                                                            border: "none",
+                                                            background:
+                                                                "#0f172a",
+                                                            color: "#ffffff",
+                                                            fontWeight: 900,
+                                                            cursor: editSaving
+                                                                ? "not-allowed"
+                                                                : "pointer",
+                                                            opacity: editSaving
+                                                                ? 0.65
+                                                                : 1,
+                                                        }}
+                                                    >
+                                                        {editSaving
+                                                            ? "Saving..."
+                                                            : "Save Changes"}
+                                                    </button>
+
+                                                    <button
+                                                        type="button"
+                                                        disabled={editSaving}
+                                                        onClick={
+                                                            cancelEditRecord
+                                                        }
+                                                        style={{
+                                                            padding:
+                                                                "10px 16px",
+                                                            borderRadius: 8,
+                                                            border:
+                                                                "1px solid #cbd5e1",
+                                                            background:
+                                                                "#ffffff",
+                                                            color: "#0f172a",
+                                                            fontWeight: 800,
+                                                            cursor: editSaving
+                                                                ? "not-allowed"
+                                                                : "pointer",
+                                                        }}
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+</article>
                             ))}
                         </div>
                     )}
