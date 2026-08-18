@@ -22,11 +22,30 @@ const AddressSchema = z.object({
   postal_code: z.string().trim().min(1),
 });
 
+const AddressListSchema = z
+  .union([
+    AddressSchema,
+    z.array(AddressSchema),
+  ])
+  .transform((value) =>
+    Array.isArray(value) ? value : [value]
+  );
+
+
 const ItemSchema = z.object({
   sku: z.string().trim().min(1),
   name: z.string().trim().min(1),
   quantity: z.coerce.number().int().positive(),
-  serial: z.array(z.string().trim().min(1)).optional().default([]),
+  serial: z
+    .union([
+      z.string().trim().min(1),
+      z.array(z.string().trim().min(1)),
+    ])
+    .transform((value) =>
+      typeof value === "string" ? [value] : value
+    )
+    .optional()
+    .default([]),
 });
 
 const RmaSchema = z.object({
@@ -34,8 +53,8 @@ const RmaSchema = z.object({
   number: z.string().trim().min(1),
   first_name: z.string().trim().optional().nullable(),
   last_name: z.string().trim().optional().nullable(),
-  collection_address: z.array(AddressSchema).optional().default([]),
-  delivery_address: z.array(AddressSchema).optional().default([]),
+  collection_address: AddressListSchema.optional().default([]),
+  delivery_address: AddressListSchema.optional().default([]),
   telephone: z.array(z.string().trim()).optional().default([]),
   email: z.string().trim().email().optional().nullable(),
   items: z.array(ItemSchema).optional().default([]),
