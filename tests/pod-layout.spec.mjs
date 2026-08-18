@@ -111,9 +111,13 @@ export async function assertOnRealPage(page) {
     return `redirected to ${landed} — not signed in`;
   }
   const hasQueue = await page.evaluate(
-    () => Boolean(document.querySelector('[role="tablist"]') && document.querySelector("table")),
+    () =>
+      Boolean(
+        document.querySelector('section[aria-label="POD summary"]') &&
+          document.querySelector("main h1"),
+      ),
   );
-  if (!hasQueue) return "/pod rendered without the queue table";
+  if (!hasQueue) return "/pod rendered without its summary tiles";
   return null;
 }
 
@@ -151,16 +155,18 @@ if (isMain) {
       process.exit(2);
     }
 
-    const rowCount = await page.evaluate(() => document.querySelectorAll("tbody tr").length);
+    const rowCount = await page.evaluate(
+      () => document.querySelectorAll("[data-stop-card]").length,
+    );
 
     if (stress) {
       await page.evaluate(
         ([name, vehicle]) => {
-          for (const row of document.querySelectorAll("tbody tr")) {
-            const route = row.querySelector("td:nth-child(2) span span");
-            if (route) route.textContent = name;
-            const veh = row.querySelector("td:nth-child(4) span span");
-            if (veh) veh.textContent = vehicle;
+          for (const card of document.querySelectorAll("[data-stop-card]")) {
+            const n = card.querySelector('[data-stress="name"]');
+            if (n) n.textContent = name;
+            const v = card.querySelector('[data-stress="vehicle"]');
+            if (v) v.textContent = vehicle;
           }
         },
         [LONG_NAME, LONG_VEHICLE],
@@ -183,7 +189,7 @@ if (isMain) {
     if (rowCount === 0) {
       // Not a failure, but an empty queue exercises none of the column
       // geometry, so a PASS on zero rows is not evidence the row layout holds.
-      console.log("  NOTE: queue was empty, so no row geometry was measured at this width.");
+      console.log("  NOTE: no stop cards rendered, so no row geometry was measured at this width.");
     }
     if (!clean) {
       if (verdict === "KNOWN") {

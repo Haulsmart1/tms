@@ -2,7 +2,6 @@
 
 import {
   ChangeEvent,
-  CSSProperties,
   useCallback,
   useEffect,
   useMemo,
@@ -13,6 +12,11 @@ import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
 import PodLink from "../components/PodLink";
+import Badge, { type Tone } from "../../components/Badge";
+import Button from "../../components/Button";
+import Field from "../../components/Field";
+import Stat from "../../components/Stat";
+import Textarea from "../../components/Textarea";
 
 const POD_BUCKET = "pod-files";
 const MAX_FILE_SIZE = 15 * 1024 * 1024;
@@ -628,58 +632,62 @@ export default function PodPage() {
 
   return (
     <TenantGate>
-      <main style={styles.page}>
-        <div style={styles.shell}>
-          <header style={styles.header}>
-            <div>
-              <p style={styles.eyebrow}>
-                Delivery Evidence
-              </p>
-
-              <h1 style={styles.title}>
-                Proof of Delivery
-              </h1>
-
-              <p style={styles.subtitle}>
-                Capture recipients, photos and documents,
-                then complete delivery stops with a full
-                tenant-scoped POD record.
-              </p>
+      <div className="ds min-h-screen bg-canvas font-sans text-ink">
+        <main className="mx-auto max-w-[1480px] px-6 py-8">
+          <header>
+            <div className="text-kicker uppercase text-ink-3">
+              Delivery Evidence
             </div>
+
+            <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">
+              Proof of Delivery
+            </h1>
+
+            <p className="mb-4 text-sm text-ink-3">
+              Capture recipients, photos and documents, then complete delivery
+              stops with a full tenant-scoped POD record.
+            </p>
           </header>
 
-          <section style={styles.summaryGrid}>
-            <SummaryCard
+          <section
+            aria-label="POD summary"
+            className="mb-4 grid grid-cols-2 gap-2.5 lg:grid-cols-4"
+          >
+            <Stat
               label="Delivery Stops"
-              value={summary.total}
+              value={String(summary.total)}
             />
-            <SummaryCard
+            <Stat
               label="Pending POD"
-              value={summary.pending}
+              value={String(summary.pending)}
+              subTone={summary.pending > 0 ? "warning" : undefined}
             />
-            <SummaryCard
+            <Stat
               label="Delivered"
-              value={summary.delivered}
+              value={String(summary.delivered)}
+              subTone="positive"
             />
-            <SummaryCard
+            <Stat
               label="Missing Evidence"
-              value={summary.missingEvidence}
+              value={String(summary.missingEvidence)}
+              subTone="danger"
+              sub={summary.missingEvidence > 0 ? "needs evidence" : undefined}
             />
           </section>
 
           {errorMessage ? (
-            <div style={styles.error}>
+            <div className="mb-4 rounded-lg border border-danger-border bg-danger-tint p-3 text-sm text-danger-strong">
               {errorMessage}
             </div>
           ) : null}
 
           {message ? (
-            <div style={styles.success}>
+            <div className="mb-4 rounded-lg border border-success-border bg-success-tint p-3 text-sm text-success-strong">
               {message}
             </div>
           ) : null}
 
-          <section style={styles.toolbar}>
+          <section className="mb-4 flex flex-wrap items-center gap-3">
             <input
               type="search"
               value={search}
@@ -687,61 +695,64 @@ export default function PodPage() {
                 setSearch(event.target.value)
               }
               placeholder="Search job, customer, address, postcode or recipient..."
-              style={styles.search}
+              className="h-10 min-w-0 flex-1 basis-72 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
             />
 
-            <select
-              value={filter}
-              onChange={(event) =>
-                setFilter(
-                  event.target.value as PodFilter
-                )
-              }
-              style={styles.select}
-            >
-              <option value="all">
-                All POD
-              </option>
-              <option value="pending">
-                Pending
-              </option>
-              <option value="delivered">
-                Delivered
-              </option>
-              <option value="missing_evidence">
-                Missing Evidence
-              </option>
-            </select>
+            <label className="flex items-center gap-2">
+              <span className="text-sm font-medium text-ink-2">Filter</span>
+              <select
+                value={filter}
+                onChange={(event) =>
+                  setFilter(
+                    event.target.value as PodFilter
+                  )
+                }
+                className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+              >
+                <option value="all">
+                  All POD
+                </option>
+                <option value="pending">
+                  Pending
+                </option>
+                <option value="delivered">
+                  Delivered
+                </option>
+                <option value="missing_evidence">
+                  Missing Evidence
+                </option>
+              </select>
+            </label>
           </section>
 
           {loading ? (
-            <div style={styles.empty}>
+            <div className="rounded-lg border border-line bg-surface p-8 text-center text-sm text-ink-3">
               Loading POD records...
             </div>
           ) : filteredJobs.length === 0 ? (
-            <div style={styles.empty}>
+            <div className="rounded-lg border border-line bg-surface p-8 text-center text-sm text-ink-3">
               No POD records match the current filter.
             </div>
           ) : (
-            <div style={styles.jobList}>
+            <div>
               {filteredJobs.map((job) => (
                 <section
                   key={job.id}
-                  style={styles.jobCard}
+                  className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm"
                 >
-                  <div style={styles.jobHeader}>
+                  <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
                     <div>
-                      <div style={styles.reference}>
+                      <div className="text-kicker uppercase text-primary-deep">
                         {job.reference ||
                           "No job reference"}
                       </div>
 
-                      <h2 style={styles.customer}>
+                      <h2 className="mb-2 text-md font-semibold text-ink">
                         {job.customers?.name ||
                           "No customer"}
                       </h2>
 
-                      <div style={styles.jobMeta}>
+                      <div className="text-xs text-ink-3">
                         Scheduled:{" "}
                         {formatDate(job.scheduled_date)}
                       </div>
@@ -752,7 +763,7 @@ export default function PodPage() {
                     />
                   </div>
 
-                  <div style={styles.stopList}>
+                  <div>
                     {job.job_stops.map((stop) => {
                       const form =
                         forms[stop.id] ?? {
@@ -787,18 +798,14 @@ export default function PodPage() {
                       return (
                         <article
                           key={stop.id}
-                          style={styles.stopCard}
+                          data-stop-card
+                          className="mb-3 rounded-lg border border-line bg-surface-2 p-3"
                         >
-                          <div
-                            style={
-                              styles.stopHeader
-                            }
-                          >
-                            <div>
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
                               <div
-                                style={
-                                  styles.stopTitle
-                                }
+                                data-stress="vehicle"
+                                className="text-sm font-semibold text-ink"
                               >
                                 Stop{" "}
                                 {stop.stop_order} ·{" "}
@@ -808,9 +815,8 @@ export default function PodPage() {
                               </div>
 
                               <div
-                                style={
-                                  styles.address
-                                }
+                                data-stress="name"
+                                className="mt-1 break-words text-sm text-ink-2"
                               >
                                 {[
                                   stop.address_line,
@@ -822,11 +828,7 @@ export default function PodPage() {
                               </div>
 
                               {stop.planned_at ? (
-                                <div
-                                  style={
-                                    styles.muted
-                                  }
-                                >
+                                <div className="mt-1 text-xs text-ink-3">
                                   Planned:{" "}
                                   {formatDateTime(
                                     stop.planned_at
@@ -835,11 +837,7 @@ export default function PodPage() {
                               ) : null}
                             </div>
 
-                            <div
-                              style={
-                                styles.stopBadges
-                              }
-                            >
+                            <div className="flex flex-wrap gap-2">
                               <StatusBadge
                                 value={
                                   stop.pod_status ||
@@ -847,20 +845,14 @@ export default function PodPage() {
                                 }
                               />
 
-                              <span
-                                style={
-                                  styles.evidenceBadge
-                                }
-                              >
+                              <Badge tone="info">
                                 {evidenceCount} evidence
-                              </span>
+                              </Badge>
                             </div>
                           </div>
 
                           {stop.delivered_at ? (
-                            <div
-                              style={styles.delivered}
-                            >
+                            <div className="mt-3 rounded-lg border border-success-border bg-success-tint p-2.5 text-sm font-medium text-success-strong">
                               Delivered{" "}
                               {formatDateTime(
                                 stop.delivered_at
@@ -873,95 +865,50 @@ export default function PodPage() {
 
                           {stop.type ===
                           "delivery" ? (
-                            <div
-                              style={
-                                styles.deliveryBody
-                              }
-                            >
-                              <div
-                                style={
-                                  styles.formGrid
-                                }
-                              >
-                                <label
-                                  style={
-                                    styles.field
+                            <div className="mt-4 grid gap-4">
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                <Field
+                                  id={`pod-${stop.id}-recipient`}
+                                  label="Recipient Name"
+                                  value={
+                                    form.recipient_name
                                   }
-                                >
-                                  <span
-                                    style={
-                                      styles.label
-                                    }
-                                  >
-                                    Recipient Name
-                                  </span>
+                                  onChange={(
+                                    event
+                                  ) =>
+                                    updateForm(
+                                      stop.id,
+                                      "recipient_name",
+                                      event.target
+                                        .value
+                                    )
+                                  }
+                                  placeholder="Who received the delivery?"
+                                />
 
-                                  <input
-                                    value={
-                                      form.recipient_name
-                                    }
-                                    onChange={(
-                                      event
-                                    ) =>
-                                      updateForm(
-                                        stop.id,
-                                        "recipient_name",
-                                        event.target
-                                          .value
-                                      )
-                                    }
-                                    placeholder="Who received the delivery?"
-                                    style={
-                                      styles.input
-                                    }
-                                  />
-                                </label>
-
-                                <label
-                                  style={{
-                                    ...styles.field,
-                                    gridColumn:
-                                      "1 / -1",
-                                  }}
-                                >
-                                  <span
-                                    style={
-                                      styles.label
-                                    }
-                                  >
-                                    POD Notes
-                                  </span>
-
-                                  <textarea
-                                    value={
-                                      form.pod_notes
-                                    }
-                                    onChange={(
-                                      event
-                                    ) =>
-                                      updateForm(
-                                        stop.id,
-                                        "pod_notes",
-                                        event.target
-                                          .value
-                                      )
-                                    }
-                                    rows={3}
-                                    placeholder="Delivery notes, condition, quantities or other POD information..."
-                                    style={{
-                                      ...styles.input,
-                                      resize:
-                                        "vertical",
-                                    }}
-                                  />
-                                </label>
+                                <Textarea
+                                  id={`pod-${stop.id}-notes`}
+                                  label="POD Notes"
+                                  wrapperClassName="sm:col-span-2"
+                                  value={
+                                    form.pod_notes
+                                  }
+                                  onChange={(
+                                    event
+                                  ) =>
+                                    updateForm(
+                                      stop.id,
+                                      "pod_notes",
+                                      event.target
+                                        .value
+                                    )
+                                  }
+                                  rows={3}
+                                  placeholder="Delivery notes, condition, quantities or other POD information..."
+                                />
                               </div>
 
-                              <div
-                                style={
-                                  styles.uploadGrid
-                                }
-                              >
+                              <div className="grid gap-3 sm:grid-cols-2">
                                 <EvidenceUpload
                                   title="Delivery Photos"
                                   description="Upload one or more photos."
@@ -1011,35 +958,19 @@ export default function PodPage() {
                                 />
                               </div>
 
-                              <div
-                                style={
-                                  styles.evidenceSection
-                                }
-                              >
-                                <h3
-                                  style={
-                                    styles.evidenceTitle
-                                  }
-                                >
+                              <div className="grid gap-2.5">
+                                <h3 className="m-0 text-sm font-semibold text-ink">
                                   POD Evidence
                                 </h3>
 
                                 {stop.pod_photo_url ||
                                 stop.pod_document_url ? (
-                                  <div
-                                    style={
-                                      styles.legacyBox
-                                    }
-                                  >
+                                  <div className="rounded-lg border border-warning-border bg-warning-tint p-3 text-sm text-warning-strong">
                                     <strong>
                                       Legacy POD
                                     </strong>
 
-                                    <div
-                                      style={
-                                        styles.linkList
-                                      }
-                                    >
+                                    <div className="mt-1.5 flex flex-wrap gap-3">
                                       {stop.pod_photo_url ? (
                                         <PodLink
                                           value={
@@ -1065,20 +996,12 @@ export default function PodPage() {
                                   0 &&
                                 documents.length ===
                                   0 ? (
-                                  <div
-                                    style={
-                                      styles.noEvidence
-                                    }
-                                  >
+                                  <div className="rounded-lg border border-dashed border-line-strong bg-surface p-3 text-sm text-ink-3">
                                     No new POD evidence
                                     uploaded yet.
                                   </div>
                                 ) : (
-                                  <div
-                                    style={
-                                      styles.evidenceGrid
-                                    }
-                                  >
+                                  <div className="grid gap-2">
                                     {[
                                       ...photos,
                                       ...documents,
@@ -1087,23 +1010,17 @@ export default function PodPage() {
                                         key={
                                           item.id
                                         }
-                                        style={
-                                          styles.evidenceItem
-                                        }
+                                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-surface p-3"
                                       >
-                                        <div>
-                                          <strong>
+                                        <div className="min-w-0">
+                                          <strong className="break-words text-sm text-ink">
                                             {item.original_filename ||
                                               formatLabel(
                                                 item.evidence_type
                                               )}
                                           </strong>
 
-                                          <div
-                                            style={
-                                              styles.muted
-                                            }
-                                          >
+                                          <div className="mt-0.5 text-xs text-ink-3">
                                             {formatLabel(
                                               item.evidence_type
                                             )}{" "}
@@ -1114,11 +1031,7 @@ export default function PodPage() {
                                           </div>
                                         </div>
 
-                                        <div
-                                          style={
-                                            styles.evidenceActions
-                                          }
-                                        >
+                                        <div className="flex items-center gap-2.5">
                                           <PodLink
                                             value={
                                               item.storage_path
@@ -1126,19 +1039,17 @@ export default function PodPage() {
                                             label="View"
                                           />
 
-                                          <button
-                                            type="button"
+                                          <Button
+                                            variant="danger"
+                                            size="sm"
                                             onClick={() =>
                                               void deleteEvidence(
                                                 item
                                               )
                                             }
-                                            style={
-                                              styles.deleteButton
-                                            }
                                           >
                                             Delete
-                                          </button>
+                                          </Button>
                                         </div>
                                       </div>
                                     ))}
@@ -1146,13 +1057,9 @@ export default function PodPage() {
                                 )}
                               </div>
 
-                              <div
-                                style={
-                                  styles.actions
-                                }
-                              >
-                                <button
-                                  type="button"
+                              <div className="flex flex-wrap items-center justify-between gap-4 border-t border-line pt-4">
+                                <Button
+                                  variant="secondary"
                                   disabled={
                                     savingStopId ===
                                     stop.id
@@ -1164,18 +1071,14 @@ export default function PodPage() {
                                       false
                                     )
                                   }
-                                  style={
-                                    styles.secondaryButton
-                                  }
                                 >
                                   {savingStopId ===
                                   stop.id
                                     ? "Saving..."
                                     : "SAVE POD DRAFT"}
-                                </button>
+                                </Button>
 
-                                <button
-                                  type="button"
+                                <Button
                                   disabled={
                                     savingStopId ===
                                       stop.id ||
@@ -1189,14 +1092,6 @@ export default function PodPage() {
                                       true
                                     )
                                   }
-                                  style={{
-                                    ...styles.primaryButton,
-                                    opacity:
-                                      stop.pod_status ===
-                                      "delivered"
-                                        ? 0.55
-                                        : 1,
-                                  }}
                                 >
                                   {stop.pod_status ===
                                   "delivered"
@@ -1205,7 +1100,7 @@ export default function PodPage() {
                                         stop.id
                                       ? "Saving..."
                                       : "COMPLETE DELIVERY"}
-                                </button>
+                                </Button>
                               </div>
                             </div>
                           ) : null}
@@ -1217,8 +1112,8 @@ export default function PodPage() {
               ))}
             </div>
           )}
-        </div>
-      </main>
+        </main>
+      </div>
     </TenantGate>
   );
 }
@@ -1248,13 +1143,13 @@ function EvidenceUpload({
       : "ADD DELIVERY DOCUMENTS";
 
   return (
-    <div style={styles.uploadCard}>
+    <div className="grid min-h-[140px] content-between gap-3 rounded-lg border border-line bg-surface p-4">
       <div>
-        <strong style={styles.uploadTitle}>
+        <strong className="mb-1 block text-sm font-semibold text-ink">
           {title}
         </strong>
 
-        <div style={styles.uploadDescription}>
+        <div className="text-xs text-ink-3">
           {description}
         </div>
       </div>
@@ -1266,44 +1161,20 @@ function EvidenceUpload({
         multiple={multiple}
         disabled={uploading}
         onChange={onChange}
-        style={styles.hiddenFileInput}
+        className="hidden"
       />
 
-      <button
-        type="button"
+      <Button
+        variant="secondary"
+        size="sm"
+        className="w-full"
         disabled={uploading}
         onClick={() => inputRef.current?.click()}
-        style={{
-          ...styles.uploadButton,
-          opacity: uploading ? 0.55 : 1,
-          cursor: uploading
-            ? "not-allowed"
-            : "pointer",
-        }}
       >
         {uploading
           ? "UPLOADING..."
           : buttonLabel}
-      </button>
-    </div>
-  );
-}
-
-function SummaryCard({
-  label,
-  value,
-}: {
-  label: string;
-  value: number;
-}) {
-  return (
-    <div style={styles.summaryCard}>
-      <div style={styles.summaryValue}>
-        {value}
-      </div>
-      <div style={styles.summaryLabel}>
-        {label}
-      </div>
+      </Button>
     </div>
   );
 }
@@ -1315,33 +1186,24 @@ function StatusBadge({
 }) {
   const normalized = value.toLowerCase();
 
-  let background = "#e2e8f0";
-  let color = "#334155";
+  let tone: Tone = "neutral";
 
   if (
     normalized === "delivered" ||
     normalized === "completed"
   ) {
-    background = "#dcfce7";
-    color = "#166534";
+    tone = "success";
   } else if (
     normalized === "pending" ||
     normalized === "planned"
   ) {
-    background = "#fef3c7";
-    color = "#92400e";
+    tone = "warning";
   }
 
   return (
-    <span
-      style={{
-        ...styles.statusBadge,
-        background,
-        color,
-      }}
-    >
+    <Badge tone={tone}>
       {formatLabel(value)}
-    </span>
+    </Badge>
   );
 }
 
@@ -1399,431 +1261,3 @@ function formatFileSize(value: number | null) {
     (1024 * 1024)
   ).toFixed(1)} MB`;
 }
-
-const styles: Record<string, CSSProperties> = {
-  page: {
-    minHeight: "100vh",
-    padding: 30,
-    background: "#f1f5f9",
-  },
-
-  shell: {
-    maxWidth: 1500,
-    margin: "0 auto",
-    display: "grid",
-    gap: 22,
-  },
-
-  header: {
-    padding: 28,
-    borderRadius: 18,
-    background:
-      "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)",
-    color: "white",
-  },
-
-  eyebrow: {
-    margin: "0 0 6px",
-    fontSize: 12,
-    textTransform: "uppercase",
-    letterSpacing: "0.12em",
-    color: "#93c5fd",
-    fontWeight: 900,
-  },
-
-  title: {
-    margin: 0,
-    fontSize: 36,
-  },
-
-  subtitle: {
-    margin: "8px 0 0",
-    color: "#cbd5e1",
-    maxWidth: 760,
-    lineHeight: 1.5,
-  },
-
-  summaryGrid: {
-    display: "grid",
-    gridTemplateColumns:
-      "repeat(auto-fit, minmax(180px, 1fr))",
-    gap: 14,
-  },
-
-  summaryCard: {
-    padding: 18,
-    borderRadius: 14,
-    background: "white",
-    border: "1px solid #e2e8f0",
-  },
-
-  summaryValue: {
-    fontSize: 30,
-    fontWeight: 900,
-    color: "#0f172a",
-  },
-
-  summaryLabel: {
-    marginTop: 4,
-    color: "#64748b",
-    fontWeight: 700,
-  },
-
-  toolbar: {
-    display: "flex",
-    gap: 12,
-    flexWrap: "wrap",
-    padding: 16,
-    background: "white",
-    borderRadius: 14,
-    border: "1px solid #e2e8f0",
-  },
-
-  search: {
-    flex: "1 1 360px",
-    padding: "11px 12px",
-    border: "1px solid #cbd5e1",
-    borderRadius: 9,
-    fontSize: 14,
-  },
-
-  select: {
-    minWidth: 190,
-    padding: "11px 12px",
-    border: "1px solid #cbd5e1",
-    borderRadius: 9,
-    background: "white",
-  },
-
-  error: {
-    padding: 14,
-    borderRadius: 10,
-    background: "#fee2e2",
-    color: "#991b1b",
-    fontWeight: 700,
-  },
-
-  success: {
-    padding: 14,
-    borderRadius: 10,
-    background: "#dcfce7",
-    color: "#166534",
-    fontWeight: 700,
-  },
-
-  empty: {
-    padding: 36,
-    borderRadius: 14,
-    background: "white",
-    color: "#64748b",
-    textAlign: "center",
-    border: "1px solid #e2e8f0",
-  },
-
-  jobList: {
-    display: "grid",
-    gap: 18,
-  },
-
-  jobCard: {
-    padding: 22,
-    borderRadius: 16,
-    background: "white",
-    border: "1px solid #e2e8f0",
-    boxShadow: "0 8px 24px rgba(15,23,42,0.06)",
-  },
-
-  jobHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: 16,
-    alignItems: "flex-start",
-    marginBottom: 18,
-  },
-
-  reference: {
-    fontSize: 13,
-    color: "#2563eb",
-    fontWeight: 900,
-  },
-
-  customer: {
-    margin: "4px 0",
-    fontSize: 21,
-    color: "#0f172a",
-  },
-
-  jobMeta: {
-    color: "#64748b",
-    fontSize: 13,
-  },
-
-  stopList: {
-    display: "grid",
-    gap: 14,
-  },
-
-  stopCard: {
-    padding: 18,
-    borderRadius: 14,
-    border: "1px solid #e2e8f0",
-    background: "#f8fafc",
-  },
-
-  stopHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: 12,
-    alignItems: "flex-start",
-    flexWrap: "wrap",
-  },
-
-  stopTitle: {
-    fontWeight: 900,
-    color: "#0f172a",
-  },
-
-  address: {
-    marginTop: 4,
-    color: "#334155",
-  },
-
-  muted: {
-    marginTop: 4,
-    color: "#64748b",
-    fontSize: 12,
-  },
-
-  stopBadges: {
-    display: "flex",
-    gap: 8,
-    flexWrap: "wrap",
-  },
-
-  statusBadge: {
-    display: "inline-flex",
-    padding: "6px 10px",
-    borderRadius: 999,
-    fontSize: 12,
-    fontWeight: 900,
-  },
-
-  evidenceBadge: {
-    display: "inline-flex",
-    padding: "6px 10px",
-    borderRadius: 999,
-    background: "#dbeafe",
-    color: "#1d4ed8",
-    fontSize: 12,
-    fontWeight: 900,
-  },
-
-  delivered: {
-    marginTop: 12,
-    padding: 10,
-    borderRadius: 9,
-    background: "#dcfce7",
-    color: "#166534",
-    fontWeight: 700,
-  },
-
-  deliveryBody: {
-    display: "grid",
-    gap: 16,
-    marginTop: 16,
-  },
-
-  formGrid: {
-    display: "grid",
-    gridTemplateColumns:
-      "repeat(auto-fit, minmax(240px, 1fr))",
-    gap: 12,
-  },
-
-  field: {
-    display: "grid",
-    gap: 6,
-  },
-
-  label: {
-    fontSize: 12,
-    color: "#334155",
-    fontWeight: 800,
-  },
-
-  input: {
-    width: "100%",
-    boxSizing: "border-box",
-    border: "1px solid #cbd5e1",
-    borderRadius: 9,
-    padding: "11px 12px",
-    background: "white",
-    color: "#0f172a",
-  },
-
-  uploadGrid: {
-    display: "grid",
-    gridTemplateColumns:
-      "repeat(auto-fit, minmax(260px, 1fr))",
-    gap: 12,
-  },
-
-  uploadCard: {
-    display: "grid",
-    gap: 12,
-    padding: 18,
-    minHeight: 140,
-    alignContent: "space-between",
-    borderRadius: 4,
-    background: "#ffffff",
-    border: "2px solid #b1b4b6",
-  },
-
-  uploadTitle: {
-    display: "block",
-    fontSize: 15,
-    fontWeight: 900,
-    color: "#0b0c0c",
-    marginBottom: 5,
-  },
-
-  uploadDescription: {
-    color: "#505a5f",
-    fontSize: 13,
-    lineHeight: 1.4,
-  },
-
-  uploadButton: {
-    width: "100%",
-    minHeight: 50,
-    padding: "12px 16px",
-    border: "2px solid #0b0c0c",
-    borderRadius: 4,
-    background: "#ffffff",
-    color: "#0b0c0c",
-    fontSize: 14,
-    fontWeight: 900,
-    letterSpacing: "0.02em",
-    textAlign: "center",
-    boxShadow: "0 2px 0 #929191",
-  },
-
-  hiddenFileInput: {
-    display: "none",
-  },
-
-  uploading: {
-    color: "#2563eb",
-    fontWeight: 700,
-    fontSize: 12,
-  },
-
-  evidenceSection: {
-    display: "grid",
-    gap: 10,
-  },
-
-  evidenceTitle: {
-    margin: 0,
-    fontSize: 15,
-    color: "#0f172a",
-  },
-
-  evidenceGrid: {
-    display: "grid",
-    gap: 8,
-  },
-
-  evidenceItem: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: 12,
-    alignItems: "center",
-    padding: 12,
-    borderRadius: 10,
-    background: "white",
-    border: "1px solid #e2e8f0",
-    flexWrap: "wrap",
-  },
-
-  evidenceActions: {
-    display: "flex",
-    gap: 10,
-    alignItems: "center",
-  },
-
-  legacyBox: {
-    padding: 12,
-    borderRadius: 10,
-    background: "#fffbeb",
-    border: "1px solid #fde68a",
-  },
-
-  linkList: {
-    display: "flex",
-    gap: 12,
-    flexWrap: "wrap",
-    marginTop: 7,
-  },
-
-  noEvidence: {
-    padding: 12,
-    borderRadius: 10,
-    background: "white",
-    border: "1px dashed #cbd5e1",
-    color: "#64748b",
-  },
-
-  actions: {
-    display: "flex",
-    gap: 16,
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingTop: 20,
-    marginTop: 8,
-    borderTop: "2px solid #b1b4b6",
-  },
-
-  primaryButton: {
-    minWidth: 220,
-    minHeight: 52,
-    padding: "12px 22px",
-    border: "2px solid #005a30",
-    borderRadius: 4,
-    background: "#00703c",
-    color: "#ffffff",
-    fontSize: 15,
-    fontWeight: 900,
-    letterSpacing: "0.02em",
-    cursor: "pointer",
-    textAlign: "center",
-    boxShadow: "0 2px 0 #003d21",
-  },
-
-  secondaryButton: {
-    minWidth: 180,
-    minHeight: 52,
-    padding: "12px 22px",
-    border: "2px solid #0b0c0c",
-    borderRadius: 4,
-    background: "#f3f2f1",
-    color: "#0b0c0c",
-    fontSize: 15,
-    fontWeight: 900,
-    letterSpacing: "0.02em",
-    cursor: "pointer",
-    textAlign: "center",
-    boxShadow: "0 2px 0 #929191",
-  },
-
-  deleteButton: {
-    padding: "6px 9px",
-    borderRadius: 8,
-    border: "1px solid #fecaca",
-    background: "#fff1f2",
-    color: "#be123c",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-};
