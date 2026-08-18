@@ -4,6 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../../../lib/supabase/browser";
 import { useTenant } from "../../components/TenantProvider";
 import TenantGate from "../../components/TenantGate";
+import MessageBanner from "../../../components/MessageBanner";
+import Card from "../../../components/Card";
+import Button from "../../../components/Button";
+import Stat from "../../../components/Stat";
 
 const PRICE_PER_LICENSED_VEHICLE = 10;
 
@@ -41,56 +45,6 @@ type VehicleLicenceRow = {
     notes: string | null;
     created_at: string;
     vehicles?: Vehicle[] | null;
-};
-
-const pageBackground =
-    "url('https://images.unsplash.com/photo-1553413077-190dd305871c')";
-
-const cardStyle: React.CSSProperties = {
-    background: "rgba(255,255,255,0.95)",
-    padding: 20,
-    borderRadius: 14,
-    boxShadow: "0 8px 30px rgba(0,0,0,0.25)",
-};
-
-const inputStyle: React.CSSProperties = {
-    width: "100%",
-    padding: "12px 14px",
-    borderRadius: 10,
-    border: "1px solid #d1d5db",
-    boxSizing: "border-box",
-    fontSize: 14,
-    background: "white",
-};
-
-const primaryButtonStyle: React.CSSProperties = {
-    background: "#2563eb",
-    color: "white",
-    border: "none",
-    borderRadius: 10,
-    padding: "12px 14px",
-    cursor: "pointer",
-    fontWeight: 700,
-};
-
-const secondaryButtonStyle: React.CSSProperties = {
-    background: "white",
-    color: "#111827",
-    border: "1px solid #d1d5db",
-    borderRadius: 10,
-    padding: "10px 14px",
-    cursor: "pointer",
-    fontWeight: 600,
-};
-
-const deleteButtonStyle: React.CSSProperties = {
-    background: "#dc2626",
-    color: "white",
-    border: "none",
-    borderRadius: 10,
-    padding: "10px 14px",
-    cursor: "pointer",
-    fontWeight: 600,
 };
 
 export default function VehicleLicencesPage() {
@@ -288,212 +242,149 @@ export default function VehicleLicencesPage() {
 
     return (
         <TenantGate>
-        <main
-            style={{
-                minHeight: "100vh",
-                padding: 30,
-                backgroundImage: pageBackground,
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-            }}
-        >
-            <div
-                style={{
-                    background: "rgba(0,0,0,0.6)",
-                    padding: 30,
-                    borderRadius: 20,
-                }}
+        <div className="ds min-h-screen bg-canvas font-sans text-ink">
+        <main className="mx-auto max-w-[1480px] px-6 py-8">
+            <header className="mb-4">
+                <div className="text-kicker uppercase text-ink-3">Admin</div>
+                <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">Vehicle Licences</h1>
+                <p className="m-0 text-sm text-ink-3">
+                    Add and manage vehicle licences. Billing is £10 per licensed vehicle per month.
+                </p>
+            </header>
+
+            <div className="mb-4 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+                <Stat label="Licensed Vehicles" value={String(billableVehicleCount)} />
+                <Stat label="Monthly Charge" value={`£${monthlyTotal}`} />
+                <Stat label="Billing Rule" value="£10" sub="per licensed vehicle" />
+            </div>
+
+            <form
+                onSubmit={createLicence}
+                className="mb-4 grid gap-3 rounded-lg border border-line bg-surface p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-3"
             >
-                <div style={{ color: "white", marginBottom: 20 }}>
-                    <h1 style={{ marginTop: 0, marginBottom: 8 }}>Vehicle Licences</h1>
-                    <p style={{ margin: 0, opacity: 0.9 }}>
-                        Add and manage vehicle licences. Billing is £10 per licensed vehicle per month.
-                    </p>
-                </div>
-
-                <div
-                    style={{
-                        ...cardStyle,
-                        display: "grid",
-                        gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                        gap: 16,
-                        marginBottom: 20,
-                    }}
+                <select
+                    value={vehicleId}
+                    onChange={(event) => setVehicleId(event.target.value)}
+                    className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                    required
                 >
-                    <div>
-                        <div style={{ fontSize: 13, opacity: 0.7 }}>Licensed Vehicles</div>
-                        <div style={{ fontSize: 28, fontWeight: 800 }}>{billableVehicleCount}</div>
-                    </div>
-                    <div>
-                        <div style={{ fontSize: 13, opacity: 0.7 }}>Monthly Charge</div>
-                        <div style={{ fontSize: 28, fontWeight: 800 }}>£{monthlyTotal}</div>
-                    </div>
-                    <div>
-                        <div style={{ fontSize: 13, opacity: 0.7 }}>Billing Rule</div>
-                        <div style={{ fontSize: 18, fontWeight: 700 }}>£10 per licensed vehicle</div>
-                    </div>
-                </div>
+                    <option value="">Select vehicle</option>
+                    {vehicles.map((vehicle) => (
+                        <option key={vehicle.id} value={vehicle.id}>
+                            {vehicleLabel(vehicle)}
+                        </option>
+                    ))}
+                </select>
 
-                <form
-                    onSubmit={createLicence}
-                    style={{
-                        ...cardStyle,
-                        display: "grid",
-                        gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                        gap: 12,
-                        marginBottom: 20,
-                    }}
-                >
-                    <select
-                        value={vehicleId}
-                        onChange={(event) => setVehicleId(event.target.value)}
-                        style={inputStyle}
-                        required
-                    >
-                        <option value="">Select vehicle</option>
-                        {vehicles.map((vehicle) => (
-                            <option key={vehicle.id} value={vehicle.id}>
-                                {vehicleLabel(vehicle)}
-                            </option>
-                        ))}
-                    </select>
+                <input
+                    type="text"
+                    placeholder="Licence type"
+                    value={licenceType}
+                    onChange={(event) => setLicenceType(event.target.value)}
+                    className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
+                    required
+                />
 
+                <input
+                    type="date"
+                    value={issueDate}
+                    onChange={(event) => setIssueDate(event.target.value)}
+                    className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
+                />
+
+                <input
+                    type="date"
+                    value={expiryDate}
+                    onChange={(event) => setExpiryDate(event.target.value)}
+                    className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
+                />
+
+                <input
+                    type="text"
+                    placeholder="Notes"
+                    value={notes}
+                    onChange={(event) => setNotes(event.target.value)}
+                    className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
+                />
+
+                <label className="flex items-center gap-2 rounded-md border border-ink-3 bg-surface px-3 text-sm text-ink-2">
                     <input
-                        type="text"
-                        placeholder="Licence type"
-                        value={licenceType}
-                        onChange={(event) => setLicenceType(event.target.value)}
-                        style={inputStyle}
-                        required
+                        type="checkbox"
+                        checked={active}
+                        onChange={(event) => setActive(event.target.checked)}
                     />
+                    Active for billing
+                </label>
 
-                    <input
-                        type="date"
-                        value={issueDate}
-                        onChange={(event) => setIssueDate(event.target.value)}
-                        style={inputStyle}
-                    />
-
-                    <input
-                        type="date"
-                        value={expiryDate}
-                        onChange={(event) => setExpiryDate(event.target.value)}
-                        style={inputStyle}
-                    />
-
-                    <input
-                        type="text"
-                        placeholder="Notes"
-                        value={notes}
-                        onChange={(event) => setNotes(event.target.value)}
-                        style={inputStyle}
-                    />
-
-                    <label
-                        style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 10,
-                            background: "white",
-                            border: "1px solid #d1d5db",
-                            borderRadius: 10,
-                            padding: "12px 14px",
-                        }}
-                    >
-                        <input
-                            type="checkbox"
-                            checked={active}
-                            onChange={(event) => setActive(event.target.checked)}
-                        />
-                        Active for billing
-                    </label>
-
-                    <button
-                        type="submit"
-                        disabled={saving}
-                        style={{
-                            ...primaryButtonStyle,
-                            cursor: saving ? "not-allowed" : "pointer",
-                        }}
-                    >
+                <div className="sm:col-span-2 lg:col-span-3">
+                    <Button type="submit" disabled={saving}>
                         {saving ? "Saving..." : "Add Licence"}
-                    </button>
-                </form>
+                    </Button>
+                </div>
+            </form>
 
-                {message ? (
-                    <div
-                        style={{
-                            background: "white",
-                            padding: 12,
-                            borderRadius: 10,
-                            marginBottom: 20,
-                        }}
-                    >
-                        {message}
-                    </div>
-                ) : null}
+            <MessageBanner tone="neutral">{message}</MessageBanner>
 
-                {loading ? (
-                    <div style={cardStyle}>Loading...</div>
-                ) : (
-                    <div style={{ display: "grid", gap: 16 }}>
-                        {licences.map((licence) => (
-                            <div
-                                key={licence.id}
-                                style={{
-                                    ...cardStyle,
-                                    display: "grid",
-                                    gap: 8,
-                                }}
-                            >
-                                <h3 style={{ margin: 0 }}>{licence.licence_type}</h3>
+            {loading ? (
+                <Card>Loading...</Card>
+            ) : (
+                <div className="grid gap-3">
+                    {licences.map((licence) => (
+                        <article key={licence.id} className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+                            <h3 className="m-0 mb-2 text-md font-semibold text-ink">{licence.licence_type}</h3>
 
-                                <div style={{ opacity: 0.8 }}>
-                                    Vehicle:{" "}
-                                    {licence.vehicles?.registration ||
-                                        [licence.vehicles?.make, licence.vehicles?.model].filter(Boolean).join(" ") ||
-                                        licence.vehicle_id}
+                            <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                                <div className="text-sm">
+                                    <span className="text-kicker uppercase text-ink-3">Vehicle</span>{" "}
+                                    <strong className="block font-normal text-ink">
+                                        {licence.vehicles?.registration ||
+                                            [licence.vehicles?.make, licence.vehicles?.model].filter(Boolean).join(" ") ||
+                                            licence.vehicle_id}
+                                    </strong>
                                 </div>
 
-                                <div style={{ opacity: 0.8 }}>
-                                    Issue Date: {licence.issue_date || "-"}
+                                <div className="text-sm">
+                                    <span className="text-kicker uppercase text-ink-3">Issue Date</span>{" "}
+                                    <strong className="block font-mono font-normal text-ink">{licence.issue_date || "-"}</strong>
                                 </div>
 
-                                <div style={{ opacity: 0.8 }}>
-                                    Expiry Date: {licence.expiry_date || "-"}
+                                <div className="text-sm">
+                                    <span className="text-kicker uppercase text-ink-3">Expiry Date</span>{" "}
+                                    <strong className="block font-mono font-normal text-ink">{licence.expiry_date || "-"}</strong>
                                 </div>
 
-                                <div style={{ opacity: 0.8 }}>
-                                    Billing Status: {licence.active ? "Active" : "Inactive"}
+                                <div className="text-sm">
+                                    <span className="text-kicker uppercase text-ink-3">Billing Status</span>{" "}
+                                    <strong className="block font-normal text-ink">{licence.active ? "Active" : "Inactive"}</strong>
                                 </div>
 
-                                <div style={{ opacity: 0.8 }}>
-                                    Notes: {licence.notes || "-"}
-                                </div>
-
-                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-                                    <button
-                                        type="button"
-                                        style={secondaryButtonStyle}
-                                        onClick={() => toggleLicence(licence.id, licence.active)}
-                                    >
-                                        {licence.active ? "Deactivate" : "Activate"}
-                                    </button>
-
-                                    <button
-                                        type="button"
-                                        style={deleteButtonStyle}
-                                        onClick={() => deleteLicence(licence.id)}
-                                    >
-                                        Delete
-                                    </button>
+                                <div className="text-sm">
+                                    <span className="text-kicker uppercase text-ink-3">Notes</span>{" "}
+                                    <strong className="block font-normal text-ink">{licence.notes || "-"}</strong>
                                 </div>
                             </div>
-                        ))}
-                    </div>
-                )}
-            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                                <Button
+                                    variant="secondary"
+                                    onClick={() => toggleLicence(licence.id, licence.active)}
+                                >
+                                    {licence.active ? "Deactivate" : "Activate"}
+                                </Button>
+
+                                <Button
+                                    variant="danger"
+                                    onClick={() => deleteLicence(licence.id)}
+                                >
+                                    Delete
+                                </Button>
+                            </div>
+                        </article>
+                    ))}
+                </div>
+            )}
         </main>
+        </div>
         </TenantGate>
     );
 }
