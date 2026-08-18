@@ -307,7 +307,7 @@ export default function VehicleLicencesPage() {
                     className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
                 />
 
-                <label className="flex items-center gap-2 rounded-md border border-ink-3 bg-surface px-3 text-sm text-ink-2">
+                <label className="flex min-h-10 items-center gap-2 rounded-md border border-ink-3 bg-surface px-3 text-sm text-ink-2">
                     <input
                         type="checkbox"
                         checked={active}
@@ -336,7 +336,7 @@ export default function VehicleLicencesPage() {
                             <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                                 <div className="text-sm">
                                     <span className="text-kicker uppercase text-ink-3">Vehicle</span>{" "}
-                                    <strong className="block font-normal text-ink">
+                                    <strong className="block text-ink">
                                         {licence.vehicles?.registration ||
                                             [licence.vehicles?.make, licence.vehicles?.model].filter(Boolean).join(" ") ||
                                             licence.vehicle_id}
@@ -345,22 +345,22 @@ export default function VehicleLicencesPage() {
 
                                 <div className="text-sm">
                                     <span className="text-kicker uppercase text-ink-3">Issue Date</span>{" "}
-                                    <strong className="block font-mono font-normal text-ink">{licence.issue_date || "-"}</strong>
+                                    <strong className="block font-mono text-ink">{licence.issue_date || "-"}</strong>
                                 </div>
 
                                 <div className="text-sm">
                                     <span className="text-kicker uppercase text-ink-3">Expiry Date</span>{" "}
-                                    <strong className="block font-mono font-normal text-ink">{licence.expiry_date || "-"}</strong>
+                                    <strong className="block font-mono text-ink">{licence.expiry_date || "-"}</strong>
                                 </div>
 
                                 <div className="text-sm">
                                     <span className="text-kicker uppercase text-ink-3">Billing Status</span>{" "}
-                                    <strong className="block font-normal text-ink">{licence.active ? "Active" : "Inactive"}</strong>
+                                    <strong className="block text-ink">{licence.active ? "Active" : "Inactive"}</strong>
                                 </div>
 
                                 <div className="text-sm">
                                     <span className="text-kicker uppercase text-ink-3">Notes</span>{" "}
-                                    <strong className="block font-normal text-ink">{licence.notes || "-"}</strong>
+                                    <strong className="block text-ink">{licence.notes || "-"}</strong>
                                 </div>
                             </div>
 
