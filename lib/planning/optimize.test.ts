@@ -53,4 +53,20 @@ describe("bestOrder", () => {
     expect([...order].sort((a, b) => a - b)).toEqual(Array.from({ length: n }, (_, i) => i));
     expect(pathSeconds(order, m)).toBe((n - 1) * 60);
   });
+
+  it("actually optimizes above the exhaustive limit (identity order is not optimal)", () => {
+    // The same 10-jobs-on-a-line shape, but with the labels scrambled: job i
+    // sits at position p[i], so the identity order zig-zags (cost 49 * 60)
+    // while the true best path sweeps the line end to end (cost 9 * 60).
+    // A solver that skipped the heuristic and returned the input order would
+    // fail this loudly.
+    const p = [5, 2, 8, 0, 9, 1, 6, 3, 7, 4];
+    const n = p.length;
+    const m = Array.from({ length: n }, (_, i) =>
+      Array.from({ length: n }, (_, j) => Math.abs(p[i] - p[j]) * 60)
+    );
+    const order = bestOrder(m);
+    expect([...order].sort((a, b) => a - b)).toEqual(Array.from({ length: n }, (_, i) => i));
+    expect(pathSeconds(order, m)).toBe((n - 1) * 60);
+  });
 });

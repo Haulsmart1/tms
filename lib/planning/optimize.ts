@@ -25,6 +25,9 @@ export function pathSeconds(order: number[], matrix: number[][]): number {
   return total;
 }
 
+/** Precondition: `matrix` is square with non-negative, non-NaN entries
+    (Infinity is fine for unreachable pairs; NaN would silently corrupt every
+    comparison it touches). The TomTom matrix parser upholds this. */
 export function bestOrder(matrix: number[][]): number[] {
   const n = matrix.length;
   if (n <= 1) return matrix.map((_, i) => i);
