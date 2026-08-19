@@ -59,7 +59,9 @@ function isRateLimited(key: string): boolean {
   const mine = (recentHits.get(effectiveKey) ?? []).filter(
     (t) => now - t < RATE_LIMIT_WINDOW_MS,
   );
-  mine.push(now);
+  // Pushing past the threshold changes no decision; capping keeps one
+  // flooding key from growing its array without bound.
+  if (mine.length <= RATE_LIMIT_MAX) mine.push(now);
   recentHits.set(effectiveKey, mine);
   return mine.length > RATE_LIMIT_MAX;
 }

@@ -48,6 +48,7 @@ describe("isThemeableRoute", () => {
         "/super-admin/requests",
         "/dashboard",
         "/jobs",
+        "/planning",
         "/pod",
         "/tracking",
         "/drivers",

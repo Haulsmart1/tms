@@ -46,6 +46,7 @@ export const THEMEABLE_ROUTES: readonly string[] = [
   "/super-admin/requests",    // app/super-admin/requests/page.tsx (no shell, no toggle)
   "/dashboard",               // app/dashboard/page.tsx
   "/jobs",                    // app/jobs/page.tsx
+  "/planning",                // app/planning/page.tsx
   "/pod",                     // app/pod/page.tsx
   "/tracking",                // app/tracking/page.tsx
   "/drivers",                 // app/drivers/page.tsx

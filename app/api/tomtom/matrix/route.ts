@@ -1,0 +1,80 @@
+import { NextResponse } from "next/server";
+import { matrixBody, matrixUrl, parseMatrix } from "../../../../lib/tomtom/api";
+import {
+  authClient,
+  isRateLimited,
+  parsePoints,
+  requireOperator,
+} from "../../../../lib/tomtom/server";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+/* The synchronous Matrix v2 endpoint caps at 100 cells, so 10 jobs is the
+   ceiling (10 x 10). The page never optimizes more than one vehicle's day at
+   a time, so hitting this limit means a single van with 11+ jobs in one day;
+   the handler rejects rather than silently truncating.
+
+   Like the routing endpoint, this spends the premium key on every call, so it
+   is gated on being console staff rather than merely signed in. */
+
+const MAX_JOBS = 10;
+const TIMEOUT_MS = 10000;
+
+export async function POST(request: Request) {
+  try {
+    const client = await authClient();
+
+    const operator = await requireOperator(client);
+    if (!operator) {
+      return NextResponse.json({ error: "You must be signed in." }, { status: 401 });
+    }
+    if (!operator.companyId) {
+      return NextResponse.json({ error: "You do not have console access." }, { status: 403 });
+    }
+
+    if (isRateLimited(operator.userId)) {
+      return NextResponse.json(
+        { error: "Too many requests. Please try again shortly." },
+        { status: 429 }
+      );
+    }
+
+    const body = await request.json().catch(() => null);
+    const points = parsePoints(body);
+    if (!points || points.length < 2 || points.length > MAX_JOBS) {
+      return NextResponse.json(
+        { error: `points must be 2 to ${MAX_JOBS} lat/lng pairs.` },
+        { status: 400 }
+      );
+    }
+
+    const key = process.env.TOMTOM_API_KEY;
+    if (!key) {
+      return NextResponse.json({ error: "TomTom is not configured." }, { status: 503 });
+    }
+
+    const response = await fetch(matrixUrl(key), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(matrixBody(points)),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: `TomTom matrix failed (${response.status}).` },
+        { status: 502 }
+      );
+    }
+    const travelSeconds = parseMatrix(await response.json(), points.length);
+    if (!travelSeconds) {
+      return NextResponse.json({ error: "TomTom returned no matrix." }, { status: 502 });
+    }
+    return NextResponse.json({ travelSeconds });
+  } catch (error) {
+    // Constant message: a fetch failure can quote the request URL, which holds
+    // the API key, and a Supabase error can describe internals.
+    console.error("tomtom/matrix failed:", error);
+    return NextResponse.json({ error: "Matrix routing failed." }, { status: 500 });
+  }
+}
