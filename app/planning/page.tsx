@@ -58,6 +58,12 @@ export default function PlanningPage() {
      built and why it matters. */
   const [displacedNotes, setDisplacedNotes] = useState<Record<string, string>>({});
   const [geocodeSettled, setGeocodeSettled] = useState(false);
+  /* True when the geocode endpoint refused the whole batch (not configured,
+     or rate-limited/forbidden) rather than failing on individual addresses.
+     A 503 here means "TomTom isn't set up", not "these addresses are bad",
+     and badging every job "no map fix" would read as N data errors during
+     the exact manual pass that runs before keys exist. */
+  const [geocodeUnavailable, setGeocodeUnavailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [optimizing, setOptimizing] = useState(false);
@@ -106,6 +112,7 @@ export default function PlanningPage() {
     setLoading(true);
     setMessage("");
     setGeocodeSettled(false);
+    setGeocodeUnavailable(false);
     setRoutes({});
 
     const jobsQuery = supabase
@@ -249,9 +256,16 @@ export default function PlanningPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ stopIds: batch }),
         });
-        // A refusal (403, 429, 503, ...) will refuse the next batch too, so
-        // stop asking and let the badges explain the missing fixes.
-        if (!response.ok) break;
+        // A refusal will refuse the next batch too, so stop asking. A 503
+        // (or 401/403/429) means the geocoder is not configured or is
+        // refusing us outright, not that these particular addresses are bad,
+        // so that case is tracked separately from a plain per-batch failure.
+        if (!response.ok) {
+          if ([401, 403, 429, 503].includes(response.status)) {
+            if (!isCancelled()) setGeocodeUnavailable(true);
+          }
+          break;
+        }
         const { geocoded } = await response.json();
         if (isCancelled()) return;
         const byStop = new Map<string, { lat: number; lng: number }>(
@@ -424,6 +438,12 @@ export default function PlanningPage() {
       const matrix = sanitizeTravelSeconds((await response.json())?.travelSeconds, routable.length);
       if (!matrix) { setMessage("Optimize failed."); return; }
       const order = bestOrder(matrix);
+      // The optimizer must never be able to delete jobs from a lane, whatever
+      // it returns: refuse any order that is not a full permutation.
+      if (order.length !== routable.length) {
+        setMessage("Optimize failed.");
+        return;
+      }
       const reordered = order
         .map((i) => routable[i].id)
         .concat(selectedLaneJobs.filter((j) => !isRoutable(j)).map((j) => j.id));
@@ -494,6 +514,11 @@ export default function PlanningPage() {
           </header>
 
           {message ? <p className="text-sm text-danger">{message}</p> : null}
+          {geocodeUnavailable ? (
+            <p className="text-sm text-ink-3">
+              Address lookup is unavailable, so routes and map pins are off. Assigning and sequencing still works.
+            </p>
+          ) : null}
 
           <PlanningMap markers={markers} route={selectedRoute} notice={mapNotice} />
 
@@ -504,7 +529,7 @@ export default function PlanningPage() {
               <UnassignedPool
                 jobs={unassigned}
                 subcontracted={subcontracted}
-                geocodeSettled={geocodeSettled}
+                geocodeSettled={geocodeSettled && !geocodeUnavailable}
                 displacedNotes={displacedNotes}
                 onDropJob={(jobId) => moveJob(jobId, null, null)}
               />
@@ -523,7 +548,7 @@ export default function PlanningPage() {
                       drivers={drivers}
                       selected={v.id === selectedVehicleId}
                       summary={laneSummary(v.id)}
-                      geocodeSettled={geocodeSettled}
+                      geocodeSettled={geocodeSettled && !geocodeUnavailable}
                       driverConflict={driverConflicts.has(v.id)}
                       onSelect={() => setSelectedVehicleId(v.id)}
                       onDriverChange={(driverId) =>

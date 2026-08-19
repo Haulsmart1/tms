@@ -66,8 +66,9 @@ function exhaustive(matrix: number[][]): number[] {
 
 function nearestNeighbour(matrix: number[][]): number[] {
   const n = matrix.length;
-  let best: number[] = [];
-  let bestCost = Number.POSITIVE_INFINITY;
+  // An all-Infinity matrix must yield SOME permutation, never an empty order.
+  let best: number[] = Array.from({ length: n }, (_, i) => i);
+  let bestCost = pathSeconds(best, matrix);
   // The path is open, so the start matters: try them all and keep the winner.
   for (let start = 0; start < n; start++) {
     const order = [start];

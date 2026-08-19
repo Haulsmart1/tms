@@ -69,4 +69,18 @@ describe("bestOrder", () => {
     expect([...order].sort((a, b) => a - b)).toEqual(Array.from({ length: n }, (_, i) => i));
     expect(pathSeconds(order, m)).toBe((n - 1) * 60);
   });
+
+  it("returns a full permutation even when a job is unreachable (all-Infinity heuristic case)", () => {
+    // 9 jobs so the heuristic branch runs; job 8 is unreachable from and to
+    // every other job, so every open path costs Infinity. The solver must
+    // still return some permutation rather than an empty order.
+    const n = 9;
+    const m = Array.from({ length: n }, (_, i) =>
+      Array.from({ length: n }, (_, j) =>
+        i === j ? 0 : i === 8 || j === 8 ? Number.POSITIVE_INFINITY : Math.abs(i - j) * 60
+      )
+    );
+    const order = bestOrder(m);
+    expect([...order].sort((a, b) => a - b)).toEqual(Array.from({ length: n }, (_, i) => i));
+  });
 });
