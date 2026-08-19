@@ -68,10 +68,12 @@ export default function PlanningMap({ markers, route, notice }: Props) {
     markerObjsRef.current = markers.map((m) => {
       const el = document.createElement("div");
       el.textContent = m.label;
+      // A real DOM node inside the page, so the design tokens apply: the
+      // numbered pin reads as a primary-filled control in either theme.
       el.style.cssText =
-        "width:26px;height:26px;border-radius:50%;background:#2563eb;color:#fff;" +
+        "width:26px;height:26px;border-radius:50%;background:var(--primary);color:var(--on-primary);" +
         "display:flex;align-items:center;justify-content:center;" +
-        "font:600 13px sans-serif;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)";
+        "font:600 13px sans-serif;border:2px solid var(--on-primary);box-shadow:0 1px 4px rgba(0,0,0,.4)";
       return new tt.Marker({ element: el })
         .setLngLat([m.position.lng, m.position.lat])
         .addTo(map);
@@ -96,6 +98,8 @@ export default function PlanningMap({ markers, route, notice }: Props) {
         type: "line",
         source: "plan-route",
         layout: { "line-cap": "round", "line-join": "round" },
+        // Concrete hex on purpose: this paints on the map-gl WebGL canvas, which
+        // cannot resolve CSS variables. Do not "fix" it to var(--something).
         paint: { "line-color": "#e2574c", "line-width": 4 },
       });
     }
