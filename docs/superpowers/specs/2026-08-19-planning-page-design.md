@@ -43,7 +43,7 @@ Added to `job_stops`:
 - `lng double precision null`
 - `geocoded_at timestamptz null`
 
-These cache TomTom geocoding results so each address is geocoded once, ever. When JobForm edits a stop's address fields, it clears all three columns so the stop is re-geocoded on next planning load.
+These cache TomTom geocoding results so each address is geocoded once per stop row. No clearing mechanism is needed: the Jobs page deletes and reinserts a job's stops on every edit (app/jobs/page.tsx), so an edited address is a new row with NULL coordinates that re-geocodes on the next planning load. One accepted limitation: an address TomTom cannot resolve is retried once per planning page load rather than negatively cached; at current scale that cost is negligible, and negative caching is deferred.
 
 No new RLS work: both tables already carry tenant policies that cover new columns. Downstream pages (tracking, POD, invoices) already read `vehicle_id` and `driver_id` and simply ignore `route_order`.
 
