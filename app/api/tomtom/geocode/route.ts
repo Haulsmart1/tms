@@ -80,7 +80,14 @@ export async function POST(request: Request) {
        (a van's day, a handful of bad addresses) that is a few wasted lookups,
        not a cost problem. Revisit if a tenant ever imports dirty addresses in
        bulk. */
+    /* Total wall-clock bound: without it, a TomTom outage costs 5s per stop
+       and the platform kills the invocation before partial results return.
+       Stops past the deadline land in `failed` via the subtraction below and
+       retry on the next page load. */
+    const deadline = Date.now() + 25_000;
+
     for (const stop of stops ?? []) {
+      if (Date.now() > deadline) break;
       try {
         if (stop.lat !== null && stop.lng !== null) {
           geocoded.push({ id: stop.id, lat: stop.lat, lng: stop.lng });
@@ -107,10 +114,11 @@ export async function POST(request: Request) {
       }
     }
 
-    /* `failed` is derived from the request, not from the loop: the client
-       treats it as "this will not resolve, badge the job", so an id the
-       RLS-filtered select never returned has to appear there too. Computing
-       it by subtraction is the only way that stays true. */
+    /* `failed` = every requested id that did not resolve IN THIS PASS:
+       unresolvable addresses, but also timeouts, TomTom 429s and RLS-dropped
+       ids. The client badges these for now and naturally retries transient
+       cases on the next load, because stopsNeedingGeocode still selects any
+       stop whose coordinates are null. */
     const resolved = new Set(geocoded.map((g) => g.id));
     const failed = stopIds.filter((id) => !resolved.has(id));
 
