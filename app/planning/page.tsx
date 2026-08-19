@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
@@ -27,6 +27,7 @@ function rel(value: any): any {
 }
 
 type Vehicle = { id: string; registration: string };
+type VehicleRow = { id: string; registration: string; active: boolean };
 type Driver = { id: string; name: string };
 
 /* The geocode endpoint caps a batch at 100 stop ids and rejects anything
@@ -52,12 +53,21 @@ export default function PlanningPage() {
   const [baselineDiff, setBaselineDiff] = useState("[]");
   /* Vehicle ids whose lane arrived carrying more than one distinct driver. */
   const [driverConflicts, setDriverConflicts] = useState<Set<string>>(new Set());
+  /* job id -> disclosure note for fleet jobs that arrived assigned to a
+     vehicle no longer in the active fleet; see loadData for how this is
+     built and why it matters. */
+  const [displacedNotes, setDisplacedNotes] = useState<Record<string, string>>({});
   const [geocodeSettled, setGeocodeSettled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [optimizing, setOptimizing] = useState(false);
   const [message, setMessage] = useState("");
   const [mapNotice, setMapNotice] = useState<string | null>(null);
+  /* Generation counter: each load claims the next value, and its predicate
+     checks whether a newer load (or unmount) has since claimed a later one.
+     Replaces a single-flag "cancelled" boolean so a save-triggered reload can
+     itself be superseded by a later load, not just by unmount. */
+  const loadSeq = useRef(0);
 
   const jobById = useMemo(() => new Map(jobs.map((j) => [j.id, j])), [jobs]);
 
@@ -112,8 +122,7 @@ export default function PlanningPage() {
       .filterByTenant(jobsQuery)
       .order("created_at", { ascending: true });
     const { data: vehicleData, error: vehicleError } = await tenant
-      .filterByTenant(supabase.from("vehicles").select("id, registration"))
-      .eq("active", true)
+      .filterByTenant(supabase.from("vehicles").select("id, registration, active"))
       .order("registration", { ascending: true });
     const { data: driverData, error: driverError } = await tenant
       .filterByTenant(supabase.from("drivers").select("id, name"))
@@ -141,8 +150,16 @@ export default function PlanningPage() {
       })),
     }));
 
-    const vehicleList: Vehicle[] = vehicleData ?? [];
+    // Fetched unfiltered so retired vehicles' registrations are still known
+    // (for the displaced-job disclosure below); lanes and everything else
+    // stay driven by the active-only derived list, in the same registration
+    // order the query already produced.
+    const allVehicles: VehicleRow[] = vehicleData ?? [];
+    const vehicleList: Vehicle[] = allVehicles
+      .filter((v) => v.active)
+      .map((v) => ({ id: v.id, registration: v.registration }));
     const activeVehicleIds = new Set(vehicleList.map((v) => v.id));
+    const registrationById = new Map(allVehicles.map((v) => [v.id, v.registration]));
 
     // Lanes from the saved plan: group by vehicle, order by route_order with
     // unsequenced jobs after, in load order. Lane drivers come from the first
@@ -188,6 +205,18 @@ export default function PlanningPage() {
       .map((j) => j.id);
     const initialDiff = computeSaveDiff(loaded, initialLanePlans, initialUnassignedIds);
 
+    /* The pool's disclosure for jobs displaced by a retired vehicle: the
+       unassignment already rides the baseline diff above, so it is only
+       actually written once the user makes a deliberate edit and saves. The
+       badge is what makes that quiet trade honest in the meantime. */
+    const displaced: Record<string, string> = {};
+    for (const job of loaded) {
+      if (job.subcontractor_id) continue;
+      if (job.vehicle_id && !activeVehicleIds.has(job.vehicle_id)) {
+        displaced[job.id] = `was on ${registrationById.get(job.vehicle_id) ?? "a retired vehicle"}`;
+      }
+    }
+
     if (isCancelled()) return;
     setJobs(loaded);
     setVehicles(vehicleList);
@@ -196,6 +225,7 @@ export default function PlanningPage() {
     setLaneDrivers(laneDriverInit);
     setDriverConflicts(conflicts);
     setBaselineDiff(JSON.stringify(initialDiff));
+    setDisplacedNotes(displaced);
     // Keep the planner's current lane if it survived the reload; only fall
     // back when it did not, so a save-triggered reload does not jump the board.
     setSelectedVehicleId((prev) =>
@@ -246,9 +276,11 @@ export default function PlanningPage() {
 
   useEffect(() => {
     if (tenant.status !== "ready") return;
-    let cancelled = false;
-    loadData(() => cancelled);
-    return () => { cancelled = true; };
+    const seq = ++loadSeq.current;
+    loadData(() => loadSeq.current !== seq);
+    // Any newer load (a later effect run, or a save-triggered reload) or an
+    // unmount bumps the counter, which invalidates this load's predicate.
+    return () => { loadSeq.current++; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenant.status, tenant.activeTenantId, date]);
 
@@ -351,14 +383,18 @@ export default function PlanningPage() {
            leave the board confidently showing the unwritten plan, so reload
            what was actually written. loadData clears `message` on entry, so
            the failure is restated afterwards: the planner must still see it. */
-        await loadData(() => false);
+        const seq = ++loadSeq.current;
+        await loadData(() => loadSeq.current !== seq);
         setMessage(failure);
         return;
       }
     }
     setSaving(false);
-    // Never cancelled: a save-triggered reload is not a stale closure's load.
-    await loadData(() => false);
+    // Claim the next generation so a date/tenant change during this reload
+    // (or the reload itself being superseded by a later save) cancels it
+    // instead of painting stale state over the newer load.
+    const seq = ++loadSeq.current;
+    await loadData(() => loadSeq.current !== seq);
   }
 
   async function optimize() {
@@ -469,6 +505,7 @@ export default function PlanningPage() {
                 jobs={unassigned}
                 subcontracted={subcontracted}
                 geocodeSettled={geocodeSettled}
+                displacedNotes={displacedNotes}
                 onDropJob={(jobId) => moveJob(jobId, null, null)}
               />
               <div className="flex flex-1 flex-col gap-3">

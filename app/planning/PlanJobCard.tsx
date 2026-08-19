@@ -11,12 +11,15 @@ type Props = {
   /** True once geocoding has been attempted, so the badge means "failed",
       never "still loading". */
   geocodeSettled: boolean;
+  /** Set when this job arrived assigned to a now-inactive vehicle; saving any
+      change to the plan will clear that assignment. */
+  note?: string;
   onDropBefore?: (draggedJobId: string) => void;
 };
 
 export const JOB_ID_MIME = "text/plain";
 
-export default function PlanJobCard({ job, sequence, geocodeSettled, onDropBefore }: Props) {
+export default function PlanJobCard({ job, sequence, geocodeSettled, note, onDropBefore }: Props) {
   const stops = sortedStops(job);
   const first = stops[0];
   const last = stops[stops.length - 1];
@@ -62,6 +65,14 @@ export default function PlanJobCard({ job, sequence, geocodeSettled, onDropBefor
             title="One or more stops could not be geocoded; this job is excluded from the route."
           >
             no map fix
+          </span>
+        ) : null}
+        {note ? (
+          <span
+            className="ml-1.5 rounded border border-line px-1 text-xs font-normal text-warning"
+            title="This job arrived assigned to an inactive vehicle. Saving any change to the plan will clear that assignment."
+          >
+            {note}
           </span>
         ) : null}
       </p>

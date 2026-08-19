@@ -8,10 +8,14 @@ type Props = {
   jobs: PlanJob[];
   subcontracted: PlanJob[];
   geocodeSettled: boolean;
+  /** job id -> disclosure note for jobs displaced from an inactive vehicle. */
+  displacedNotes: Record<string, string>;
   onDropJob: (draggedJobId: string) => void;
 };
 
-export default function UnassignedPool({ jobs, subcontracted, geocodeSettled, onDropJob }: Props) {
+export default function UnassignedPool({
+  jobs, subcontracted, geocodeSettled, displacedNotes, onDropJob,
+}: Props) {
   function handleDragOver(e: DragEvent) {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
@@ -35,7 +39,13 @@ export default function UnassignedPool({ jobs, subcontracted, geocodeSettled, on
         <p className="text-xs text-ink-3">Every job for this date is assigned.</p>
       ) : (
         jobs.map((job) => (
-          <PlanJobCard key={job.id} job={job} sequence={null} geocodeSettled={geocodeSettled} />
+          <PlanJobCard
+            key={job.id}
+            job={job}
+            sequence={null}
+            geocodeSettled={geocodeSettled}
+            note={displacedNotes[job.id]}
+          />
         ))
       )}
 
