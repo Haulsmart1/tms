@@ -18,6 +18,12 @@
 2. The spec described Optimize as a TomTom waypoint-optimization call over representative points. TomTom's `computeBestOrder` pins the first and last waypoints, which would silently pin the first and last JOBS. Instead the server fetches a travel-time matrix (Matrix Routing v2) and a tested local solver picks the order with no pinning (Task 5). Same spec intent, correct behavior, and the solver is unit-testable.
 3. Lane headers show distance/time once that lane has been selected and routed (routes are fetched per selected vehicle, not for every lane on load, to keep API usage proportional). Unrouted lanes show job count only.
 
+**Accepted v1 gaps (decided during execution, tracked for follow-up):**
+
+- The board is drag-and-drop only: no keyboard path exists for assigning, reordering, or unassigning jobs. Accepted for v1 (no live customers; lane-click selection follows the existing house pattern), to revisit in an accessibility pass.
+- No negative geocode caching: an address TomTom cannot resolve retries once per planning page load (see the spec's data-model section).
+- The TomTom map SDK (@tomtom-international/web-sdk-maps v6) is deprecated by TomTom in favor of @tomtom-org/maps-sdk; v6 works and is fully typed, migration is a future task.
+
 ---
 
 ## File Structure
