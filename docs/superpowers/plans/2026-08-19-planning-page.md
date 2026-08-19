@@ -22,7 +22,8 @@
 
 - The board is drag-and-drop only: no keyboard path exists for assigning, reordering, or unassigning jobs. Accepted for v1 (no live customers; lane-click selection follows the existing house pattern), to revisit in an accessibility pass.
 - No negative geocode caching: an address TomTom cannot resolve retries once per planning page load (see the spec's data-model section).
-- The TomTom map SDK (@tomtom-international/web-sdk-maps v6) is deprecated by TomTom in favor of @tomtom-org/maps-sdk; v6 works and is fully typed, migration is a future task.
+- The TomTom map SDK (@tomtom-international/web-sdk-maps v6) is deprecated by TomTom in favor of @tomtom-org/maps-sdk; v6 works and is fully typed, migration is a future task. Its dependency tree also brings uuid@3.3.3 (GHSA-w5hq-g745-h8pq, moderate, no fix; not exploitable here), a second reason to migrate.
+- Per-leg distance/time chips on the map (in the spec and the approved mockup) are deferred until the TomTom map key exists: they are DOM overlays that need real tiles and projected positions to place and verify, and the top-bar totals plus the polyline carry the core value meanwhile. RouteResult.legs is already parsed, typed, and returned by the route endpoint, so rendering them is purely map-side work.
 
 ---
 
