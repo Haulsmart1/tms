@@ -37,64 +37,34 @@ export default function TachographPage() {
     }, []);
 
 
-    const cardStyle = {
-        background: "rgba(255,255,255,0.95)",
-        padding: 20,
-        borderRadius: 14,
-        boxShadow: "0 8px 30px rgba(0,0,0,0.25)"
-    };
-
-
     return (
 
-        <main
-            style={{
-                minHeight: "100vh",
-                padding: 30,
-                backgroundImage:
-                    "url('https://images.unsplash.com/photo-1553413077-190dd305871c')",
-                backgroundSize: "cover"
-            }}
-        >
+        <div className="ds min-h-screen bg-canvas font-sans text-ink">
+            <main className="mx-auto max-w-[1480px] px-6 py-8">
 
-            <div
-                style={{
-                    background: "rgba(0,0,0,0.65)",
-                    padding: 30,
-                    borderRadius: 20
-                }}
-            >
+                <header className="mb-4">
+                    <div className="text-kicker uppercase text-ink-3">Compliance</div>
 
-                <div style={{ color: "white", marginBottom: 20 }}>
+                    <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">Tachograph</h1>
 
-                    <h1>Tachograph</h1>
-
-                    <p>EU Drivers Hours & WTD compliance</p>
-
-                </div>
+                    <p className="m-0 text-sm text-ink-3">EU Drivers Hours & WTD compliance</p>
+                </header>
 
 
-                {loading && <p style={{ color: "white" }}>Loading...</p>}
+                {loading && <p className="text-sm text-ink-3">Loading...</p>}
 
 
-                <div
-                    style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))",
-                        gap: 20,
-                        marginBottom: 30
-                    }}
-                >
+                <div className="mb-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
 
                     {drivers.map(driver => (
 
-                        <div key={driver.id} style={cardStyle}>
+                        <article key={driver.id} className="rounded-lg border border-line bg-surface p-4 shadow-sm">
 
-                            <h3>{driver.name}</h3>
+                            <h3 className="mb-1 text-md font-semibold text-ink">{driver.name}</h3>
 
-                            <p>{driver.driver_type}</p>
+                            <p className="text-sm text-ink-3">{driver.driver_type}</p>
 
-                        </div>
+                        </article>
 
                     ))}
 
@@ -102,44 +72,37 @@ export default function TachographPage() {
 
 
 
-                <h2 style={{ color: "white" }}>Recent Activity</h2>
+                <h2 className="mb-2 mt-6 text-md font-semibold text-ink">Recent Activity</h2>
 
 
-                <div
-                    style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))",
-                        gap: 20
-                    }}
-                >
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
 
                     {logs.map(log => (
 
-                        <div key={log.id} style={cardStyle}>
+                        <article key={log.id} className="rounded-lg border border-line bg-surface p-4 shadow-sm">
 
-                            <strong>{log.activity_type}</strong>
+                            <strong className="text-sm font-semibold text-ink">{log.activity_type}</strong>
 
-                            <p>
+                            <p className="font-mono text-sm text-ink-2">
 
                                 {new Date(log.start_time).toLocaleString()}
 
                             </p>
 
-                            <p>
+                            <p className="font-mono text-sm text-ink-2">
 
                                 {Math.round(log.duration_minutes || 0)} mins
 
                             </p>
 
-                        </div>
+                        </article>
 
                     ))}
 
                 </div>
 
-            </div>
-
-        </main>
+            </main>
+        </div>
 
     );
 

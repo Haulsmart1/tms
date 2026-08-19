@@ -10,12 +10,17 @@ describe("isThemeableRoute", () => {
     expect(isThemeableRoute("/pod")).toBe(true);
     expect(isThemeableRoute("/tracking")).toBe(true);
     expect(isThemeableRoute("/super-admin/requests")).toBe(true);
+    expect(isThemeableRoute("/invoices")).toBe(true);
+    expect(isThemeableRoute("/telematics")).toBe(true);
+    expect(isThemeableRoute("/stats")).toBe(true);
+    expect(isThemeableRoute("/settings")).toBe(true);
+    expect(isThemeableRoute("/settings/company")).toBe(true);
   });
 
-  it("returns false for legacy inline-styled pages, which pin themselves dark", () => {
-    expect(isThemeableRoute("/telematics")).toBe(false);
-    expect(isThemeableRoute("/invoices")).toBe(false);
-    expect(isThemeableRoute("/stats")).toBe(false);
+  it("returns false for the legacy inline-styled pages, which pin themselves dark", () => {
+    expect(isThemeableRoute("/driver/dashboard")).toBe(false);
+    expect(isThemeableRoute("/subcontractor/dashboard")).toBe(false);
+    expect(isThemeableRoute("/super-admin/companies")).toBe(false);
   });
 
   it("returns false for an unknown route, so a new page is legacy-safe by default rather than half-themed", () => {
@@ -37,7 +42,32 @@ describe("isThemeableRoute", () => {
 
   it("lists exactly the pages known to be tokenised today", () => {
     expect([...THEMEABLE_ROUTES].sort()).toEqual(
-      ["/", "/dashboard", "/jobs", "/login", "/pod", "/tracking", "/super-admin/requests"].sort(),
+      [
+        "/",
+        "/login",
+        "/super-admin/requests",
+        "/dashboard",
+        "/jobs",
+        "/pod",
+        "/tracking",
+        "/drivers",
+        "/assets",
+        "/maintenance",
+        "/vehicles",
+        "/customers",
+        "/subcontractors",
+        "/invoices",
+        "/stats",
+        "/tachograph",
+        "/telematics",
+        "/settings",
+        "/settings/users",
+        "/settings/permissions",
+        "/settings/invoices",
+        "/settings/portal-invites",
+        "/settings/licences",
+        "/settings/company",
+      ].sort(),
     );
   });
 });

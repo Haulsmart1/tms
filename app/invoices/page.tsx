@@ -8,6 +8,12 @@ import {
 } from "react";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
+import Badge from "../../components/Badge";
+import Button from "../../components/Button";
+import Card from "../../components/Card";
+import MessageBanner from "../../components/MessageBanner";
+import Stat from "../../components/Stat";
+import Tabs from "../../components/Tabs";
 
 type Tab =
   | "ready"
@@ -788,54 +794,51 @@ export default function CustomerAccountsPage() {
 
   return (
     <TenantGate>
-      <main style={styles.page}>
-        <div style={styles.container}>
-          <header style={styles.header}>
+      <div className="ds min-h-screen bg-canvas font-sans text-ink">
+        <main className="mx-auto max-w-[1500px] px-6 py-8">
+          <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p style={styles.eyebrow}>Customer Accounts</p>
-              <h1 style={styles.title}>Invoices & Accounts</h1>
-              <p style={styles.subtitle}>
+              <div className="text-kicker uppercase text-ink-3">
+                Customer Accounts
+              </div>
+              <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">
+                Invoices & Accounts
+              </h1>
+              <p className="m-0 text-sm text-ink-3">
                 Jobs, PODs, invoices, credits, payments, statements, purchase
                 orders, debt chasing and accounting-package sync.
               </p>
             </div>
 
-            <div style={styles.headerTotals}>
-              <Metric
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+              <Stat
                 label="Outstanding"
                 value={money(outstandingTotal, "GBP")}
               />
-              <Metric
+              <Stat
                 label="Overdue invoices"
                 value={String(overdueInvoices.length)}
               />
-              <Metric
+              <Stat
                 label="Ready to invoice"
                 value={String(readyJobs.length)}
               />
             </div>
           </header>
 
-          <nav style={styles.tabs}>
-            {TABS.map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setTab(key)}
-                style={{
-                  ...styles.tab,
-                  ...(tab === key ? styles.activeTab : {}),
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </nav>
+          <div className="-m-0.5 mb-4 overflow-x-auto p-0.5">
+            <Tabs
+              label="Accounts sections"
+              tabs={TABS.map(([key, label]) => ({ id: key, label }))}
+              activeId={tab}
+              onChange={(id) => setTab(id as Tab)}
+            />
+          </div>
 
-          {message ? <div style={styles.message}>{message}</div> : null}
+          <MessageBanner tone="neutral">{message}</MessageBanner>
 
           {loading ? (
-            <section style={styles.card}>Loading accounts...</section>
+            <Card>Loading accounts...</Card>
           ) : (
             <>
               {tab === "ready" ? (
@@ -859,13 +862,13 @@ export default function CustomerAccountsPage() {
               ) : null}
 
               {tab === "payments" ? (
-                <section style={styles.card}>
-                  <h2 style={styles.sectionTitle}>Record Customer Payment</h2>
+                <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+                  <h2 className="m-0 mb-3 text-md font-semibold text-ink">Record Customer Payment</h2>
 
-                  <div style={styles.formGrid}>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     <Field label="Customer">
                       <select
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                         value={paymentCustomerId}
                         onChange={(event) => {
                           setPaymentCustomerId(event.target.value);
@@ -883,7 +886,7 @@ export default function CustomerAccountsPage() {
 
                     <Field label="Allocate to Invoice">
                       <select
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                         value={paymentInvoiceId}
                         onChange={(event) =>
                           setPaymentInvoiceId(event.target.value)
@@ -911,7 +914,7 @@ export default function CustomerAccountsPage() {
 
                     <Field label="Amount">
                       <input
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
                         type="number"
                         step="0.01"
                         min="0"
@@ -924,7 +927,7 @@ export default function CustomerAccountsPage() {
 
                     <Field label="Method">
                       <select
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                         value={paymentMethod}
                         onChange={(event) =>
                           setPaymentMethod(event.target.value)
@@ -941,7 +944,7 @@ export default function CustomerAccountsPage() {
 
                     <Field label="Reference">
                       <input
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
                         value={paymentReference}
                         onChange={(event) =>
                           setPaymentReference(event.target.value)
@@ -950,24 +953,26 @@ export default function CustomerAccountsPage() {
                     </Field>
                   </div>
 
-                  <ActionButton
-                    working={working}
-                    label="Record Payment"
-                    onClick={createPayment}
-                  />
+                  <div className="mt-3">
+                    <ActionButton
+                      working={working}
+                      label="Record Payment"
+                      onClick={createPayment}
+                    />
+                  </div>
 
                   <RecordCards rows={rows} />
                 </section>
               ) : null}
 
               {tab === "credits" ? (
-                <section style={styles.card}>
-                  <h2 style={styles.sectionTitle}>Create Credit Note</h2>
+                <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+                  <h2 className="m-0 mb-3 text-md font-semibold text-ink">Create Credit Note</h2>
 
-                  <div style={styles.formGrid}>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     <Field label="Original Invoice">
                       <select
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                         value={creditInvoiceId}
                         onChange={(event) =>
                           setCreditInvoiceId(event.target.value)
@@ -986,7 +991,7 @@ export default function CustomerAccountsPage() {
 
                     <Field label="Credit Amount">
                       <input
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
                         type="number"
                         step="0.01"
                         min="0"
@@ -999,7 +1004,7 @@ export default function CustomerAccountsPage() {
 
                     <Field label="Reason">
                       <input
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
                         value={creditReason}
                         onChange={(event) =>
                           setCreditReason(event.target.value)
@@ -1008,24 +1013,26 @@ export default function CustomerAccountsPage() {
                     </Field>
                   </div>
 
-                  <ActionButton
-                    working={working}
-                    label="Create Credit Note"
-                    onClick={createCreditNote}
-                  />
+                  <div className="mt-3">
+                    <ActionButton
+                      working={working}
+                      label="Create Credit Note"
+                      onClick={createCreditNote}
+                    />
+                  </div>
 
                   <RecordCards rows={rows} />
                 </section>
               ) : null}
 
               {tab === "statements" ? (
-                <section style={styles.card}>
-                  <h2 style={styles.sectionTitle}>Generate Statement</h2>
+                <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+                  <h2 className="m-0 mb-3 text-md font-semibold text-ink">Generate Statement</h2>
 
-                  <div style={styles.formGrid}>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     <Field label="Customer">
                       <select
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                         value={statementCustomerId}
                         onChange={(event) =>
                           setStatementCustomerId(event.target.value)
@@ -1041,24 +1048,26 @@ export default function CustomerAccountsPage() {
                     </Field>
                   </div>
 
-                  <ActionButton
-                    working={working}
-                    label="Generate Statement"
-                    onClick={createStatement}
-                  />
+                  <div className="mt-3">
+                    <ActionButton
+                      working={working}
+                      label="Generate Statement"
+                      onClick={createStatement}
+                    />
+                  </div>
 
                   <RecordCards rows={rows} />
                 </section>
               ) : null}
 
               {tab === "chase" ? (
-                <section style={styles.card}>
-                  <h2 style={styles.sectionTitle}>Create Chase Letter</h2>
+                <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+                  <h2 className="m-0 mb-3 text-md font-semibold text-ink">Create Chase Letter</h2>
 
-                  <div style={styles.formGrid}>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     <Field label="Customer">
                       <select
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                         value={chaseCustomerId}
                         onChange={(event) =>
                           setChaseCustomerId(event.target.value)
@@ -1075,7 +1084,7 @@ export default function CustomerAccountsPage() {
 
                     <Field label="Level">
                       <select
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                         value={chaseLevel}
                         onChange={(event) =>
                           setChaseLevel(event.target.value)
@@ -1090,7 +1099,7 @@ export default function CustomerAccountsPage() {
 
                     <Field label="Subject">
                       <input
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
                         value={chaseSubject}
                         onChange={(event) =>
                           setChaseSubject(event.target.value)
@@ -1100,10 +1109,7 @@ export default function CustomerAccountsPage() {
 
                     <Field label="Message">
                       <textarea
-                        style={{
-                          ...styles.input,
-                          minHeight: 100,
-                        }}
+                        className="min-h-24 w-full min-w-0 resize-y rounded-md border border-ink-3 bg-surface px-3 py-2 text-base text-ink"
                         value={chaseBody}
                         onChange={(event) =>
                           setChaseBody(event.target.value)
@@ -1112,24 +1118,26 @@ export default function CustomerAccountsPage() {
                     </Field>
                   </div>
 
-                  <ActionButton
-                    working={working}
-                    label="Create Chase Letter"
-                    onClick={createChaseLetter}
-                  />
+                  <div className="mt-3">
+                    <ActionButton
+                      working={working}
+                      label="Create Chase Letter"
+                      onClick={createChaseLetter}
+                    />
+                  </div>
 
                   <RecordCards rows={rows} />
                 </section>
               ) : null}
 
               {tab === "customer-pos" ? (
-                <section style={styles.card}>
-                  <h2 style={styles.sectionTitle}>Customer Purchase Order</h2>
+                <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+                  <h2 className="m-0 mb-3 text-md font-semibold text-ink">Customer Purchase Order</h2>
 
-                  <div style={styles.formGrid}>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     <Field label="Customer">
                       <select
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                         value={customerPoCustomerId}
                         onChange={(event) =>
                           setCustomerPoCustomerId(event.target.value)
@@ -1146,7 +1154,7 @@ export default function CustomerAccountsPage() {
 
                     <Field label="PO Number">
                       <input
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
                         value={customerPoNumber}
                         onChange={(event) =>
                           setCustomerPoNumber(event.target.value)
@@ -1156,7 +1164,7 @@ export default function CustomerAccountsPage() {
 
                     <Field label="Authorised Value">
                       <input
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
                         type="number"
                         step="0.01"
                         value={customerPoValue}
@@ -1168,7 +1176,7 @@ export default function CustomerAccountsPage() {
 
                     <Field label="Description">
                       <input
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
                         value={customerPoDescription}
                         onChange={(event) =>
                           setCustomerPoDescription(event.target.value)
@@ -1177,24 +1185,26 @@ export default function CustomerAccountsPage() {
                     </Field>
                   </div>
 
-                  <ActionButton
-                    working={working}
-                    label="Create Customer PO"
-                    onClick={createCustomerPo}
-                  />
+                  <div className="mt-3">
+                    <ActionButton
+                      working={working}
+                      label="Create Customer PO"
+                      onClick={createCustomerPo}
+                    />
+                  </div>
 
                   <RecordCards rows={rows} />
                 </section>
               ) : null}
 
               {tab === "supplier-pos" ? (
-                <section style={styles.card}>
-                  <h2 style={styles.sectionTitle}>Supplier / Subcontractor PO</h2>
+                <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+                  <h2 className="m-0 mb-3 text-md font-semibold text-ink">Supplier / Subcontractor PO</h2>
 
-                  <div style={styles.formGrid}>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     <Field label="Subcontractor">
                       <select
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                         value={supplierPoSubcontractorId}
                         onChange={(event) =>
                           setSupplierPoSubcontractorId(event.target.value)
@@ -1214,7 +1224,7 @@ export default function CustomerAccountsPage() {
 
                     <Field label="PO Number">
                       <input
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
                         value={supplierPoNumber}
                         onChange={(event) =>
                           setSupplierPoNumber(event.target.value)
@@ -1224,7 +1234,7 @@ export default function CustomerAccountsPage() {
 
                     <Field label="Net">
                       <input
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
                         type="number"
                         step="0.01"
                         value={supplierPoSubtotal}
@@ -1236,7 +1246,7 @@ export default function CustomerAccountsPage() {
 
                     <Field label="VAT">
                       <input
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
                         type="number"
                         step="0.01"
                         value={supplierPoVat}
@@ -1248,7 +1258,7 @@ export default function CustomerAccountsPage() {
 
                     <Field label="Description">
                       <input
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
                         value={supplierPoDescription}
                         onChange={(event) =>
                           setSupplierPoDescription(event.target.value)
@@ -1257,31 +1267,30 @@ export default function CustomerAccountsPage() {
                     </Field>
                   </div>
 
-                  <ActionButton
-                    working={working}
-                    label="Create Supplier PO"
-                    onClick={createSupplierPo}
-                  />
+                  <div className="mt-3">
+                    <ActionButton
+                      working={working}
+                      label="Create Supplier PO"
+                      onClick={createSupplierPo}
+                    />
+                  </div>
 
                   <RecordCards rows={rows} />
                 </section>
               ) : null}
 
               {tab === "accounting" ? (
-                <section style={styles.card}>
-                  <h2 style={styles.sectionTitle}>Accounting Integration</h2>
+                <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+                  <h2 className="m-0 mb-3 text-md font-semibold text-ink">Accounting Integration</h2>
 
-                  <div
-                    style={{
-                      ...styles.invoiceCard,
-                      marginBottom: 18,
-                    }}
-                  >
-                    <div style={styles.rowBetween}>
+                  <article className="mb-4 rounded-lg border border-line bg-surface-2 p-3">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
                       <div>
-                        <strong style={styles.invoiceNumber}>Xero</strong>
+                        <strong className="font-mono text-sm font-semibold text-ink">
+                          Xero
+                        </strong>
 
-                        <div style={styles.muted}>
+                        <div className="text-sm text-ink-3">
                           Secure OAuth accounting connection
                         </div>
                       </div>
@@ -1296,7 +1305,7 @@ export default function CustomerAccountsPage() {
                       />
                     </div>
 
-                    <div style={styles.infoGrid}>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
                       <Info
                         label="Organisation"
                         value={
@@ -1328,62 +1337,52 @@ export default function CustomerAccountsPage() {
                       />
                     </div>
 
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 10,
-                        flexWrap: "wrap",
-                        marginTop: 14,
-                      }}
-                    >
+                    <div className="mt-3 flex flex-wrap gap-2.5">
                       {!xeroStatus.connected ? (
-                        <button
+                        <Button
+                          variant="secondary"
                           type="button"
                           onClick={connectXero}
                           disabled={xeroWorking}
-                          style={styles.primaryButton}
                         >
                           Connect Xero
-                        </button>
+                        </Button>
                       ) : (
                         <>
-                          <button
+                          <Button
+                            variant="secondary"
                             type="button"
                             onClick={() => void testXeroConnection()}
                             disabled={xeroWorking}
-                            style={styles.primaryButton}
                           >
                             {xeroWorking
                               ? "Testing..."
                               : "Test Connection"}
-                          </button>
+                          </Button>
 
-                          <button
+                          <Button
+                            variant="danger"
                             type="button"
                             onClick={() => void disconnectXero()}
                             disabled={xeroWorking}
-                            style={{
-                              ...styles.primaryButton,
-                              background: "#991b1b",
-                            }}
                           >
                             Disconnect Xero
-                          </button>
+                          </Button>
                         </>
                       )}
                     </div>
-                  </div>
+                  </article>
 
-                  <p style={styles.muted}>
+                  <p className="mb-3 text-sm text-ink-3">
                     Configure nominal/account codes here. Xero credentials are
                     stored securely on the server and are never exposed to the
                     browser.
                   </p>
 
-                  <div style={styles.formGrid}>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     <Field label="Provider">
                       <select
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                         value={provider}
                         onChange={(event) =>
                           setProvider(event.target.value)
@@ -1400,7 +1399,7 @@ export default function CustomerAccountsPage() {
 
                     <Field label="Display Name">
                       <input
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
                         value={providerDisplayName}
                         onChange={(event) =>
                           setProviderDisplayName(event.target.value)
@@ -1410,7 +1409,7 @@ export default function CustomerAccountsPage() {
 
                     <Field label="Sales Account Code">
                       <input
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
                         value={salesAccountCode}
                         onChange={(event) =>
                           setSalesAccountCode(event.target.value)
@@ -1420,7 +1419,7 @@ export default function CustomerAccountsPage() {
 
                     <Field label="Purchase Account Code">
                       <input
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
                         value={purchaseAccountCode}
                         onChange={(event) =>
                           setPurchaseAccountCode(event.target.value)
@@ -1430,7 +1429,7 @@ export default function CustomerAccountsPage() {
 
                     <Field label="Tax Code">
                       <input
-                        style={styles.input}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
                         value={taxCode}
                         onChange={(event) =>
                           setTaxCode(event.target.value)
@@ -1439,13 +1438,15 @@ export default function CustomerAccountsPage() {
                     </Field>
                   </div>
 
-                  <ActionButton
-                    working={working}
-                    label="Save Provider Settings"
-                    onClick={saveAccountingProvider}
-                  />
+                  <div className="mt-3">
+                    <ActionButton
+                      working={working}
+                      label="Save Provider Settings"
+                      onClick={saveAccountingProvider}
+                    />
+                  </div>
 
-                  <div style={styles.listGrid}>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                     {integrations
                       .filter(
                         (integration) =>
@@ -1455,10 +1456,10 @@ export default function CustomerAccountsPage() {
                       .map((integration) => (
                         <article
                           key={integration.id}
-                          style={styles.invoiceCard}
+                          className="rounded-lg border border-line bg-surface-2 p-3"
                         >
-                          <div style={styles.rowBetween}>
-                            <strong>
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <strong className="text-ink">
                               {integration.display_name ||
                                 integration.provider}
                             </strong>
@@ -1468,11 +1469,11 @@ export default function CustomerAccountsPage() {
                             />
                           </div>
 
-                          <div style={styles.muted}>
+                          <div className="mt-1 text-sm text-ink-3">
                             Provider: {integration.provider}
                           </div>
 
-                          <div style={styles.muted}>
+                          <div className="text-sm text-ink-3">
                             Last sync:{" "}
                             {formatDate(integration.last_sync_at)}
                           </div>
@@ -1483,8 +1484,8 @@ export default function CustomerAccountsPage() {
               ) : null}
             </>
           )}
-        </div>
-      </main>
+        </main>
+      </div>
     </TenantGate>
   );
 }
@@ -1515,19 +1516,21 @@ function ReadyToInvoicePanel({
   createInvoice: () => Promise<void>;
 }) {
   return (
-    <section style={styles.card}>
-      <div style={styles.rowBetween}>
+    <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 style={styles.sectionTitle}>Ready to Invoice</h2>
-          <p style={styles.muted}>
+          <h2 className="m-0 text-md font-semibold text-ink">Ready to Invoice</h2>
+          <p className="m-0 text-sm text-ink-3">
             Select completed jobs for one customer to create a consolidated
             invoice.
           </p>
         </div>
 
-        <div style={styles.summary}>
-          <strong>{selectedReady.length} selected</strong>
-          <span>
+        <div className="grid gap-0.5 text-right text-sm">
+          <strong className="font-mono tabular-nums text-ink">
+            {selectedReady.length} selected
+          </strong>
+          <span className="font-mono tabular-nums text-ink-2">
             {money(
               selectedTotal,
               selectedReady[0]?.currency_code || "GBP"
@@ -1536,10 +1539,10 @@ function ReadyToInvoicePanel({
         </div>
       </div>
 
-      <div style={styles.formGrid}>
+      <div className="my-3 grid gap-3 sm:grid-cols-2">
         <Field label="Customer PO Reference">
           <input
-            style={styles.input}
+            className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
             value={invoicePoReference}
             onChange={(event) =>
               setInvoicePoReference(event.target.value)
@@ -1549,7 +1552,7 @@ function ReadyToInvoicePanel({
 
         <Field label="Invoice Notes">
           <input
-            style={styles.input}
+            className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
             value={invoiceNotes}
             onChange={(event) => setInvoiceNotes(event.target.value)}
           />
@@ -1563,24 +1566,24 @@ function ReadyToInvoicePanel({
         disabled={selectedReady.length === 0}
       />
 
-      <div style={styles.tableWrap}>
-        <table style={styles.table}>
+      <div className="mt-3 overflow-x-auto rounded-lg border border-line">
+        <table className="w-full border-collapse text-sm">
           <thead>
             <tr>
-              <th></th>
-              <th>Job</th>
-              <th>Customer</th>
-              <th>Completed</th>
-              <th>POD</th>
-              <th>PO Required</th>
-              <th style={styles.right}>Price</th>
+              <th className="border-b border-line px-3 py-2 text-left text-kicker uppercase text-ink-2"></th>
+              <th className="border-b border-line px-3 py-2 text-left text-kicker uppercase text-ink-2">Job</th>
+              <th className="border-b border-line px-3 py-2 text-left text-kicker uppercase text-ink-2">Customer</th>
+              <th className="border-b border-line px-3 py-2 text-left text-kicker uppercase text-ink-2">Completed</th>
+              <th className="border-b border-line px-3 py-2 text-left text-kicker uppercase text-ink-2">POD</th>
+              <th className="border-b border-line px-3 py-2 text-left text-kicker uppercase text-ink-2">PO Required</th>
+              <th className="border-b border-line px-3 py-2 text-right text-kicker uppercase text-ink-2">Price</th>
             </tr>
           </thead>
 
           <tbody>
             {readyJobs.map((job) => (
               <tr key={job.job_id}>
-                <td>
+                <td className="border-b border-line px-3 py-2 text-ink">
                   <input
                     type="checkbox"
                     checked={selectedJobs.includes(job.job_id)}
@@ -1594,14 +1597,14 @@ function ReadyToInvoicePanel({
                   />
                 </td>
 
-                <td>{job.job_reference || job.job_id.slice(0, 8)}</td>
-                <td>{job.customer_name || "Customer"}</td>
-                <td>{formatDate(job.completed_at)}</td>
-                <td>
+                <td className="border-b border-line px-3 py-2 text-ink">{job.job_reference || job.job_id.slice(0, 8)}</td>
+                <td className="border-b border-line px-3 py-2 text-ink">{job.customer_name || "Customer"}</td>
+                <td className="border-b border-line px-3 py-2 text-ink">{formatDate(job.completed_at)}</td>
+                <td className="border-b border-line px-3 py-2 text-ink">
                   <Status value={job.pod_status || "Not set"} />
                 </td>
-                <td>{job.requires_po ? "Yes" : "No"}</td>
-                <td style={styles.right}>
+                <td className="border-b border-line px-3 py-2 text-ink">{job.requires_po ? "Yes" : "No"}</td>
+                <td className="border-b border-line px-3 py-2 text-right font-mono tabular-nums text-ink">
                   {money(
                     job.customer_price,
                     job.currency_code || "GBP"
@@ -1618,21 +1621,24 @@ function ReadyToInvoicePanel({
 
 function InvoicesPanel({ invoices }: { invoices: Invoice[] }) {
   return (
-    <section style={styles.card}>
-      <h2 style={styles.sectionTitle}>Invoices</h2>
+    <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+      <h2 className="m-0 text-md font-semibold text-ink">Invoices</h2>
 
-      <div style={styles.listGrid}>
+      <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {invoices.length === 0 ? (
-          <p style={styles.muted}>No invoices yet.</p>
+          <p className="col-span-full py-10 text-center text-sm text-ink-3">No invoices yet.</p>
         ) : (
           invoices.map((invoice) => (
-            <article key={invoice.id} style={styles.invoiceCard}>
-              <div style={styles.rowBetween}>
+            <article
+              key={invoice.id}
+              className="rounded-lg border border-line bg-surface-2 p-3"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  <strong style={styles.invoiceNumber}>
+                  <strong className="font-mono text-sm font-semibold text-ink">
                     {invoice.invoice_number || "Invoice"}
                   </strong>
-                  <div style={styles.muted}>
+                  <div className="text-sm text-ink-3">
                     {invoice.customer_name || "Customer"}
                   </div>
                 </div>
@@ -1640,7 +1646,7 @@ function InvoicesPanel({ invoices }: { invoices: Invoice[] }) {
                 <Status value={invoice.status || "draft"} />
               </div>
 
-              <div style={styles.infoGrid}>
+              <div className="mt-2 grid grid-cols-2 gap-2">
                 <Info
                   label="Issue Date"
                   value={formatDate(invoice.issue_date)}
@@ -1675,16 +1681,16 @@ function InvoicesPanel({ invoices }: { invoices: Invoice[] }) {
 
 function RecordCards({ rows }: { rows: GenericRow[] }) {
   return (
-    <div style={styles.listGrid}>
+    <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
       {rows.length === 0 ? (
-        <p style={styles.muted}>No records yet.</p>
+        <p className="col-span-full py-10 text-center text-sm text-ink-3">No records yet.</p>
       ) : (
         rows.map((row, index) => (
           <article
             key={String(row.id ?? index)}
-            style={styles.invoiceCard}
+            className="rounded-lg border border-line bg-surface-2 p-3"
           >
-            <pre style={styles.pre}>
+            <pre className="m-0 whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-xs text-ink-2">
               {JSON.stringify(row, null, 2)}
             </pre>
           </article>
@@ -1702,8 +1708,8 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <label style={styles.field}>
-      <span style={styles.smallLabel}>{label}</span>
+    <label className="grid gap-1.5">
+      <span className="text-sm font-medium text-ink-2">{label}</span>
       {children}
     </label>
   );
@@ -1721,25 +1727,21 @@ function ActionButton({
   disabled?: boolean;
 }) {
   return (
-    <button
+    <Button
       type="button"
       disabled={working || disabled}
       onClick={() => void onClick()}
-      style={{
-        ...styles.primaryButton,
-        opacity: working || disabled ? 0.6 : 1,
-      }}
     >
       {working ? "Working..." : label}
-    </button>
+    </Button>
   );
 }
 
 function Status({ value }: { value: string }) {
   return (
-    <span style={styles.status}>
-      {value.replaceAll("_", " ")}
-    </span>
+    <Badge tone="neutral">
+      <span className="capitalize">{value.replaceAll("_", " ")}</span>
+    </Badge>
   );
 }
 
@@ -1751,24 +1753,9 @@ function Info({
   value: string;
 }) {
   return (
-    <div>
-      <span style={styles.smallLabel}>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
-function Metric({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div style={styles.metric}>
-      <span style={styles.smallLabel}>{label}</span>
-      <strong style={styles.metricValue}>{value}</strong>
+    <div className="text-sm">
+      <span className="text-kicker uppercase text-ink-2">{label}</span>{" "}
+      <strong className="block text-ink">{value}</strong>
     </div>
   );
 }
@@ -1794,223 +1781,3 @@ function formatDate(value: string | null | undefined) {
     ? value
     : date.toLocaleDateString("en-GB");
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  page: {
-    minHeight: "100vh",
-    padding: "28px 18px 60px",
-    background: "#f8fafc",
-    color: "#0f172a",
-  },
-
-  container: {
-    maxWidth: 1500,
-    margin: "0 auto",
-  },
-
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: 20,
-    alignItems: "flex-start",
-    flexWrap: "wrap",
-    marginBottom: 20,
-  },
-
-  headerTotals: {
-    display: "flex",
-    gap: 10,
-    flexWrap: "wrap",
-  },
-
-  metric: {
-    background: "#fff",
-    border: "1px solid #e2e8f0",
-    borderRadius: 12,
-    padding: "10px 14px",
-    minWidth: 120,
-  },
-
-  metricValue: {
-    display: "block",
-    fontSize: 18,
-  },
-
-  eyebrow: {
-    margin: 0,
-    color: "#2563eb",
-    fontSize: 12,
-    fontWeight: 900,
-    textTransform: "uppercase",
-  },
-
-  title: {
-    margin: "4px 0",
-    fontSize: 42,
-  },
-
-  subtitle: {
-    color: "#64748b",
-    margin: 0,
-  },
-
-  tabs: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 18,
-  },
-
-  tab: {
-    border: "1px solid #cbd5e1",
-    borderRadius: 999,
-    padding: "9px 12px",
-    background: "#fff",
-    cursor: "pointer",
-    fontWeight: 700,
-  },
-
-  activeTab: {
-    background: "#0f172a",
-    color: "#fff",
-    borderColor: "#0f172a",
-  },
-
-  card: {
-    background: "#fff",
-    border: "1px solid #e2e8f0",
-    borderRadius: 18,
-    padding: 20,
-    boxShadow: "0 8px 28px rgba(15,23,42,.05)",
-  },
-
-  message: {
-    marginBottom: 16,
-    background: "#fff",
-    border: "1px solid #e2e8f0",
-    borderRadius: 12,
-    padding: 12,
-  },
-
-  sectionTitle: {
-    marginTop: 0,
-  },
-
-  muted: {
-    color: "#64748b",
-    fontSize: 12,
-  },
-
-  rowBetween: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: 16,
-    alignItems: "flex-start",
-    flexWrap: "wrap",
-  },
-
-  summary: {
-    display: "grid",
-    textAlign: "right",
-    gap: 2,
-  },
-
-  formGrid: {
-    display: "grid",
-    gridTemplateColumns:
-      "repeat(auto-fit,minmax(220px,1fr))",
-    gap: 12,
-    margin: "14px 0",
-  },
-
-  field: {
-    display: "grid",
-    gap: 6,
-  },
-
-  input: {
-    width: "100%",
-    boxSizing: "border-box",
-    padding: "10px 12px",
-    border: "1px solid #cbd5e1",
-    borderRadius: 10,
-    background: "#fff",
-  },
-
-  primaryButton: {
-    margin: "14px 0",
-    border: "none",
-    borderRadius: 10,
-    background: "#2563eb",
-    color: "#fff",
-    padding: "11px 14px",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-
-  tableWrap: {
-    overflowX: "auto",
-  },
-
-  table: {
-    width: "100%",
-    borderCollapse: "collapse",
-  },
-
-  right: {
-    textAlign: "right",
-  },
-
-  status: {
-    display: "inline-block",
-    padding: "5px 8px",
-    borderRadius: 999,
-    background: "#e2e8f0",
-    fontSize: 11,
-    fontWeight: 800,
-    textTransform: "capitalize",
-  },
-
-  listGrid: {
-    display: "grid",
-    gridTemplateColumns:
-      "repeat(auto-fit,minmax(280px,1fr))",
-    gap: 14,
-    marginTop: 18,
-  },
-
-  invoiceCard: {
-    border: "1px solid #e2e8f0",
-    borderRadius: 14,
-    padding: 16,
-    background: "#f8fafc",
-  },
-
-  invoiceNumber: {
-    fontSize: 18,
-  },
-
-  infoGrid: {
-    marginTop: 14,
-    display: "grid",
-    gridTemplateColumns:
-      "repeat(2,minmax(0,1fr))",
-    gap: 10,
-  },
-
-  smallLabel: {
-    display: "block",
-    color: "#64748b",
-    fontSize: 10,
-    fontWeight: 900,
-    textTransform: "uppercase",
-    marginBottom: 2,
-  },
-
-  pre: {
-    whiteSpace: "pre-wrap",
-    overflowWrap: "anywhere",
-    margin: 0,
-    fontSize: 11,
-  },
-};

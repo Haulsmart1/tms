@@ -34,58 +34,34 @@ export default function SettingsPage() {
     ];
 
     return (
-        <main
-            style={{
-                minHeight: "100vh",
-                padding: 30,
-                backgroundImage:
-                    "url('https://images.unsplash.com/photo-1553413077-190dd305871c')",
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-            }}
-        >
-            <div
-                style={{
-                    background: "rgba(0,0,0,0.65)",
-                    padding: 30,
-                    borderRadius: 20,
-                }}
-            >
-                <div style={{ color: "white", marginBottom: 30 }}>
-                    <h1 style={{ marginTop: 0, fontSize: 38 }}>Settings</h1>
-                    <p style={{ opacity: 0.85, marginBottom: 0 }}>
+        <div className="ds min-h-screen bg-canvas font-sans text-ink">
+            <main className="mx-auto max-w-[1480px] px-6 py-8">
+
+                <header className="mb-4">
+                    <div className="text-kicker uppercase text-ink-3">Admin</div>
+
+                    <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">Settings</h1>
+
+                    <p className="m-0 text-sm text-ink-3">
                         Manage company details, users, permissions, vehicle licences and billing settings.
                     </p>
-                </div>
+                </header>
 
-                <div
-                    style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-                        gap: 20,
-                    }}
-                >
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                     {cards.map((card) => (
                         <a
                             key={card.href}
                             href={card.href}
-                            style={{
-                                background: "rgba(255,255,255,0.95)",
-                                padding: 22,
-                                borderRadius: 14,
-                                textDecoration: "none",
-                                color: "#111",
-                                boxShadow: "0 8px 30px rgba(0,0,0,0.25)",
-                                display: "block",
-                            }}
+                            className="block rounded-lg border border-line bg-surface p-4 shadow-sm hover:border-primary-tint-border hover:shadow-md"
                         >
-                            <div style={{ fontSize: 30, marginBottom: 10 }}>{card.icon}</div>
-                            <h2 style={{ marginTop: 0, marginBottom: 6 }}>{card.title}</h2>
-                            <p style={{ margin: 0, color: "#555" }}>{card.description}</p>
+                            <div aria-hidden className="mb-2 text-2xl">{card.icon}</div>
+                            <h2 className="mb-1 mt-0 text-md font-semibold text-ink">{card.title}</h2>
+                            <p className="m-0 text-sm text-ink-3">{card.description}</p>
                         </a>
                     ))}
                 </div>
-            </div>
-        </main>
+
+            </main>
+        </div>
     );
 }

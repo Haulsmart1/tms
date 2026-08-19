@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "../../../lib/supabase/browser";
+import Stat from "../../../components/Stat";
 
 const PRICE = 10;
 
@@ -32,34 +33,22 @@ export default function BillingPage() {
 
     return (
 
-        <main style={pageStyle}>
+        <div className="ds min-h-screen bg-canvas font-sans text-ink">
+            <main className="mx-auto max-w-[1480px] px-6 py-8">
 
-            <div style={overlayStyle}>
+                <header className="mb-4">
+                    <div className="text-kicker uppercase text-ink-3">Admin</div>
 
-                <h1 style={titleStyle}>Billing</h1>
+                    <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">Billing</h1>
+                </header>
 
-                <div style={cardStyle}>
-
-                    <h2>Monthly Charge</h2>
-
-                    <h1>£{count * PRICE}</h1>
-
-                    <p>{count} licensed vehicles</p>
-
+                <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+                    <Stat label="Monthly Charge" value={`£${count * PRICE}`} sub={`${count} licensed vehicles`} />
                 </div>
 
-            </div>
-
-        </main>
+            </main>
+        </div>
 
     )
 
 }
-
-const pageStyle = { minHeight: "100vh", padding: 30, backgroundImage: "url('https://images.unsplash.com/photo-1553413077-190dd305871c')", backgroundSize: "cover" }
-
-const overlayStyle = { background: "rgba(0,0,0,0.65)", padding: 30, borderRadius: 20 }
-
-const titleStyle = { color: "white" }
-
-const cardStyle = { background: "white", padding: 20, borderRadius: 14 }

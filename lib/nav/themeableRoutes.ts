@@ -1,10 +1,15 @@
 /* THE ACTIVATION SWITCH.
 
    A route on this list follows the light/dark theme and shows the theme toggle.
-   A route not on it is pinned dark by ThemeScope, because the ~14 legacy pages
-   are styled with hardcoded inline colour literals that cannot respond to a
-   theme class. Letting them follow the theme would put their dark-tuned text on
-   a light background: /telematics would render white-on-white.
+   A route not on it is pinned dark by ThemeScope, because the remaining legacy
+   pages are styled with hardcoded inline colour literals that cannot respond to
+   a theme class. Letting them follow the theme would put their dark-tuned text
+   on a light background: /super-admin would render white-on-white.
+
+   SEVEN LEGACY PAGES ARE LEFT, all of them deliberately absent below:
+   /driver/dashboard, /subcontractor/dashboard, and the five non-requests
+   /super-admin pages. Every other route in the app has been converted and is
+   listed here.
 
    TO ACTIVATE A LEGACY PAGE: convert its inline colour literals to tokens, give
    its root element `className="ds ... bg-canvas text-ink"` the way the pages
@@ -17,11 +22,10 @@
 
    THREE ENTRIES BELOW DO NOT SHOW A TOGGLE, and that is correct. AppShell is
    what renders the toggle, and shouldShowShell() hides AppShell entirely on
-   "/", "/login" and every "/super-admin/*" path. So of the seven routes here,
-   only /dashboard, /jobs, /pod and /tracking actually offer the control. The
-   others still need to be listed, because this list ALSO decides whether
-   ThemeScope pins a route dark, and pinning the landing page or /login dark
-   would be wrong.
+   "/", "/login" and every "/super-admin/*" path. Those three still need to be
+   listed, because this list ALSO decides whether ThemeScope pins a route dark,
+   and pinning the landing page or /login dark would be wrong. Every other
+   route here offers the control.
 
    "/" is a further special case: it self-pins `.light` on its own root element
    (see app/page.tsx), because the public marketing page stays light whatever
@@ -37,13 +41,30 @@
    When every route is listed, this file and app/components/ThemeScope.tsx can
    both be deleted in one commit. */
 export const THEMEABLE_ROUTES: readonly string[] = [
-  "/",                       // app/page.tsx                      (self-pins .light)
-  "/login",                  // app/login/page.tsx
-  "/dashboard",              // app/dashboard/page.tsx
-  "/jobs",                   // app/jobs/page.tsx
-  "/pod",                    // app/pod/page.tsx
-  "/tracking",               // app/tracking/page.tsx
-  "/super-admin/requests",   // app/super-admin/requests/page.tsx
+  "/",                        // app/page.tsx                      (self-pins .light)
+  "/login",                   // app/login/page.tsx                (no shell, no toggle)
+  "/super-admin/requests",    // app/super-admin/requests/page.tsx (no shell, no toggle)
+  "/dashboard",               // app/dashboard/page.tsx
+  "/jobs",                    // app/jobs/page.tsx
+  "/pod",                     // app/pod/page.tsx
+  "/tracking",                // app/tracking/page.tsx
+  "/drivers",                 // app/drivers/page.tsx
+  "/assets",                  // app/assets/page.tsx
+  "/maintenance",             // app/maintenance/page.tsx
+  "/vehicles",                // app/vehicles/page.tsx
+  "/customers",               // app/customers/page.tsx
+  "/subcontractors",          // app/subcontractors/page.tsx
+  "/invoices",                // app/invoices/page.tsx
+  "/stats",                   // app/stats/page.tsx
+  "/tachograph",              // app/tachograph/page.tsx
+  "/telematics",              // app/telematics/page.tsx
+  "/settings",                // app/settings/page.tsx
+  "/settings/users",          // app/settings/users/page.tsx
+  "/settings/permissions",    // app/settings/permissions/page.tsx
+  "/settings/invoices",       // app/settings/invoices/page.tsx
+  "/settings/portal-invites", // app/settings/portal-invites/page.tsx
+  "/settings/licences",       // app/settings/licences/page.tsx
+  "/settings/company",        // app/settings/company/page.tsx
 ];
 
 export function isThemeableRoute(pathname: string): boolean {
