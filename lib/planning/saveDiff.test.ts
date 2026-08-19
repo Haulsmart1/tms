@@ -51,4 +51,12 @@ describe("computeSaveDiff", () => {
     const original = [job({ id: "sub", subcontractor_id: "s1" })];
     expect(computeSaveDiff(original, [], [])).toEqual([]);
   });
+
+  it("lets unassigned win over a lane on (invalid) overlapping input, per the documented precondition", () => {
+    const original = [job({ id: "a", vehicle_id: "v1", driver_id: "d1", route_order: 1 })];
+    const lanes: LanePlan[] = [{ vehicleId: "v1", driverId: "d1", jobIds: ["a"] }];
+    expect(computeSaveDiff(original, lanes, ["a"])).toEqual([
+      { id: "a", vehicle_id: null, driver_id: null, route_order: null },
+    ]);
+  });
 });

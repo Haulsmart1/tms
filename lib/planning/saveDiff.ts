@@ -18,7 +18,11 @@ export type JobUpdate = {
    compared field-by-field against what was loaded. Unassigning clears all
    three columns; the driver is deliberately included so a job dragged out of
    a lane does not keep a driver it no longer rides with. Jobs in neither a
-   lane nor the unassigned list (the subcontracted ones) are untouched. */
+   lane nor the unassigned list (the subcontracted ones) are untouched.
+
+   Precondition: lanes and unassignedJobIds are disjoint and no id repeats.
+   The page upholds this by construction (the pool is derived as "jobs in no
+   lane"); if it were ever violated, the later write wins silently. */
 export function computeSaveDiff(
   original: PlanJob[],
   lanes: LanePlan[],
