@@ -15,6 +15,7 @@ import {
   isRoutable, jobRepresentativePoint, laneWaypoints,
 } from "../../lib/planning/waypoints";
 import { bestOrder } from "../../lib/planning/optimize";
+import { sanitizeTravelSeconds } from "../../lib/planning/matrix";
 import type { PlanJob, RouteResult } from "../../lib/planning/types";
 import { operatorDay } from "../../lib/time";
 
@@ -44,6 +45,13 @@ export default function PlanningPage() {
   const [laneDrivers, setLaneDrivers] = useState<Record<string, string | null>>({});
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const [routes, setRoutes] = useState<Record<string, RouteResult>>({});
+  /* The diff the freshly loaded board already implies before the user touches
+     anything. Loading normalises the saved plan (one driver per lane, jobs on
+     inactive vehicles fall back to the pool), and that normalisation is not
+     the user's own edit, so it must not light up "Unsaved changes". */
+  const [baselineDiff, setBaselineDiff] = useState("[]");
+  /* Vehicle ids whose lane arrived carrying more than one distinct driver. */
+  const [driverConflicts, setDriverConflicts] = useState<Set<string>>(new Set());
   const [geocodeSettled, setGeocodeSettled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -78,9 +86,13 @@ export default function PlanningPage() {
     () => computeSaveDiff(jobs, lanePlans, unassigned.map((j) => j.id)),
     [jobs, lanePlans, unassigned]
   );
-  const dirty = pendingUpdates.length > 0;
+  const pendingUpdatesJson = useMemo(() => JSON.stringify(pendingUpdates), [pendingUpdates]);
+  /* Dirty means "differs from what the load itself produced", not "non-empty".
+     Save still writes pendingUpdates in full, normalisation included: by the
+     time the button is enabled the user has made a deliberate edit. */
+  const dirty = pendingUpdatesJson !== baselineDiff;
 
-  async function loadData() {
+  async function loadData(isCancelled: () => boolean) {
     setLoading(true);
     setMessage("");
     setGeocodeSettled(false);
@@ -108,6 +120,7 @@ export default function PlanningPage() {
       .eq("active", true)
       .order("name", { ascending: true });
 
+    if (isCancelled()) return;
     if (jobsError) { setMessage(`Jobs load error: ${jobsError.message}`); setLoading(false); return; }
     if (vehicleError) { setMessage(`Vehicles load error: ${vehicleError.message}`); setLoading(false); return; }
     if (driverError) { setMessage(`Drivers load error: ${driverError.message}`); setLoading(false); return; }
@@ -128,28 +141,67 @@ export default function PlanningPage() {
       })),
     }));
 
+    const vehicleList: Vehicle[] = vehicleData ?? [];
+    const activeVehicleIds = new Set(vehicleList.map((v) => v.id));
+
     // Lanes from the saved plan: group by vehicle, order by route_order with
     // unsequenced jobs after, in load order. Lane drivers come from the first
     // job that names one, so a saved plan round-trips exactly.
+    /* Only jobs on an ACTIVE vehicle become lane jobs. A job pinned to a
+       retired vehicle has no lane to render in, so grouping it there would
+       hide it from the board entirely; falling through to the derived
+       unassigned pool keeps it visible and re-plannable. Visible-in-pool beats
+       invisible: saving after a user edit genuinely unassigns it, and the pool
+       makes that plain before they press the button. */
     const orders: Record<string, string[]> = {};
     const laneDriverInit: Record<string, string | null> = {};
+    const laneDriverSets = new Map<string, Set<string>>();
     const grouped = loaded
-      .filter((j) => j.vehicle_id && !j.subcontractor_id)
+      .filter((j) => j.vehicle_id && !j.subcontractor_id && activeVehicleIds.has(j.vehicle_id))
       .sort((a, b) => (a.route_order ?? 1e9) - (b.route_order ?? 1e9));
     for (const job of grouped) {
       const vid = job.vehicle_id as string;
       (orders[vid] ??= []).push(job.id);
       if (laneDriverInit[vid] === undefined && job.driver_id) laneDriverInit[vid] = job.driver_id;
+      if (job.driver_id) {
+        let seen = laneDriverSets.get(vid);
+        if (!seen) { seen = new Set(); laneDriverSets.set(vid, seen); }
+        seen.add(job.driver_id);
+      }
     }
+    // A lane can only carry one driver, so a lane whose jobs disagree is being
+    // silently normalised. Flag it rather than let Save surprise the planner.
+    const conflicts = new Set<string>();
+    for (const [vid, seen] of laneDriverSets) if (seen.size > 1) conflicts.add(vid);
 
+    /* Baseline: the diff this load already implies, before any user action.
+       `dirty` compares against it, so load-time normalisation (one driver per
+       lane, inactive-vehicle fallout) does not masquerade as an unsaved edit. */
+    const laneAssignedIds = new Set(Object.values(orders).flat());
+    const initialLanePlans: LanePlan[] = vehicleList.map((v) => ({
+      vehicleId: v.id,
+      driverId: laneDriverInit[v.id] ?? null,
+      jobIds: orders[v.id] ?? [],
+    }));
+    const initialUnassignedIds = loaded
+      .filter((j) => !j.subcontractor_id && !laneAssignedIds.has(j.id))
+      .map((j) => j.id);
+    const initialDiff = computeSaveDiff(loaded, initialLanePlans, initialUnassignedIds);
+
+    if (isCancelled()) return;
     setJobs(loaded);
-    setVehicles(vehicleData ?? []);
+    setVehicles(vehicleList);
     setDrivers(driverData ?? []);
     setLaneOrders(orders);
     setLaneDrivers(laneDriverInit);
-    setSelectedVehicleId(
-      (vehicleData ?? []).find((v: Vehicle) => (orders[v.id] ?? []).length > 0)?.id ??
-        (vehicleData ?? [])[0]?.id ?? null
+    setDriverConflicts(conflicts);
+    setBaselineDiff(JSON.stringify(initialDiff));
+    // Keep the planner's current lane if it survived the reload; only fall
+    // back when it did not, so a save-triggered reload does not jump the board.
+    setSelectedVehicleId((prev) =>
+      prev && activeVehicleIds.has(prev)
+        ? prev
+        : vehicleList.find((v) => (orders[v.id] ?? []).length > 0)?.id ?? vehicleList[0]?.id ?? null
     );
     setLoading(false);
 
@@ -160,6 +212,7 @@ export default function PlanningPage() {
     try {
       // Sequential batches of at most GEOCODE_BATCH ids, merged as each lands.
       for (let start = 0; start < missing.length; start += GEOCODE_BATCH) {
+        if (isCancelled()) return;
         const batch = missing.slice(start, start + GEOCODE_BATCH);
         const response = await fetch("/api/tomtom/geocode", {
           method: "POST",
@@ -170,6 +223,7 @@ export default function PlanningPage() {
         // stop asking and let the badges explain the missing fixes.
         if (!response.ok) break;
         const { geocoded } = await response.json();
+        if (isCancelled()) return;
         const byStop = new Map<string, { lat: number; lng: number }>(
           (geocoded ?? []).map((g: any) => [g.id, { lat: g.lat, lng: g.lng }])
         );
@@ -186,12 +240,15 @@ export default function PlanningPage() {
     } catch {
       // Board-only mode: badges explain themselves once settled.
     }
+    if (isCancelled()) return;
     setGeocodeSettled(true);
   }
 
   useEffect(() => {
     if (tenant.status !== "ready") return;
-    loadData();
+    let cancelled = false;
+    loadData(() => cancelled);
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenant.status, tenant.activeTenantId, date]);
 
@@ -247,6 +304,22 @@ export default function PlanningPage() {
   function moveJob(jobId: string, vehicleId: string | null, beforeJobId: string | null) {
     const job = jobById.get(jobId);
     if (!job || job.subcontractor_id) return;
+    /* `routes` is keyed by vehicle id, so a cached route outlives the lane it
+       described. Every lane this job leaves, plus the one it enters, now has a
+       different composition: drop just those entries and let the route effect
+       refetch the selected one. */
+    const affected = new Set<string>();
+    if (vehicleId) affected.add(vehicleId);
+    for (const [vid, ids] of Object.entries(laneOrders)) {
+      if (ids.includes(jobId)) affected.add(vid);
+    }
+    if (affected.size > 0) {
+      setRoutes((prev) => {
+        const next = { ...prev };
+        for (const vid of affected) delete next[vid];
+        return next;
+      });
+    }
     setLaneOrders((prev) => {
       const next: Record<string, string[]> = {};
       for (const [vid, ids] of Object.entries(prev)) next[vid] = ids.filter((id) => id !== jobId);
@@ -271,13 +344,21 @@ export default function PlanningPage() {
         .update({ vehicle_id: u.vehicle_id, driver_id: u.driver_id, route_order: u.route_order })
         .eq("id", u.id);
       if (error) {
-        setMessage(`Save error: ${error.message}`);
+        const failure = `Save error: ${error.message}`;
+        setMessage(failure);
         setSaving(false);
+        /* Earlier updates in this loop already landed. A partial save must not
+           leave the board confidently showing the unwritten plan, so reload
+           what was actually written. loadData clears `message` on entry, so
+           the failure is restated afterwards: the planner must still see it. */
+        await loadData(() => false);
+        setMessage(failure);
         return;
       }
     }
     setSaving(false);
-    await loadData();
+    // Never cancelled: a save-triggered reload is not a stale closure's load.
+    await loadData(() => false);
   }
 
   async function optimize() {
@@ -290,7 +371,10 @@ export default function PlanningPage() {
     setOptimizing(true);
     setMessage("");
     try {
-      const points = routable.map((j) => jobRepresentativePoint(j));
+      const points = routable.flatMap((j) => {
+        const p = jobRepresentativePoint(j);
+        return p ? [p] : [];
+      });
       const response = await fetch("/api/tomtom/matrix", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -301,12 +385,19 @@ export default function PlanningPage() {
         setMessage(body?.error ?? "Optimize failed.");
         return;
       }
-      const { travelSeconds } = await response.json();
-      const order = bestOrder(travelSeconds);
+      const matrix = sanitizeTravelSeconds((await response.json())?.travelSeconds, routable.length);
+      if (!matrix) { setMessage("Optimize failed."); return; }
+      const order = bestOrder(matrix);
       const reordered = order
         .map((i) => routable[i].id)
         .concat(selectedLaneJobs.filter((j) => !isRoutable(j)).map((j) => j.id));
       setLaneOrders((prev) => ({ ...prev, [selectedVehicleId]: reordered }));
+      // The lane's order changed, so its cached route describes the old one.
+      setRoutes((prev) => {
+        const next = { ...prev };
+        delete next[selectedVehicleId];
+        return next;
+      });
     } catch {
       setMessage("Optimize failed.");
     } finally {
@@ -316,15 +407,17 @@ export default function PlanningPage() {
 
   const selectedRoute = selectedVehicleId ? (routes[selectedVehicleId] ?? null) : null;
   /* Memoised: a fresh markers array on every parent render tears down and
-     rebuilds every TomTom marker, which flickers during a drag. */
+     rebuilds every TomTom marker, which flickers during a drag.
+
+     The label is the job's position IN THE LANE, not its position among the
+     routable ones, so a pin always carries the same number as its card even
+     when an unroutable job sits between two routable ones. */
   const markers: MapMarker[] = useMemo(
     () =>
-      selectedLaneJobs
-        .filter(isRoutable)
-        .map((job, index) => ({
-          position: jobRepresentativePoint(job) as { lat: number; lng: number },
-          label: String(index + 1),
-        })),
+      selectedLaneJobs.flatMap((job, index) => {
+        const position = jobRepresentativePoint(job);
+        return position ? [{ position, label: String(index + 1) }] : [];
+      }),
     [selectedLaneJobs]
   );
 
@@ -394,6 +487,7 @@ export default function PlanningPage() {
                       selected={v.id === selectedVehicleId}
                       summary={laneSummary(v.id)}
                       geocodeSettled={geocodeSettled}
+                      driverConflict={driverConflicts.has(v.id)}
                       onSelect={() => setSelectedVehicleId(v.id)}
                       onDriverChange={(driverId) =>
                         setLaneDrivers((prev) => ({ ...prev, [v.id]: driverId }))

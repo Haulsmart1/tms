@@ -13,6 +13,9 @@ type Props = {
   /** e.g. "3 jobs · 92 km · 2 h 41 m", or null before this lane has a route. */
   summary: string | null;
   geocodeSettled: boolean;
+  /** True when the lane's jobs arrived carrying more than one distinct driver,
+      so the single lane driver above is a normalisation the user should see. */
+  driverConflict?: boolean;
   onSelect: () => void;
   onDriverChange: (driverId: string | null) => void;
   /** beforeJobId null means append to the end of the lane. */
@@ -21,7 +24,7 @@ type Props = {
 
 export default function VehicleLane({
   vehicle, jobs, driverId, drivers, selected, summary, geocodeSettled,
-  onSelect, onDriverChange, onDropJob,
+  driverConflict, onSelect, onDriverChange, onDropJob,
 }: Props) {
   function handleDragOver(e: DragEvent) {
     e.preventDefault();
@@ -58,6 +61,14 @@ export default function VehicleLane({
             <option key={d.id} value={d.id}>{d.name}</option>
           ))}
         </select>
+        {driverConflict ? (
+          <span
+            className="rounded border border-line px-1 text-xs text-warning"
+            title="Jobs in this lane arrived with different drivers. Saving applies the picked driver to every job in the lane."
+          >
+            mixed drivers
+          </span>
+        ) : null}
         <span className="ml-auto text-xs text-ink-3">
           {summary ?? `${jobs.length} ${jobs.length === 1 ? "job" : "jobs"}`}
         </span>
