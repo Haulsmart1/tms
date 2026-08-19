@@ -35,9 +35,17 @@
      renders in browser blue. Links that should LOOK like links opt back in with
      an explicit `underline` class. */
   :where(.ds) :where(a) { color: inherit; text-decoration: inherit; }
-  :where(.ds) :where(button, [type="button"], [type="submit"]) {
+  /* background-color: transparent is the load-bearing line here, and it is what
+     real Preflight does. Without it a <button> keeps the UA default fill of
+     ButtonFace — a light grey — so every button that does not set its own bg
+     class rendered as a pale slab on the dark canvas. That is what made the
+     inactive tabs on /invoices look like white buttons. appearance:none does
+     NOT remove it: it drops the native widget look and leaves the UA
+     background-color declaration standing. */
+  :where(.ds) :where(button, [type="button"], [type="reset"], [type="submit"]) {
     -webkit-appearance: none;
     appearance: none;
+    background-color: transparent;
     background-image: none;
   }
   :where(.ds) :where(button, input, textarea, select) {
