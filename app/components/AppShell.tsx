@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, ClipboardList, CircleCheck, MapPin, Receipt, Building2, Users,
   Truck, User, Boxes, TriangleAlert, Gauge, Navigation, ArrowUpRight, Settings, LogOut,
+  Route,
   type LucideIcon,
 } from "lucide-react";
 import { useTenant } from "./TenantProvider";
@@ -19,6 +20,7 @@ import { isThemeableRoute } from "../../lib/nav/themeableRoutes";
 const ICONS: Record<string, LucideIcon> = {
   LayoutDashboard, ClipboardList, CircleCheck, MapPin, Receipt, Building2, Users,
   Truck, User, Boxes, TriangleAlert, Gauge, Navigation, ArrowUpRight, Settings,
+  Route,
 };
 
 export default function AppShell() {
