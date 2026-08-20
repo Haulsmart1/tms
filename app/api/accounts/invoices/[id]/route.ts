@@ -127,6 +127,120 @@ export async function PATCH(
 
     if (error) throw new Error(error.message);
 
+    const { data: currentInvoice, error: currentInvoiceError } = await admin
+      .from("invoices")
+      .select("id,status,accounting_sync_status")
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+
+    if (currentInvoiceError) {
+      throw new Error(currentInvoiceError.message);
+    }
+
+    if (!currentInvoice) {
+      return NextResponse.json(
+        { error: "Invoice not found." },
+        { status: 404 }
+      );
+    }
+
+    const lockedStatuses = new Set([
+      "sent",
+      "paid",
+      "void",
+      "credited",
+    ]);
+
+    if (
+      Array.isArray(body.lines) &&
+      lockedStatuses.has(
+        String(currentInvoice.status ?? "").toLowerCase()
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Sent, paid, void or credited invoices cannot have their values edited.",
+        },
+        {
+          status: 409,
+        }
+      );
+    }
+
+    if (Array.isArray(body.lines)) {
+      for (const rawLine of body.lines) {
+        const lineId =
+          String(rawLine.id ?? "").trim();
+
+        const quantity =
+          Number(rawLine.quantity);
+
+        const unitPrice =
+          Number(rawLine.unit_price);
+
+        const vatRate =
+          Number(rawLine.vat_rate);
+
+        if (
+          !lineId ||
+          !Number.isFinite(quantity) ||
+          quantity <= 0 ||
+          !Number.isFinite(unitPrice) ||
+          unitPrice < 0 ||
+          !Number.isFinite(vatRate) ||
+          vatRate < 0
+        ) {
+          return NextResponse.json(
+            {
+              error:
+                "Invalid invoice line values.",
+            },
+            {
+              status: 400,
+            }
+          );
+        }
+
+        const { error: lineError } = await admin
+          .from("invoice_lines")
+          .update({
+            description:
+              String(
+                rawLine.description ?? ""
+              ).trim() ||
+              "Transport service",
+            quantity,
+            unit_price: unitPrice,
+            vat_rate: vatRate,
+          })
+          .eq("id", lineId)
+          .eq("invoice_id", id)
+          .eq("tenant_id", tenantId);
+
+        if (lineError) {
+          throw new Error(
+            lineError.message
+          );
+        }
+      }
+
+      const {
+        error: recalculateError,
+      } = await admin.rpc(
+        "recalculate_invoice_totals",
+        {
+          p_invoice_id: id,
+        }
+      );
+
+      if (recalculateError) {
+        throw new Error(
+          recalculateError.message
+        );
+      }
+    }
     return NextResponse.json({ ok: true });
   } catch (error) {
     const result = errorResponse(error);

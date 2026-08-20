@@ -56,7 +56,17 @@ type Invoice = {
   credit_total?: number | null;
   balance_due: number | null;
   currency: string | null;
+  po_reference?: string | null;
+  notes?: string | null;
   accounting_sync_status?: string | null;
+};
+
+type InvoiceLine = {
+  id: string;
+  description: string | null;
+  quantity: number | null;
+  unit_price: number | null;
+  vat_rate: number | null;
 };
 
 type Customer = {
@@ -140,6 +150,14 @@ export default function CustomerAccountsPage() {
 
   const [invoicePoReference, setInvoicePoReference] = useState("");
   const [invoiceNotes, setInvoiceNotes] = useState("");
+
+  const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
+  const [editingLines, setEditingLines] = useState<InvoiceLine[]>([]);
+  const [editIssueDate, setEditIssueDate] = useState("");
+  const [editDueDate, setEditDueDate] = useState("");
+  const [editPoReference, setEditPoReference] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [invoiceEditWorking, setInvoiceEditWorking] = useState(false);
 
   const [paymentCustomerId, setPaymentCustomerId] = useState("");
   const [paymentInvoiceId, setPaymentInvoiceId] = useState("");
@@ -490,6 +508,139 @@ export default function CustomerAccountsPage() {
     }
   }
 
+  async function openInvoiceEditor(invoice: Invoice) {
+    if (!tenantId) {
+      setMessage("Choose a tenant.");
+      return;
+    }
+
+    setInvoiceEditWorking(true);
+    setMessage("");
+
+    try {
+      const response = await fetch(
+        `/api/accounts/invoices/${invoice.id}?tenantId=${encodeURIComponent(
+          tenantId
+        )}`,
+        {
+          cache: "no-store",
+        }
+      );
+
+      const body = await response.json();
+
+      if (!response.ok) {
+        throw new Error(body.error || "Unable to load invoice.");
+      }
+
+      setEditingInvoice({
+        ...invoice,
+        issue_date: body.invoice?.issue_date ?? invoice.issue_date,
+        due_date: body.invoice?.due_date ?? invoice.due_date,
+        po_reference: body.invoice?.po_reference ?? null,
+        notes: body.invoice?.notes ?? null,
+      });
+
+      setEditingLines(body.lines ?? []);
+      setEditIssueDate(body.invoice?.issue_date ?? "");
+      setEditDueDate(body.invoice?.due_date ?? "");
+      setEditPoReference(body.invoice?.po_reference ?? "");
+      setEditNotes(body.invoice?.notes ?? "");
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to load invoice."
+      );
+    } finally {
+      setInvoiceEditWorking(false);
+    }
+  }
+
+  async function saveInvoiceEditor() {
+    if (!tenant.writeTenantId || !editingInvoice) {
+      return;
+    }
+
+    if (editingLines.length === 0) {
+      setMessage("Invoice must contain at least one line.");
+      return;
+    }
+
+    const invalidLine = editingLines.some((line) => {
+      const quantity = Number(line.quantity);
+      const unitPrice = Number(line.unit_price);
+      const vatRate = Number(line.vat_rate);
+
+      return (
+        !Number.isFinite(quantity) ||
+        quantity <= 0 ||
+        !Number.isFinite(unitPrice) ||
+        unitPrice < 0 ||
+        !Number.isFinite(vatRate) ||
+        vatRate < 0
+      );
+    });
+
+    if (invalidLine) {
+      setMessage(
+        "Invoice lines contain an invalid quantity, price or VAT rate."
+      );
+      return;
+    }
+
+    setInvoiceEditWorking(true);
+    setMessage("");
+
+    try {
+      const response = await fetch(
+        `/api/accounts/invoices/${editingInvoice.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenantId: tenant.writeTenantId,
+            issue_date: editIssueDate || null,
+            due_date: editDueDate || null,
+            po_reference: editPoReference.trim() || null,
+            notes: editNotes.trim() || null,
+            lines: editingLines.map((line) => ({
+              id: line.id,
+              description:
+                line.description?.trim() || "Transport service",
+              quantity: Number(line.quantity),
+              unit_price: Number(line.unit_price),
+              vat_rate: Number(line.vat_rate),
+            })),
+          }),
+        }
+      );
+
+      const body = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          body.error || "Unable to update invoice."
+        );
+      }
+
+      setEditingInvoice(null);
+      setEditingLines([]);
+      setMessage("Invoice updated successfully.");
+
+      await loadTab();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to update invoice."
+      );
+    } finally {
+      setInvoiceEditWorking(false);
+    }
+  }
   async function createPayment() {
     if (!tenant.writeTenantId || !paymentCustomerId || !paymentAmount) {
       setMessage("Customer and payment amount are required.");
@@ -858,7 +1009,27 @@ export default function CustomerAccountsPage() {
               ) : null}
 
               {tab === "invoices" ? (
-                <InvoicesPanel invoices={invoices} />
+                <InvoicesPanel
+                  invoices={invoices}
+                  editingInvoice={editingInvoice}
+                  editingLines={editingLines}
+                  setEditingLines={setEditingLines}
+                  editIssueDate={editIssueDate}
+                  setEditIssueDate={setEditIssueDate}
+                  editDueDate={editDueDate}
+                  setEditDueDate={setEditDueDate}
+                  editPoReference={editPoReference}
+                  setEditPoReference={setEditPoReference}
+                  editNotes={editNotes}
+                  setEditNotes={setEditNotes}
+                  working={invoiceEditWorking}
+                  openInvoiceEditor={openInvoiceEditor}
+                  saveInvoiceEditor={saveInvoiceEditor}
+                  closeInvoiceEditor={() => {
+                    setEditingInvoice(null);
+                    setEditingLines([]);
+                  }}
+                />
               ) : null}
 
               {tab === "payments" ? (
@@ -1619,66 +1790,363 @@ function ReadyToInvoicePanel({
   );
 }
 
-function InvoicesPanel({ invoices }: { invoices: Invoice[] }) {
+function InvoicesPanel({
+  invoices,
+  editingInvoice,
+  editingLines,
+  setEditingLines,
+  editIssueDate,
+  setEditIssueDate,
+  editDueDate,
+  setEditDueDate,
+  editPoReference,
+  setEditPoReference,
+  editNotes,
+  setEditNotes,
+  working,
+  openInvoiceEditor,
+  saveInvoiceEditor,
+  closeInvoiceEditor,
+}: {
+  invoices: Invoice[];
+  editingInvoice: Invoice | null;
+  editingLines: InvoiceLine[];
+  setEditingLines: React.Dispatch<React.SetStateAction<InvoiceLine[]>>;
+  editIssueDate: string;
+  setEditIssueDate: (value: string) => void;
+  editDueDate: string;
+  setEditDueDate: (value: string) => void;
+  editPoReference: string;
+  setEditPoReference: (value: string) => void;
+  editNotes: string;
+  setEditNotes: (value: string) => void;
+  working: boolean;
+  openInvoiceEditor: (invoice: Invoice) => Promise<void>;
+  saveInvoiceEditor: () => Promise<void>;
+  closeInvoiceEditor: () => void;
+}) {
+  const editableStatuses = new Set([
+    "draft",
+    "awaiting_pod",
+    "approved",
+  ]);
+
   return (
     <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
-      <h2 className="m-0 text-md font-semibold text-ink">Invoices</h2>
+      <h2 className="m-0 text-md font-semibold text-ink">
+        Invoices
+      </h2>
+
+      {editingInvoice ? (
+        <div className="mt-4 rounded-lg border border-line bg-surface-2 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="m-0 text-md font-semibold text-ink">
+                Edit{" "}
+                {editingInvoice.invoice_number || "Invoice"}
+              </h3>
+
+              <div className="mt-1 text-sm text-ink-3">
+                {editingInvoice.customer_name || "Customer"}
+              </div>
+            </div>
+
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={closeInvoiceEditor}
+              disabled={working}
+            >
+              Cancel
+            </Button>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Field label="Issue Date">
+              <input
+                type="date"
+                className="h-10 w-full rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                value={editIssueDate}
+                onChange={(event) =>
+                  setEditIssueDate(event.target.value)
+                }
+              />
+            </Field>
+
+            <Field label="Due Date">
+              <input
+                type="date"
+                className="h-10 w-full rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                value={editDueDate}
+                onChange={(event) =>
+                  setEditDueDate(event.target.value)
+                }
+              />
+            </Field>
+
+            <Field label="PO Reference">
+              <input
+                className="h-10 w-full rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                value={editPoReference}
+                onChange={(event) =>
+                  setEditPoReference(event.target.value)
+                }
+              />
+            </Field>
+
+            <Field label="Notes">
+              <input
+                className="h-10 w-full rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                value={editNotes}
+                onChange={(event) =>
+                  setEditNotes(event.target.value)
+                }
+              />
+            </Field>
+          </div>
+
+          <div className="mt-4 overflow-x-auto rounded-lg border border-line">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr>
+                  <th className="border-b border-line px-3 py-2 text-left text-kicker uppercase text-ink-2">
+                    Description
+                  </th>
+                  <th className="border-b border-line px-3 py-2 text-right text-kicker uppercase text-ink-2">
+                    Qty
+                  </th>
+                  <th className="border-b border-line px-3 py-2 text-right text-kicker uppercase text-ink-2">
+                    Unit Price
+                  </th>
+                  <th className="border-b border-line px-3 py-2 text-right text-kicker uppercase text-ink-2">
+                    VAT %
+                  </th>
+                  <th className="border-b border-line px-3 py-2 text-right text-kicker uppercase text-ink-2">
+                    Net
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {editingLines.map((line, index) => (
+                  <tr key={line.id}>
+                    <td className="border-b border-line p-2">
+                      <input
+                        className="h-10 min-w-64 w-full rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                        value={line.description || ""}
+                        onChange={(event) =>
+                          setEditingLines((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index
+                                ? {
+                                    ...item,
+                                    description: event.target.value,
+                                  }
+                                : item
+                            )
+                          )
+                        }
+                      />
+                    </td>
+
+                    <td className="border-b border-line p-2 text-right">
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        className="h-10 w-24 rounded-md border border-ink-3 bg-surface px-3 text-right text-base text-ink"
+                        value={line.quantity ?? 1}
+                        onChange={(event) =>
+                          setEditingLines((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index
+                                ? {
+                                    ...item,
+                                    quantity: Number(event.target.value),
+                                  }
+                                : item
+                            )
+                          )
+                        }
+                      />
+                    </td>
+
+                    <td className="border-b border-line p-2 text-right">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="h-10 w-32 rounded-md border border-ink-3 bg-surface px-3 text-right text-base text-ink"
+                        value={line.unit_price ?? 0}
+                        onChange={(event) =>
+                          setEditingLines((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index
+                                ? {
+                                    ...item,
+                                    unit_price: Number(event.target.value),
+                                  }
+                                : item
+                            )
+                          )
+                        }
+                      />
+                    </td>
+
+                    <td className="border-b border-line p-2 text-right">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="h-10 w-24 rounded-md border border-ink-3 bg-surface px-3 text-right text-base text-ink"
+                        value={line.vat_rate ?? 0}
+                        onChange={(event) =>
+                          setEditingLines((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index
+                                ? {
+                                    ...item,
+                                    vat_rate: Number(event.target.value),
+                                  }
+                                : item
+                            )
+                          )
+                        }
+                      />
+                    </td>
+
+                    <td className="border-b border-line px-3 py-2 text-right font-mono tabular-nums text-ink">
+                      {money(
+                        Number(line.quantity ?? 0) *
+                          Number(line.unit_price ?? 0),
+                        editingInvoice.currency || "GBP"
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="grid gap-1">
+              <span className="text-sm text-ink-3">
+                Net total
+              </span>
+
+              <strong className="font-mono text-lg tabular-nums text-ink">
+                {money(
+                  editingLines.reduce(
+                    (sum, line) =>
+                      sum +
+                      Number(line.quantity ?? 0) *
+                        Number(line.unit_price ?? 0),
+                    0
+                  ),
+                  editingInvoice.currency || "GBP"
+                )}
+              </strong>
+            </div>
+
+            <ActionButton
+              working={working}
+              label="Save Invoice"
+              onClick={saveInvoiceEditor}
+            />
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {invoices.length === 0 ? (
-          <p className="col-span-full py-10 text-center text-sm text-ink-3">No invoices yet.</p>
+          <p className="col-span-full py-10 text-center text-sm text-ink-3">
+            No invoices yet.
+          </p>
         ) : (
-          invoices.map((invoice) => (
-            <article
-              key={invoice.id}
-              className="rounded-lg border border-line bg-surface-2 p-3"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <strong className="font-mono text-sm font-semibold text-ink">
-                    {invoice.invoice_number || "Invoice"}
-                  </strong>
-                  <div className="text-sm text-ink-3">
-                    {invoice.customer_name || "Customer"}
+          invoices.map((invoice) => {
+            const status =
+              String(invoice.status || "draft").toLowerCase();
+
+            const canEdit =
+              editableStatuses.has(status);
+
+            return (
+              <article
+                key={invoice.id}
+                className="rounded-lg border border-line bg-surface-2 p-3"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <strong className="font-mono text-sm font-semibold text-ink">
+                      {invoice.invoice_number || "Invoice"}
+                    </strong>
+
+                    <div className="text-sm text-ink-3">
+                      {invoice.customer_name || "Customer"}
+                    </div>
                   </div>
+
+                  <Status value={invoice.status || "draft"} />
                 </div>
 
-                <Status value={invoice.status || "draft"} />
-              </div>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <Info
+                    label="Issue Date"
+                    value={formatDate(invoice.issue_date)}
+                  />
 
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                <Info
-                  label="Issue Date"
-                  value={formatDate(invoice.issue_date)}
-                />
-                <Info
-                  label="Due Date"
-                  value={formatDate(invoice.due_date)}
-                />
-                <Info
-                  label="Total"
-                  value={money(invoice.total, invoice.currency || "GBP")}
-                />
-                <Info
-                  label="Balance"
-                  value={money(
-                    invoice.balance_due,
-                    invoice.currency || "GBP"
-                  )}
-                />
-                <Info
-                  label="Accounting"
-                  value={invoice.accounting_sync_status || "not_synced"}
-                />
-              </div>
-            </article>
-          ))
+                  <Info
+                    label="Due Date"
+                    value={formatDate(invoice.due_date)}
+                  />
+
+                  <Info
+                    label="Total"
+                    value={money(
+                      invoice.total,
+                      invoice.currency || "GBP"
+                    )}
+                  />
+
+                  <Info
+                    label="Balance"
+                    value={money(
+                      invoice.balance_due,
+                      invoice.currency || "GBP"
+                    )}
+                  />
+
+                  <Info
+                    label="Accounting"
+                    value={
+                      invoice.accounting_sync_status ||
+                      "not_synced"
+                    }
+                  />
+                </div>
+
+                <div className="mt-3">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={!canEdit || working}
+                    onClick={() =>
+                      void openInvoiceEditor(invoice)
+                    }
+                  >
+                    {canEdit
+                      ? "Edit Invoice"
+                      : "Invoice Locked"}
+                  </Button>
+                </div>
+              </article>
+            );
+          })
         )}
       </div>
     </section>
   );
 }
-
 function RecordCards({ rows }: { rows: GenericRow[] }) {
   return (
     <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
