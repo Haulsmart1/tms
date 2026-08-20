@@ -266,12 +266,12 @@ export default function PodPage() {
   }
 
   async function uploadFiles(
-    files: FileList | null,
+    files: File[],
     job: Job,
     stop: JobStop,
     evidenceType: Exclude<EvidenceType, "signature">
   ) {
-    if (!files || files.length === 0) {
+    if (files.length === 0) {
       return;
     }
 
@@ -298,7 +298,7 @@ export default function PodPage() {
         throw new Error("You must be signed in to upload POD evidence.");
       }
 
-      for (const file of Array.from(files)) {
+      for (const file of files) {
         if (file.size > MAX_FILE_SIZE) {
           throw new Error(
             `${file.name} is larger than the 15 MB POD upload limit.`
@@ -966,15 +966,18 @@ export default function PodPage() {
                                   onChange={(
                                     event
                                   ) => {
+                                    const selectedFiles = Array.from(
+                                      event.currentTarget.files ?? []
+                                    );
+
+                                    event.currentTarget.value = "";
+
                                     void uploadFiles(
-                                      event.target
-                                        .files,
+                                      selectedFiles,
                                       job,
                                       stop,
                                       "photo"
                                     );
-                                    event.target.value =
-                                      "";
                                   }}
                                 />
 
@@ -990,15 +993,18 @@ export default function PodPage() {
                                   onChange={(
                                     event
                                   ) => {
+                                    const selectedFiles = Array.from(
+                                      event.currentTarget.files ?? []
+                                    );
+
+                                    event.currentTarget.value = "";
+
                                     void uploadFiles(
-                                      event.target
-                                        .files,
+                                      selectedFiles,
                                       job,
                                       stop,
                                       "document"
                                     );
-                                    event.target.value =
-                                      "";
                                   }}
                                 />
                               </div>
