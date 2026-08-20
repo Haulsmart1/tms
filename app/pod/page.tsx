@@ -1239,11 +1239,15 @@ function EvidenceUpload({
       />
 
       <Button
+        type="button"
         variant="secondary"
         size="sm"
         className="w-full"
         disabled={uploading}
-        onClick={() => inputRef.current?.click()}
+        onClick={(event) => {
+          event.preventDefault();
+          inputRef.current?.click();
+        }}
       >
         {uploading
           ? "UPLOADING..."
