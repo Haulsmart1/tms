@@ -9,7 +9,7 @@ function formatDateTime(
   value: string | null
 ) {
   if (!value) {
-    return "-";
+    return "—";
   }
 
   const date =
@@ -29,6 +29,83 @@ function formatDateTime(
       timeZone:
         "Europe/London",
     }
+  );
+}
+
+function formatExpiry(
+  unixSeconds: number
+) {
+  const date =
+    new Date(
+      unixSeconds * 1000
+    );
+
+  return date.toLocaleString(
+    "en-GB",
+    {
+      timeZone:
+        "Europe/London",
+    }
+  );
+}
+
+function formatLabel(
+  value: string | null
+) {
+  if (!value) {
+    return "—";
+  }
+
+  return value
+    .replaceAll("_", " ")
+    .replace(
+      /\b\w/g,
+      (character) =>
+        character.toUpperCase()
+    );
+}
+
+function statusClasses(
+  value: string | null
+) {
+  const normalized =
+    value?.toLowerCase() ?? "";
+
+  if (
+    normalized === "completed" ||
+    normalized === "delivered"
+  ) {
+    return "border-emerald-500/40 bg-emerald-500/15 text-emerald-300";
+  }
+
+  if (
+    normalized === "pending" ||
+    normalized === "planned"
+  ) {
+    return "border-amber-500/40 bg-amber-500/15 text-amber-300";
+  }
+
+  return "border-slate-600 bg-slate-800 text-slate-200";
+}
+
+function Detail({
+  label,
+  children,
+}: {
+  label: string;
+  children:
+    React.ReactNode;
+}) {
+  return (
+    <div>
+      <div className="mb-1 text-xs font-bold text-slate-200">
+        {label}
+      </div>
+
+      <div className="text-sm leading-6 text-white">
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -69,211 +146,346 @@ export default async function PodSharePage({
       decodedToken
     )}/pdf`;
 
+  const allEvidence =
+    pod.stops.flatMap(
+      (stop) =>
+        stop.evidence.map(
+          (item) => ({
+            ...item,
+            stopOrder:
+              stop.stopOrder,
+            stopType:
+              stop.type,
+          })
+        )
+    );
+
+  const photos =
+    allEvidence.filter(
+      (item) =>
+        item.mimeType?.startsWith(
+          "image/"
+        )
+    );
+
+  const documents =
+    allEvidence.filter(
+      (item) =>
+        !item.mimeType?.startsWith(
+          "image/"
+        )
+    );
+
   return (
-    <main className="mx-auto max-w-4xl p-6 print:max-w-none print:p-0">
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="text-sm font-semibold uppercase text-ink-3">
-            ADR Carriers
-          </div>
-
-          <h1 className="mt-1 text-2xl font-bold text-ink">
-            Proof of Delivery
-          </h1>
-        </div>
-
-        <ShareActions
-          pdfUrl={pdfUrl}
-        />
-      </div>
-
-      <section className="mb-6 grid gap-3 rounded-lg border border-line bg-surface p-4 sm:grid-cols-2">
-        <div>
-          <strong>
-            Job reference
-          </strong>
+    <main className="min-h-screen bg-[#0b1220] text-white">
+      <div className="mx-auto max-w-6xl px-5 py-8 sm:px-8 lg:px-10 print:max-w-none print:bg-white print:px-0 print:py-0 print:text-black">
+        <header className="mb-7 flex flex-wrap items-start justify-between gap-5">
           <div>
-            {pod.reference}
+            <div className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-blue-400 print:text-black">
+              ADR Carriers
+            </div>
+
+            <h1 className="text-3xl font-bold tracking-tight text-white print:text-black">
+              Proof of Delivery
+            </h1>
           </div>
-        </div>
 
-        <div>
-          <strong>
-            Customer
-          </strong>
-          <div>
-            {pod.customerName}
-          </div>
-        </div>
+          <ShareActions
+            pdfUrl={pdfUrl}
+          />
+        </header>
 
-        <div>
-          <strong>
-            Customer reference
-          </strong>
-          <div>
-            {pod.customerReference ||
-              "-"}
-          </div>
-        </div>
+        <section className="mb-5 rounded-xl border border-slate-700 bg-[#111c2e] p-5 shadow-sm print:border-slate-300 print:bg-white">
+          <div className="grid gap-6 md:grid-cols-2">
+            <div className="space-y-5 md:border-r md:border-slate-700 md:pr-8 print:md:border-slate-300">
+              <Detail label="Job reference">
+                {pod.reference}
+              </Detail>
 
-        <div>
-          <strong>
-            Status
-          </strong>
-          <div>
-            {pod.status ||
-              "-"}
-          </div>
-        </div>
-      </section>
+              <Detail label="Customer reference">
+                {pod.customerReference ||
+                  "—"}
+              </Detail>
+            </div>
 
-      <div className="grid gap-4">
-        {pod.stops.map(
-          (stop) => (
-            <section
-              key={stop.id}
-              className="break-inside-avoid rounded-lg border border-line bg-surface p-4"
-            >
-              <h2 className="mb-3 text-lg font-semibold text-ink">
-                Stop{" "}
-                {stop.stopOrder}{" "}
-                ·{" "}
-                {stop.type}
-              </h2>
+            <div className="space-y-5 md:pl-3">
+              <Detail label="Customer">
+                {pod.customerName}
+              </Detail>
 
-              <div className="grid gap-2 text-sm sm:grid-cols-2">
-                <div>
-                  <strong>
-                    Address
-                  </strong>
-                  <div>
-                    {[
-                      stop.address,
-                      stop.city,
-                      stop.postcode,
-                    ]
-                      .filter(
-                        Boolean
-                      )
-                      .join(
-                        ", "
-                      )}
-                  </div>
+              <div>
+                <div className="mb-1 text-xs font-bold text-slate-200">
+                  Status
                 </div>
 
-                <div>
-                  <strong>
-                    Recipient
-                  </strong>
-                  <div>
-                    {stop.recipientName ||
-                      "-"}
-                  </div>
-                </div>
-
-                <div>
-                  <strong>
-                    Delivered
-                  </strong>
-                  <div>
-                    {formatDateTime(
-                      stop.deliveredAt
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <strong>
-                    POD status
-                  </strong>
-                  <div>
-                    {stop.podStatus ||
-                      "-"}
-                  </div>
-                </div>
-
-                <div className="sm:col-span-2">
-                  <strong>
-                    POD notes
-                  </strong>
-                  <div className="whitespace-pre-wrap">
-                    {stop.podNotes ||
-                      "-"}
-                  </div>
-                </div>
+                <span
+                  className={`inline-flex rounded-md border px-2.5 py-1 text-xs font-bold ${statusClasses(
+                    pod.status
+                  )}`}
+                >
+                  {formatLabel(
+                    pod.status
+                  )}
+                </span>
               </div>
+            </div>
+          </div>
+        </section>
 
-              {stop.evidence.length >
-              0 ? (
-                <div className="mt-4">
-                  <h3 className="mb-2 font-semibold text-ink">
-                    POD Evidence
-                  </h3>
+        <div className="mb-5 grid gap-4 lg:grid-cols-2">
+          {pod.stops.map(
+            (stop) => (
+              <section
+                key={stop.id}
+                className="break-inside-avoid rounded-xl border border-slate-700 bg-[#111c2e] p-5 shadow-sm print:border-slate-300 print:bg-white"
+              >
+                <div className="mb-5 flex items-center gap-3">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
+                    {stop.stopOrder}
+                  </span>
 
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {stop.evidence.map(
-                      (
-                        item
-                      ) => (
-                        <div
-                          key={
-                            item.id
+                  <h2 className="text-lg font-bold text-white print:text-black">
+                    Step{" "}
+                    {stop.stopOrder}
+                    {" — "}
+                    {formatLabel(
+                      stop.type
+                    )}
+                  </h2>
+                </div>
+
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <div className="space-y-5 sm:border-r sm:border-slate-700 sm:pr-5 print:sm:border-slate-300">
+                    <Detail label="Address">
+                      {[
+                        stop.address,
+                        stop.city,
+                        stop.postcode,
+                      ]
+                        .filter(
+                          Boolean
+                        )
+                        .join(", ")}
+                    </Detail>
+
+                    <Detail label="Delivered">
+                      {formatDateTime(
+                        stop.deliveredAt
+                      )}
+                    </Detail>
+
+                    <Detail label="POD notes">
+                      <span className="whitespace-pre-wrap">
+                        {stop.podNotes ||
+                          "—"}
+                      </span>
+                    </Detail>
+                  </div>
+
+                  <div className="space-y-5">
+                    <Detail label="Recipient">
+                      {stop.recipientName ||
+                        "—"}
+                    </Detail>
+
+                    <div>
+                      <div className="mb-1 text-xs font-bold text-slate-200">
+                        POD status
+                      </div>
+
+                      <span
+                        className={`inline-flex rounded-md border px-2.5 py-1 text-xs font-bold ${statusClasses(
+                          stop.podStatus
+                        )}`}
+                      >
+                        {formatLabel(
+                          stop.podStatus
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )
+          )}
+        </div>
+
+        <section className="mb-5 rounded-xl border border-slate-700 bg-[#111c2e] p-5 shadow-sm print:border-slate-300 print:bg-white">
+          <h2 className="mb-4 text-xl font-bold text-white print:text-black">
+            POD Evidence
+          </h2>
+
+          {allEvidence.length ===
+          0 ? (
+            <div className="rounded-lg border border-dashed border-slate-600 p-5 text-sm text-slate-300 print:text-black">
+              No POD evidence has been uploaded.
+            </div>
+          ) : (
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.9fr)]">
+              <div className="grid gap-4 sm:grid-cols-2">
+                {photos.map(
+                  (item) => (
+                    <div
+                      key={item.id}
+                      className="overflow-hidden rounded-lg border border-slate-700 bg-[#0b1220] print:border-slate-300 print:bg-white"
+                    >
+                      {item.signedUrl ? (
+                        <a
+                          href={
+                            item.signedUrl
                           }
-                          className="rounded-md border border-line p-3"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block"
                         >
-                          {item.mimeType?.startsWith(
-                            "image/"
-                          ) &&
-                          item.signedUrl ? (
-                            <img
-                              src={
-                                item.signedUrl
-                              }
-                              alt={
-                                item.filename
-                              }
-                              className="mb-2 max-h-72 w-full rounded object-contain"
-                            />
-                          ) : null}
-
-                          <div className="break-all text-sm font-medium">
-                            {
+                          <img
+                            src={
+                              item.signedUrl
+                            }
+                            alt={
                               item.filename
                             }
-                          </div>
+                            className="h-72 w-full object-contain"
+                          />
+                        </a>
+                      ) : null}
 
-                          <div className="text-xs text-ink-3">
-                            {
-                              item.evidenceType
-                            }
-                          </div>
-
-                          {item.signedUrl ? (
-                            <a
-                              href={
-                                item.signedUrl
-                              }
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="print:hidden mt-2 inline-block text-sm font-semibold underline"
-                            >
-                              Open evidence
-                            </a>
-                          ) : null}
+                      <div className="border-t border-slate-700 p-3 print:border-slate-300">
+                        <div className="mb-1 text-xs font-semibold uppercase text-slate-400">
+                          Photo
                         </div>
-                      )
-                    )}
-                  </div>
-                </div>
-              ) : null}
-            </section>
-          )
-        )}
-      </div>
 
-      <div className="mt-8 border-t border-line pt-3 text-xs text-ink-3">
-        Secure POD supplied by ADR Carriers.
-        This sharing link expires automatically.
+                        <div className="break-all text-sm font-semibold text-white print:text-black">
+                          {item.filename}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                )}
+              </div>
+
+              <div className="space-y-5">
+                {documents.length >
+                0 ? (
+                  <div>
+                    <div className="mb-3 text-sm font-bold text-white print:text-black">
+                      Documents
+                    </div>
+
+                    <div className="space-y-2">
+                      {documents.map(
+                        (item) => (
+                          <div
+                            key={
+                              item.id
+                            }
+                            className="rounded-lg border border-slate-700 bg-[#0b1220] p-3 print:border-slate-300 print:bg-white"
+                          >
+                            <div className="mb-1 text-xs text-slate-400">
+                              Stop{" "}
+                              {
+                                item.stopOrder
+                              }{" "}
+                              ·{" "}
+                              {formatLabel(
+                                item.stopType
+                              )}
+                            </div>
+
+                            {item.signedUrl ? (
+                              <a
+                                href={
+                                  item.signedUrl
+                                }
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="break-all text-sm font-bold text-blue-400 underline decoration-blue-400/50 underline-offset-2 hover:text-blue-300 print:text-black"
+                              >
+                                {
+                                  item.filename
+                                }
+                              </a>
+                            ) : (
+                              <div className="break-all text-sm font-bold text-white print:text-black">
+                                {
+                                  item.filename
+                                }
+                              </div>
+                            )}
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+
+                {photos.length >
+                0 ? (
+                  <div>
+                    <div className="mb-3 text-sm font-bold text-white print:text-black">
+                      Photo files
+                    </div>
+
+                    <div className="space-y-2">
+                      {photos.map(
+                        (item) => (
+                          <div
+                            key={
+                              item.id
+                            }
+                            className="rounded-lg border border-slate-700 bg-[#0b1220] p-3 print:border-slate-300 print:bg-white"
+                          >
+                            {item.signedUrl ? (
+                              <a
+                                href={
+                                  item.signedUrl
+                                }
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="break-all text-sm font-bold text-blue-400 underline decoration-blue-400/50 underline-offset-2 hover:text-blue-300 print:text-black"
+                              >
+                                {
+                                  item.filename
+                                }
+                              </a>
+                            ) : (
+                              <div className="break-all text-sm font-bold text-white print:text-black">
+                                {
+                                  item.filename
+                                }
+                              </div>
+                            )}
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          )}
+        </section>
+
+        <footer className="rounded-xl border border-slate-700 bg-[#111c2e] p-5 print:border-slate-300 print:bg-white">
+          <div className="flex items-start gap-4">
+            <div className="flex h-10 w-10 flex-none items-center justify-center rounded-full border border-blue-500 text-lg text-blue-400">
+              🔒
+            </div>
+
+            <div>
+              <div className="font-semibold text-white print:text-black">
+                This POD link is secure and accessible only to anyone who has this link.
+              </div>
+
+              <div className="mt-1 text-sm text-slate-300 print:text-black">
+                This link expires automatically on{" "}
+                {formatExpiry(
+                  payload.expiresAt
+                )}.
+              </div>
+            </div>
+          </div>
+        </footer>
       </div>
     </main>
   );
