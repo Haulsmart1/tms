@@ -3,7 +3,7 @@
 import {
   ChangeEvent,
   useCallback,
-  useEffect, useId, useMemo, useRef, useState,
+  useEffect, useMemo, useRef, useState,
 } from "react";
 import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
@@ -1206,8 +1206,6 @@ function EvidenceUpload({
     event: ChangeEvent<HTMLInputElement>
   ) => void;
 }) {
-  const inputId = useId();
-
   const buttonLabel =
     title === "Delivery Photos"
       ? "ADD DELIVERY PHOTOS"
@@ -1225,32 +1223,38 @@ function EvidenceUpload({
         </div>
       </div>
 
-      <input
-        id={inputId}
-        type="file"
-        accept={accept}
-        multiple={multiple}
-        disabled={uploading}
-        onChange={onChange}
-        className="hidden"
-      />
+      <div className="relative w-full">
+        <div
+          aria-hidden="true"
+          className={[
+            "inline-flex w-full items-center justify-center rounded-md border border-line-strong",
+            "bg-surface px-3 py-2 text-xs font-semibold text-ink transition",
+            "hover:bg-surface-2",
+            uploading
+              ? "cursor-not-allowed opacity-50"
+              : "cursor-pointer",
+          ].join(" ")}
+        >
+          {uploading
+            ? "UPLOADING..."
+            : buttonLabel}
+        </div>
 
-      <label
-        htmlFor={inputId}
-        aria-disabled={uploading}
-        className={[
-          "inline-flex w-full cursor-pointer items-center justify-center rounded-md border border-line-strong",
-          "bg-surface px-3 py-2 text-xs font-semibold text-ink transition",
-          "hover:bg-surface-2",
-          uploading
-            ? "pointer-events-none cursor-not-allowed opacity-50"
-            : "",
-        ].join(" ")}
-      >
-        {uploading
-          ? "UPLOADING..."
-          : buttonLabel}
-      </label>
+        <input
+          type="file"
+          accept={accept}
+          multiple={multiple}
+          disabled={uploading}
+          onChange={onChange}
+          aria-label={buttonLabel}
+          className={[
+            "absolute inset-0 z-10 h-full w-full opacity-0",
+            uploading
+              ? "cursor-not-allowed"
+              : "cursor-pointer",
+          ].join(" ")}
+        />
+      </div>
     </div>
   );
 }
