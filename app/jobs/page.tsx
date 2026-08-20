@@ -1254,6 +1254,8 @@ export default function JobsPage() {
                                       (stop: any) => (
                                         <StopCard
                                           key={stop.id}
+                                          jobId={job.id}
+                                          tenantId={job.tenant_id}
                                           stop={stop}
                                           podForm={
                                             podForms[
