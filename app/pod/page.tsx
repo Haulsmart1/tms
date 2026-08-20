@@ -55,6 +55,7 @@ type Job = {
   id: string;
   tenant_id?: string;
   reference: string | null;
+  external_reference: string | null;
   status: string | null;
   scheduled_date: string | null;
   customers: CustomerRelation;
@@ -141,6 +142,7 @@ export default function PodPage() {
             id,
             tenant_id,
             reference,
+            external_reference,
             status,
             scheduled_date,
             customers (
@@ -547,6 +549,335 @@ export default function PodPage() {
     }
   }
 
+  async function createShare(
+    job: Job
+  ) {
+    if (!activeTenantId) {
+      throw new Error(
+        "No active tenant is selected."
+      );
+    }
+
+    const response = await fetch(
+      "/api/pod/share",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          jobId: job.id,
+          tenantId:
+            activeTenantId,
+        }),
+      }
+    );
+
+    const result =
+      (await response.json()) as {
+        shareUrl?: string;
+        pdfUrl?: string;
+        reference?: string | null;
+        isCambridge?: boolean;
+        contactName?: string | null;
+        contactEmail?: string | null;
+        contactPhone?: string | null;
+        error?: string;
+      };
+
+    if (
+      !response.ok ||
+      !result.shareUrl ||
+      !result.pdfUrl
+    ) {
+      throw new Error(
+        result.error ||
+          "Unable to create POD share."
+      );
+    }
+
+    return {
+      shareUrl:
+        result.shareUrl,
+      pdfUrl:
+        result.pdfUrl,
+      reference:
+        result.reference ?? job.reference,
+      isCambridge:
+        result.isCambridge ?? false,
+      contactName:
+        result.contactName ?? null,
+      contactEmail:
+        result.contactEmail ?? null,
+      contactPhone:
+        result.contactPhone ?? null,
+    };
+  }
+
+  async function viewSharedPod(
+    job: Job
+  ) {
+    clearMessages();
+
+    try {
+      const share =
+        await createShare(job);
+
+      window.open(
+        share.shareUrl,
+        "_blank",
+        "noopener,noreferrer"
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to open shared POD."
+      );
+    }
+  }
+
+  async function downloadPodPdf(
+    job: Job
+  ) {
+    clearMessages();
+
+    try {
+      const share =
+        await createShare(job);
+
+      window.open(
+        share.pdfUrl,
+        "_blank",
+        "noopener,noreferrer"
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to generate POD PDF."
+      );
+    }
+  }
+
+  async function copyPodShareLink(
+    job: Job
+  ) {
+    clearMessages();
+
+    try {
+      const share =
+        await createShare(job);
+
+      await navigator.clipboard.writeText(
+        share.shareUrl
+      );
+
+      setMessage(
+        "Secure POD link copied. It expires automatically."
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to copy POD share link."
+      );
+    }
+  }
+  async function emailPod(
+    job: Job
+  ) {
+    clearMessages();
+
+    try {
+      const share =
+        await createShare(job);
+
+      const recipient =
+        window.prompt(
+          "Email POD to:",
+          share.contactEmail ?? ""
+        );
+
+      if (!recipient?.trim()) {
+        return;
+      }
+
+      const response = await fetch(
+        "/api/pod/share/email",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            jobId: job.id,
+            tenantId:
+              activeTenantId,
+            to:
+              recipient.trim(),
+          }),
+        }
+      );
+
+      const result =
+        (await response.json()) as {
+          recipient?: string;
+          error?: string;
+        };
+
+      if (!response.ok) {
+        throw new Error(
+          result.error ||
+            "Unable to email POD."
+        );
+      }
+
+      setMessage(
+        `POD emailed successfully to ${result.recipient ?? recipient.trim()}.`
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to email POD."
+      );
+    }
+  }
+
+  function normalizeWhatsAppPhone(
+    value: string | null
+  ) {
+    if (!value) {
+      return "";
+    }
+
+    const trimmed =
+      value.trim();
+
+    if (!trimmed) {
+      return "";
+    }
+
+    let digits =
+      trimmed.replace(
+        /\D/g,
+        ""
+      );
+
+    if (
+      trimmed.startsWith("0") &&
+      digits.startsWith("0")
+    ) {
+      digits =
+        `44${digits.slice(1)}`;
+    }
+
+    return digits;
+  }
+
+  async function whatsappPod(
+    job: Job
+  ) {
+    clearMessages();
+
+    try {
+      const share =
+        await createShare(job);
+
+      const reference =
+        share.reference ||
+        job.reference ||
+        "POD";
+
+      const text =
+        `Proof of Delivery for ${reference} is now available: ${share.shareUrl}`;
+
+      const phone =
+        normalizeWhatsAppPhone(
+          share.contactPhone
+        );
+
+      const url =
+        phone
+          ? `https://wa.me/${phone}?text=${encodeURIComponent(
+              text
+            )}`
+          : `https://wa.me/?text=${encodeURIComponent(
+              text
+            )}`;
+
+      window.open(
+        url,
+        "_blank",
+        "noopener,noreferrer"
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to create WhatsApp POD message."
+      );
+    }
+  }
+
+  async function pingCambridge(
+    job: Job
+  ) {
+    clearMessages();
+
+    if (!activeTenantId) {
+      setErrorMessage(
+        "No active tenant is selected."
+      );
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        "/api/pod/share/email",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            jobId: job.id,
+            tenantId:
+              activeTenantId,
+            useCustomerContact:
+              true,
+          }),
+        }
+      );
+
+      const result =
+        (await response.json()) as {
+          recipient?: string;
+          error?: string;
+        };
+
+      if (!response.ok) {
+        throw new Error(
+          result.error ||
+            "Unable to notify Cambridge."
+        );
+      }
+
+      setMessage(
+        `Cambridge POD notification sent to ${result.recipient ?? "the Cambridge contact"}.`
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to notify Cambridge."
+      );
+    }
+  }
   const summary = useMemo(() => {
     const deliveryStops = jobs.flatMap((job) =>
       job.job_stops.filter((stop) => stop.type === "delivery")
@@ -905,6 +1236,90 @@ export default function PodPage() {
                               {stop.recipient_name
                                 ? ` to ${stop.recipient_name}`
                                 : ""}
+                            </div>
+                          ) : null}
+                          {stop.delivered_at ? (
+                            <div className="mt-3 rounded-lg border border-line bg-surface p-3">
+                              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-3">
+                                Share POD
+                              </div>
+
+                              <div className="flex flex-wrap gap-2">
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() =>
+                                    void viewSharedPod(
+                                      job
+                                    )
+                                  }
+                                >
+                                  VIEW POD
+                                </Button>
+
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() =>
+                                    void downloadPodPdf(
+                                      job
+                                    )
+                                  }
+                                >
+                                  DOWNLOAD PDF
+                                </Button>
+
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() =>
+                                    void copyPodShareLink(
+                                      job
+                                    )
+                                  }
+                                >
+                                  COPY LINK
+                                </Button>
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() =>
+                                    void emailPod(
+                                      job
+                                    )
+                                  }
+                                >
+                                  EMAIL POD
+                                </Button>
+
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() =>
+                                    void whatsappPod(
+                                      job
+                                    )
+                                  }
+                                >
+                                  WHATSAPP
+                                </Button>
+
+                                {job.external_reference?.startsWith(
+                                  "CAMBRIDGE-RMA-"
+                                ) ? (
+                                  <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() =>
+                                      void pingCambridge(
+                                        job
+                                      )
+                                    }
+                                  >
+                                    PING CAMBRIDGE
+                                  </Button>
+                                ) : null}
+                              </div>
                             </div>
                           ) : null}
 
