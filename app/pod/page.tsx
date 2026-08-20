@@ -519,9 +519,15 @@ export default function PodPage() {
           );
 
         if (allDelivered) {
+          const completedAt = new Date().toISOString();
+
           const { error: jobError } = await supabase
             .from("jobs")
-            .update({ status: "completed" })
+            .update({
+              status: "completed",
+              pod_status: "delivered",
+              completed_at: completedAt,
+            })
             .eq("id", job.id)
             .eq("tenant_id", activeTenantId);
 

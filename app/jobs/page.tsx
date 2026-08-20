@@ -433,7 +433,16 @@ export default function JobsPage() {
 
     const allDelivered = (deliveryStops || []).length > 0 && deliveryStops.every((s: any) => s.pod_status === "delivered");
     if (allDelivered) {
-      const { error: jobUpdateError } = await supabase.from("jobs").update({ status: "completed" }).eq("id", jobId);
+      const completedAt = new Date().toISOString();
+
+      const { error: jobUpdateError } = await supabase
+        .from("jobs")
+        .update({
+          status: "completed",
+          pod_status: "delivered",
+          completed_at: completedAt,
+        })
+        .eq("id", jobId);
       if (jobUpdateError) { setMessage(`Job completion error: ${jobUpdateError.message}`); await loadData(); return; }
     }
 
