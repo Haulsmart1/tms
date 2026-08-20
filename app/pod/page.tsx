@@ -3,10 +3,7 @@
 import {
   ChangeEvent,
   useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
+  useEffect, useId, useMemo, useRef, useState,
 } from "react";
 import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
@@ -1209,7 +1206,7 @@ function EvidenceUpload({
     event: ChangeEvent<HTMLInputElement>
   ) => void;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputId = useId();
 
   const buttonLabel =
     title === "Delivery Photos"
@@ -1229,7 +1226,7 @@ function EvidenceUpload({
       </div>
 
       <input
-        ref={inputRef}
+        id={inputId}
         type="file"
         accept={accept}
         multiple={multiple}
@@ -1238,21 +1235,22 @@ function EvidenceUpload({
         className="hidden"
       />
 
-      <Button
-        type="button"
-        variant="secondary"
-        size="sm"
-        className="w-full"
-        disabled={uploading}
-        onClick={(event) => {
-          event.preventDefault();
-          inputRef.current?.click();
-        }}
+      <label
+        htmlFor={inputId}
+        aria-disabled={uploading}
+        className={[
+          "inline-flex w-full cursor-pointer items-center justify-center rounded-md border border-line-strong",
+          "bg-surface px-3 py-2 text-xs font-semibold text-ink transition",
+          "hover:bg-surface-2",
+          uploading
+            ? "pointer-events-none cursor-not-allowed opacity-50"
+            : "",
+        ].join(" ")}
       >
         {uploading
           ? "UPLOADING..."
           : buttonLabel}
-      </Button>
+      </label>
     </div>
   );
 }
