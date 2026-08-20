@@ -103,6 +103,7 @@ export default function PodPage() {
 
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<PodFilter>("all");
+  const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
 
   const activeTenantId = tenant.activeTenantId;
 
@@ -370,10 +371,18 @@ export default function PodPage() {
         }
       }
 
+      const uploadedCount = files.length;
+
       setMessage(
-        evidenceType === "photo"
-          ? "POD photo evidence uploaded."
-          : "POD document evidence uploaded."
+        `${uploadedCount} ${
+          evidenceType === "photo"
+            ? uploadedCount === 1
+              ? "photo"
+              : "photos"
+            : uploadedCount === 1
+              ? "document"
+              : "documents"
+        } uploaded successfully.`
       );
 
       await loadData();
@@ -740,32 +749,68 @@ export default function PodPage() {
               {filteredJobs.map((job) => (
                 <section
                   key={job.id}
-                  className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm"
+                  className="mb-2 rounded-lg border border-line bg-surface px-3 py-2.5 shadow-sm"
                 >
-                  <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+                  <div className="grid gap-3 md:grid-cols-[minmax(145px,1.1fr)_minmax(180px,1.5fr)_100px_115px_160px_auto] md:items-center">
                     <div className="min-w-0">
-                      <div className="text-kicker uppercase text-primary-deep">
-                        {job.reference ||
-                          "No job reference"}
-                      </div>
-
-                      <h2 className="mb-2 break-words text-md font-semibold text-ink">
-                        {job.customers?.name ||
-                          "No customer"}
-                      </h2>
-
-                      <div className="text-xs text-ink-3">
-                        Scheduled:{" "}
-                        {formatDate(job.scheduled_date)}
+                      <div className="truncate font-mono text-sm font-semibold text-ink">
+                        {job.reference || "No job reference"}
                       </div>
                     </div>
 
-                    <StatusBadge
-                      value={job.status || "planned"}
-                    />
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-ink">
+                        {job.customers?.name || "No customer"}
+                      </div>
+                    </div>
+
+                    <div className="text-xs text-ink-3">
+                      {formatDate(job.scheduled_date)}
+                    </div>
+
+                    <div>
+                      <StatusBadge
+                        value={job.status || "planned"}
+                      />
+                    </div>
+
+                    <div className="text-xs font-medium text-ink-2">
+                      Photos{" "}
+                      {evidence.filter(
+                        (item) =>
+                          item.job_id === job.id &&
+                          item.evidence_type === "photo"
+                      ).length}
+                      {" · "}Docs{" "}
+                      {evidence.filter(
+                        (item) =>
+                          item.job_id === job.id &&
+                          item.evidence_type === "document"
+                      ).length}
+                    </div>
+
+                    <div className="flex justify-start md:justify-end">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() =>
+                          setExpandedJobId((current) =>
+                            current === job.id
+                              ? null
+                              : job.id
+                          )
+                        }
+                      >
+                        {expandedJobId === job.id
+                          ? "Hide"
+                          : "View"}
+                      </Button>
+                    </div>
                   </div>
 
-                  <div>
+                  {expandedJobId === job.id ? (
+                    <div className="mt-3 border-t border-line pt-3">
                     {job.job_stops.map((stop) => {
                       const form =
                         forms[stop.id] ?? {
@@ -962,9 +1007,25 @@ export default function PodPage() {
                               </div>
 
                               <div className="grid gap-2.5">
-                                <h3 className="m-0 text-sm font-semibold text-ink">
-                                  POD Evidence
-                                </h3>
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <h3 className="m-0 text-sm font-semibold text-ink">
+                                    POD Evidence Viewer
+                                  </h3>
+
+                                  <div className="flex flex-wrap gap-2">
+                                    <Badge tone="info">
+                                      {photos.length} photo{photos.length === 1 ? "" : "s"}
+                                    </Badge>
+
+                                    <Badge tone="info">
+                                      {documents.length} document{documents.length === 1 ? "" : "s"}
+                                    </Badge>
+
+                                    <Badge tone="neutral">
+                                      {evidenceCount} total
+                                    </Badge>
+                                  </div>
+                                </div>
 
                                 {stop.pod_photo_url ||
                                 stop.pod_document_url ? (
@@ -1030,6 +1091,10 @@ export default function PodPage() {
                                             ·{" "}
                                             {formatFileSize(
                                               item.file_size_bytes
+                                            )}{" "}
+                                            · Uploaded{" "}
+                                            {formatDateTime(
+                                              item.created_at
                                             )}
                                           </div>
                                         </div>
@@ -1039,7 +1104,12 @@ export default function PodPage() {
                                             value={
                                               item.storage_path
                                             }
-                                            label="View"
+                                            label={
+                                              item.mime_type?.startsWith("image/") ||
+                                              item.mime_type === "application/pdf"
+                                                ? "Preview"
+                                                : "Open / Download"
+                                            }
                                           />
 
                                           <Button
@@ -1110,7 +1180,8 @@ export default function PodPage() {
                         </article>
                       );
                     })}
-                  </div>
+                    </div>
+                  ) : null}
                 </section>
               ))}
             </div>
