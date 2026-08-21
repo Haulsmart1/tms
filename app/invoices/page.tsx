@@ -58,6 +58,7 @@ type Invoice = {
   currency: string | null;
   po_reference?: string | null;
   notes?: string | null;
+  accounting_invoice_id?: string | null;
   accounting_sync_status?: string | null;
 };
 
@@ -67,6 +68,25 @@ type InvoiceLine = {
   quantity: number | null;
   unit_price: number | null;
   vat_rate: number | null;
+};
+
+type InvoiceJobDetail = {
+  job_id: string;
+  reference: string | null;
+  external_reference: string | null;
+  pod_status: string | null;
+};
+
+type InvoicePreviewData = {
+  invoice: Invoice & {
+    customer_reference?: string | null;
+    accounting_invoice_id?: string | null;
+    accounting_sync_error?: string | null;
+  };
+  lines: InvoiceLine[];
+  jobs: InvoiceJobDetail[];
+  payments: Array<Record<string, unknown>>;
+  credits: Array<Record<string, unknown>>;
 };
 
 type Customer = {
@@ -158,6 +178,11 @@ export default function CustomerAccountsPage() {
   const [editPoReference, setEditPoReference] = useState("");
   const [editNotes, setEditNotes] = useState("");
   const [invoiceEditWorking, setInvoiceEditWorking] = useState(false);
+  const [previewInvoice, setPreviewInvoice] =
+    useState<InvoicePreviewData | null>(null);
+  const [previewWorking, setPreviewWorking] = useState(false);
+  const [xeroInvoiceSyncingId, setXeroInvoiceSyncingId] =
+    useState<string | null>(null);
 
   const [paymentCustomerId, setPaymentCustomerId] = useState("");
   const [paymentInvoiceId, setPaymentInvoiceId] = useState("");
@@ -508,6 +533,175 @@ export default function CustomerAccountsPage() {
     }
   }
 
+  async function openInvoicePreview(invoice: Invoice) {
+    if (!tenantId) {
+      setMessage("Choose a tenant.");
+      return;
+    }
+
+    setPreviewWorking(true);
+    setMessage("");
+
+    try {
+      const response = await fetch(
+        `/api/accounts/invoices/${invoice.id}?tenantId=${encodeURIComponent(
+          tenantId
+        )}`,
+        {
+          cache: "no-store",
+        }
+      );
+
+      const body = (await response.json()) as InvoicePreviewData & {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(
+          body.error || "Unable to load invoice preview."
+        );
+      }
+
+      setPreviewInvoice(body);
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to load invoice preview."
+      );
+    } finally {
+      setPreviewWorking(false);
+    }
+  }
+
+  async function approveInvoice(invoice: Invoice) {
+    if (!tenant.writeTenantId) {
+      setMessage("Choose a tenant.");
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Approve ${invoice.invoice_number || "this invoice"}?`
+      )
+    ) {
+      return;
+    }
+
+    setPreviewWorking(true);
+    setMessage("");
+
+    try {
+      const response = await fetch(
+        `/api/accounts/invoices/${invoice.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenantId: tenant.writeTenantId,
+            status: "approved",
+          }),
+        }
+      );
+
+      const body = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          body.error || "Unable to approve invoice."
+        );
+      }
+
+      setMessage("Invoice approved.");
+      setPreviewInvoice(null);
+      await loadTab();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to approve invoice."
+      );
+    } finally {
+      setPreviewWorking(false);
+    }
+  }
+  async function syncInvoiceToXero(invoice: Invoice) {
+    if (!tenant.writeTenantId) {
+      setMessage("Choose a tenant.");
+      return;
+    }
+
+    if (!xeroStatus.connected) {
+      setMessage("Connect Xero before syncing invoices.");
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Sync ${invoice.invoice_number || "this invoice"} to Xero?`
+      )
+    ) {
+      return;
+    }
+
+    setXeroInvoiceSyncingId(invoice.id);
+    setMessage("");
+
+    try {
+      const response = await fetch(
+        `/api/accounts/accounting/xero/invoices/${invoice.id}/sync`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenantId: tenant.writeTenantId,
+          }),
+        }
+      );
+
+      const body = (await response.json()) as {
+        ok?: boolean;
+        alreadySynced?: boolean;
+        invoiceNumber?: string;
+        xeroInvoiceId?: string;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(
+          body.error || "Unable to sync invoice to Xero."
+        );
+      }
+
+      if (body.alreadySynced) {
+        setMessage(
+          `${body.invoiceNumber || "Invoice"} is already synced to Xero.`
+        );
+      } else {
+        setMessage(
+          `${body.invoiceNumber || "Invoice"} synced to Xero successfully.`
+        );
+      }
+
+      setPreviewInvoice(null);
+      await loadTab();
+      await loadXeroStatus();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to sync invoice to Xero."
+      );
+
+      await loadTab();
+    } finally {
+      setXeroInvoiceSyncingId(null);
+    }
+  }
   async function openInvoiceEditor(invoice: Invoice) {
     if (!tenantId) {
       setMessage("Choose a tenant.");
@@ -1025,7 +1219,14 @@ export default function CustomerAccountsPage() {
                   working={invoiceEditWorking}
                   openInvoiceEditor={openInvoiceEditor}
                   saveInvoiceEditor={saveInvoiceEditor}
-                  closeInvoiceEditor={() => {
+                  xeroConnected={xeroStatus.connected}
+                  xeroInvoiceSyncingId={xeroInvoiceSyncingId}
+                  syncInvoiceToXero={syncInvoiceToXero}
+                  previewInvoice={previewInvoice}
+                  previewWorking={previewWorking}
+                  openInvoicePreview={openInvoicePreview}
+                  approveInvoice={approveInvoice}
+                  closeInvoicePreview={() => setPreviewInvoice(null)}                  closeInvoiceEditor={() => {
                     setEditingInvoice(null);
                     setEditingLines([]);
                   }}
@@ -1072,7 +1273,7 @@ export default function CustomerAccountsPage() {
                           )
                           .map((invoice) => (
                             <option key={invoice.id} value={invoice.id}>
-                              {invoice.invoice_number} Â·{" "}
+                              {invoice.invoice_number} ·{" "}
                               {money(
                                 invoice.balance_due,
                                 invoice.currency || "GBP"
@@ -1152,8 +1353,8 @@ export default function CustomerAccountsPage() {
                         <option value="">Choose invoice</option>
                         {invoices.map((invoice) => (
                           <option key={invoice.id} value={invoice.id}>
-                            {invoice.invoice_number} Â·{" "}
-                            {invoice.customer_name || "Customer"} Â·{" "}
+                            {invoice.invoice_number} ·{" "}
+                            {invoice.customer_name || "Customer"} ·{" "}
                             {money(invoice.total, invoice.currency || "GBP")}
                           </option>
                         ))}
@@ -1806,6 +2007,14 @@ function InvoicesPanel({
   working,
   openInvoiceEditor,
   saveInvoiceEditor,
+  xeroConnected,
+  xeroInvoiceSyncingId,
+  syncInvoiceToXero,
+  previewInvoice,
+  previewWorking,
+  openInvoicePreview,
+  approveInvoice,
+  closeInvoicePreview,
   closeInvoiceEditor,
 }: {
   invoices: Invoice[];
@@ -1823,6 +2032,14 @@ function InvoicesPanel({
   working: boolean;
   openInvoiceEditor: (invoice: Invoice) => Promise<void>;
   saveInvoiceEditor: () => Promise<void>;
+  xeroConnected: boolean;
+  xeroInvoiceSyncingId: string | null;
+  syncInvoiceToXero: (invoice: Invoice) => Promise<void>;
+  previewInvoice: InvoicePreviewData | null;
+  previewWorking: boolean;
+  openInvoicePreview: (invoice: Invoice) => Promise<void>;
+  approveInvoice: (invoice: Invoice) => Promise<void>;
+  closeInvoicePreview: () => void;
   closeInvoiceEditor: () => void;
 }) {
   const editableStatuses = new Set([
@@ -1831,19 +2048,318 @@ function InvoicesPanel({
     "approved",
   ]);
 
+  const approvableStatuses = new Set([
+    "draft",
+    "awaiting_pod",
+  ]);
+
   return (
     <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
-      <h2 className="m-0 text-md font-semibold text-ink">
-        Invoices
-      </h2>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="m-0 text-md font-semibold text-ink">
+            Invoices
+          </h2>
+
+          <p className="m-0 text-sm text-ink-3">
+            View, edit, approve and prepare consolidated customer invoices.
+          </p>
+        </div>
+      </div>
+
+      {previewInvoice ? (
+        <article
+          id="invoice-preview"
+          className="mt-4 rounded-xl border border-line bg-white p-6 text-slate-950 shadow-sm print:border-0 print:shadow-none"
+        >
+          <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+                ADR Carriers
+              </div>
+
+              <h3 className="mt-1 text-2xl font-bold">
+                Invoice
+              </h3>
+
+              <div className="mt-1 font-mono text-lg">
+                {previewInvoice.invoice.invoice_number || "Invoice"}
+              </div>
+            </div>
+
+            <div className="print:hidden flex flex-wrap gap-2">
+              {xeroConnected &&
+              ["approved", "sent"].includes(
+                String(previewInvoice.invoice.status || "").toLowerCase()
+              ) &&
+              !previewInvoice.invoice.accounting_invoice_id ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={
+                    xeroInvoiceSyncingId === previewInvoice.invoice.id
+                  }
+                  onClick={() =>
+                    void syncInvoiceToXero(previewInvoice.invoice)
+                  }
+                >
+                  {xeroInvoiceSyncingId === previewInvoice.invoice.id
+                    ? "Syncing..."
+                    : "Sync this invoice to Xero"}
+                </Button>
+              ) : null}
+
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => window.print()}
+              >
+                Print / Save PDF
+              </Button>
+
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={closeInvoicePreview}
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid gap-5 border-y border-slate-200 py-5 md:grid-cols-2">
+            <div className="space-y-2">
+              <div>
+                <span className="text-xs font-bold uppercase text-slate-500">
+                  Customer
+                </span>
+                <div className="font-semibold">
+                  {previewInvoice.invoice.customer_name || "Customer"}
+                </div>
+              </div>
+
+              <div>
+                <span className="text-xs font-bold uppercase text-slate-500">
+                  Customer reference
+                </span>
+                <div>
+                  {previewInvoice.invoice.customer_reference || "—"}
+                </div>
+              </div>
+
+              <div>
+                <span className="text-xs font-bold uppercase text-slate-500">
+                  PO reference
+                </span>
+                <div>
+                  {previewInvoice.invoice.po_reference || "—"}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2 md:text-right">
+              <div>
+                <span className="text-xs font-bold uppercase text-slate-500">
+                  Issue date
+                </span>
+                <div>
+                  {formatDate(previewInvoice.invoice.issue_date)}
+                </div>
+              </div>
+
+              <div>
+                <span className="text-xs font-bold uppercase text-slate-500">
+                  Due date
+                </span>
+                <div>
+                  {formatDate(previewInvoice.invoice.due_date)}
+                </div>
+              </div>
+
+              <div>
+                <span className="text-xs font-bold uppercase text-slate-500">
+                  Status
+                </span>
+                <div className="capitalize">
+                  {(previewInvoice.invoice.status || "draft").replaceAll(
+                    "_",
+                    " "
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {previewInvoice.jobs.length > 0 ? (
+            <div className="mt-5">
+              <h4 className="mb-2 text-sm font-bold uppercase text-slate-500">
+                Jobs / RMA references
+              </h4>
+
+              <div className="flex flex-wrap gap-2">
+                {previewInvoice.jobs.map((job) => (
+                  <div
+                    key={job.job_id}
+                    className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+                  >
+                    <strong>{job.reference || job.job_id.slice(0, 8)}</strong>
+
+                    {job.external_reference ? (
+                      <div className="text-xs text-slate-500">
+                        {job.external_reference}
+                      </div>
+                    ) : null}
+
+                    <div className="text-xs capitalize text-slate-500">
+                      POD: {(job.pod_status || "not set").replaceAll("_", " ")}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="mt-5 overflow-x-auto rounded-lg border border-slate-200">
+            <table className="w-full border-collapse text-sm">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="border-b border-slate-200 px-3 py-2 text-left">
+                    Description
+                  </th>
+                  <th className="border-b border-slate-200 px-3 py-2 text-right">
+                    Qty
+                  </th>
+                  <th className="border-b border-slate-200 px-3 py-2 text-right">
+                    Rate
+                  </th>
+                  <th className="border-b border-slate-200 px-3 py-2 text-right">
+                    VAT
+                  </th>
+                  <th className="border-b border-slate-200 px-3 py-2 text-right">
+                    Net
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {previewInvoice.lines.map((line) => {
+                  const quantity = Number(line.quantity ?? 0);
+                  const rate = Number(line.unit_price ?? 0);
+                  const net = quantity * rate;
+
+                  return (
+                    <tr key={line.id}>
+                      <td className="border-b border-slate-200 px-3 py-3">
+                        {line.description || "Transport service"}
+                      </td>
+
+                      <td className="border-b border-slate-200 px-3 py-3 text-right font-mono">
+                        {quantity}
+                      </td>
+
+                      <td className="border-b border-slate-200 px-3 py-3 text-right font-mono">
+                        {money(
+                          rate,
+                          previewInvoice.invoice.currency || "GBP"
+                        )}
+                      </td>
+
+                      <td className="border-b border-slate-200 px-3 py-3 text-right font-mono">
+                        {Number(line.vat_rate ?? 0)}%
+                      </td>
+
+                      <td className="border-b border-slate-200 px-3 py-3 text-right font-mono">
+                        {money(
+                          net,
+                          previewInvoice.invoice.currency || "GBP"
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="ml-auto mt-5 grid max-w-sm gap-2">
+            <div className="flex justify-between gap-6">
+              <span>Subtotal</span>
+              <strong className="font-mono">
+                {money(
+                  previewInvoice.invoice.subtotal,
+                  previewInvoice.invoice.currency || "GBP"
+                )}
+              </strong>
+            </div>
+
+            <div className="flex justify-between gap-6">
+              <span>VAT</span>
+              <strong className="font-mono">
+                {money(
+                  previewInvoice.invoice.vat_total,
+                  previewInvoice.invoice.currency || "GBP"
+                )}
+              </strong>
+            </div>
+
+            <div className="flex justify-between gap-6 border-t border-slate-300 pt-2 text-lg">
+              <span>Total</span>
+              <strong className="font-mono">
+                {money(
+                  previewInvoice.invoice.total,
+                  previewInvoice.invoice.currency || "GBP"
+                )}
+              </strong>
+            </div>
+
+            <div className="flex justify-between gap-6">
+              <span>Balance due</span>
+              <strong className="font-mono">
+                {money(
+                  previewInvoice.invoice.balance_due,
+                  previewInvoice.invoice.currency || "GBP"
+                )}
+              </strong>
+            </div>
+          </div>
+
+          {previewInvoice.invoice.notes ? (
+            <div className="mt-5 rounded-lg bg-slate-50 p-3 text-sm">
+              <strong>Notes:</strong>{" "}
+              {previewInvoice.invoice.notes}
+            </div>
+          ) : null}
+
+          <div className="mt-5 border-t border-slate-200 pt-4">
+            <div className="text-xs font-bold uppercase text-slate-500">
+              Accounting
+            </div>
+
+            <div className="mt-1 text-sm">
+              Xero sync:{" "}
+              <strong className="capitalize">
+                {(
+                  previewInvoice.invoice.accounting_sync_status ||
+                  "not_synced"
+                ).replaceAll("_", " ")}
+              </strong>
+            </div>
+
+            {previewInvoice.invoice.accounting_sync_error ? (
+              <div className="mt-1 text-sm text-red-700">
+                {previewInvoice.invoice.accounting_sync_error}
+              </div>
+            ) : null}
+          </div>
+        </article>
+      ) : null}
 
       {editingInvoice ? (
         <div className="mt-4 rounded-lg border border-line bg-surface-2 p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h3 className="m-0 text-md font-semibold text-ink">
-                Edit{" "}
-                {editingInvoice.invoice_number || "Invoice"}
+                Edit {editingInvoice.invoice_number || "Invoice"}
               </h3>
 
               <div className="mt-1 text-sm text-ink-3">
@@ -1867,9 +2383,7 @@ function InvoicesPanel({
                 type="date"
                 className="h-10 w-full rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                 value={editIssueDate}
-                onChange={(event) =>
-                  setEditIssueDate(event.target.value)
-                }
+                onChange={(event) => setEditIssueDate(event.target.value)}
               />
             </Field>
 
@@ -1878,9 +2392,7 @@ function InvoicesPanel({
                 type="date"
                 className="h-10 w-full rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                 value={editDueDate}
-                onChange={(event) =>
-                  setEditDueDate(event.target.value)
-                }
+                onChange={(event) => setEditDueDate(event.target.value)}
               />
             </Field>
 
@@ -1898,9 +2410,7 @@ function InvoicesPanel({
               <input
                 className="h-10 w-full rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                 value={editNotes}
-                onChange={(event) =>
-                  setEditNotes(event.target.value)
-                }
+                onChange={(event) => setEditNotes(event.target.value)}
               />
             </Field>
           </div>
@@ -1909,19 +2419,19 @@ function InvoicesPanel({
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr>
-                  <th className="border-b border-line px-3 py-2 text-left text-kicker uppercase text-ink-2">
+                  <th className="border-b border-line px-3 py-2 text-left">
                     Description
                   </th>
-                  <th className="border-b border-line px-3 py-2 text-right text-kicker uppercase text-ink-2">
+                  <th className="border-b border-line px-3 py-2 text-right">
                     Qty
                   </th>
-                  <th className="border-b border-line px-3 py-2 text-right text-kicker uppercase text-ink-2">
+                  <th className="border-b border-line px-3 py-2 text-right">
                     Unit Price
                   </th>
-                  <th className="border-b border-line px-3 py-2 text-right text-kicker uppercase text-ink-2">
+                  <th className="border-b border-line px-3 py-2 text-right">
                     VAT %
                   </th>
-                  <th className="border-b border-line px-3 py-2 text-right text-kicker uppercase text-ink-2">
+                  <th className="border-b border-line px-3 py-2 text-right">
                     Net
                   </th>
                 </tr>
@@ -2015,7 +2525,7 @@ function InvoicesPanel({
                       />
                     </td>
 
-                    <td className="border-b border-line px-3 py-2 text-right font-mono tabular-nums text-ink">
+                    <td className="border-b border-line px-3 py-2 text-right font-mono">
                       {money(
                         Number(line.quantity ?? 0) *
                           Number(line.unit_price ?? 0),
@@ -2028,26 +2538,7 @@ function InvoicesPanel({
             </table>
           </div>
 
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="grid gap-1">
-              <span className="text-sm text-ink-3">
-                Net total
-              </span>
-
-              <strong className="font-mono text-lg tabular-nums text-ink">
-                {money(
-                  editingLines.reduce(
-                    (sum, line) =>
-                      sum +
-                      Number(line.quantity ?? 0) *
-                        Number(line.unit_price ?? 0),
-                    0
-                  ),
-                  editingInvoice.currency || "GBP"
-                )}
-              </strong>
-            </div>
-
+          <div className="mt-4 flex justify-end">
             <ActionButton
               working={working}
               label="Save Invoice"
@@ -2057,7 +2548,7 @@ function InvoicesPanel({
         </div>
       ) : null}
 
-      <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {invoices.length === 0 ? (
           <p className="col-span-full py-10 text-center text-sm text-ink-3">
             No invoices yet.
@@ -2069,6 +2560,9 @@ function InvoicesPanel({
 
             const canEdit =
               editableStatuses.has(status);
+
+            const canApprove =
+              approvableStatuses.has(status);
 
             return (
               <article
@@ -2125,7 +2619,18 @@ function InvoicesPanel({
                   />
                 </div>
 
-                <div className="mt-3">
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={previewWorking}
+                    onClick={() =>
+                      void openInvoicePreview(invoice)
+                    }
+                  >
+                    View / Preview
+                  </Button>
+
                   <Button
                     type="button"
                     variant="secondary"
@@ -2138,6 +2643,41 @@ function InvoicesPanel({
                       ? "Edit Invoice"
                       : "Invoice Locked"}
                   </Button>
+
+                  {xeroConnected ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={
+                        xeroInvoiceSyncingId === invoice.id ||
+                        !["approved", "sent"].includes(status) ||
+                        Boolean(invoice.accounting_invoice_id) ||
+                        invoice.accounting_sync_status === "synced"
+                      }
+                      onClick={() =>
+                        void syncInvoiceToXero(invoice)
+                      }
+                    >
+                      {xeroInvoiceSyncingId === invoice.id
+                        ? "Syncing..."
+                        : invoice.accounting_invoice_id ||
+                            invoice.accounting_sync_status === "synced"
+                          ? "Synced to Xero"
+                          : "Sync to Xero"}
+                    </Button>
+                  ) : null}
+                  {canApprove ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={previewWorking}
+                      onClick={() =>
+                        void approveInvoice(invoice)
+                      }
+                    >
+                      Approve
+                    </Button>
+                  ) : null}
                 </div>
               </article>
             );

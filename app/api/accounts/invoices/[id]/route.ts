@@ -61,10 +61,40 @@ export async function GET(
       return NextResponse.json({ error: "Invoice not found." }, { status: 404 });
     }
 
+    const linkedJobIds = (jobsResult.data ?? [])
+      .map((row) => row.job_id)
+      .filter(Boolean);
+
+    let jobDetails: Array<{
+      job_id: string;
+      reference: string | null;
+      external_reference: string | null;
+      pod_status: string | null;
+    }> = [];
+
+    if (linkedJobIds.length > 0) {
+      const { data: jobs, error: jobDetailError } = await admin
+        .from("jobs")
+        .select("id,reference,external_reference,pod_status")
+        .eq("tenant_id", tenantId)
+        .in("id", linkedJobIds);
+
+      if (jobDetailError) {
+        throw new Error(jobDetailError.message);
+      }
+
+      jobDetails = (jobs ?? []).map((job) => ({
+        job_id: job.id,
+        reference: job.reference ?? null,
+        external_reference: job.external_reference ?? null,
+        pod_status: job.pod_status ?? null,
+      }));
+    }
+
     return NextResponse.json({
       invoice: invoiceResult.data,
       lines: linesResult.data ?? [],
-      jobs: jobsResult.data ?? [],
+      jobs: jobDetails,
       payments: paymentsResult.data ?? [],
       credits: creditsResult.data ?? [],
     });

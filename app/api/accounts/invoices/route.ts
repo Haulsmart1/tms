@@ -149,9 +149,29 @@ export async function POST(request: NextRequest) {
       due.setDate(due.getDate() + Number(customer.payment_terms_days ?? 30));
     }
 
-    const invoiceNumber =
-      body.invoiceNumber?.trim() ||
-      `INV-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}`;
+    let invoiceNumber = body.invoiceNumber?.trim() || "";
+
+    if (!invoiceNumber) {
+      const { data: allocatedNumber, error: numberError } = await admin.rpc(
+        "next_invoice_number",
+        {
+          p_tenant_id: tenantId,
+          p_issue_date: issueDate,
+        }
+      );
+
+      if (numberError) {
+        throw new Error(
+          `Unable to allocate invoice number: ${numberError.message}`
+        );
+      }
+
+      invoiceNumber = String(allocatedNumber ?? "").trim();
+
+      if (!invoiceNumber) {
+        throw new Error("Invoice number allocation returned an empty value.");
+      }
+    }
 
     const status = podBlocked ? "awaiting_pod" : "draft";
 
