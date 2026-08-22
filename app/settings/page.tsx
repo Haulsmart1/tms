@@ -26,6 +26,12 @@ export default function SettingsPage() {
             icon: "📄",
         },
         {
+            title: "Documents & Branding",
+            description:
+                "Manage logos, document branding, footers and quotation defaults",
+            href: "/settings/documents",
+            icon: "📄",
+        },        {
             title: "Invoices",
             description: "View billing and invoice settings",
             href: "/settings/invoices",

@@ -8,6 +8,8 @@ import Field from "../../../components/Field";
 import MessageBanner from "../../../components/MessageBanner";
 import Select from "../../../components/Select";
 import Textarea from "../../../components/Textarea";
+import StripeConnectionPanel from "../../../components/settings/StripeConnectionPanel";
+import { useTenant } from "../../components/TenantProvider";
 
 type CompanyProfile = {
   tenant_id: string;
@@ -195,6 +197,15 @@ function mapRowToProfile(row: CompanyProfileRow): CompanyProfile {
 }
 
 export default function CompanySettingsPage() {
+  const {
+    status: tenantStatus,
+    activeTenantId,
+    writeTenantId,
+  } = useTenant();
+
+  const selectedTenantId =
+    writeTenantId ??
+    activeTenantId;
   const supabase = useMemo(() => createClient(), []);
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [profile, setProfile] = useState<CompanyProfile | null>(null);
@@ -230,47 +241,6 @@ export default function CompanySettingsPage() {
     setMessage(text);
   }
 
-  async function resolveCompanyId(): Promise<string | null> {
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-
-    console.log("auth user", user);
-    console.log("auth error", userError);
-    console.log("supabase url", process.env.NEXT_PUBLIC_SUPABASE_URL);
-
-    if (userError || !user) {
-      setError(userError?.message || "No authenticated user found.");
-      return null;
-    }
-
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id, company_id")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    console.log("profiles data", data);
-    console.log("profiles error", error);
-
-    if (error) {
-      setError(`Profiles query failed: ${error.message}`);
-      return null;
-    }
-
-    if (!data) {
-      setError(`No profile row found for user ${user.id}.`);
-      return null;
-    }
-
-    if (!data.company_id) {
-      setError(`Profile exists but company_id is null for user ${user.id}.`);
-      return null;
-    }
-
-    return data.company_id;
-  }
 
   async function loadProfile(
     currentCompanyId: string,
@@ -286,9 +256,6 @@ export default function CompanySettingsPage() {
       .select("*")
       .eq("tenant_id", currentCompanyId)
       .maybeSingle();
-
-    console.log("company_profiles data", data);
-    console.log("company_profiles error", error);
 
     if (!isMounted()) return;
 
@@ -311,38 +278,56 @@ export default function CompanySettingsPage() {
 
   useEffect(() => {
     let mounted = true;
-    const isMounted = () => mounted;
+
+    const isMounted = () =>
+      mounted;
 
     async function init() {
       try {
-        const {
-          data: { session },
-          error: sessionError,
-        } = await supabase.auth.getSession();
-
-        console.log("session", session);
-        console.log("session error", sessionError);
-
-        const resolvedCompanyId = await resolveCompanyId();
-
-        console.log("resolvedCompanyId", resolvedCompanyId);
-
-        if (!mounted) return;
-
-        if (!resolvedCompanyId) {
-          setLoading(false);
+        if (
+          tenantStatus ===
+          "loading"
+        ) {
           return;
         }
 
-        setCompanyId(resolvedCompanyId);
-        await loadProfile(resolvedCompanyId, isMounted);
-      } catch (error) {
-        if (!mounted) return;
+        if (!selectedTenantId) {
+          if (mounted) {
+            setCompanyId(null);
+            setProfile(null);
+            setLoading(false);
+            setError(
+              "No active company selected."
+            );
+          }
+
+          return;
+        }
+
+        if (!mounted) {
+          return;
+        }
+
+        setCompanyId(
+          selectedTenantId
+        );
+
+        await loadProfile(
+          selectedTenantId,
+          isMounted
+        );
+      }
+      catch (error) {
+        if (!mounted) {
+          return;
+        }
+
         setError(
           error instanceof Error
             ? error.message
             : "Failed to load company profile."
         );
+
         setLoading(false);
       }
     }
@@ -352,7 +337,11 @@ export default function CompanySettingsPage() {
     return () => {
       mounted = false;
     };
-  }, [supabase]);
+  }, [
+    selectedTenantId,
+    tenantStatus,
+    supabase,
+  ]);
 
   function updateField<K extends keyof CompanyProfile>(
     key: K,
@@ -467,16 +456,11 @@ export default function CompanySettingsPage() {
         notes: profile.notes.trim() || null,
       };
 
-      console.log("save payload", payload);
-
       const { data, error } = await supabase
         .from("company_profiles")
         .upsert(payload, { onConflict: "tenant_id" })
         .select()
         .single();
-
-      console.log("save data", data);
-      console.log("save error", error);
 
       if (error) {
         setError(error.message);
@@ -518,6 +502,7 @@ export default function CompanySettingsPage() {
         ) : loading || !profile ? (
           <Card className="font-medium">{message || "Loading..."}</Card>
         ) : (
+          <>
           <form onSubmit={saveProfile} className="grid gap-4">
             <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
               <h2 className="mb-3 mt-0 text-md font-semibold text-ink">
@@ -881,6 +866,11 @@ export default function CompanySettingsPage() {
               </Button>
             </div>
           </form>
+
+          <StripeConnectionPanel
+            tenantId={companyId}
+          />
+        </>
         )}
       </main>
     </div>

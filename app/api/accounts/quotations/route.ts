@@ -480,37 +480,58 @@ export async function PATCH(
   try {
     const body = await request.json();
 
-    const tenantId = String(
-      body.tenantId ?? ""
-    ).trim();
+    const tenantId =
+      String(
+        body.tenantId ?? ""
+      ).trim();
 
-    const quotationId = String(
-      body.quotationId ?? ""
-    ).trim();
+    const quotationId =
+      String(
+        body.quotationId ?? ""
+      ).trim();
 
-    if (!tenantId || !quotationId) {
+    if (
+      !tenantId ||
+      !quotationId
+    ) {
       return NextResponse.json(
         {
           error:
             "tenantId and quotationId are required.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
-    const { admin } =
-      await requireTenantAccess(tenantId);
+    const {
+      admin,
+    } =
+      await requireTenantAccess(
+        tenantId
+      );
 
     const {
-      data: quotation,
-      error: existingError,
+      data:
+        quotation,
+      error:
+        existingError,
     } = await admin
       .from("quotations")
-      .select(
-        "id,status,converted_job_id"
+      .select(`
+        id,
+        status,
+        converted_job_id
+      `)
+      .eq(
+        "id",
+        quotationId
       )
-      .eq("id", quotationId)
-      .eq("tenant_id", tenantId)
+      .eq(
+        "tenant_id",
+        tenantId
+      )
       .maybeSingle();
 
     if (existingError) {
@@ -521,8 +542,13 @@ export async function PATCH(
 
     if (!quotation) {
       return NextResponse.json(
-        { error: "Quotation not found." },
-        { status: 404 }
+        {
+          error:
+            "Quotation not found.",
+        },
+        {
+          status: 404,
+        }
       );
     }
 
@@ -534,18 +560,21 @@ export async function PATCH(
           error:
             "Converted quotations cannot be changed.",
         },
-        { status: 409 }
+        {
+          status: 409,
+        }
       );
     }
 
-    const allowedStatuses = new Set([
-      "draft",
-      "sent",
-      "accepted",
-      "declined",
-      "expired",
-      "cancelled",
-    ]);
+    const allowedStatuses =
+      new Set([
+        "draft",
+        "sent",
+        "accepted",
+        "declined",
+        "expired",
+        "cancelled",
+      ]);
 
     const status =
       body.status === undefined
@@ -556,96 +585,770 @@ export async function PATCH(
 
     if (
       status &&
-      !allowedStatuses.has(status)
+      !allowedStatuses.has(
+        status
+      )
     ) {
       return NextResponse.json(
         {
           error:
             "Invalid quotation status.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
-    const updates:
-      Record<string, unknown> = {
-        updated_at:
-          new Date().toISOString(),
-      };
+    const editableFields =
+      [
+        "customerId",
+        "quoteDate",
+        "validUntil",
+        "proposedServiceDate",
+        "customerReference",
+        "poReference",
+        "notes",
+        "terms",
+        "lines",
+        "stops",
+      ];
 
-    if (status) {
-      updates.status = status;
-    }
+    const hasContentChanges =
+      editableFields.some(
+        (field) =>
+          body[field] !==
+          undefined
+      );
 
     if (
-      body.validUntil !== undefined
+      hasContentChanges &&
+      ![
+        "draft",
+        "sent",
+      ].includes(
+        quotation.status
+      )
     ) {
-      updates.valid_until =
-        body.validUntil || null;
+      return NextResponse.json(
+        {
+          error:
+            "Only draft or sent quotations can be edited.",
+        },
+        {
+          status: 409,
+        }
+      );
     }
 
-    if (
-      body.proposedServiceDate !==
-      undefined
-    ) {
-      updates.proposed_service_date =
-        body.proposedServiceDate ||
+    let customerId:
+      string | null =
         null;
-    }
 
     if (
-      body.customerReference !==
+      body.customerId !==
       undefined
     ) {
-      updates.customer_reference =
+      customerId =
         String(
-          body.customerReference ??
+          body.customerId ??
             ""
-        ).trim() || null;
+        ).trim();
+
+      if (!customerId) {
+        return NextResponse.json(
+          {
+            error:
+              "Customer is required.",
+          },
+          {
+            status: 400,
+          }
+        );
+      }
+
+      const {
+        data:
+          customer,
+        error:
+          customerError,
+      } = await admin
+        .from("customers")
+        .select("id")
+        .eq(
+          "id",
+          customerId
+        )
+        .eq(
+          "tenant_id",
+          tenantId
+        )
+        .maybeSingle();
+
+      if (customerError) {
+        throw new Error(
+          customerError.message
+        );
+      }
+
+      if (!customer) {
+        return NextResponse.json(
+          {
+            error:
+              "Customer not found.",
+          },
+          {
+            status: 404,
+          }
+        );
+      }
+    }
+
+    const replaceLines =
+      body.lines !==
+      undefined;
+
+    const replaceStops =
+      body.stops !==
+      undefined;
+
+    const lines =
+      replaceLines
+        ? parseLines(
+            body.lines
+          )
+        : [];
+
+    const stops =
+      replaceStops
+        ? parseStops(
+            body.stops
+          )
+        : [];
+
+    if (
+      replaceLines &&
+      lines.length === 0
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Add at least one quotation line.",
+        },
+        {
+          status: 400,
+        }
+      );
     }
 
     if (
-      body.poReference !== undefined
+      replaceStops &&
+      stops.length === 0
     ) {
-      updates.po_reference =
-        String(
-          body.poReference ?? ""
-        ).trim() || null;
+      return NextResponse.json(
+        {
+          error:
+            "Add at least one quotation stop.",
+        },
+        {
+          status: 400,
+        }
+      );
     }
 
-    if (body.notes !== undefined) {
-      updates.notes =
-        String(body.notes ?? "").trim() ||
-        null;
+    const [
+      originalLinesResult,
+      originalStopsResult,
+    ] =
+      await Promise.all([
+        replaceLines
+          ? admin
+              .from(
+                "quotation_lines"
+              )
+              .select(`
+                line_number,
+                description,
+                quantity,
+                unit_price,
+                vat_rate
+              `)
+              .eq(
+                "quotation_id",
+                quotationId
+              )
+              .eq(
+                "tenant_id",
+                tenantId
+              )
+              .order(
+                "line_number"
+              )
+          : Promise.resolve({
+              data: [],
+              error: null,
+            }),
+
+        replaceStops
+          ? admin
+              .from(
+                "quotation_stops"
+              )
+              .select(`
+                stop_order,
+                type,
+                address_line,
+                city,
+                postcode,
+                recipient_name,
+                contact_phone,
+                notes
+              `)
+              .eq(
+                "quotation_id",
+                quotationId
+              )
+              .eq(
+                "tenant_id",
+                tenantId
+              )
+              .order(
+                "stop_order"
+              )
+          : Promise.resolve({
+              data: [],
+              error: null,
+            }),
+      ]);
+
+    if (
+      originalLinesResult.error
+    ) {
+      throw new Error(
+        originalLinesResult
+          .error.message
+      );
     }
 
-    if (body.terms !== undefined) {
-      updates.terms =
-        String(body.terms ?? "").trim() ||
-        null;
+    if (
+      originalStopsResult.error
+    ) {
+      throw new Error(
+        originalStopsResult
+          .error.message
+      );
     }
 
-    const { data, error } = await admin
+    const originalLines =
+      originalLinesResult.data ??
+      [];
+
+    const originalStops =
+      originalStopsResult.data ??
+      [];
+
+    async function restoreChildren() {
+      if (replaceLines) {
+        await admin
+          .from(
+            "quotation_lines"
+          )
+          .delete()
+          .eq(
+            "quotation_id",
+            quotationId
+          )
+          .eq(
+            "tenant_id",
+            tenantId
+          );
+
+        if (
+          originalLines.length >
+          0
+        ) {
+          await admin
+            .from(
+              "quotation_lines"
+            )
+            .insert(
+              originalLines.map(
+                (line) => ({
+                  tenant_id:
+                    tenantId,
+
+                  quotation_id:
+                    quotationId,
+
+                  line_number:
+                    line.line_number,
+
+                  description:
+                    line.description,
+
+                  quantity:
+                    line.quantity,
+
+                  unit_price:
+                    line.unit_price,
+
+                  vat_rate:
+                    line.vat_rate,
+                })
+              )
+            );
+        }
+      }
+
+      if (replaceStops) {
+        await admin
+          .from(
+            "quotation_stops"
+          )
+          .delete()
+          .eq(
+            "quotation_id",
+            quotationId
+          )
+          .eq(
+            "tenant_id",
+            tenantId
+          );
+
+        if (
+          originalStops.length >
+          0
+        ) {
+          await admin
+            .from(
+              "quotation_stops"
+            )
+            .insert(
+              originalStops.map(
+                (stop) => ({
+                  tenant_id:
+                    tenantId,
+
+                  quotation_id:
+                    quotationId,
+
+                  stop_order:
+                    stop.stop_order,
+
+                  type:
+                    stop.type,
+
+                  address_line:
+                    stop.address_line,
+
+                  city:
+                    stop.city,
+
+                  postcode:
+                    stop.postcode,
+
+                  recipient_name:
+                    stop.recipient_name,
+
+                  contact_phone:
+                    stop.contact_phone,
+
+                  notes:
+                    stop.notes,
+                })
+              )
+            );
+        }
+      }
+
+      if (replaceLines) {
+        await admin.rpc(
+          "recalculate_quotation_totals",
+          {
+            p_quotation_id:
+              quotationId,
+          }
+        );
+      }
+    }
+
+    try {
+      if (replaceLines) {
+        const {
+          error:
+            deleteLinesError,
+        } = await admin
+          .from(
+            "quotation_lines"
+          )
+          .delete()
+          .eq(
+            "quotation_id",
+            quotationId
+          )
+          .eq(
+            "tenant_id",
+            tenantId
+          );
+
+        if (
+          deleteLinesError
+        ) {
+          throw new Error(
+            deleteLinesError.message
+          );
+        }
+
+        const {
+          error:
+            insertLinesError,
+        } = await admin
+          .from(
+            "quotation_lines"
+          )
+          .insert(
+            lines.map(
+              (
+                line,
+                index
+              ) => ({
+                tenant_id:
+                  tenantId,
+
+                quotation_id:
+                  quotationId,
+
+                line_number:
+                  index + 1,
+
+                description:
+                  line.description,
+
+                quantity:
+                  line.quantity,
+
+                unit_price:
+                  line.unitPrice,
+
+                vat_rate:
+                  line.vatRate,
+              })
+            )
+          );
+
+        if (
+          insertLinesError
+        ) {
+          throw new Error(
+            insertLinesError.message
+          );
+        }
+      }
+
+      if (replaceStops) {
+        const {
+          error:
+            deleteStopsError,
+        } = await admin
+          .from(
+            "quotation_stops"
+          )
+          .delete()
+          .eq(
+            "quotation_id",
+            quotationId
+          )
+          .eq(
+            "tenant_id",
+            tenantId
+          );
+
+        if (
+          deleteStopsError
+        ) {
+          throw new Error(
+            deleteStopsError.message
+          );
+        }
+
+        const {
+          error:
+            insertStopsError,
+        } = await admin
+          .from(
+            "quotation_stops"
+          )
+          .insert(
+            stops.map(
+              (
+                stop,
+                index
+              ) => ({
+                tenant_id:
+                  tenantId,
+
+                quotation_id:
+                  quotationId,
+
+                stop_order:
+                  index + 1,
+
+                type:
+                  stop.type,
+
+                address_line:
+                  stop.addressLine,
+
+                city:
+                  stop.city,
+
+                postcode:
+                  stop.postcode,
+
+                recipient_name:
+                  stop.recipientName,
+
+                contact_phone:
+                  stop.contactPhone,
+
+                notes:
+                  stop.notes,
+              })
+            )
+          );
+
+        if (
+          insertStopsError
+        ) {
+          throw new Error(
+            insertStopsError.message
+          );
+        }
+      }
+
+      if (replaceLines) {
+        const {
+          error:
+            totalsError,
+        } = await admin.rpc(
+          "recalculate_quotation_totals",
+          {
+            p_quotation_id:
+              quotationId,
+          }
+        );
+
+        if (totalsError) {
+          throw new Error(
+            totalsError.message
+          );
+        }
+      }
+
+      const updates:
+        Record<
+          string,
+          unknown
+        > = {
+          updated_at:
+            new Date()
+              .toISOString(),
+        };
+
+      if (status) {
+        updates.status =
+          status;
+      }
+
+      if (customerId) {
+        updates.customer_id =
+          customerId;
+      }
+
+      if (
+        body.quoteDate !==
+        undefined
+      ) {
+        const quoteDate =
+          String(
+            body.quoteDate ??
+              ""
+          ).trim();
+
+        if (!quoteDate) {
+          return NextResponse.json(
+            {
+              error:
+                "Quote date is required.",
+            },
+            {
+              status: 400,
+            }
+          );
+        }
+
+        updates.quote_date =
+          quoteDate;
+      }
+
+      if (
+        body.validUntil !==
+        undefined
+      ) {
+        updates.valid_until =
+          body.validUntil ||
+          null;
+      }
+
+      if (
+        body.proposedServiceDate !==
+        undefined
+      ) {
+        updates.proposed_service_date =
+          body.proposedServiceDate ||
+          null;
+      }
+
+      if (
+        body.customerReference !==
+        undefined
+      ) {
+        updates.customer_reference =
+          String(
+            body.customerReference ??
+              ""
+          ).trim() ||
+          null;
+      }
+
+      if (
+        body.poReference !==
+        undefined
+      ) {
+        updates.po_reference =
+          String(
+            body.poReference ??
+              ""
+          ).trim() ||
+          null;
+      }
+
+      if (
+        body.notes !==
+        undefined
+      ) {
+        updates.notes =
+          String(
+            body.notes ?? ""
+          ).trim() ||
+          null;
+      }
+
+      if (
+        body.terms !==
+        undefined
+      ) {
+        updates.terms =
+          String(
+            body.terms ?? ""
+          ).trim() ||
+          null;
+      }
+
+      const {
+        error:
+          updateError,
+      } = await admin
+        .from("quotations")
+        .update(updates)
+        .eq(
+          "id",
+          quotationId
+        )
+        .eq(
+          "tenant_id",
+          tenantId
+        );
+
+      if (updateError) {
+        throw new Error(
+          updateError.message
+        );
+      }
+    }
+    catch (mutationError) {
+      await restoreChildren();
+
+      throw mutationError;
+    }
+
+    const {
+      data:
+        completed,
+      error:
+        reloadError,
+    } = await admin
       .from("quotations")
-      .update(updates)
-      .eq("id", quotationId)
-      .eq("tenant_id", tenantId)
-      .select("*")
+      .select(`
+        *,
+        customers (
+          id,
+          name
+        ),
+        quotation_lines (
+          id,
+          line_number,
+          description,
+          quantity,
+          unit_price,
+          vat_rate,
+          line_subtotal,
+          line_vat,
+          line_total
+        ),
+        quotation_stops (
+          id,
+          stop_order,
+          type,
+          address_line,
+          city,
+          postcode,
+          recipient_name,
+          contact_phone,
+          notes
+        )
+      `)
+      .eq(
+        "id",
+        quotationId
+      )
+      .eq(
+        "tenant_id",
+        tenantId
+      )
       .single();
 
-    if (error) {
-      throw new Error(error.message);
+    if (reloadError) {
+      throw new Error(
+        reloadError.message
+      );
     }
 
     return NextResponse.json({
-      quotation: data,
+      quotation:
+        completed,
     });
-  } catch (error) {
-    const result = errorResponse(error);
+  }
+  catch (error) {
+    const result =
+      errorResponse(error);
 
     return NextResponse.json(
       result.body,
-      { status: result.status }
+      {
+        status:
+          result.status,
+      }
     );
   }
 }

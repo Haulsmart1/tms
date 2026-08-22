@@ -14,6 +14,7 @@ import Card from "../../components/Card";
 import MessageBanner from "../../components/MessageBanner";
 import Stat from "../../components/Stat";
 import Tabs from "../../components/Tabs";
+import QuotationPanel from "./QuotationPanel";
 
 type Tab =
   | "ready"
@@ -23,6 +24,7 @@ type Tab =
   | "statements"
   | "chase"
   | "customer-pos"
+  | "quotations"
   | "supplier-pos"
   | "accounting";
 
@@ -87,8 +89,38 @@ type InvoicePreviewData = {
   jobs: InvoiceJobDetail[];
   payments: Array<Record<string, unknown>>;
   credits: Array<Record<string, unknown>>;
+  branding: InvoiceDocumentBranding | null;
 };
 
+type InvoiceDocumentBranding = {
+  companyProfile: {
+    company_name: string | null;
+    trading_name: string | null;
+    registration_number: string | null;
+    vat_number: string | null;
+    business_email: string | null;
+    business_phone: string | null;
+    website: string | null;
+    address_line_1: string | null;
+    address_line_2: string | null;
+    city: string | null;
+    region: string | null;
+    postcode: string | null;
+    country_code: string | null;
+  } | null;
+
+  documentSettings: {
+    logo_path: string | null;
+    logo_signed_url: string | null;
+    footer_text: string | null;
+    bank_details: string | null;
+    generic_document_note: string | null;
+    show_logo: boolean;
+    show_company_registration: boolean;
+    show_vat_number: boolean;
+    show_contact_details: boolean;
+  } | null;
+};
 type Customer = {
   id: string;
   name: string;
@@ -148,6 +180,7 @@ const TABS: Array<[Tab, string]> = [
   ["statements", "Statements"],
   ["chase", "Chase Letters"],
   ["customer-pos", "Customer POs"],
+  ["quotations", "Quotations"],
   ["supplier-pos", "Supplier POs"],
   ["accounting", "Accounting"],
 ];
@@ -353,6 +386,10 @@ export default function CustomerAccountsPage() {
         return;
       }
 
+      if (tab === "quotations") {
+        setRows([]);
+        return;
+      }
       const endpoint =
         tab === "credits"
           ? "credit-notes"
@@ -543,37 +580,73 @@ export default function CustomerAccountsPage() {
     setMessage("");
 
     try {
-      const response = await fetch(
-        `/api/accounts/invoices/${invoice.id}?tenantId=${encodeURIComponent(
-          tenantId
-        )}`,
-        {
-          cache: "no-store",
-        }
-      );
+      const encodedTenantId =
+        encodeURIComponent(tenantId);
 
-      const body = (await response.json()) as InvoicePreviewData & {
-        error?: string;
-      };
+      const [
+        invoiceResponse,
+        brandingResponse,
+      ] = await Promise.all([
+        fetch(
+          `/api/accounts/invoices/${invoice.id}?tenantId=${encodedTenantId}`,
+          {
+            cache: "no-store",
+          }
+        ),
 
-      if (!response.ok) {
+        fetch(
+          `/api/settings/documents?tenantId=${encodedTenantId}`,
+          {
+            cache: "no-store",
+          }
+        ),
+      ]);
+
+      const invoiceBody =
+        await invoiceResponse.json();
+
+      if (!invoiceResponse.ok) {
         throw new Error(
-          body.error || "Unable to load invoice preview."
+          invoiceBody.error ||
+            "Unable to load invoice preview."
         );
       }
 
-      setPreviewInvoice(body);
-    } catch (error) {
+      const brandingBody =
+        await brandingResponse.json();
+
+      if (!brandingResponse.ok) {
+        throw new Error(
+          brandingBody.error ||
+            "Unable to load document branding."
+        );
+      }
+
+      setPreviewInvoice({
+        ...invoiceBody,
+
+        branding: {
+          companyProfile:
+            brandingBody.companyProfile ??
+            null,
+
+          documentSettings:
+            brandingBody.documentSettings ??
+            null,
+        },
+      });
+    }
+    catch (error) {
       setMessage(
         error instanceof Error
           ? error.message
           : "Unable to load invoice preview."
       );
-    } finally {
+    }
+    finally {
       setPreviewWorking(false);
     }
   }
-
   async function approveInvoice(invoice: Invoice) {
     if (!tenant.writeTenantId) {
       setMessage("Choose a tenant.");
@@ -1569,6 +1642,12 @@ export default function CustomerAccountsPage() {
                 </section>
               ) : null}
 
+              {tab === "quotations" && tenantId ? (
+                <QuotationPanel
+                  tenantId={tenantId}
+                  customers={customers}
+                />
+              ) : null}
               {tab === "supplier-pos" ? (
                 <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
                   <h2 className="m-0 mb-3 text-md font-semibold text-ink">Supplier / Subcontractor PO</h2>
@@ -2055,6 +2134,39 @@ function InvoicesPanel({
 
   return (
     <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+      {/* INVOICE_PRINT_ONLY */}
+      <style jsx global>{`
+        @media print {
+          body * {
+            visibility: hidden !important;
+          }
+
+          #invoice-preview,
+          #invoice-preview * {
+            visibility: visible !important;
+          }
+
+          #invoice-preview {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: 0 !important;
+            box-shadow: none !important;
+          }
+
+          #invoice-preview .print\:hidden {
+            display: none !important;
+          }
+        }
+
+        @page {
+          size: A4 portrait;
+          margin: 12mm;
+        }
+      `}</style>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="m-0 text-md font-semibold text-ink">
@@ -2073,17 +2185,91 @@ function InvoicesPanel({
           className="mt-4 rounded-xl border border-line bg-white p-6 text-slate-950 shadow-sm print:border-0 print:shadow-none"
         >
           <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
-                ADR Carriers
-              </div>
+            <div className="flex min-w-0 items-start gap-4">
+              {previewInvoice.branding?.documentSettings?.show_logo &&
+              previewInvoice.branding.documentSettings.logo_signed_url ? (
+                <img
+                  src={
+                    previewInvoice.branding.documentSettings
+                      .logo_signed_url
+                  }
+                  alt="Company logo"
+                  className="max-h-20 max-w-44 shrink-0 object-contain"
+                />
+              ) : null}
 
-              <h3 className="mt-1 text-2xl font-bold">
-                Invoice
-              </h3>
+              <div className="min-w-0">
+                <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+                  {previewInvoice.branding?.companyProfile?.company_name ||
+                    previewInvoice.branding?.companyProfile?.trading_name ||
+                    "ADR Carriers"}
+                </div>
 
-              <div className="mt-1 font-mono text-lg">
-                {previewInvoice.invoice.invoice_number || "Invoice"}
+                {[
+                  previewInvoice.branding?.companyProfile?.address_line_1,
+                  previewInvoice.branding?.companyProfile?.address_line_2,
+                  previewInvoice.branding?.companyProfile?.city,
+                  previewInvoice.branding?.companyProfile?.region,
+                  previewInvoice.branding?.companyProfile?.postcode,
+                  previewInvoice.branding?.companyProfile?.country_code,
+                ].filter(Boolean).length > 0 ? (
+                  <div className="mt-1 max-w-md text-xs leading-5 text-slate-500">
+                    {[
+                      previewInvoice.branding?.companyProfile?.address_line_1,
+                      previewInvoice.branding?.companyProfile?.address_line_2,
+                      previewInvoice.branding?.companyProfile?.city,
+                      previewInvoice.branding?.companyProfile?.region,
+                      previewInvoice.branding?.companyProfile?.postcode,
+                      previewInvoice.branding?.companyProfile?.country_code,
+                    ]
+                      .filter(Boolean)
+                      .join(", ")}
+                  </div>
+                ) : null}
+
+                {previewInvoice.branding?.documentSettings
+                  ?.show_contact_details ? (
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+                    {previewInvoice.branding.companyProfile
+                      ?.business_phone ? (
+                      <span>
+                        Tel:{" "}
+                        {
+                          previewInvoice.branding.companyProfile
+                            .business_phone
+                        }
+                      </span>
+                    ) : null}
+
+                    {previewInvoice.branding.companyProfile
+                      ?.business_email ? (
+                      <span>
+                        {
+                          previewInvoice.branding.companyProfile
+                            .business_email
+                        }
+                      </span>
+                    ) : null}
+
+                    {previewInvoice.branding.companyProfile
+                      ?.website ? (
+                      <span>
+                        {
+                          previewInvoice.branding.companyProfile
+                            .website
+                        }
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                <h3 className="mt-3 text-2xl font-bold">
+                  Invoice
+                </h3>
+
+                <div className="mt-1 font-mono text-lg">
+                  {previewInvoice.invoice.invoice_number || "Invoice"}
+                </div>
               </div>
             </div>
 
@@ -2126,6 +2312,46 @@ function InvoicesPanel({
               </Button>
             </div>
           </div>
+
+          {(previewInvoice.branding?.documentSettings
+            ?.show_company_registration &&
+            previewInvoice.branding?.companyProfile
+              ?.registration_number) ||
+          (previewInvoice.branding?.documentSettings
+            ?.show_vat_number &&
+            previewInvoice.branding?.companyProfile
+              ?.vat_number) ? (
+            <div
+              data-invoice-company-details="true"
+              className="mb-4 flex flex-wrap justify-end gap-x-5 gap-y-1 text-xs text-slate-500"
+            >
+              {previewInvoice.branding?.documentSettings
+                ?.show_company_registration &&
+              previewInvoice.branding?.companyProfile
+                ?.registration_number ? (
+                <span>
+                  Company No:{" "}
+                  {
+                    previewInvoice.branding.companyProfile
+                      .registration_number
+                  }
+                </span>
+              ) : null}
+
+              {previewInvoice.branding?.documentSettings
+                ?.show_vat_number &&
+              previewInvoice.branding?.companyProfile
+                ?.vat_number ? (
+                <span>
+                  VAT No:{" "}
+                  {
+                    previewInvoice.branding.companyProfile
+                      .vat_number
+                  }
+                </span>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="grid gap-5 border-y border-slate-200 py-5 md:grid-cols-2">
             <div className="space-y-2">
@@ -2351,6 +2577,47 @@ function InvoicesPanel({
               </div>
             ) : null}
           </div>
+
+          {previewInvoice.branding?.documentSettings
+            ?.bank_details ? (
+            <div className="mt-6 border-t border-slate-200 pt-4">
+              <div className="text-xs font-bold uppercase text-slate-500">
+                Payment Details
+              </div>
+
+              <div className="mt-1 whitespace-pre-wrap text-sm text-slate-700">
+                {
+                  previewInvoice.branding.documentSettings
+                    .bank_details
+                }
+              </div>
+            </div>
+          ) : null}
+
+          {previewInvoice.branding?.documentSettings
+            ?.generic_document_note ? (
+            <div className="mt-4 whitespace-pre-wrap rounded-md bg-slate-50 p-3 text-xs text-slate-600">
+              {
+                previewInvoice.branding.documentSettings
+                  .generic_document_note
+              }
+            </div>
+          ) : null}
+
+          {previewInvoice.branding?.documentSettings
+            ?.footer_text ? (
+            <footer
+              data-invoice-document-footer="true"
+              className="mt-6 border-t border-slate-200 pt-4 text-center text-xs leading-5 text-slate-500"
+            >
+              <div className="whitespace-pre-wrap">
+                {
+                  previewInvoice.branding.documentSettings
+                    .footer_text
+                }
+              </div>
+            </footer>
+          ) : null}
         </article>
       ) : null}
 

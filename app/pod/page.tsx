@@ -44,6 +44,7 @@ type JobStop = {
   status: string;
   pod_status: string | null;
   recipient_name: string | null;
+  collected_at: string | null;
   delivered_at: string | null;
   pod_notes: string | null;
   pod_photo_url: string | null;
@@ -160,6 +161,7 @@ export default function PodPage() {
               status,
               pod_status,
               recipient_name,
+              collected_at,
               delivered_at,
               pod_notes,
               pod_photo_url,
@@ -444,10 +446,18 @@ export default function PodPage() {
   async function savePod(
     job: Job,
     stop: JobStop,
-    markDelivered: boolean
+    markComplete: boolean
   ) {
     if (!activeTenantId || stop.tenant_id !== activeTenantId) {
       setErrorMessage("This stop does not belong to the active tenant.");
+      return;
+    }
+
+    const isCollection = stop.type === "collection";
+    const isDelivery = stop.type === "delivery";
+
+    if (!isCollection && !isDelivery) {
+      setErrorMessage("This stop type does not support POD.");
       return;
     }
 
@@ -458,16 +468,20 @@ export default function PodPage() {
 
     clearMessages();
 
-    if (markDelivered && !form.recipient_name.trim()) {
+    if (markComplete && !form.recipient_name.trim()) {
       setErrorMessage(
-        "Recipient name is required before completing delivery."
+        isCollection
+          ? "Collection contact is required before marking the stop collected."
+          : "Recipient name is required before completing delivery."
       );
       return;
     }
 
-    if (markDelivered && !hasPodEvidence(stop)) {
+    if (markComplete && !hasPodEvidence(stop)) {
       setErrorMessage(
-        "Upload at least one POD photo or document before completing delivery."
+        isCollection
+          ? "Upload at least one collection photo or document before marking the stop collected."
+          : "Upload at least one POD photo or document before completing delivery."
       );
       return;
     }
@@ -475,16 +489,26 @@ export default function PodPage() {
     setSavingStopId(stop.id);
 
     try {
+      const now = new Date().toISOString();
+
       const updatePayload: Record<string, unknown> = {
         recipient_name: form.recipient_name.trim() || null,
         pod_notes: form.pod_notes.trim() || null,
-        pod_updated_at: new Date().toISOString(),
+        pod_updated_at: now,
       };
 
-      if (markDelivered) {
-        updatePayload.delivered_at = new Date().toISOString();
-        updatePayload.pod_status = "delivered";
+      if (markComplete) {
         updatePayload.status = "completed";
+
+        if (isCollection) {
+          updatePayload.pod_status = "collected";
+          updatePayload.collected_at = now;
+        }
+
+        if (isDelivery) {
+          updatePayload.pod_status = "delivered";
+          updatePayload.delivered_at = now;
+        }
       }
 
       const { error: stopError } = await supabase
@@ -498,7 +522,7 @@ export default function PodPage() {
         throw stopError;
       }
 
-      if (markDelivered) {
+      if (markComplete && isDelivery) {
         const { data: deliveryStops, error: deliveryError } =
           await supabase
             .from("job_stops")
@@ -538,9 +562,13 @@ export default function PodPage() {
       }
 
       setMessage(
-        markDelivered
-          ? "POD completed and delivery stop marked delivered."
-          : "POD draft saved."
+        markComplete
+          ? isCollection
+            ? "Collection POD completed and stop marked collected."
+            : "POD completed and delivery stop marked delivered."
+          : isCollection
+            ? "Collection POD draft saved."
+            : "POD draft saved."
       );
 
       await loadData();
@@ -554,7 +582,6 @@ export default function PodPage() {
       setSavingStopId(null);
     }
   }
-
   async function createShare(
     job: Job
   ) {
@@ -1233,6 +1260,15 @@ export default function PodPage() {
                             </div>
                           </div>
 
+                          {stop.collected_at ? (
+                            <div className="mt-3 rounded-lg border border-success-border bg-success-tint p-2.5 text-sm font-medium text-success-strong">
+                              Collected{" "}
+                              {formatDateTime(stop.collected_at)}
+                              {stop.recipient_name
+                                ? ` by ${stop.recipient_name}`
+                                : ""}
+                            </div>
+                          ) : null}
                           {stop.delivered_at ? (
                             <div className="mt-3 rounded-lg border border-success-border bg-success-tint p-2.5 text-sm font-medium text-success-strong">
                               Delivered{" "}
@@ -1241,6 +1277,15 @@ export default function PodPage() {
                               )}
                               {stop.recipient_name
                                 ? ` to ${stop.recipient_name}`
+                                : ""}
+                            </div>
+                          ) : null}
+                          {stop.collected_at ? (
+                            <div className="mt-3 rounded-lg border border-success-border bg-success-tint p-2.5 text-sm font-medium text-success-strong">
+                              Collected{" "}
+                              {formatDateTime(stop.collected_at)}
+                              {stop.recipient_name
+                                ? ` by ${stop.recipient_name}`
                                 : ""}
                             </div>
                           ) : null}
@@ -1329,13 +1374,13 @@ export default function PodPage() {
                             </div>
                           ) : null}
 
-                          {stop.type ===
-                          "delivery" ? (
+                          {(stop.type === "collection" ||
+                          stop.type === "delivery") ? (
                             <div className="mt-4 grid gap-4">
                               <div className="grid gap-3 sm:grid-cols-2">
                                 <Field
                                   id={`pod-${stop.id}-recipient`}
-                                  label="Recipient Name"
+                                  label={stop.type === "collection" ? "Collection Contact" : "Recipient Name"}
                                   value={
                                     form.recipient_name
                                   }
@@ -1349,12 +1394,12 @@ export default function PodPage() {
                                         .value
                                     )
                                   }
-                                  placeholder="Who received the delivery?"
+                                  placeholder={stop.type === "collection" ? "Who released or handed over the load?" : "Who received the delivery?"}
                                 />
 
                                 <Textarea
                                   id={`pod-${stop.id}-notes`}
-                                  label="POD Notes"
+                                  label={stop.type === "collection" ? "Collection Notes" : "POD Notes"}
                                   wrapperClassName="sm:col-span-2"
                                   value={
                                     form.pod_notes
@@ -1370,13 +1415,13 @@ export default function PodPage() {
                                     )
                                   }
                                   rows={3}
-                                  placeholder="Delivery notes, condition, quantities or other POD information..."
+                                  placeholder={stop.type === "collection" ? "Collection notes, condition, quantities or other collection information..." : "Delivery notes, condition, quantities or other POD information..."}
                                 />
                               </div>
 
                               <div className="grid gap-3 sm:grid-cols-2">
                                 <EvidenceUpload
-                                  title="Delivery Photos"
+                                  title={stop.type === "collection" ? "Collection Photos" : "Delivery Photos"}
                                   description="Upload one or more photos."
                                   accept="image/*"
                                   multiple
@@ -1403,7 +1448,7 @@ export default function PodPage() {
                                 />
 
                                 <EvidenceUpload
-                                  title="Delivery Documents"
+                                  title={stop.type === "collection" ? "Collection Documents" : "Delivery Documents"}
                                   description="PDF, Word or image documents."
                                   accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.heic"
                                   multiple
@@ -1572,7 +1617,7 @@ export default function PodPage() {
                                   {savingStopId ===
                                   stop.id
                                     ? "Saving..."
-                                    : "SAVE POD DRAFT"}
+                                    : stop.type === "collection" ? "SAVE COLLECTION DRAFT" : "SAVE POD DRAFT"}
                                 </Button>
 
                                 <Button
@@ -1596,7 +1641,7 @@ export default function PodPage() {
                                     : savingStopId ===
                                         stop.id
                                       ? "Saving..."
-                                      : "COMPLETE DELIVERY"}
+                                      : stop.type === "collection" ? "MARK COLLECTED" : "COMPLETE DELIVERY"}
                                 </Button>
                               </div>
                             </div>
@@ -1697,6 +1742,7 @@ function StatusBadge({
 
   if (
     normalized === "delivered" ||
+    normalized === "collected" ||
     normalized === "completed"
   ) {
     tone = "success";
