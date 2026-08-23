@@ -7,14 +7,19 @@ import {
   verifyQuotationShareToken,
 } from "./shareToken";
 
+export type QuotationTermsClause = {
+  key: string;
+  title: string;
+  text: string;
+  required: boolean;
+};
+
 export async function loadQuotationShare(
   rawToken: string,
   markViewed = false
 ) {
   const payload =
-    verifyQuotationShareToken(
-      rawToken
-    );
+    verifyQuotationShareToken(rawToken);
 
   if (!payload) {
     throw new Error(
@@ -26,9 +31,7 @@ export async function loadQuotationShare(
     createAdminClient();
 
   const tokenHash =
-    hashQuotationShareToken(
-      rawToken
-    );
+    hashQuotationShareToken(rawToken);
 
   const {
     data: share,
@@ -52,30 +55,20 @@ export async function loadQuotationShare(
       declined_by_name,
       declined_by_email,
       revoked_at,
-      created_at
+      created_at,
+      terms_version_id,
+      terms_snapshot,
+      terms_hash,
+      adr_required
     `)
-    .eq(
-      "id",
-      payload.shareLinkId
-    )
-    .eq(
-      "tenant_id",
-      payload.tenantId
-    )
-    .eq(
-      "quotation_id",
-      payload.quotationId
-    )
-    .eq(
-      "token_hash",
-      tokenHash
-    )
+    .eq("id", payload.shareLinkId)
+    .eq("tenant_id", payload.tenantId)
+    .eq("quotation_id", payload.quotationId)
+    .eq("token_hash", tokenHash)
     .maybeSingle();
 
   if (shareError) {
-    throw new Error(
-      shareError.message
-    );
+    throw new Error(shareError.message);
   }
 
   if (!share) {
@@ -91,9 +84,8 @@ export async function loadQuotationShare(
   }
 
   if (
-    new Date(
-      share.expires_at
-    ).getTime() <= Date.now()
+    new Date(share.expires_at).getTime() <=
+    Date.now()
   ) {
     throw new Error(
       "This quotation link has expired."
@@ -122,6 +114,7 @@ export async function loadQuotationShare(
       total,
       notes,
       terms,
+      requires_adr_acceptance,
       converted_job_id,
       converted_at,
       sent_at,
@@ -159,14 +152,8 @@ export async function loadQuotationShare(
         notes
       )
     `)
-    .eq(
-      "id",
-      payload.quotationId
-    )
-    .eq(
-      "tenant_id",
-      payload.tenantId
-    )
+    .eq("id", payload.quotationId)
+    .eq("tenant_id", payload.tenantId)
     .maybeSingle();
 
   if (quotationError) {
@@ -185,9 +172,7 @@ export async function loadQuotationShare(
     data: template,
     error: templateError,
   } = await admin
-    .from(
-      "quotation_template_settings"
-    )
+    .from("quotation_template_settings")
     .select(`
       heading,
       intro_text,
@@ -203,16 +188,61 @@ export async function loadQuotationShare(
       show_route_details,
       show_line_vat
     `)
-    .eq(
-      "tenant_id",
-      payload.tenantId
-    )
+    .eq("tenant_id", payload.tenantId)
     .maybeSingle();
 
   if (templateError) {
     throw new Error(
       templateError.message
     );
+  }
+
+  let termsVersion: {
+    id: string;
+    version_number: number;
+    title: string;
+    clauses: QuotationTermsClause[];
+    adr_acceptance_text: string | null;
+    content_hash: string;
+  } | null = null;
+
+  if (share.terms_version_id) {
+    const {
+      data,
+      error,
+    } = await admin
+      .from("quotation_terms_versions")
+      .select(`
+        id,
+        version_number,
+        title,
+        clauses,
+        adr_acceptance_text,
+        content_hash
+      `)
+      .eq("id", share.terms_version_id)
+      .eq("tenant_id", payload.tenantId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    if (data) {
+      termsVersion = {
+        id: data.id,
+        version_number:
+          Number(data.version_number),
+        title: data.title,
+        clauses: Array.isArray(data.clauses)
+          ? (data.clauses as QuotationTermsClause[])
+          : [],
+        adr_acceptance_text:
+          data.adr_acceptance_text,
+        content_hash:
+          data.content_hash,
+      };
+    }
   }
 
   if (markViewed) {
@@ -238,5 +268,6 @@ export async function loadQuotationShare(
     share,
     quotation,
     template,
+    termsVersion,
   };
 }

@@ -71,6 +71,65 @@ type InvoiceLine = {
   unit_price: number | null;
   vat_rate: number | null;
 };
+type CreditNoteLine = {
+  id: string;
+  invoice_line_id: string | null;
+  job_id: string | null;
+  description: string;
+  quantity: number | null;
+  unit_price: number | null;
+  vat_rate: number | null;
+  net_amount: number | null;
+  vat_amount: number | null;
+  gross_amount: number | null;
+};
+
+type CreditNote = {
+  id: string;
+  customer_id: string;
+  original_invoice_id: string | null;
+  credit_note_number: string | null;
+  status: string;
+  issue_date: string;
+  reason: string | null;
+  subtotal: number | null;
+  vat_total: number | null;
+  total: number | null;
+  currency: string | null;
+
+  customers?: {
+    id: string;
+    name: string;
+  } | null;
+
+  invoices?: {
+    id: string;
+    invoice_number: string | null;
+    total: number | null;
+    credit_total: number | null;
+    balance_due: number | null;
+    currency: string | null;
+  } | null;
+
+  credit_note_lines?: CreditNoteLine[];
+
+  credit_note_allocations?: Array<{
+    id: string;
+    invoice_id: string;
+    amount: number | null;
+    allocated_at: string;
+  }>;
+};
+
+type CreditLineDraft = {
+  invoiceLineId: string;
+  description: string;
+  originalQuantity: number;
+  availableQuantity: number;
+  unitPrice: number;
+  vatRate: number;
+  quantity: string;
+};
 
 type InvoiceJobDetail = {
   job_id: string;
@@ -222,10 +281,16 @@ export default function CustomerAccountsPage() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentReference, setPaymentReference] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("bank_transfer");
-
   const [creditInvoiceId, setCreditInvoiceId] = useState("");
-  const [creditAmount, setCreditAmount] = useState("");
   const [creditReason, setCreditReason] = useState("");
+  const [creditIssueDate, setCreditIssueDate] = useState(
+    new Date().toISOString().slice(0, 10)
+  );
+  const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
+  const [creditLines, setCreditLines] = useState<CreditLineDraft[]>([]);
+  const [editingCreditNote, setEditingCreditNote] =
+    useState<CreditNote | null>(null);
+  const [creditLinesLoading, setCreditLinesLoading] = useState(false);
 
   const [statementCustomerId, setStatementCustomerId] = useState("");
 
@@ -426,10 +491,32 @@ export default function CustomerAccountsPage() {
       if (tab === "accounting") {
         setIntegrations(body.integrations ?? []);
         setRows([]);
+      } else if (tab === "credits") {
+        setCreditNotes(body.creditNotes ?? []);
+        setRows([]);
+
+        const invoiceResponse = await fetch(
+          `/api/accounts/invoices?tenantId=${encodeURIComponent(
+            tenantId
+          )}`,
+          {
+            cache: "no-store",
+          }
+        );
+
+        const invoiceBody = await invoiceResponse.json();
+
+        if (!invoiceResponse.ok) {
+          throw new Error(
+            invoiceBody.error ||
+              "Unable to load invoices for Credit Notes."
+          );
+        }
+
+        setInvoices(invoiceBody.invoices ?? []);
       } else {
         setRows(
-          body.creditNotes ??
-            body.payments ??
+          body.payments ??
             body.statements ??
             body.chaseLetters ??
             body.purchaseOrders ??
@@ -934,29 +1021,722 @@ export default function CustomerAccountsPage() {
     }
   }
 
-  async function createCreditNote() {
-    if (!tenant.writeTenantId || !creditInvoiceId || !creditAmount) {
-      setMessage("Invoice and credit amount are required.");
+  function roundCreditMoney(value: number) {
+    return Math.round(
+      (value + Number.EPSILON) * 100
+    ) / 100;
+  }
+
+  function creditDraftTotals() {
+    return creditLines.reduce(
+      (totals, line) => {
+        const quantity =
+          Number(line.quantity || 0);
+
+        if (
+          !Number.isFinite(quantity) ||
+          quantity <= 0
+        ) {
+          return totals;
+        }
+
+        const net =
+          roundCreditMoney(
+            quantity *
+              line.unitPrice
+          );
+
+        const vat =
+          roundCreditMoney(
+            net *
+              (line.vatRate / 100)
+          );
+
+        const gross =
+          roundCreditMoney(
+            net + vat
+          );
+
+        return {
+          net:
+            roundCreditMoney(
+              totals.net + net
+            ),
+
+          vat:
+            roundCreditMoney(
+              totals.vat + vat
+            ),
+
+          gross:
+            roundCreditMoney(
+              totals.gross + gross
+            ),
+        };
+      },
+      {
+        net: 0,
+        vat: 0,
+        gross: 0,
+      }
+    );
+  }
+
+  function creditedQuantityForLine(
+    invoiceId: string,
+    invoiceLineId: string,
+    excludeCreditNoteId?: string
+  ) {
+    return creditNotes.reduce(
+      (total, note) => {
+        if (
+          note.original_invoice_id !==
+            invoiceId ||
+          note.id ===
+            excludeCreditNoteId ||
+          [
+            "cancelled",
+            "void",
+          ].includes(
+            String(
+              note.status ?? ""
+            ).toLowerCase()
+          )
+        ) {
+          return total;
+        }
+
+        const quantity =
+          (
+            note.credit_note_lines ??
+            []
+          )
+            .filter(
+              (line) =>
+                line.invoice_line_id ===
+                invoiceLineId
+            )
+            .reduce(
+              (sum, line) =>
+                sum +
+                Number(
+                  line.quantity ?? 0
+                ),
+              0
+            );
+
+        return total + quantity;
+      },
+      0
+    );
+  }
+
+  async function loadCreditInvoiceLines(
+    invoiceId: string,
+    existingCredit?: CreditNote | null
+  ) {
+    if (
+      !tenant.writeTenantId ||
+      !invoiceId
+    ) {
+      setCreditLines([]);
       return;
     }
 
-    const success = await postJson(
-      "/api/accounts/credit-notes",
-      {
-        tenantId: tenant.writeTenantId,
-        invoiceId: creditInvoiceId,
-        amount: Number(creditAmount),
-        reason: creditReason.trim() || null,
-      },
-      "Credit note created."
-    );
+    setCreditLinesLoading(true);
+    setMessage("");
 
-    if (success) {
-      setCreditAmount("");
-      setCreditReason("");
+    try {
+      const response =
+        await fetch(
+          `/api/accounts/invoices/${invoiceId}?tenantId=${encodeURIComponent(
+            tenant.writeTenantId
+          )}`,
+          {
+            cache:
+              "no-store",
+          }
+        );
+
+      const body =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          body.error ||
+            "Unable to load invoice lines."
+        );
+      }
+
+      const existingQuantities =
+        new Map<
+          string,
+          number
+        >();
+
+      for (
+        const line of
+        existingCredit
+          ?.credit_note_lines ??
+        []
+      ) {
+        if (
+          !line.invoice_line_id
+        ) {
+          continue;
+        }
+
+        existingQuantities.set(
+          line.invoice_line_id,
+          Number(
+            line.quantity ?? 0
+          )
+        );
+      }
+
+      const nextLines:
+        CreditLineDraft[] =
+        (body.lines ?? []).map(
+          (line: InvoiceLine) => {
+            const originalQuantity =
+              Number(
+                line.quantity ?? 0
+              );
+
+            const alreadyCredited =
+              creditedQuantityForLine(
+                invoiceId,
+                line.id,
+                existingCredit?.id
+              );
+
+            const availableQuantity =
+              Math.max(
+                originalQuantity -
+                  alreadyCredited,
+                0
+              );
+
+            const existingQuantity =
+              Number(
+                existingQuantities.get(
+                  line.id
+                ) ?? 0
+              );
+
+            return {
+              invoiceLineId:
+                line.id,
+
+              description:
+                line.description ||
+                "Invoice line",
+
+              originalQuantity,
+
+              availableQuantity,
+
+              unitPrice:
+                Number(
+                  line.unit_price ??
+                    0
+                ),
+
+              vatRate:
+                Number(
+                  line.vat_rate ??
+                    0
+                ),
+
+              quantity:
+                existingQuantity > 0
+                  ? String(
+                      existingQuantity
+                    )
+                  : "",
+            };
+          }
+        );
+
+      setCreditLines(
+        nextLines
+      );
+    }
+    catch (error) {
+      setCreditLines([]);
+
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to load invoice lines."
+      );
+    }
+    finally {
+      setCreditLinesLoading(
+        false
+      );
     }
   }
 
+  async function changeCreditInvoice(
+    invoiceId: string
+  ) {
+    setCreditInvoiceId(
+      invoiceId
+    );
+
+    setEditingCreditNote(
+      null
+    );
+
+    setCreditLines([]);
+
+    if (!invoiceId) {
+      return;
+    }
+
+    await loadCreditInvoiceLines(
+      invoiceId
+    );
+  }
+
+  function resetCreditEditor() {
+    setEditingCreditNote(
+      null
+    );
+
+    setCreditInvoiceId(
+      ""
+    );
+
+    setCreditReason(
+      ""
+    );
+
+    setCreditIssueDate(
+      new Date()
+        .toISOString()
+        .slice(0, 10)
+    );
+
+    setCreditLines([]);
+  }
+
+  function selectedCreditLines() {
+    return creditLines
+      .map((line) => ({
+        invoiceLineId:
+          line.invoiceLineId,
+
+        quantity:
+          Number(
+            line.quantity || 0
+          ),
+      }))
+      .filter(
+        (line) =>
+          Number.isFinite(
+            line.quantity
+          ) &&
+          line.quantity > 0
+      );
+  }
+
+  function validateCreditLines() {
+    const selected =
+      selectedCreditLines();
+
+    if (
+      selected.length === 0
+    ) {
+      setMessage(
+        "Enter a credit quantity against at least one invoice line."
+      );
+
+      return null;
+    }
+
+    for (
+      const line of
+      creditLines
+    ) {
+      const quantity =
+        Number(
+          line.quantity || 0
+        );
+
+      if (
+        quantity <= 0
+      ) {
+        continue;
+      }
+
+      if (
+        quantity >
+        line.availableQuantity +
+          0.000001
+      ) {
+        setMessage(
+          `Credit quantity for "${line.description}" exceeds the available quantity of ${line.availableQuantity}.`
+        );
+
+        return null;
+      }
+    }
+
+    return selected;
+  }
+
+  async function createCreditNote() {
+    if (
+      !tenant.writeTenantId ||
+      !creditInvoiceId
+    ) {
+      setMessage(
+        "Choose an original invoice."
+      );
+
+      return;
+    }
+
+    const lines =
+      validateCreditLines();
+
+    if (!lines) {
+      return;
+    }
+
+    setWorking(true);
+    setMessage("");
+
+    try {
+      const response =
+        await fetch(
+          "/api/accounts/credit-notes",
+          {
+            method:
+              "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+
+            body:
+              JSON.stringify({
+                tenantId:
+                  tenant.writeTenantId,
+
+                invoiceId:
+                  creditInvoiceId,
+
+                issueDate:
+                  creditIssueDate,
+
+                reason:
+                  creditReason
+                    .trim() ||
+                  null,
+
+                lines,
+              }),
+          }
+        );
+
+      const body =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          body.error ||
+            "Unable to create Credit Note."
+        );
+      }
+
+      setMessage(
+        `${
+          body.creditNote
+            ?.credit_note_number ||
+          "Credit Note"
+        } saved as draft.`
+      );
+
+      resetCreditEditor();
+
+      await loadTab();
+    }
+    catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to create Credit Note."
+      );
+    }
+    finally {
+      setWorking(false);
+    }
+  }
+
+  async function editCreditNote(
+    note: CreditNote
+  ) {
+    if (
+      note.status !== "draft" ||
+      !note.original_invoice_id
+    ) {
+      return;
+    }
+
+    if (
+      (
+        note.credit_note_allocations ??
+        []
+      ).length > 0
+    ) {
+      setMessage(
+        "This legacy draft already has an allocation and must be corrected before editing."
+      );
+
+      return;
+    }
+
+    setEditingCreditNote(
+      note
+    );
+
+    setCreditInvoiceId(
+      note.original_invoice_id
+    );
+
+    setCreditReason(
+      note.reason ?? ""
+    );
+
+    setCreditIssueDate(
+      note.issue_date ||
+        new Date()
+          .toISOString()
+          .slice(0, 10)
+    );
+
+    await loadCreditInvoiceLines(
+      note.original_invoice_id,
+      note
+    );
+
+    window.setTimeout(
+      () => {
+        document
+          .getElementById(
+            "credit-note-editor"
+          )
+          ?.scrollIntoView({
+            behavior:
+              "smooth",
+
+            block:
+              "start",
+          });
+      },
+      0
+    );
+  }
+
+  async function saveCreditNote() {
+    if (
+      !tenant.writeTenantId ||
+      !editingCreditNote
+    ) {
+      return;
+    }
+
+    const lines =
+      validateCreditLines();
+
+    if (!lines) {
+      return;
+    }
+
+    setWorking(true);
+    setMessage("");
+
+    try {
+      const response =
+        await fetch(
+          "/api/accounts/credit-notes",
+          {
+            method:
+              "PATCH",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+
+            body:
+              JSON.stringify({
+                tenantId:
+                  tenant.writeTenantId,
+
+                creditNoteId:
+                  editingCreditNote.id,
+
+                action:
+                  "save",
+
+                issueDate:
+                  creditIssueDate,
+
+                reason:
+                  creditReason
+                    .trim() ||
+                  null,
+
+                lines,
+              }),
+          }
+        );
+
+      const body =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          body.error ||
+            "Unable to save Credit Note."
+        );
+      }
+
+      setMessage(
+        `${
+          body.creditNote
+            ?.credit_note_number ||
+          "Credit Note"
+        } saved.`
+      );
+
+      resetCreditEditor();
+
+      await loadTab();
+    }
+    catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to save Credit Note."
+      );
+    }
+    finally {
+      setWorking(false);
+    }
+  }
+
+  async function creditNoteAction(
+    note: CreditNote,
+    action:
+      | "approve"
+      | "cancel"
+  ) {
+    if (
+      !tenant.writeTenantId
+    ) {
+      return;
+    }
+
+    if (
+      action === "approve" &&
+      !window.confirm(
+        `Approve ${
+          note.credit_note_number ||
+          "this Credit Note"
+        } for ${money(
+          note.total,
+          note.currency ||
+            "GBP"
+        )}? This will apply the credit to the original invoice.`
+      )
+    ) {
+      return;
+    }
+
+    if (
+      action === "cancel" &&
+      !window.confirm(
+        `Cancel ${
+          note.credit_note_number ||
+          "this Credit Note"
+        }?`
+      )
+    ) {
+      return;
+    }
+
+    setWorking(true);
+    setMessage("");
+
+    try {
+      const response =
+        await fetch(
+          "/api/accounts/credit-notes",
+          {
+            method:
+              "PATCH",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+
+            body:
+              JSON.stringify({
+                tenantId:
+                  tenant.writeTenantId,
+
+                creditNoteId:
+                  note.id,
+
+                action,
+              }),
+          }
+        );
+
+      const body =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          body.error ||
+            `Unable to ${action} Credit Note.`
+        );
+      }
+
+      setMessage(
+        action === "approve"
+          ? `${
+              note.credit_note_number ||
+              "Credit Note"
+            } approved and applied to the invoice.`
+          : `${
+              note.credit_note_number ||
+              "Credit Note"
+            } cancelled.`
+      );
+
+      resetCreditEditor();
+
+      await loadTab();
+    }
+    catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : `Unable to ${action} Credit Note.`
+      );
+    }
+    finally {
+      setWorking(false);
+    }
+  }
   async function createStatement() {
     if (!tenant.writeTenantId || !statementCustomerId) {
       setMessage("Choose a customer.");
@@ -1411,65 +2191,690 @@ export default function CustomerAccountsPage() {
               ) : null}
 
               {tab === "credits" ? (
-                <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
-                  <h2 className="m-0 mb-3 text-md font-semibold text-ink">Create Credit Note</h2>
+                <div className="space-y-4">
+                  <section
+                    id="credit-note-editor"
+                    className="rounded-lg border border-line bg-surface p-4 shadow-sm"
+                  >
+                    <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h2 className="m-0 text-md font-semibold text-ink">
+                          {editingCreditNote
+                            ? `Edit ${
+                                editingCreditNote.credit_note_number ||
+                                "Credit Note"
+                              }`
+                            : "Create Credit Note"}
+                        </h2>
 
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    <Field label="Original Invoice">
-                      <select
-                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
-                        value={creditInvoiceId}
-                        onChange={(event) =>
-                          setCreditInvoiceId(event.target.value)
-                        }
-                      >
-                        <option value="">Choose invoice</option>
-                        {invoices.map((invoice) => (
-                          <option key={invoice.id} value={invoice.id}>
-                            {invoice.invoice_number} ·{" "}
-                            {invoice.customer_name || "Customer"} ·{" "}
-                            {money(invoice.total, invoice.currency || "GBP")}
+                        <p className="mb-0 mt-1 text-sm text-ink-3">
+                          Credit invoice lines directly so Net, VAT and Total remain correct.
+                        </p>
+                      </div>
+
+                      {editingCreditNote ? (
+                        <button
+                          type="button"
+                          disabled={working}
+                          onClick={resetCreditEditor}
+                          className="rounded-md border border-line bg-surface px-3 py-2 text-sm font-medium text-ink hover:bg-canvas"
+                        >
+                          Cancel Edit
+                        </button>
+                      ) : null}
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      <Field label="Original Invoice">
+                        <select
+                          className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                          value={creditInvoiceId}
+                          disabled={
+                            working ||
+                            Boolean(
+                              editingCreditNote
+                            )
+                          }
+                          onChange={(event) =>
+                            void changeCreditInvoice(
+                              event.target.value
+                            )
+                          }
+                        >
+                          <option value="">
+                            Choose invoice
                           </option>
-                        ))}
-                      </select>
-                    </Field>
 
-                    <Field label="Credit Amount">
-                      <input
-                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={creditAmount}
-                        onChange={(event) =>
-                          setCreditAmount(event.target.value)
-                        }
-                      />
-                    </Field>
+                          {invoices.map(
+                            (invoice) => (
+                              <option
+                                key={invoice.id}
+                                value={invoice.id}
+                              >
+                                {invoice.invoice_number}
+                                {" · "}
+                                {invoice.customer_name ||
+                                  "Customer"}
+                                {" · "}
+                                {money(
+                                  invoice.total,
+                                  invoice.currency ||
+                                    "GBP"
+                                )}
+                              </option>
+                            )
+                          )}
+                        </select>
+                      </Field>
 
-                    <Field label="Reason">
-                      <input
-                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
-                        value={creditReason}
-                        onChange={(event) =>
-                          setCreditReason(event.target.value)
-                        }
-                      />
-                    </Field>
-                  </div>
+                      <Field label="Issue Date">
+                        <input
+                          type="date"
+                          className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                          value={creditIssueDate}
+                          onChange={(event) =>
+                            setCreditIssueDate(
+                              event.target.value
+                            )
+                          }
+                        />
+                      </Field>
 
-                  <div className="mt-3">
-                    <ActionButton
-                      working={working}
-                      label="Create Credit Note"
-                      onClick={createCreditNote}
-                    />
-                  </div>
+                      <Field label="Reason">
+                        <input
+                          className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
+                          value={creditReason}
+                          placeholder="Reason for credit"
+                          onChange={(event) =>
+                            setCreditReason(
+                              event.target.value
+                            )
+                          }
+                        />
+                      </Field>
+                    </div>
 
-                  <RecordCards rows={rows} />
-                </section>
+                    {creditLinesLoading ? (
+                      <div className="mt-4 rounded-md border border-line bg-canvas p-4 text-sm text-ink-3">
+                        Loading invoice lines...
+                      </div>
+                    ) : null}
+
+                    {!creditLinesLoading &&
+                    creditInvoiceId &&
+                    creditLines.length === 0 ? (
+                      <div className="mt-4 rounded-md border border-line bg-canvas p-4 text-sm text-ink-3">
+                        This invoice has no creditable lines.
+                      </div>
+                    ) : null}
+
+                    {creditLines.length > 0 ? (
+                      <div className="mt-4 overflow-x-auto rounded-lg border border-line">
+                        <table className="w-full min-w-[920px] border-collapse text-sm">
+                          <thead className="bg-canvas text-left text-ink-3">
+                            <tr>
+                              <th className="px-3 py-2 font-medium">
+                                Description
+                              </th>
+                              <th className="px-3 py-2 text-right font-medium">
+                                Original Qty
+                              </th>
+                              <th className="px-3 py-2 text-right font-medium">
+                                Available
+                              </th>
+                              <th className="px-3 py-2 text-right font-medium">
+                                Rate
+                              </th>
+                              <th className="px-3 py-2 text-right font-medium">
+                                VAT
+                              </th>
+                              <th className="px-3 py-2 text-right font-medium">
+                                Credit Qty
+                              </th>
+                              <th className="px-3 py-2 text-right font-medium">
+                                Net
+                              </th>
+                              <th className="px-3 py-2 text-right font-medium">
+                                VAT
+                              </th>
+                              <th className="px-3 py-2 text-right font-medium">
+                                Total
+                              </th>
+                            </tr>
+                          </thead>
+
+                          <tbody>
+                            {creditLines.map(
+                              (
+                                line,
+                                index
+                              ) => {
+                                const quantity =
+                                  Number(
+                                    line.quantity ||
+                                      0
+                                  );
+
+                                const net =
+                                  quantity > 0
+                                    ? roundCreditMoney(
+                                        quantity *
+                                          line.unitPrice
+                                      )
+                                    : 0;
+
+                                const vat =
+                                  quantity > 0
+                                    ? roundCreditMoney(
+                                        net *
+                                          (line.vatRate /
+                                            100)
+                                      )
+                                    : 0;
+
+                                const gross =
+                                  roundCreditMoney(
+                                    net + vat
+                                  );
+
+                                const currency =
+                                  invoices.find(
+                                    (invoice) =>
+                                      invoice.id ===
+                                      creditInvoiceId
+                                  )?.currency ||
+                                  "GBP";
+
+                                return (
+                                  <tr
+                                    key={
+                                      line.invoiceLineId
+                                    }
+                                    className="border-t border-line"
+                                  >
+                                    <td className="px-3 py-3 text-ink">
+                                      {
+                                        line.description
+                                      }
+                                    </td>
+
+                                    <td className="px-3 py-3 text-right text-ink">
+                                      {
+                                        line.originalQuantity
+                                      }
+                                    </td>
+
+                                    <td className="px-3 py-3 text-right text-ink">
+                                      {
+                                        line.availableQuantity
+                                      }
+                                    </td>
+
+                                    <td className="px-3 py-3 text-right text-ink">
+                                      {money(
+                                        line.unitPrice,
+                                        currency
+                                      )}
+                                    </td>
+
+                                    <td className="px-3 py-3 text-right text-ink">
+                                      {
+                                        line.vatRate
+                                      }
+                                      %
+                                    </td>
+
+                                    <td className="px-3 py-2 text-right">
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        max={
+                                          line.availableQuantity
+                                        }
+                                        step="0.01"
+                                        className="h-9 w-28 rounded-md border border-ink-3 bg-surface px-2 text-right text-base text-ink"
+                                        value={
+                                          line.quantity
+                                        }
+                                        onChange={(
+                                          event
+                                        ) => {
+                                          const value =
+                                            event.target
+                                              .value;
+
+                                          setCreditLines(
+                                            (
+                                              current
+                                            ) =>
+                                              current.map(
+                                                (
+                                                  item,
+                                                  itemIndex
+                                                ) =>
+                                                  itemIndex ===
+                                                  index
+                                                    ? {
+                                                        ...item,
+                                                        quantity:
+                                                          value,
+                                                      }
+                                                    : item
+                                              )
+                                          );
+                                        }}
+                                      />
+                                    </td>
+
+                                    <td className="px-3 py-3 text-right font-medium text-ink">
+                                      {money(
+                                        net,
+                                        currency
+                                      )}
+                                    </td>
+
+                                    <td className="px-3 py-3 text-right font-medium text-ink">
+                                      {money(
+                                        vat,
+                                        currency
+                                      )}
+                                    </td>
+
+                                    <td className="px-3 py-3 text-right font-semibold text-ink">
+                                      {money(
+                                        gross,
+                                        currency
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              }
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : null}
+
+                    {creditLines.length > 0 ? (
+                      <div className="mt-4 flex flex-wrap items-end justify-between gap-4 border-t border-line pt-4">
+                        <div className="grid min-w-[280px] gap-1 text-sm">
+                          <div className="flex justify-between gap-6 text-ink-3">
+                            <span>
+                              Subtotal
+                            </span>
+
+                            <span>
+                              {money(
+                                creditDraftTotals()
+                                  .net,
+                                invoices.find(
+                                  (invoice) =>
+                                    invoice.id ===
+                                    creditInvoiceId
+                                )?.currency ||
+                                  "GBP"
+                              )}
+                            </span>
+                          </div>
+
+                          <div className="flex justify-between gap-6 text-ink-3">
+                            <span>
+                              VAT
+                            </span>
+
+                            <span>
+                              {money(
+                                creditDraftTotals()
+                                  .vat,
+                                invoices.find(
+                                  (invoice) =>
+                                    invoice.id ===
+                                    creditInvoiceId
+                                )?.currency ||
+                                  "GBP"
+                              )}
+                            </span>
+                          </div>
+
+                          <div className="flex justify-between gap-6 border-t border-line pt-1 text-base font-semibold text-ink">
+                            <span>
+                              Credit Total
+                            </span>
+
+                            <span>
+                              {money(
+                                creditDraftTotals()
+                                  .gross,
+                                invoices.find(
+                                  (invoice) =>
+                                    invoice.id ===
+                                    creditInvoiceId
+                                )?.currency ||
+                                  "GBP"
+                              )}
+                            </span>
+                          </div>
+                        </div>
+
+                        <ActionButton
+                          working={working}
+                          label={
+                            editingCreditNote
+                              ? "Save Credit Note"
+                              : "Save Draft Credit Note"
+                          }
+                          onClick={
+                            editingCreditNote
+                              ? saveCreditNote
+                              : createCreditNote
+                          }
+                        />
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h2 className="m-0 text-md font-semibold text-ink">
+                          Credit Notes
+                        </h2>
+
+                        <p className="mb-0 mt-1 text-sm text-ink-3">
+                          Draft credits do not affect invoice balances until approved.
+                        </p>
+                      </div>
+
+                      <div className="text-sm text-ink-3">
+                        {creditNotes.length}{" "}
+                        {creditNotes.length ===
+                        1
+                          ? "record"
+                          : "records"}
+                      </div>
+                    </div>
+
+                    {creditNotes.length ===
+                    0 ? (
+                      <div className="rounded-md border border-line bg-canvas p-4 text-sm text-ink-3">
+                        No Credit Notes yet.
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {creditNotes.map(
+                          (note) => {
+                            const status =
+                              String(
+                                note.status ||
+                                  "draft"
+                              ).toLowerCase();
+
+                            const allocationCount =
+                              (
+                                note.credit_note_allocations ??
+                                []
+                              ).length;
+
+                            const canEdit =
+                              status ===
+                                "draft" &&
+                              allocationCount ===
+                                0;
+
+                            return (
+                              <article
+                                key={note.id}
+                                className="rounded-lg border border-line bg-canvas p-4"
+                              >
+                                <div className="flex flex-wrap items-start justify-between gap-4">
+                                  <div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <h3 className="m-0 text-base font-semibold text-ink">
+                                        {note.credit_note_number ||
+                                          "Credit Note"}
+                                      </h3>
+
+                                      <span className="rounded-full border border-line bg-surface px-2 py-0.5 text-xs font-medium uppercase text-ink-3">
+                                        {
+                                          status
+                                        }
+                                      </span>
+                                    </div>
+
+                                    <div className="mt-1 text-sm text-ink-3">
+                                      {note.customers
+                                        ?.name ||
+                                        "Customer"}
+                                      {" · "}
+                                      Invoice{" "}
+                                      {note.invoices
+                                        ?.invoice_number ||
+                                        "—"}
+                                      {" · "}
+                                      {
+                                        note.issue_date
+                                      }
+                                    </div>
+
+                                    {note.reason ? (
+                                      <div className="mt-2 text-sm text-ink">
+                                        {
+                                          note.reason
+                                        }
+                                      </div>
+                                    ) : null}
+                                  </div>
+
+                                  <div className="min-w-[210px] text-sm">
+                                    <div className="flex justify-between gap-6 text-ink-3">
+                                      <span>
+                                        Subtotal
+                                      </span>
+
+                                      <span>
+                                        {money(
+                                          note.subtotal,
+                                          note.currency ||
+                                            "GBP"
+                                        )}
+                                      </span>
+                                    </div>
+
+                                    <div className="mt-1 flex justify-between gap-6 text-ink-3">
+                                      <span>
+                                        VAT
+                                      </span>
+
+                                      <span>
+                                        {money(
+                                          note.vat_total,
+                                          note.currency ||
+                                            "GBP"
+                                        )}
+                                      </span>
+                                    </div>
+
+                                    <div className="mt-1 flex justify-between gap-6 border-t border-line pt-1 text-base font-semibold text-ink">
+                                      <span>
+                                        Total
+                                      </span>
+
+                                      <span>
+                                        {money(
+                                          note.total,
+                                          note.currency ||
+                                            "GBP"
+                                        )}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {(note.credit_note_lines ??
+                                  []).length >
+                                0 ? (
+                                  <div className="mt-3 overflow-x-auto rounded-md border border-line bg-surface">
+                                    <table className="w-full min-w-[700px] text-sm">
+                                      <thead className="bg-canvas text-left text-ink-3">
+                                        <tr>
+                                          <th className="px-3 py-2 font-medium">
+                                            Description
+                                          </th>
+                                          <th className="px-3 py-2 text-right font-medium">
+                                            Qty
+                                          </th>
+                                          <th className="px-3 py-2 text-right font-medium">
+                                            Rate
+                                          </th>
+                                          <th className="px-3 py-2 text-right font-medium">
+                                            VAT
+                                          </th>
+                                          <th className="px-3 py-2 text-right font-medium">
+                                            Total
+                                          </th>
+                                        </tr>
+                                      </thead>
+
+                                      <tbody>
+                                        {(
+                                          note.credit_note_lines ??
+                                          []
+                                        ).map(
+                                          (line) => (
+                                            <tr
+                                              key={
+                                                line.id
+                                              }
+                                              className="border-t border-line"
+                                            >
+                                              <td className="px-3 py-2 text-ink">
+                                                {
+                                                  line.description
+                                                }
+                                              </td>
+
+                                              <td className="px-3 py-2 text-right text-ink">
+                                                {
+                                                  line.quantity
+                                                }
+                                              </td>
+
+                                              <td className="px-3 py-2 text-right text-ink">
+                                                {money(
+                                                  line.unit_price,
+                                                  note.currency ||
+                                                    "GBP"
+                                                )}
+                                              </td>
+
+                                              <td className="px-3 py-2 text-right text-ink">
+                                                {
+                                                  line.vat_rate
+                                                }
+                                                %
+                                              </td>
+
+                                              <td className="px-3 py-2 text-right font-medium text-ink">
+                                                {money(
+                                                  line.gross_amount,
+                                                  note.currency ||
+                                                    "GBP"
+                                                )}
+                                              </td>
+                                            </tr>
+                                          )
+                                        )}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                ) : (
+                                  <div className="mt-3 rounded-md border border-warning-border bg-warning-tint p-3 text-sm text-warning-strong">
+                                    Legacy Credit Note: no line-level credit data is stored.
+                                  </div>
+                                )}
+
+                                {status ===
+                                  "draft" &&
+                                allocationCount >
+                                  0 ? (
+                                  <div className="mt-3 rounded-md border border-warning-border bg-warning-tint p-3 text-sm text-warning-strong">
+                                    Legacy allocated draft detected. Do not edit or approve this record until its existing allocation has been corrected.
+                                  </div>
+                                ) : null}
+
+                                <div className="mt-3 flex flex-wrap gap-2 border-t border-line pt-3">
+                                  {canEdit ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        disabled={
+                                          working
+                                        }
+                                        onClick={() =>
+                                          void editCreditNote(
+                                            note
+                                          )
+                                        }
+                                        className="rounded-md border border-line bg-surface px-3 py-2 text-sm font-medium text-ink hover:bg-canvas"
+                                      >
+                                        Edit
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        disabled={
+                                          working ||
+                                          (
+                                            note.credit_note_lines ??
+                                            []
+                                          ).length ===
+                                            0
+                                        }
+                                        onClick={() =>
+                                          void creditNoteAction(
+                                            note,
+                                            "approve"
+                                          )
+                                        }
+                                        className="rounded-md border border-line bg-surface px-3 py-2 text-sm font-medium text-ink hover:bg-canvas"
+                                      >
+                                        Approve & Apply
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        disabled={
+                                          working
+                                        }
+                                        onClick={() =>
+                                          void creditNoteAction(
+                                            note,
+                                            "cancel"
+                                          )
+                                        }
+                                        className="rounded-md border border-line bg-surface px-3 py-2 text-sm font-medium text-ink hover:bg-canvas"
+                                      >
+                                        Cancel Credit
+                                      </button>
+                                    </>
+                                  ) : null}
+
+                                  {status ===
+                                  "approved" ? (
+                                    <div className="rounded-md border border-success-border bg-success-tint px-3 py-2 text-sm font-medium text-success-strong">
+                                      Applied to invoice
+                                    </div>
+                                  ) : null}
+                                </div>
+                              </article>
+                            );
+                          }
+                        )}
+                      </div>
+                    )}
+                  </section>
+                </div>
               ) : null}
-
               {tab === "statements" ? (
                 <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
                   <h2 className="m-0 mb-3 text-md font-semibold text-ink">Generate Statement</h2>

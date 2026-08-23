@@ -1413,6 +1413,66 @@ export default function QuotationPanel({
     }
   }
 
+  async function copyShareLink(quotation: Quotation) {
+    setWorking(true);
+    setMessage("");
+
+    try {
+      const response = await fetch(
+        `/api/accounts/quotations/${quotation.id}/share`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenantId,
+          }),
+        }
+      );
+
+      const body = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          body.error || "Unable to create quotation share link."
+        );
+      }
+
+      const shareUrl =
+        typeof body.shareUrl === "string"
+          ? body.shareUrl.trim()
+          : "";
+
+      if (!shareUrl) {
+        throw new Error(
+          "Quotation share API did not return a share URL."
+        );
+      }
+
+      if (!navigator.clipboard?.writeText) {
+        throw new Error(
+          "Clipboard access is unavailable in this browser."
+        );
+      }
+
+      await navigator.clipboard.writeText(shareUrl);
+
+      setMessage(
+        `${quotation.quote_number} share link copied to clipboard.`
+      );
+
+      await load();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to copy quotation share link."
+      );
+    } finally {
+      setWorking(false);
+    }
+  }
   async function convertToJob(quotation: Quotation) {
     if (
       !window.confirm(
@@ -2580,6 +2640,17 @@ export default function QuotationPanel({
                     onClick={() => setPreview(quotation)}
                   >
                     Preview
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={working}
+                    onClick={() =>
+                      void copyShareLink(quotation)
+                    }
+                  >
+                    Copy Share Link
                   </Button>
 
                   {["draft", "sent"].includes(

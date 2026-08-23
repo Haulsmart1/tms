@@ -2,7 +2,9 @@
 
 import {
   ChangeEvent,
+  useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
 
@@ -168,11 +170,55 @@ export default function DocumentsSettingsPage() {
     setError,
   ] = useState("");
 
+  const [
+    autoSaveStatus,
+    setAutoSaveStatus,
+  ] = useState<
+    "idle" |
+    "dirty" |
+    "saving" |
+    "saved" |
+    "error"
+  >("idle");
+
+  const hydratedRef =
+    useRef(false);
+
+  const lastSavedSnapshotRef =
+    useRef("");
+
+  const autoSaveRequestRef =
+    useRef(0);
+
+  const autoSaveTimerRef =
+    useRef<
+      ReturnType<
+        typeof setTimeout
+      > | null
+    >(null);
+
   useEffect(() => {
     let cancelled =
       false;
 
     async function init() {
+      hydratedRef.current = false;
+
+      if (
+        autoSaveTimerRef.current
+      ) {
+        clearTimeout(
+          autoSaveTimerRef.current
+        );
+
+        autoSaveTimerRef.current =
+          null;
+      }
+
+      setAutoSaveStatus(
+        "idle"
+      );
+
       setLoading(true);
       setError("");
 
@@ -236,7 +282,9 @@ export default function DocumentsSettingsPage() {
         const savedDocument =
           body.documentSettings;
 
-        setDocumentSettings({
+        const savedQuotation =
+          body.quotationTemplate;
+        const hydratedDocumentSettings: DocumentSettings = {
           logo_path:
             savedDocument?.logo_path ??
             null,
@@ -271,12 +319,9 @@ export default function DocumentsSettingsPage() {
           show_contact_details:
             savedDocument?.show_contact_details ??
             true,
-        });
+        };
 
-        const savedQuotation =
-          body.quotationTemplate;
-
-        setQuotationTemplate({
+        const hydratedQuotationTemplate: QuotationTemplate = {
           heading:
             text(
               savedQuotation?.heading
@@ -341,7 +386,34 @@ export default function DocumentsSettingsPage() {
           show_line_vat:
             savedQuotation?.show_line_vat ??
             true,
-        });
+        };
+
+        setDocumentSettings(
+          hydratedDocumentSettings
+        );
+
+        setQuotationTemplate(
+          hydratedQuotationTemplate
+        );
+
+        lastSavedSnapshotRef.current =
+          JSON.stringify({
+            tenantId:
+              companyId,
+
+            documentSettings:
+              hydratedDocumentSettings,
+
+            quotationTemplate:
+              hydratedQuotationTemplate,
+          });
+
+        hydratedRef.current =
+          true;
+
+        setAutoSaveStatus(
+          "saved"
+        );
 
         setLogoUrl(
           text(
@@ -576,6 +648,53 @@ export default function DocumentsSettingsPage() {
       );
     }
   }
+  const persistSettings =
+    useCallback(
+      async (
+        targetTenantId: string,
+        nextDocumentSettings: DocumentSettings,
+        nextQuotationTemplate: QuotationTemplate
+      ) => {
+        const response =
+          await fetch(
+            "/api/settings/documents",
+            {
+              method:
+                "PUT",
+
+              headers: {
+                "Content-Type":
+                  "application/json",
+              },
+
+              body:
+                JSON.stringify({
+                  tenantId:
+                    targetTenantId,
+
+                  documentSettings:
+                    nextDocumentSettings,
+
+                  quotationTemplate:
+                    nextQuotationTemplate,
+                }),
+            }
+          );
+
+        const body =
+          await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            body.error ||
+              "Unable to save document settings."
+          );
+        }
+
+        return body;
+      },
+      []
+    );
   async function save() {
     if (!tenantId) {
       setError(
@@ -584,49 +703,51 @@ export default function DocumentsSettingsPage() {
       return;
     }
 
+    if (
+      autoSaveTimerRef.current
+    ) {
+      clearTimeout(
+        autoSaveTimerRef.current
+      );
+
+      autoSaveTimerRef.current =
+        null;
+    }
+
     setSaving(true);
     setMessage("");
     setError("");
+    setAutoSaveStatus(
+      "saving"
+    );
 
     try {
-      const response =
-        await fetch(
-          "/api/settings/documents",
-          {
-            method:
-              "PUT",
+      await persistSettings(
+        tenantId,
+        documentSettings,
+        quotationTemplate
+      );
 
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
+      lastSavedSnapshotRef.current =
+        JSON.stringify({
+          tenantId,
+          documentSettings,
+          quotationTemplate,
+        });
 
-            body:
-              JSON.stringify({
-                tenantId,
-                documentSettings,
-                quotationTemplate,
-              }),
-          }
-        );
-
-      const body =
-        await response.json();
-
-      if (
-        !response.ok
-      ) {
-        throw new Error(
-          body.error ||
-            "Unable to save document settings."
-        );
-      }
+      setAutoSaveStatus(
+        "saved"
+      );
 
       setMessage(
         "Documents & Branding settings saved."
       );
     }
     catch (saveError) {
+      setAutoSaveStatus(
+        "error"
+      );
+
       setError(
         saveError instanceof Error
           ? saveError.message
@@ -639,7 +760,128 @@ export default function DocumentsSettingsPage() {
       );
     }
   }
+  useEffect(() => {
+    if (
+      !hydratedRef.current ||
+      loading ||
+      !tenantId
+    ) {
+      return;
+    }
 
+    const snapshot =
+      JSON.stringify({
+        tenantId,
+        documentSettings,
+        quotationTemplate,
+      });
+
+    if (
+      snapshot ===
+      lastSavedSnapshotRef.current
+    ) {
+      return;
+    }
+
+    setAutoSaveStatus(
+      "dirty"
+    );
+
+    if (
+      autoSaveTimerRef.current
+    ) {
+      clearTimeout(
+        autoSaveTimerRef.current
+      );
+    }
+
+    const requestId =
+      autoSaveRequestRef.current +
+      1;
+
+    autoSaveRequestRef.current =
+      requestId;
+
+    autoSaveTimerRef.current =
+      setTimeout(
+        () => {
+          void (
+            async () => {
+              if (
+                requestId !==
+                autoSaveRequestRef.current
+              ) {
+                return;
+              }
+
+              setAutoSaveStatus(
+                "saving"
+              );
+
+              try {
+                await persistSettings(
+                  tenantId,
+                  documentSettings,
+                  quotationTemplate
+                );
+
+                if (
+                  requestId !==
+                  autoSaveRequestRef.current
+                ) {
+                  return;
+                }
+
+                lastSavedSnapshotRef.current =
+                  snapshot;
+
+                setAutoSaveStatus(
+                  "saved"
+                );
+              }
+              catch (saveError) {
+                if (
+                  requestId !==
+                  autoSaveRequestRef.current
+                ) {
+                  return;
+                }
+
+                setAutoSaveStatus(
+                  "error"
+                );
+
+                setError(
+                  saveError instanceof Error
+                    ? saveError.message
+                    : "Autosave failed."
+                );
+              }
+            }
+          )();
+        },
+        1200
+      );
+
+    return () => {
+      if (
+        autoSaveTimerRef.current
+      ) {
+        clearTimeout(
+          autoSaveTimerRef.current
+        );
+
+        autoSaveTimerRef.current =
+          null;
+      }
+    };
+  }, [
+    documentSettings,
+    loading,
+    persistSettings,
+    quotationTemplate,
+    tenantId,
+  ]);
   const companyAddress =
     [
       company?.address_line_1,
@@ -1017,7 +1259,19 @@ export default function DocumentsSettingsPage() {
               </div>
             </section>
 
-            <div className="flex justify-end">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm text-ink-3">
+                {autoSaveStatus === "dirty"
+                  ? "Unsaved changes"
+                  : autoSaveStatus === "saving"
+                    ? "Saving..."
+                    : autoSaveStatus === "saved"
+                      ? "Saved"
+                      : autoSaveStatus === "error"
+                        ? "Autosave failed"
+                        : ""}
+              </div>
+
               <Button
                 type="button"
                 disabled={saving || uploading}
