@@ -7,9 +7,6 @@ import {
   NextResponse,
 } from "next/server";
 
-import {
-  Resend,
-} from "resend";
 
 import {
   errorResponse,
@@ -20,6 +17,14 @@ import {
   createQuotationShareToken,
   hashQuotationShareToken,
 } from "../../../../../../lib/quotations/shareToken";
+
+import {
+  generateQuotationPdf,
+} from "../../../../../../lib/quotations/generatePdf";
+
+import {
+  sendLoggedDocumentEmail,
+} from "../../../../../../lib/documents/delivery";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -179,7 +184,15 @@ export async function POST(
         customer_id,
         quote_number,
         status,
-        valid_until
+        quote_date,
+        valid_until,
+        currency_code,
+        subtotal,
+        vat_total,
+        total,
+        notes,
+        customer_reference,
+        po_reference
       `)
       .eq(
         "id",
@@ -464,23 +477,7 @@ export async function POST(
       `${origin}/quotation/share/${encodeURIComponent(
         token
       )}`;
-
-    const apiKey =
-      process.env.RESEND_API_KEY;
-
-    const from =
-      process.env.MAIL_FROM;
-
-    if (
-      !apiKey ||
-      !from
-    ) {
-      throw new Error(
-        "Quotation email is not configured. RESEND_API_KEY and MAIL_FROM are required."
-      );
-    }
-
-    const quoteNumber =
+const quoteNumber =
       String(
         quotation.quote_number
       );
@@ -520,57 +517,151 @@ export async function POST(
       "Regards,",
       companyName,
     ].join("\n");
-
-    const resend =
-      new Resend(
-        apiKey
-      );
-
     const {
-      data: sendData,
-      error: sendError,
-    } =
-      await resend.emails.send({
-        from,
-        to:
-          recipient,
-        subject,
-        text,
-      });
-
-    if (sendError) {
-      await admin
-        .from(
-          "quotation_share_links"
-        )
-        .update({
-          revoked_at:
-            new Date()
-              .toISOString(),
-        })
-        .eq(
-          "id",
-          shareLinkId
-        )
-        .eq(
-          "tenant_id",
-          tenantId
-        );
-
-      newShareLinkId =
-        null;
-
-      return NextResponse.json(
+      data: quotationLines,
+      error: quotationLinesError,
+    } = await admin
+      .from("quotation_lines")
+      .select(`
+        description,
+        quantity,
+        unit_price,
+        vat_rate,
+        line_total,
+        line_number
+      `)
+      .eq(
+        "quotation_id",
+        quotation.id
+      )
+      .eq(
+        "tenant_id",
+        tenantId
+      )
+      .order(
+        "line_number",
         {
-          error:
-            sendError.message ||
-            "Resend rejected the quotation email.",
-        },
-        {
-          status: 502,
+          ascending: true,
         }
       );
+
+    if (quotationLinesError) {
+      throw new Error(
+        quotationLinesError.message
+      );
     }
+
+    const {
+      data: shareSnapshot,
+      error: shareSnapshotError,
+    } = await admin
+      .from("quotation_share_links")
+      .select(`
+        terms_snapshot
+      `)
+      .eq(
+        "id",
+        shareLinkId
+      )
+      .eq(
+        "tenant_id",
+        tenantId
+      )
+      .maybeSingle();
+
+    if (shareSnapshotError) {
+      throw new Error(
+        shareSnapshotError.message
+      );
+    }
+
+    const {
+      bytes: quotationPdfBytes,
+      filename: quotationPdfFilename,
+    } = await generateQuotationPdf({
+      companyName,
+      customerName,
+      quoteNumber,
+      quoteDate:
+        quotation.quote_date ?? null,
+      validUntil:
+        quotation.valid_until ?? null,
+      currency:
+        quotation.currency_code || "GBP",
+      subtotal:
+        Number(quotation.subtotal ?? 0),
+      vatTotal:
+        Number(quotation.vat_total ?? 0),
+      total:
+        Number(quotation.total ?? 0),
+      notes:
+        quotation.notes ?? null,
+      customerReference:
+        quotation.customer_reference ?? null,
+      poReference:
+        quotation.po_reference ?? null,
+      lines:
+        (quotationLines ?? []).map(
+          (line) => ({
+            description:
+              String(
+                line.description ?? ""
+              ),
+            quantity:
+              Number(
+                line.quantity ?? 0
+              ),
+            unitPrice:
+              Number(
+                line.unit_price ?? 0
+              ),
+            vatRate:
+              Number(
+                line.vat_rate ?? 0
+              ),
+            lineTotal:
+              Number(
+                line.line_total ?? 0
+              ),
+          })
+        ),
+      termsSnapshot:
+        shareSnapshot?.terms_snapshot ??
+        null,
+    });
+
+    const delivery =
+      await sendLoggedDocumentEmail({
+        admin,
+        tenantId,
+        documentType:
+          "quotation",
+        documentId:
+          quotation.id,
+        recipient,
+        subject,
+        text,
+        shareReference:
+          shareUrl,
+        attachments: [
+          {
+            filename:
+              quotationPdfFilename,
+            content:
+              Buffer.from(
+                quotationPdfBytes
+              ),
+            contentType:
+              "application/pdf",
+          },
+        ],
+        metadata: {
+          quoteNumber,
+          customerName,
+          subject,
+        },
+      });
+
 
     const sentAt =
       new Date()
@@ -685,8 +776,10 @@ export async function POST(
       ok: true,
 
       id:
-        sendData?.id ??
-        null,
+        delivery.providerMessageId,
+
+      deliveryLogId:
+        delivery.deliveryLogId,
 
       recipient,
 

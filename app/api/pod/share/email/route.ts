@@ -1,4 +1,4 @@
-﻿import {
+import {
   NextRequest,
   NextResponse,
 } from "next/server";
@@ -6,7 +6,7 @@ import {
   createServerClient,
 } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { Resend } from "resend";
+import { sendLoggedDocumentEmail } from "../../../../../lib/documents/delivery";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { createPodShareToken } from "../../../../../lib/pod/shareToken";
 import { generatePodPdf } from "../../../../../lib/pod/generatePdf";
@@ -312,23 +312,6 @@ export async function POST(
       );
     }
 
-    const apiKey =
-      process.env.RESEND_API_KEY;
-
-    const from =
-      process.env.MAIL_FROM;
-
-    if (!apiKey || !from) {
-      return NextResponse.json(
-        {
-          error:
-            "POD email is not configured. RESEND_API_KEY and MAIL_FROM are required.",
-        },
-        {
-          status: 503,
-        }
-      );
-    }
 
     const token =
       createPodShareToken(
@@ -385,50 +368,47 @@ export async function POST(
       "Regards,",
       "ADR Carriers",
     ].join("\n");
-
-    const resend =
-      new Resend(apiKey);
-
-    const {
-      data: sendData,
-      error: sendError,
-    } =
-      await resend.emails.send({
-        from,
-        to: recipient,
+    const delivery =
+      await sendLoggedDocumentEmail({
+        admin,
+        tenantId,
+        documentType:
+          "pod",
+        documentId:
+          job.id,
+        recipient,
         subject,
         text,
+        shareReference:
+          shareUrl,
+        initiatedBy:
+          user.id,
         attachments: [
           {
             filename,
             content:
               Buffer.from(bytes),
+            contentType:
+              "application/pdf",
           },
         ],
+        metadata: {
+          jobId:
+            job.id,
+          reference,
+          customerName:
+            contactName,
+        },
       });
 
-    if (sendError) {
-      console.error(
-        "POD email failed:",
-        sendError
-      );
-
-      return NextResponse.json(
-        {
-          error:
-            sendError.message ||
-            "Resend rejected the POD email.",
-        },
-        {
-          status: 502,
-        }
-      );
-    }
 
     return NextResponse.json({
       ok: true,
       id:
-        sendData?.id ?? null,
+        delivery.providerMessageId,
+
+      deliveryLogId:
+        delivery.deliveryLogId,
       recipient,
       shareUrl,
     });
