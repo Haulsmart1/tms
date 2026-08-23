@@ -136,7 +136,7 @@ export async function POST(request: NextRequest) {
     const requiresAttachment = customer.invoice_pod_attachment_required === true;
     const podBlocked = (jobs ?? []).some((job) => {
       const status = String(job.pod_status ?? "").toLowerCase();
-      return requiresPod && !["complete", "completed", "approved", "received"].includes(status);
+      return requiresPod && !["complete", "completed", "approved", "received", "delivered"].includes(status);
     });
 
     const issueDate = body.issueDate || new Date().toISOString().slice(0, 10);
