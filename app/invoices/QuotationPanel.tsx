@@ -1450,17 +1450,68 @@ export default function QuotationPanel({
         );
       }
 
-      if (!navigator.clipboard?.writeText) {
-        throw new Error(
-          "Clipboard access is unavailable in this browser."
+      let copied = false;
+
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(shareUrl);
+          copied = true;
+        }
+      } catch (clipboardError) {
+        console.warn(
+          "Modern clipboard API failed:",
+          clipboardError
         );
       }
 
-      await navigator.clipboard.writeText(shareUrl);
+      if (!copied) {
+        try {
+          const textarea =
+            document.createElement("textarea");
 
-      setMessage(
-        `${quotation.quote_number} share link copied to clipboard.`
-      );
+          textarea.value = shareUrl;
+          textarea.setAttribute("readonly", "");
+          textarea.style.position = "fixed";
+          textarea.style.opacity = "0";
+          textarea.style.pointerEvents = "none";
+
+          document.body.appendChild(textarea);
+
+          textarea.focus();
+          textarea.select();
+          textarea.setSelectionRange(
+            0,
+            textarea.value.length
+          );
+
+          copied =
+            document.execCommand("copy");
+
+          document.body.removeChild(textarea);
+        } catch (fallbackError) {
+          console.warn(
+            "Clipboard fallback failed:",
+            fallbackError
+          );
+
+          copied = false;
+        }
+      }
+
+      if (copied) {
+        setMessage(
+          `${quotation.quote_number} share link copied to clipboard.`
+        );
+      } else {
+        setMessage(
+          `${quotation.quote_number} share link created. Copy it from the popup.`
+        );
+
+        window.prompt(
+          "Quotation share link:",
+          shareUrl
+        );
+      }
 
       await load();
     } catch (error) {
