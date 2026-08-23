@@ -1504,14 +1504,14 @@ export default function QuotationPanel({
         );
       } else {
         setMessage(
-          `${quotation.quote_number} share link created. Copy it from the popup.`
-        );
-
-        window.prompt(
-          "Quotation share link:",
-          shareUrl
+          `${quotation.quote_number} share link created.`
         );
       }
+
+      window.prompt(
+        "Quotation share link - Ctrl+C to copy:",
+        shareUrl
+      );
 
       await load();
     } catch (error) {
