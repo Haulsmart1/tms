@@ -275,6 +275,8 @@ export default function CustomerAccountsPage() {
   const [previewWorking, setPreviewWorking] = useState(false);
   const [xeroInvoiceSyncingId, setXeroInvoiceSyncingId] =
     useState<string | null>(null);
+  const [emailInvoiceSendingId, setEmailInvoiceSendingId] =
+    useState<string | null>(null);
 
   const [paymentCustomerId, setPaymentCustomerId] = useState("");
   const [paymentInvoiceId, setPaymentInvoiceId] = useState("");
@@ -785,6 +787,137 @@ export default function CustomerAccountsPage() {
       );
     } finally {
       setPreviewWorking(false);
+    }
+  }
+  async function emailInvoice(invoice: Invoice) {
+    if (!tenant.writeTenantId) {
+      setMessage("Choose a tenant.");
+      return;
+    }
+
+    const status =
+      String(invoice.status ?? "").toLowerCase();
+
+    if (!["approved", "sent"].includes(status)) {
+      setMessage(
+        "Approve the invoice before emailing it."
+      );
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Email ${
+          invoice.invoice_number || "this invoice"
+        } with PDF and available POD attachments?`
+      )
+    ) {
+      return;
+    }
+
+    setEmailInvoiceSendingId(invoice.id);
+    setMessage("");
+
+    try {
+      const response = await fetch(
+        `/api/accounts/invoices/${invoice.id}/email`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenantId: tenant.writeTenantId,
+            includePod: true,
+          }),
+        }
+      );
+
+      const body = (await response.json()) as {
+        ok?: boolean;
+        invoiceId?: string;
+        invoiceNumber?: string;
+        recipient?: string;
+        deliveryLogId?: string;
+        providerMessageId?: string | null;
+        attachments?: string[];
+        podAttachmentCount?: number;
+        sentAt?: string;
+        missingPodJobs?: Array<{
+          id: string;
+          reference: string;
+          podStatus: string;
+        }>;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        if (
+          Array.isArray(body.missingPodJobs) &&
+          body.missingPodJobs.length > 0
+        ) {
+          const missing =
+            body.missingPodJobs
+              .map(
+                (job) =>
+                  `${job.reference} (${job.podStatus})`
+              )
+              .join(", ");
+
+          throw new Error(
+            `${body.error || "Unable to email invoice."} Missing POD: ${missing}`
+          );
+        }
+
+        throw new Error(
+          body.error || "Unable to email invoice."
+        );
+      }
+
+      const attachmentCount =
+        Array.isArray(body.attachments)
+          ? body.attachments.length
+          : 0;
+
+      const podCount =
+        Number(body.podAttachmentCount ?? 0);
+
+      const acknowledgement =
+        body.providerMessageId
+          ? ` Provider acknowledgement: ${body.providerMessageId}.`
+          : "";
+
+      setMessage(
+        `${
+          body.invoiceNumber ||
+          invoice.invoice_number ||
+          "Invoice"
+        } sent to ${
+          body.recipient || "the customer"
+        }. ${attachmentCount} attachment${
+          attachmentCount === 1 ? "" : "s"
+        }${
+          podCount > 0
+            ? ` including ${podCount} POD PDF${
+                podCount === 1 ? "" : "s"
+              }`
+            : ""
+        }.${acknowledgement}`
+      );
+
+      setPreviewInvoice(null);
+
+      await loadTab();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to email invoice."
+      );
+
+      await loadTab();
+    } finally {
+      setEmailInvoiceSendingId(null);
     }
   }
   async function syncInvoiceToXero(invoice: Invoice) {
@@ -2075,6 +2208,8 @@ export default function CustomerAccountsPage() {
                   xeroConnected={xeroStatus.connected}
                   xeroInvoiceSyncingId={xeroInvoiceSyncingId}
                   syncInvoiceToXero={syncInvoiceToXero}
+                  emailInvoiceSendingId={emailInvoiceSendingId}
+                  emailInvoice={emailInvoice}
                   previewInvoice={previewInvoice}
                   previewWorking={previewWorking}
                   openInvoicePreview={openInvoicePreview}
@@ -3494,6 +3629,8 @@ function InvoicesPanel({
   xeroConnected,
   xeroInvoiceSyncingId,
   syncInvoiceToXero,
+  emailInvoiceSendingId,
+  emailInvoice,
   previewInvoice,
   previewWorking,
   openInvoicePreview,
@@ -3519,6 +3656,8 @@ function InvoicesPanel({
   xeroConnected: boolean;
   xeroInvoiceSyncingId: string | null;
   syncInvoiceToXero: (invoice: Invoice) => Promise<void>;
+  emailInvoiceSendingId: string | null;
+  emailInvoice: (invoice: Invoice) => Promise<void>;
   previewInvoice: InvoicePreviewData | null;
   previewWorking: boolean;
   openInvoicePreview: (invoice: Invoice) => Promise<void>;
@@ -3679,6 +3818,29 @@ function InvoicesPanel({
             </div>
 
             <div className="print:hidden flex flex-wrap gap-2">
+              {["approved", "sent"].includes(
+                String(previewInvoice.invoice.status || "").toLowerCase()
+              ) ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={
+                    emailInvoiceSendingId ===
+                    previewInvoice.invoice.id
+                  }
+                  onClick={() =>
+                    void emailInvoice(
+                      previewInvoice.invoice
+                    )
+                  }
+                >
+                  {emailInvoiceSendingId ===
+                  previewInvoice.invoice.id
+                    ? "Emailing..."
+                    : "Email Invoice + POD"}
+                </Button>
+              ) : null}
+
               {xeroConnected &&
               ["approved", "sent"].includes(
                 String(previewInvoice.invoice.status || "").toLowerCase()
@@ -4315,6 +4477,25 @@ function InvoicesPanel({
                       ? "Edit Invoice"
                       : "Invoice Locked"}
                   </Button>
+
+                  {["approved", "sent"].includes(status) ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={
+                        emailInvoiceSendingId ===
+                        invoice.id
+                      }
+                      onClick={() =>
+                        void emailInvoice(invoice)
+                      }
+                    >
+                      {emailInvoiceSendingId ===
+                      invoice.id
+                        ? "Emailing..."
+                        : "Email Invoice + POD"}
+                    </Button>
+                  ) : null}
 
                   {xeroConnected ? (
                     <Button
