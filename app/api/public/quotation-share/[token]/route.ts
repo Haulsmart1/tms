@@ -60,9 +60,41 @@ export async function POST(
       String(body.email ?? "")
         .trim();
 
+    const companyName =
+      String(body.companyName ?? "")
+        .trim();
+
+    const position =
+      String(body.position ?? "")
+        .trim();
+
     if (!name) {
       return errorResponse(
         "Your name is required."
+      );
+    }
+
+    if (!email) {
+      return errorResponse(
+        "Your email address is required."
+      );
+    }
+
+    if (
+      action === "accept" &&
+      !companyName
+    ) {
+      return errorResponse(
+        "Company name is required."
+      );
+    }
+
+    if (
+      action === "accept" &&
+      !position
+    ) {
+      return errorResponse(
+        "Position is required."
       );
     }
 
@@ -110,7 +142,7 @@ export async function POST(
         data,
         error,
       } = await admin.rpc(
-        "accept_quotation_share_with_terms",
+        "accept_quotation_share_with_business_identity",
         {
           p_share_link_id:
             share.id,
@@ -118,6 +150,10 @@ export async function POST(
             name,
           p_email:
             email || null,
+          p_company_name:
+            companyName,
+          p_position:
+            position,
           p_clause_keys:
             clauseKeys,
           p_adr_accepted:

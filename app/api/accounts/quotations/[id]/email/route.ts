@@ -26,6 +26,10 @@ import {
   sendLoggedDocumentEmail,
 } from "../../../../../../lib/documents/delivery";
 
+import {
+  buildDocumentEmailHtml,
+} from "../../../../../../lib/documents/emailTemplate";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -630,6 +634,67 @@ const quoteNumber =
         null,
     });
 
+    const html =
+      buildDocumentEmailHtml({
+        companyName,
+        recipientName:
+          customerName,
+        title:
+          `Your quotation ${quoteNumber} is ready`,
+        intro:
+          messageBody ||
+          `Please review quotation ${quoteNumber}.`,
+        summaryRows: [
+          {
+            label:
+              "Quotation",
+            value:
+              quoteNumber,
+          },
+          {
+            label:
+              "Quote date",
+            value:
+              quotation.quote_date ||
+              "-",
+          },
+          {
+            label:
+              "Valid until",
+            value:
+              quotation.valid_until ||
+              "-",
+          },
+          {
+            label:
+              "Total",
+            value:
+              new Intl.NumberFormat(
+                "en-GB",
+                {
+                  style:
+                    "currency",
+                  currency:
+                    quotation.currency_code ||
+                    "GBP",
+                }
+              ).format(
+                Number(
+                  quotation.total ??
+                  0
+                )
+              ),
+          },
+        ],
+        attachmentText:
+          "A detailed quotation PDF is attached.",
+        actionLabel:
+          "Review & Accept Quotation",
+        actionUrl:
+          shareUrl,
+        footerText:
+          "You can review, accept or decline this quotation securely online.",
+      });
     const delivery =
       await sendLoggedDocumentEmail({
         admin,
@@ -641,6 +706,7 @@ const quoteNumber =
         recipient,
         subject,
         text,
+        html,
         shareReference:
           shareUrl,
         attachments: [

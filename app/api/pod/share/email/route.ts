@@ -7,6 +7,9 @@ import {
 } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { sendLoggedDocumentEmail } from "../../../../../lib/documents/delivery";
+import {
+  buildDocumentEmailHtml,
+} from "../../../../../lib/documents/emailTemplate";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { createPodShareToken } from "../../../../../lib/pod/shareToken";
 import { generatePodPdf } from "../../../../../lib/pod/generatePdf";
@@ -368,6 +371,39 @@ export async function POST(
       "Regards,",
       "ADR Carriers",
     ].join("\n");
+    const html =
+      buildDocumentEmailHtml({
+        companyName:
+          "ADR Carriers ltd",
+        recipientName:
+          contactName,
+        title:
+          `Proof of Delivery - ${reference}`,
+        intro:
+          "Your proof of delivery is ready.",
+        summaryRows: [
+          {
+            label:
+              "Job reference",
+            value:
+              reference,
+          },
+          {
+            label:
+              "Status",
+            value:
+              "Delivered",
+          },
+        ],
+        attachmentText:
+          "A PDF copy of the Proof of Delivery is attached.",
+        actionLabel:
+          "View Proof of Delivery",
+        actionUrl:
+          shareUrl,
+        footerText:
+          "Thank you for choosing ADR Carriers.",
+      });
     const delivery =
       await sendLoggedDocumentEmail({
         admin,
@@ -379,6 +415,7 @@ export async function POST(
         recipient,
         subject,
         text,
+        html,
         shareReference:
           shareUrl,
         initiatedBy:

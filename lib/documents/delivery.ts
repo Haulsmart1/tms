@@ -25,6 +25,7 @@ type SendLoggedDocumentEmailInput = {
   recipient: string;
   subject: string;
   text: string;
+  html?: string;
   attachments?: DeliveryAttachment[];
   shareReference?: string | null;
   initiatedBy?: string | null;
@@ -142,6 +143,7 @@ async function sendMicrosoftGraphEmail(input: {
   recipient: string;
   subject: string;
   text: string;
+  html?: string;
   attachments: DeliveryAttachment[];
   deliveryLogId: string;
 }): Promise<{
@@ -174,8 +176,11 @@ async function sendMicrosoftGraphEmail(input: {
 
       body: {
         contentType:
-          "Text",
+          input.html
+            ? "HTML"
+            : "Text",
         content:
+          input.html ??
           input.text,
       },
 
@@ -397,6 +402,8 @@ export async function sendLoggedDocumentEmail(
           input.subject,
         text:
           input.text,
+        html:
+          input.html,
         attachments,
         deliveryLogId,
       });

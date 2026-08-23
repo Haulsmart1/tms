@@ -1870,6 +1870,95 @@ export default function CustomerAccountsPage() {
       setWorking(false);
     }
   }
+  async function emailRecordDocument(
+    row: GenericRow,
+    documentType:
+      | "credit_note"
+      | "chase_letter"
+      | "customer_purchase_order"
+      | "supplier_purchase_order"
+      | "statement"
+  ) {
+    if (
+      !tenant.writeTenantId
+    ) {
+      setMessage(
+        "Choose a tenant."
+      );
+      return;
+    }
+
+    const documentId =
+      String(
+        row.id ?? ""
+      );
+
+    if (!documentId) {
+      setMessage(
+        "Document ID is missing."
+      );
+      return;
+    }
+
+    if (
+      !window.confirm(
+        "Email this document as a PDF?"
+      )
+    ) {
+      return;
+    }
+
+    setWorking(true);
+    setMessage("");
+
+    try {
+      const response =
+        await fetch(
+          "/api/accounts/documents/email",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body:
+              JSON.stringify({
+                tenantId:
+                  tenant.writeTenantId,
+                documentType,
+                documentId,
+              }),
+          }
+        );
+
+      const body =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          body.error ||
+          "Unable to email document."
+        );
+      }
+
+      setMessage(
+        `Document emailed to ${
+          body.recipient ||
+          "recipient"
+        }.`
+      );
+    }
+    catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to email document."
+      );
+    }
+    finally {
+      setWorking(false);
+    }
+  }
   async function createStatement() {
     if (!tenant.writeTenantId || !statementCustomerId) {
       setMessage("Choose a customer.");
@@ -3041,7 +3130,12 @@ export default function CustomerAccountsPage() {
                     />
                   </div>
 
-                  <RecordCards rows={rows} />
+                  <RecordCards
+                    rows={rows}
+                    documentType="statement"
+                    working={working}
+                    onEmail={emailRecordDocument}
+                  />
                 </section>
               ) : null}
 
@@ -3111,7 +3205,12 @@ export default function CustomerAccountsPage() {
                     />
                   </div>
 
-                  <RecordCards rows={rows} />
+                  <RecordCards
+                    rows={rows}
+                    documentType="chase_letter"
+                    working={working}
+                    onEmail={emailRecordDocument}
+                  />
                 </section>
               ) : null}
 
@@ -3178,7 +3277,12 @@ export default function CustomerAccountsPage() {
                     />
                   </div>
 
-                  <RecordCards rows={rows} />
+                  <RecordCards
+                    rows={rows}
+                    documentType="customer_purchase_order"
+                    working={working}
+                    onEmail={emailRecordDocument}
+                  />
                 </section>
               ) : null}
 
@@ -3266,7 +3370,12 @@ export default function CustomerAccountsPage() {
                     />
                   </div>
 
-                  <RecordCards rows={rows} />
+                  <RecordCards
+                    rows={rows}
+                    documentType="supplier_purchase_order"
+                    working={working}
+                    onEmail={emailRecordDocument}
+                  />
                 </section>
               ) : null}
 
@@ -4540,7 +4649,30 @@ function InvoicesPanel({
     </section>
   );
 }
-function RecordCards({ rows }: { rows: GenericRow[] }) {
+function RecordCards({
+  rows,
+  documentType,
+  working = false,
+  onEmail,
+}: {
+  rows: GenericRow[];
+  documentType?:
+    | "credit_note"
+    | "chase_letter"
+    | "customer_purchase_order"
+    | "supplier_purchase_order"
+    | "statement";
+  working?: boolean;
+  onEmail?: (
+    row: GenericRow,
+    documentType:
+      | "credit_note"
+      | "chase_letter"
+      | "customer_purchase_order"
+      | "supplier_purchase_order"
+      | "statement"
+  ) => Promise<void>;
+}) {
   return (
     <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
       {rows.length === 0 ? (
@@ -4554,6 +4686,26 @@ function RecordCards({ rows }: { rows: GenericRow[] }) {
             <pre className="m-0 whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-xs text-ink-2">
               {JSON.stringify(row, null, 2)}
             </pre>
+
+            {documentType && onEmail ? (
+              <div className="mt-3 border-t border-line pt-3">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={working}
+                  onClick={() =>
+                    void onEmail(
+                      row,
+                      documentType
+                    )
+                  }
+                >
+                  {working
+                    ? "Working..."
+                    : "Email PDF"}
+                </Button>
+              </div>
+            ) : null}
           </article>
         ))
       )}

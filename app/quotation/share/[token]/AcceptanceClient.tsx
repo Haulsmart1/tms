@@ -37,6 +37,12 @@ export default function AcceptanceClient({
   const [email, setEmail] =
     useState(initialEmail);
 
+  const [companyName, setCompanyName] =
+    useState("");
+
+  const [position, setPosition] =
+    useState("");
+
   const [
     acceptedKeys,
     setAcceptedKeys,
@@ -84,6 +90,8 @@ export default function AcceptanceClient({
   const canAccept =
     Boolean(name.trim()) &&
     Boolean(email.trim()) &&
+    Boolean(companyName.trim()) &&
+    Boolean(position.trim()) &&
     allClausesAccepted &&
     (!adrRequired ||
       adrAccepted) &&
@@ -121,6 +129,33 @@ export default function AcceptanceClient({
       return;
     }
 
+    if (!email.trim()) {
+      setMessage(
+        "Please enter your email address."
+      );
+      return;
+    }
+
+    if (
+      action === "accept" &&
+      !companyName.trim()
+    ) {
+      setMessage(
+        "Please enter your company name."
+      );
+      return;
+    }
+
+    if (
+      action === "accept" &&
+      !position.trim()
+    ) {
+      setMessage(
+        "Please enter your position."
+      );
+      return;
+    }
+
     setBusy(true);
     setMessage("");
 
@@ -143,6 +178,10 @@ export default function AcceptanceClient({
                   name.trim(),
                 email:
                   email.trim(),
+                companyName:
+                  companyName.trim(),
+                position:
+                  position.trim(),
                 clauseKeys:
                   Array.from(
                     acceptedKeys
@@ -289,8 +328,8 @@ export default function AcceptanceClient({
         </label>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <label>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <label className="min-w-0">
           <span className="mb-1 block text-sm font-medium">
             Your name
           </span>
@@ -302,12 +341,49 @@ export default function AcceptanceClient({
                 event.target.value
               )
             }
-            className="w-full rounded-lg border border-slate-300 px-3 py-2"
+            autoComplete="name"
+            className="block w-full min-w-0 rounded-lg border border-slate-300 px-3 py-2"
             maxLength={150}
           />
         </label>
 
-        <label>
+        <label className="min-w-0">
+          <span className="mb-1 block text-sm font-medium">
+            Position
+          </span>
+
+          <input
+            value={position}
+            onChange={(event) =>
+              setPosition(
+                event.target.value
+              )
+            }
+            autoComplete="organization-title"
+            className="block w-full min-w-0 rounded-lg border border-slate-300 px-3 py-2"
+            maxLength={150}
+          />
+        </label>
+
+        <label className="min-w-0">
+          <span className="mb-1 block text-sm font-medium">
+            Company name
+          </span>
+
+          <input
+            value={companyName}
+            onChange={(event) =>
+              setCompanyName(
+                event.target.value
+              )
+            }
+            autoComplete="organization"
+            className="block w-full min-w-0 rounded-lg border border-slate-300 px-3 py-2"
+            maxLength={200}
+          />
+        </label>
+
+        <label className="min-w-0">
           <span className="mb-1 block text-sm font-medium">
             Email address
           </span>
@@ -320,7 +396,8 @@ export default function AcceptanceClient({
                 event.target.value
               )
             }
-            className="w-full rounded-lg border border-slate-300 px-3 py-2"
+            autoComplete="email"
+            className="block w-full min-w-0 rounded-lg border border-slate-300 px-3 py-2"
             maxLength={254}
           />
         </label>

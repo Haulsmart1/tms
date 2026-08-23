@@ -13,6 +13,10 @@ import {
 } from "../../../../../../lib/documents/delivery";
 
 import {
+  buildDocumentEmailHtml,
+} from "../../../../../../lib/documents/emailTemplate";
+
+import {
   generateInvoicePdf,
 } from "../../../../../../lib/invoices/generatePdf";
 
@@ -807,6 +811,76 @@ export async function POST(
       )
       .join("\n");
 
+    const html =
+      buildDocumentEmailHtml({
+        companyName:
+          String(
+            tenant.name
+          ),
+        recipientName:
+          customerName,
+        title:
+          `Invoice ${invoiceNumber}`,
+        intro:
+          `Please find invoice ${invoiceNumber} attached.`,
+        summaryRows: [
+          {
+            label:
+              "Invoice",
+            value:
+              invoiceNumber,
+          },
+          {
+            label:
+              "Issue date",
+            value:
+              invoice.issue_date ||
+              "-",
+          },
+          {
+            label:
+              "Due date",
+            value:
+              invoice.due_date ||
+              "-",
+          },
+          {
+            label:
+              "Amount due",
+            value:
+              new Intl.NumberFormat(
+                "en-GB",
+                {
+                  style:
+                    "currency",
+                  currency:
+                    invoice.currency ||
+                    "GBP",
+                }
+              ).format(
+                Number(
+                  invoice.balance_due ??
+                  invoice.total ??
+                  0
+                )
+              ),
+          },
+        ],
+        attachmentText:
+          attachPod
+            ? `${attachedPodJobIds.length} POD PDF${
+                attachedPodJobIds.length === 1
+                  ? ""
+                  : "s"
+              } ${
+                attachedPodJobIds.length === 1
+                  ? "is"
+                  : "are"
+              } included with the invoice PDF.`
+            : "The invoice PDF is attached.",
+        footerText:
+          "Please contact us if you have any questions regarding this invoice.",
+      });
     const delivery =
       await sendLoggedDocumentEmail({
         admin,
@@ -818,6 +892,7 @@ export async function POST(
         recipient,
         subject,
         text,
+        html,
         initiatedBy:
           user.id,
         attachments,
