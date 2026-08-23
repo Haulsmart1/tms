@@ -43,6 +43,69 @@ function safeHeader(
     .slice(0, 180);
 }
 
+async function loadDocumentBranding(
+  request: NextRequest,
+  tenantId: string
+) {
+  try {
+    const url =
+      new URL(
+        "/api/settings/documents",
+        request.url
+      );
+
+    url.searchParams.set(
+      "tenantId",
+      tenantId
+    );
+
+    const headers =
+      new Headers();
+
+    const cookie =
+      request.headers.get(
+        "cookie"
+      );
+
+    const authorization =
+      request.headers.get(
+        "authorization"
+      );
+
+    if (cookie) {
+      headers.set(
+        "cookie",
+        cookie
+      );
+    }
+
+    if (authorization) {
+      headers.set(
+        "authorization",
+        authorization
+      );
+    }
+
+    const response =
+      await fetch(
+        url,
+        {
+          method: "GET",
+          headers,
+          cache: "no-store",
+        }
+      );
+
+    if (!response.ok) {
+      return null;
+    }
+
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(
   request: NextRequest,
   context: {
@@ -387,6 +450,8 @@ export async function POST(
         reference: string | null;
         status: string | null;
         pod_status: string | null;
+        external_reference: string | null;
+        customer_reference: string | null;
       }> = [];
 
     if (jobIds.length > 0) {
@@ -399,7 +464,9 @@ export async function POST(
           id,
           reference,
           status,
-          pod_status
+          pod_status,
+          external_reference,
+          customer_reference
         `)
         .eq(
           "tenant_id",
@@ -519,12 +586,40 @@ export async function POST(
       }
     }
 
+    const branding =
+      await loadDocumentBranding(
+        request,
+        tenantId
+      );
+
     const {
       bytes: invoicePdfBytes,
       filename: invoicePdfFilename,
     } = await generateInvoicePdf({
       companyName:
         String(tenant.name),
+      companyProfile:
+        branding?.companyProfile ??
+        null,
+      documentSettings:
+        branding?.documentSettings ??
+        null,
+      status:
+        invoice.status ??
+        null,
+      jobs:
+        jobs.map(
+          (job) => ({
+            reference:
+              job.reference,
+            externalReference:
+              job.external_reference,
+            customerReference:
+              job.customer_reference,
+            podStatus:
+              job.pod_status,
+          })
+        ),
       customerName:
         String(
           customer.name ??

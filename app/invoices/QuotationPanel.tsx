@@ -1413,6 +1413,80 @@ export default function QuotationPanel({
     }
   }
 
+  async function emailQuotation(
+    quotation: Quotation
+  ) {
+    if (
+      !window.confirm(
+        `Email ${
+          quotation.quote_number ||
+          "this quotation"
+        } with PDF and secure acceptance link?`
+      )
+    ) {
+      return;
+    }
+
+    setWorking(true);
+    setMessage("");
+
+    try {
+      const response = await fetch(
+        `/api/accounts/quotations/${quotation.id}/email`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenantId,
+          }),
+        }
+      );
+
+      const body = (await response.json()) as {
+        ok?: boolean;
+        recipient?: string;
+        quoteNumber?: string;
+        shareUrl?: string;
+        deliveryLogId?: string;
+        id?: string | null;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(
+          body.error ||
+          "Unable to email quotation."
+        );
+      }
+
+      const acknowledgement =
+        body.id
+          ? ` Microsoft 365 acknowledgement: ${body.id}.`
+          : "";
+
+      setMessage(
+        `${
+          body.quoteNumber ||
+          quotation.quote_number
+        } emailed to ${
+          body.recipient ||
+          "the customer"
+        }. PDF and secure acceptance link included.${acknowledgement}`
+      );
+
+      await load();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to email quotation."
+      );
+    } finally {
+      setWorking(false);
+    }
+  }
   async function copyShareLink(quotation: Quotation) {
     setWorking(true);
     setMessage("");
@@ -2702,6 +2776,19 @@ export default function QuotationPanel({
                     }
                   >
                     Copy Share Link
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={working}
+                    onClick={() =>
+                      void emailQuotation(quotation)
+                    }
+                  >
+                    {working
+                      ? "Working..."
+                      : "Email Quotation"}
                   </Button>
 
                   {["draft", "sent"].includes(
