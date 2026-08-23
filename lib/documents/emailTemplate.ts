@@ -73,24 +73,39 @@ export function buildDocumentEmailHtml(
       .map(
         (row) => `
           <tr>
-            <td style="
-              padding:9px 12px;
-              border-bottom:1px solid #e2e8f0;
-              color:#64748b;
-              font-size:13px;
-              width:42%;
-            ">
-              ${escapeHtml(row.label)}
-            </td>
+            <td
+              style="
+                padding:12px 14px;
+                border-bottom:1px solid #e2e8f0;
+              "
+            >
+              <div
+                style="
+                  margin:0 0 4px;
+                  color:#64748b;
+                  font-size:11px;
+                  line-height:1.35;
+                  font-weight:700;
+                  text-transform:uppercase;
+                  letter-spacing:.4px;
+                "
+              >
+                ${escapeHtml(row.label)}
+              </div>
 
-            <td style="
-              padding:9px 12px;
-              border-bottom:1px solid #e2e8f0;
-              color:#0f172a;
-              font-size:13px;
-              font-weight:600;
-            ">
-              ${escapeHtml(row.value)}
+              <div
+                style="
+                  margin:0;
+                  color:#0f172a;
+                  font-size:14px;
+                  line-height:1.45;
+                  font-weight:700;
+                  overflow-wrap:anywhere;
+                  word-break:break-word;
+                "
+              >
+                ${escapeHtml(row.value)}
+              </div>
             </td>
           </tr>
         `
@@ -109,27 +124,55 @@ export function buildDocumentEmailHtml(
     actionUrl &&
     actionLabel
       ? `
-        <div style="
-          margin:28px 0 14px;
-          text-align:center;
-        ">
-          <a
-            href="${escapeHtml(actionUrl)}"
-            style="
-              display:inline-block;
-              background:#d39b19;
-              color:#ffffff;
-              text-decoration:none;
-              font-size:14px;
-              line-height:1;
-              font-weight:700;
-              padding:14px 24px;
-              border-radius:6px;
-            "
-          >
-            ${escapeHtml(actionLabel)}
-          </a>
-        </div>
+        <table
+          role="presentation"
+          width="100%"
+          cellspacing="0"
+          cellpadding="0"
+          border="0"
+          style="
+            width:100%;
+            margin:28px 0 14px;
+          "
+        >
+          <tr>
+            <td align="center">
+              <table
+                role="presentation"
+                cellspacing="0"
+                cellpadding="0"
+                border="0"
+              >
+                <tr>
+                  <td
+                    align="center"
+                    bgcolor="#b47a00"
+                    style="
+                      border-radius:6px;
+                    "
+                  >
+                    <a
+                      href="${escapeHtml(actionUrl)}"
+                      style="
+                        display:inline-block;
+                        background:#b47a00;
+                        color:#ffffff;
+                        text-decoration:none;
+                        font-size:14px;
+                        line-height:18px;
+                        font-weight:700;
+                        padding:13px 22px;
+                        border-radius:6px;
+                      "
+                    >
+                      ${escapeHtml(actionLabel)}
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
       `
       : "";
 

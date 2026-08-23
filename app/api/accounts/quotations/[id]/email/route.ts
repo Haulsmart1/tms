@@ -44,6 +44,69 @@ function safeHeader(
     .slice(0, 180);
 }
 
+async function loadDocumentBranding(
+  request: NextRequest,
+  tenantId: string
+) {
+  try {
+    const url =
+      new URL(
+        "/api/settings/documents",
+        request.url
+      );
+
+    url.searchParams.set(
+      "tenantId",
+      tenantId
+    );
+
+    const headers =
+      new Headers();
+
+    const cookie =
+      request.headers.get(
+        "cookie"
+      );
+
+    const authorization =
+      request.headers.get(
+        "authorization"
+      );
+
+    if (cookie) {
+      headers.set(
+        "cookie",
+        cookie
+      );
+    }
+
+    if (authorization) {
+      headers.set(
+        "authorization",
+        authorization
+      );
+    }
+
+    const response =
+      await fetch(
+        url,
+        {
+          method: "GET",
+          headers,
+          cache: "no-store",
+        }
+      );
+
+    if (!response.ok) {
+      return null;
+    }
+
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
 function renderTemplate(
   value: string,
   quoteNumber: string,
@@ -579,11 +642,23 @@ const quoteNumber =
       );
     }
 
+    const branding =
+      await loadDocumentBranding(
+        request,
+        tenantId
+      );
+
     const {
       bytes: quotationPdfBytes,
       filename: quotationPdfFilename,
     } = await generateQuotationPdf({
       companyName,
+      companyProfile:
+        branding?.companyProfile ??
+        null,
+      documentSettings:
+        branding?.documentSettings ??
+        null,
       customerName,
       quoteNumber,
       quoteDate:
