@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Driver = {
@@ -157,18 +158,45 @@ export default function DriverDashboardPage() {
           ) : (
             <div style={styles.listGrid}>
               {todaysJobs.map((job) => (
-                <article key={job.id} style={styles.listCard}>
-                  <div style={styles.rowBetween}>
-                    <strong>{job.reference || "Job"}</strong>
-                    <span style={styles.badge}>{job.status || "Pending"}</span>
-                  </div>
-                  <div style={styles.infoGrid}>
-                    <Info label="Reference" value={job.customer_reference} />
-                    <Info label="Priority" value={job.priority} />
-                    <Info label="POD" value={job.pod_status || "Pending"} />
-                  </div>
-                  {job.notes ? <p style={styles.muted}>{job.notes}</p> : null}
-                </article>
+                <Link
+                  key={job.id}
+                  href={`/driver/jobs/${job.id}`}
+                  style={styles.jobLink}
+                >
+                  <article style={styles.listCard}>
+                    <div style={styles.rowBetween}>
+                      <strong>{job.reference || "Job"}</strong>
+                      <span style={styles.badge}>
+                        {job.status || "Pending"}
+                      </span>
+                    </div>
+
+                    <div style={styles.infoGrid}>
+                      <Info
+                        label="Reference"
+                        value={job.customer_reference}
+                      />
+                      <Info
+                        label="Priority"
+                        value={job.priority}
+                      />
+                      <Info
+                        label="POD"
+                        value={job.pod_status || "Pending"}
+                      />
+                    </div>
+
+                    {job.notes ? (
+                      <p style={styles.muted}>
+                        {job.notes}
+                      </p>
+                    ) : null}
+
+                    <div style={styles.openJob}>
+                      Open job →
+                    </div>
+                  </article>
+                </Link>
               ))}
             </div>
           )}
@@ -178,15 +206,31 @@ export default function DriverDashboardPage() {
           <h2 style={styles.sectionTitle}>Recent Assigned Jobs</h2>
           <div style={styles.listGrid}>
             {data.jobs.slice(0, 20).map((job) => (
-              <article key={job.id} style={styles.listCard}>
-                <div style={styles.rowBetween}>
-                  <strong>{job.reference || "Job"}</strong>
-                  <span style={styles.badge}>{job.status || "Pending"}</span>
-                </div>
-                <p style={styles.muted}>
-                  {formatDate(job.job_date || job.scheduled_date)}
-                </p>
-              </article>
+              <Link
+                key={job.id}
+                href={`/driver/jobs/${job.id}`}
+                style={styles.jobLink}
+              >
+                <article style={styles.listCard}>
+                  <div style={styles.rowBetween}>
+                    <strong>{job.reference || "Job"}</strong>
+                    <span style={styles.badge}>
+                      {job.status || "Pending"}
+                    </span>
+                  </div>
+
+                  <p style={styles.muted}>
+                    {formatDate(
+                      job.job_date ||
+                        job.scheduled_date,
+                    )}
+                  </p>
+
+                  <div style={styles.openJob}>
+                    Open job →
+                  </div>
+                </article>
+              </Link>
             ))}
           </div>
         </section>
@@ -311,6 +355,17 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
     gap: 14,
+  },
+  jobLink: {
+    display: "block",
+    color: "inherit",
+    textDecoration: "none",
+  },
+  openJob: {
+    marginTop: 14,
+    color: "#2563eb",
+    fontSize: 13,
+    fontWeight: 900,
   },
   listCard: {
     border: "1px solid #e2e8f0",
