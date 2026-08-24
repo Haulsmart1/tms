@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import type { EmailOtpType } from "@supabase/supabase-js";
+import { decideAuthCallbackVerification } from "../../../../lib/auth/callback";
 
 function safeNextPath(raw: string | null, origin: string): string {
   if (!raw) {
@@ -206,10 +207,44 @@ export async function GET(request: NextRequest) {
           code!
         );
 
-  if (verificationError) {
+  /*
+   * Magic-link tokens are single use. Mail scanners, browser
+   * prefetchers or duplicate navigation can replay the same
+   * callback after the first request has already established a
+   * valid session.
+   *
+   * An expired token is NEVER accepted by itself. Recovery is
+   * allowed only when Supabase independently confirms that this
+   * request already carries a valid authenticated session.
+   */
+  const {
+    data: {
+      user: existingUser,
+    },
+    error: existingUserError,
+  } = verificationError
+    ? await supabase.auth.getUser()
+    : {
+        data: {
+          user: null,
+        },
+        error: null,
+      };
+
+  const verificationDecision =
+    decideAuthCallbackVerification(
+      Boolean(verificationError),
+      Boolean(
+        existingUser &&
+          !existingUserError
+      ),
+    );
+
+  if (verificationDecision === "reject") {
     console.error(
       "Magic link verification failed:",
-      verificationError.message
+      verificationError?.message ??
+        "Unknown verification error"
     );
 
     return NextResponse.redirect(
@@ -220,23 +255,34 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // ----------------------------------------------------------
-  // Obtain the authenticated user after the successful exchange.
-  // ----------------------------------------------------------
+  let user = existingUser;
 
-  const {
-    data: {
-      user,
-    },
-    error: userError,
-  } = await supabase.auth.getUser();
+  if (verificationDecision === "verified") {
+    const {
+      data: {
+        user: verifiedUser,
+      },
+      error: userError,
+    } = await supabase.auth.getUser();
 
-  if (userError || !user) {
-    console.error(
-      "Auth callback could not resolve authenticated user:",
-      userError?.message ?? "No user returned"
-    );
+    if (userError || !verifiedUser) {
+      console.error(
+        "Auth callback could not resolve authenticated user:",
+        userError?.message ?? "No user returned"
+      );
 
+      return NextResponse.redirect(
+        new URL(
+          "/login?error=user",
+          url.origin
+        )
+      );
+    }
+
+    user = verifiedUser;
+  }
+
+  if (!user) {
     return NextResponse.redirect(
       new URL(
         "/login?error=user",
