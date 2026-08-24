@@ -7,7 +7,7 @@ describe("geocodeUrl", () => {
   it("encodes the query and pins countrySet to GB", () => {
     const url = geocodeUrl("1 Dock Rd, Leeds", "KEY");
     expect(url).toBe(
-      "https://api.tomtom.com/search/2/geocode/1%20Dock%20Rd%2C%20Leeds.json?key=KEY&limit=1&countrySet=GB"
+      "https://api.tomtom.com/search/2/geocode/1%20Dock%20Rd%2C%20Leeds.json?key=KEY&limit=5&countrySet=GB"
     );
   });
 });

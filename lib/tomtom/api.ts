@@ -15,7 +15,7 @@ import type { LatLng, RouteResult } from "../planning/types";
 const BASE = "https://api.tomtom.com";
 
 export function geocodeUrl(query: string, key: string): string {
-  return `${BASE}/search/2/geocode/${encodeURIComponent(query)}.json?key=${encodeURIComponent(key)}&limit=1&countrySet=GB`;
+  return `${BASE}/search/2/geocode/${encodeURIComponent(query)}.json?key=${encodeURIComponent(key)}&limit=5&countrySet=GB`;
 }
 
 export function parseGeocode(json: any): LatLng | null {
