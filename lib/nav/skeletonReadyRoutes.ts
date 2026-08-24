@@ -10,15 +10,23 @@
    allowlist rather than a denylist.
 
    TO ADD A ROUTE, in this order and not before:
-   1. Its loader early-returns unless useTenant().status === "ready", with
-      status in the effect's dependency array.
-   2. Every region that reads data renders a skeleton via shouldShowSkeleton
+   1. The page actually renders <TenantGate>. Most do, but 22 route files do
+      not, and listing one of those here would show the sidebar during tenant
+      resolution while the page body rendered ungated beside it. Nothing can
+      detect that for you: TenantGate cannot report that it was never used.
+   2. Its loader early-returns unless useTenant().status === "ready", with
+      status in the effect's dependency array. Note that TenantGate is an
+      element inside each page's own JSX, not a wrapper around the component,
+      so it has NEVER stopped a page's effects from firing during loading.
+      This step is what stops the queries, and on most pages it is fixing a
+      bug that is already there rather than preventing a new one.
+   3. Every region that reads data renders a skeleton via shouldShowSkeleton
       (lib/loading/skeletonVisibility.ts), including regions that currently
-      render an empty state. A page listed here without step 2 will show its
+      render an empty state. A page listed here without step 3 will show its
       "nothing found" copy as a statement of fact while the query is in flight.
-   3. Then add the path below.
+   4. Then add the path below.
 
-   Adding a path before steps 1 and 2 is the one way to make this change worse
+   Adding a path before steps 1 to 3 is the one way to make this change worse
    than what it replaced. See the spec for the four pages that already do this.
 
    WHEN EVERY ROUTE IS LISTED, the teardown is bigger than this file. In one

@@ -787,15 +787,18 @@ to:
 
 ```tsx
   useEffect(() => {
-    /* Before the gate inversion this page could not mount until status was
-       "ready", so this guard was structurally unnecessary. Now it mounts
-       during tenant resolution, and tenant.filterByTenant would otherwise run
-       against an unresolved tenant. RLS is the isolation boundary either way
-       (see CLAUDE.md), so the failure mode is a wasted round trip, not a leak.
+    /* This guard fixes an existing bug rather than preventing a new one.
+       TenantGate is an element inside this component's own JSX, not a wrapper
+       around it, so it only ever gated the rendered DOM: DashboardPage mounts
+       and this effect fires while status is still "loading", and has always
+       done so. Every query below therefore ran with activeTenantId === null on
+       each cold load. RLS is the isolation boundary (see CLAUDE.md), so that
+       was a wasted round trip returning nothing, not a leak, which is why it
+       went unnoticed.
 
-       Returning BEFORE setState("loading") is what stops a token refresh
-       flashing a skeleton over a populated page: resolve() re-enters "loading"
-       on every auth event, and this effect must not reset the page for that. */
+       Returning BEFORE setState("loading") also stops a token refresh flashing
+       a skeleton over a populated page: resolve() re-enters "loading" on every
+       auth event, and this effect must not reset the page for that. */
     if (tenant.status !== "ready") return;
 
     let cancelled = false;

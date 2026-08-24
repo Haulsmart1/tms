@@ -213,9 +213,17 @@ Converted pages derive their skeleton visibility from this rather than from a lo
 
 ### Querying before tenant resolves
 
-Today a gated page's effects cannot run before `status === "ready"`, because the page never
-mounts. After pass-through they can. Each converted page's loader therefore early-returns
-unless status is ready, with `status` in the dependency array.
+CORRECTED 2026-08-24, during Task 7's review. This section originally claimed a gated page's
+effects cannot run before `status === "ready"` because the page never mounts. That is false.
+`TenantGate` is rendered *inside* each page's own JSX rather than wrapping the component, so
+it swaps the visible DOM but has never prevented the page's own `useEffect` from firing.
+`/dashboard` has been issuing its four Supabase queries with `activeTenantId === null` on
+every cold load, and still does.
+
+So the `status !== "ready"` early-return in each converted page's loader fixes a pre-existing
+bug rather than merely insuring against the gate inversion. It is still exactly the change
+described: early-return unless ready, with `status` in the dependency array. Only the reason
+for it changed.
 
 Blast radius, stated precisely: per `CLAUDE.md`, RLS in Postgres is the isolation boundary and
 the SECURITY DEFINER helpers fail closed. `TenantGate` is a UX and correctness guard, not the
