@@ -9,6 +9,9 @@ export type TrackingStop = {
   address_line: string | null;
   city: string | null;
   postcode: string | null;
+  /** TomTom geocode cache written to job_stops. */
+  lat: number | null;
+  lng: number | null;
   /* NOT a real planned time. app/jobs/page.tsx writes it as
      `${scheduled_date}T08:00:00`, so it is accurate to the day and not the
      hour. See lib/pod/overdue.ts, which says the same thing about the same

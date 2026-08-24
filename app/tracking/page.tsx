@@ -104,7 +104,7 @@ export default function TrackingPage() {
               vehicles ( registration ),
               drivers ( name, phone ),
               job_stops (
-                id, stop_order, type, address_line, city, postcode,
+                id, stop_order, type, address_line, city, postcode, lat, lng,
                 planned_at, delivered_at, pod_status, recipient_name,
                 pod_updated_at, pod_photo_url, pod_document_url
               )
