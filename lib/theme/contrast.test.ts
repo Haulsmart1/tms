@@ -94,6 +94,16 @@ type Pair = { fg: string; bg: string; min: number; label: string };
 const AA_TEXT = 4.5;
 const AA_NON_TEXT = 3;
 
+/* Skeleton placeholders are decorative: every one carries aria-hidden, so they
+   are not "visual information required to identify a component" and WCAG
+   1.4.11's 3:1 does not apply. They must still be perceptible against every
+   surface they can sit on.
+
+   DO NOT raise this to AA_NON_TEXT. A bar at 3:1 reads as real content rather
+   than a placeholder, which is the exact confusion a skeleton exists to avoid.
+   The shipped values measure 1.30 to 1.54 across both themes. */
+const SKELETON_VISIBLE = 1.25;
+
 /* The same pairs are asserted against both themes: a token's job does not
    change between them, only its value does. */
 /* DELIBERATELY NOT ASSERTED: badge borders against --surface.
@@ -131,6 +141,9 @@ const PAIRS: Pair[] = [
   { label: "focus on canvas",             fg: "--focus",             bg: "--canvas",        min: AA_NON_TEXT },
   { label: "focus on surface",            fg: "--focus",             bg: "--surface",       min: AA_NON_TEXT },
   { label: "focus on chrome",             fg: "--focus",             bg: "--chrome",        min: AA_NON_TEXT },
+  { label: "skeleton on surface",         fg: "--skeleton",          bg: "--surface",       min: SKELETON_VISIBLE },
+  { label: "skeleton on surface-2",       fg: "--skeleton",          bg: "--surface-2",     min: SKELETON_VISIBLE },
+  { label: "skeleton on canvas",          fg: "--skeleton",          bg: "--canvas",        min: SKELETON_VISIBLE },
 ];
 
 describe.each([

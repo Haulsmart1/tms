@@ -64,6 +64,7 @@ const config: Config = {
         canvas: "var(--canvas)",
         surface: { DEFAULT: "var(--surface)", 2: "var(--surface-2)" },
         line: { DEFAULT: "var(--line)", strong: "var(--line-strong)" },
+        skeleton: "var(--skeleton)",
         chrome: {
           DEFAULT: "var(--chrome)",
           raised: "var(--chrome-raised)",
