@@ -2,11 +2,24 @@
 
 import Link from "next/link";
 import {
+  type ChangeEvent,
   use,
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
+
+type PodEvidence = {
+  id: string;
+  stop_id: string;
+  evidence_type: string;
+  storage_path: string;
+  original_filename: string | null;
+  mime_type: string | null;
+  file_size_bytes: number | null;
+  created_at: string;
+};
 
 type Stop = {
   id: string;
@@ -23,6 +36,8 @@ type Stop = {
   delivered_at: string | null;
   pod_notes: string | null;
   pod_updated_at: string | null;
+  pod_photo_url: string | null;
+  evidence: PodEvidence[];
 };
 
 type Job = {
@@ -45,6 +60,10 @@ type JobResponse = {
   error?: string;
 };
 
+type ApiResponse = {
+  error?: string;
+};
+
 export default function DriverJobPage({
   params,
 }: {
@@ -61,40 +80,46 @@ export default function DriverJobPage({
   const [message, setMessage] =
     useState("");
 
-  const loadJob = useCallback(async () => {
-    setLoading(true);
+  const loadJob =
+    useCallback(async () => {
+      setLoading(true);
 
-    try {
-      const response = await fetch(
-        `/api/driver/jobs/${encodeURIComponent(jobId)}`,
-        {
-          cache: "no-store",
-        },
-      );
+      try {
+        const response =
+          await fetch(
+            `/api/driver/jobs/${encodeURIComponent(jobId)}`,
+            {
+              cache: "no-store",
+            },
+          );
 
-      const body =
-        (await response.json()) as JobResponse;
+        const body =
+          (await response.json()) as JobResponse;
 
-      if (!response.ok || !body.job) {
-        throw new Error(
-          body.error ||
-            "Unable to load this job.",
+        if (
+          !response.ok ||
+          !body.job
+        ) {
+          throw new Error(
+            body.error ||
+              "Unable to load this job.",
+          );
+        }
+
+        setJob(body.job);
+        setMessage("");
+      } catch (error) {
+        setJob(null);
+
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "Unable to load this job.",
         );
+      } finally {
+        setLoading(false);
       }
-
-      setJob(body.job);
-      setMessage("");
-    } catch (error) {
-      setJob(null);
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "Unable to load this job.",
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [jobId]);
+    }, [jobId]);
 
   useEffect(() => {
     void loadJob();
@@ -158,7 +183,10 @@ export default function DriverJobPage({
             </div>
 
             <StatusBadge
-              value={job.status || "Pending"}
+              value={
+                job.status ||
+                "Pending"
+              }
             />
           </div>
 
@@ -173,12 +201,17 @@ export default function DriverJobPage({
 
             <Info
               label="POD"
-              value={job.pod_status || "Pending"}
+              value={
+                job.pod_status ||
+                "Pending"
+              }
             />
 
             <Info
               label="Customer Ref"
-              value={job.customer_reference}
+              value={
+                job.customer_reference
+              }
             />
 
             <Info
@@ -192,6 +225,7 @@ export default function DriverJobPage({
               <div className="mb-1 text-xs font-black uppercase tracking-wide text-slate-500">
                 Job notes
               </div>
+
               {job.notes}
             </div>
           ) : null}
@@ -203,12 +237,16 @@ export default function DriverJobPage({
           </h2>
 
           <div className="mt-3 grid gap-3">
-            {job.stops.map((stop) => (
-              <StopCard
-                key={stop.id}
-                stop={stop}
-              />
-            ))}
+            {job.stops.map(
+              (stop) => (
+                <StopCard
+                  key={stop.id}
+                  jobId={job.id}
+                  stop={stop}
+                  onChanged={loadJob}
+                />
+              ),
+            )}
           </div>
         </section>
 
@@ -223,12 +261,60 @@ export default function DriverJobPage({
 }
 
 function StopCard({
+  jobId,
   stop,
+  onChanged,
 }: {
+  jobId: string;
   stop: Stop;
+  onChanged: () => Promise<void>;
 }) {
   const isCollection =
     stop.type === "collection";
+
+  const isDelivery =
+    stop.type === "delivery";
+
+  const delivered =
+    stop.pod_status === "delivered";
+
+  const [recipientName, setRecipientName] =
+    useState(
+      stop.recipient_name ?? "",
+    );
+
+  const [podNotes, setPodNotes] =
+    useState(
+      stop.pod_notes ?? "",
+    );
+
+  const [busy, setBusy] =
+    useState(false);
+
+  const [message, setMessage] =
+    useState("");
+
+  const [error, setError] =
+    useState("");
+
+  const cameraInputRef =
+    useRef<HTMLInputElement>(null);
+
+  const photoInputRef =
+    useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setRecipientName(
+      stop.recipient_name ?? "",
+    );
+
+    setPodNotes(
+      stop.pod_notes ?? "",
+    );
+  }, [
+    stop.recipient_name,
+    stop.pod_notes,
+  ]);
 
   const fullAddress = [
     stop.address_line,
@@ -241,6 +327,117 @@ function StopCard({
   const navigationUrl =
     `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`;
 
+  async function uploadPhoto(
+    event:
+      ChangeEvent<HTMLInputElement>,
+  ) {
+    const file =
+      event.target.files?.[0];
+
+    event.target.value = "";
+
+    if (!file) {
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const formData =
+        new FormData();
+
+      formData.append(
+        "file",
+        file,
+      );
+
+      const response =
+        await fetch(
+          `/api/driver/jobs/${encodeURIComponent(jobId)}/stops/${encodeURIComponent(stop.id)}/evidence`,
+          {
+            method: "POST",
+            body: formData,
+          },
+        );
+
+      const body =
+        (await response.json()) as ApiResponse;
+
+      if (!response.ok) {
+        throw new Error(
+          body.error ||
+            "Unable to upload POD photo.",
+        );
+      }
+
+      setMessage(
+        "POD photo uploaded.",
+      );
+
+      await onChanged();
+    } catch (uploadError) {
+      setError(
+        uploadError instanceof Error
+          ? uploadError.message
+          : "Unable to upload POD photo.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function completeDelivery() {
+    setBusy(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const response =
+        await fetch(
+          `/api/driver/jobs/${encodeURIComponent(jobId)}/stops/${encodeURIComponent(stop.id)}/complete`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              recipient_name:
+                recipientName,
+              pod_notes:
+                podNotes,
+            }),
+          },
+        );
+
+      const body =
+        (await response.json()) as ApiResponse;
+
+      if (!response.ok) {
+        throw new Error(
+          body.error ||
+            "Unable to complete delivery.",
+        );
+      }
+
+      setMessage(
+        "Delivery completed.",
+      );
+
+      await onChanged();
+    } catch (completeError) {
+      setError(
+        completeError instanceof Error
+          ? completeError.message
+          : "Unable to complete delivery.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
@@ -252,7 +449,9 @@ function StopCard({
                 : "flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 font-black text-emerald-800"
             }
           >
-            {isCollection ? "C" : "D"}
+            {isCollection
+              ? "C"
+              : "D"}
             {stop.stop_order}
           </div>
 
@@ -283,7 +482,8 @@ function StopCard({
 
         <div className="mt-1 text-sm leading-6 text-slate-600">
           {stop.city || ""}
-          {stop.city && stop.postcode
+          {stop.city &&
+          stop.postcode
             ? ", "
             : ""}
           {stop.postcode || ""}
@@ -308,38 +508,213 @@ function StopCard({
 
           <Info
             label="POD"
-            value={stop.pod_status || "Pending"}
+            value={
+              stop.pod_status ||
+              "Pending"
+            }
           />
         </div>
 
-        {stop.recipient_name ? (
-          <div className="mt-3 rounded-xl bg-slate-50 p-3 text-sm">
-            <span className="font-black">
-              Recipient:
-            </span>{" "}
-            {stop.recipient_name}
+        {isDelivery ? (
+          <div className="mt-5 border-t border-slate-100 pt-5">
+            <h3 className="text-base font-black">
+              Proof of Delivery
+            </h3>
+
+            {delivered ? (
+              <div className="mt-3 rounded-xl bg-emerald-50 p-4">
+                <div className="font-black text-emerald-900">
+                  Delivery complete
+                </div>
+
+                <div className="mt-2 text-sm text-emerald-900">
+                  Recipient:{" "}
+                  {stop.recipient_name ||
+                    "Not recorded"}
+                </div>
+
+                {stop.pod_notes ? (
+                  <div className="mt-1 text-sm text-emerald-900">
+                    Notes:{" "}
+                    {stop.pod_notes}
+                  </div>
+                ) : null}
+
+                <div className="mt-1 text-sm text-emerald-900">
+                  Completed:{" "}
+                  {formatDateTime(
+                    stop.delivered_at,
+                  )}
+                </div>
+              </div>
+            ) : (
+              <>
+                <label className="mt-3 block">
+                  <span className="text-xs font-black uppercase tracking-wide text-slate-600">
+                    Recipient name
+                  </span>
+
+                  <input
+                    value={recipientName}
+                    maxLength={200}
+                    disabled={busy}
+                    onChange={(event) =>
+                      setRecipientName(
+                        event.target.value,
+                      )
+                    }
+                    className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base outline-none focus:border-blue-600"
+                    placeholder="Name of person receiving goods"
+                  />
+                </label>
+
+                <label className="mt-4 block">
+                  <span className="text-xs font-black uppercase tracking-wide text-slate-600">
+                    POD notes
+                  </span>
+
+                  <textarea
+                    value={podNotes}
+                    maxLength={4000}
+                    disabled={busy}
+                    onChange={(event) =>
+                      setPodNotes(
+                        event.target.value,
+                      )
+                    }
+                    className="mt-1 min-h-24 w-full rounded-xl border border-slate-300 bg-white p-3 text-base outline-none focus:border-blue-600"
+                    placeholder="Optional delivery notes"
+                  />
+                </label>
+
+                <div className="mt-4">
+                  <div className="text-xs font-black uppercase tracking-wide text-slate-600">
+                    POD photos
+                  </div>
+
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        cameraInputRef.current?.click()
+                      }
+                      className="min-h-12 rounded-xl bg-blue-700 px-3 text-sm font-black text-white disabled:opacity-50"
+                    >
+                      Take Photo
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        photoInputRef.current?.click()
+                      }
+                      className="min-h-12 rounded-xl border border-blue-700 bg-white px-3 text-sm font-black text-blue-700 disabled:opacity-50"
+                    >
+                      Upload Photo
+                    </button>
+                  </div>
+
+                  <input
+                    ref={cameraInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/heic"
+                    capture="environment"
+                    className="hidden"
+                    onChange={(event) =>
+                      void uploadPhoto(
+                        event,
+                      )
+                    }
+                  />
+
+                  <input
+                    ref={photoInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/heic"
+                    className="hidden"
+                    onChange={(event) =>
+                      void uploadPhoto(
+                        event,
+                      )
+                    }
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() =>
+                    void completeDelivery()
+                  }
+                  className="mt-4 min-h-14 w-full rounded-xl bg-emerald-700 px-4 text-base font-black text-white disabled:opacity-50"
+                >
+                  {busy
+                    ? "Please wait..."
+                    : "Complete Delivery"}
+                </button>
+              </>
+            )}
+
+            <div className="mt-4">
+              <div className="text-xs font-black uppercase tracking-wide text-slate-600">
+                Evidence
+              </div>
+
+              {stop.evidence.length >
+              0 ? (
+                <div className="mt-2 grid gap-2">
+                  {stop.evidence.map(
+                    (item) => (
+                      <div
+                        key={item.id}
+                        className="rounded-xl bg-slate-50 p-3 text-sm"
+                      >
+                        <div className="font-bold">
+                          {item.original_filename ||
+                            "POD photo"}
+                        </div>
+
+                        <div className="mt-1 text-xs text-slate-500">
+                          {formatDateTime(
+                            item.created_at,
+                          )}
+                        </div>
+                      </div>
+                    ),
+                  )}
+                </div>
+              ) : stop.pod_photo_url ? (
+                <div className="mt-2 rounded-xl bg-slate-50 p-3 text-sm">
+                  Legacy POD photo recorded
+                </div>
+              ) : (
+                <div className="mt-2 text-sm text-slate-500">
+                  No POD photo uploaded yet.
+                </div>
+              )}
+            </div>
+
+            {message ? (
+              <div className="mt-3 rounded-xl bg-emerald-50 p-3 text-sm font-bold text-emerald-900">
+                {message}
+              </div>
+            ) : null}
+
+            {error ? (
+              <div className="mt-3 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-800">
+                {error}
+              </div>
+            ) : null}
           </div>
         ) : null}
 
-        {stop.pod_notes ? (
-          <div className="mt-3 rounded-xl bg-slate-50 p-3 text-sm">
-            <span className="font-black">
-              POD notes:
-            </span>{" "}
-            {stop.pod_notes}
-          </div>
-        ) : null}
-
-        {stop.collected_at ||
-        stop.delivered_at ? (
+        {stop.collected_at ? (
           <div className="mt-3 text-xs font-semibold text-slate-500">
-            {isCollection
-              ? "Collected"
-              : "Delivered"}
-            :{" "}
+            Collected:{" "}
             {formatDateTime(
-              stop.collected_at ||
-                stop.delivered_at,
+              stop.collected_at,
             )}
           </div>
         ) : null}
@@ -355,7 +730,10 @@ function StatusBadge({
 }) {
   return (
     <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black capitalize text-slate-700">
-      {value.replaceAll("_", " ")}
+      {value.replaceAll(
+        "_",
+        " ",
+      )}
     </span>
   );
 }
@@ -365,7 +743,10 @@ function Info({
   value,
 }: {
   label: string;
-  value: string | null | undefined;
+  value:
+    | string
+    | null
+    | undefined;
 }) {
   return (
     <div>
@@ -381,30 +762,47 @@ function Info({
 }
 
 function formatDate(
-  value: string | null | undefined,
+  value:
+    | string
+    | null
+    | undefined,
 ) {
   if (!value) {
     return "Not set";
   }
 
   const date =
-    new Date(`${value}T00:00:00`);
+    new Date(
+      `${value}T00:00:00`,
+    );
 
-  return Number.isNaN(date.getTime())
+  return Number.isNaN(
+    date.getTime(),
+  )
     ? value
-    : date.toLocaleDateString("en-GB");
+    : date.toLocaleDateString(
+        "en-GB",
+      );
 }
 
 function formatDateTime(
-  value: string | null | undefined,
+  value:
+    | string
+    | null
+    | undefined,
 ) {
   if (!value) {
     return "Not set";
   }
 
-  const date = new Date(value);
+  const date =
+    new Date(value);
 
-  return Number.isNaN(date.getTime())
+  return Number.isNaN(
+    date.getTime(),
+  )
     ? value
-    : date.toLocaleString("en-GB");
+    : date.toLocaleString(
+        "en-GB",
+      );
 }

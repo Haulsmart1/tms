@@ -59,10 +59,6 @@ export async function GET(
       throw new Error(jobError.message);
     }
 
-    /*
-     * 404 is deliberate for both a missing job and a job assigned
-     * to another driver. Do not leak job existence across drivers.
-     */
     if (!job) {
       return NextResponse.json(
         { error: "Job not found." },
@@ -76,7 +72,7 @@ export async function GET(
     } = await admin
       .from("job_stops")
       .select(
-        "id,stop_order,type,address_line,city,postcode,planned_at,status,pod_status,recipient_name,collected_at,delivered_at,pod_notes,pod_updated_at",
+        "id,stop_order,type,address_line,city,postcode,planned_at,status,pod_status,recipient_name,collected_at,delivered_at,pod_notes,pod_updated_at,pod_photo_url",
       )
       .eq("tenant_id", session.tenantId)
       .eq("job_id", job.id)
@@ -88,11 +84,50 @@ export async function GET(
       throw new Error(stopsError.message);
     }
 
+    const {
+      data: evidence,
+      error: evidenceError,
+    } = await admin
+      .from("pod_evidence")
+      .select(
+        "id,stop_id,evidence_type,storage_path,original_filename,mime_type,file_size_bytes,created_at",
+      )
+      .eq("tenant_id", session.tenantId)
+      .eq("job_id", job.id)
+      .order("created_at", {
+        ascending: false,
+      });
+
+    if (evidenceError) {
+      throw new Error(evidenceError.message);
+    }
+
+    const evidenceByStop =
+      new Map<string, typeof evidence>();
+
+    for (const item of evidence ?? []) {
+      const current =
+        evidenceByStop.get(item.stop_id) ?? [];
+
+      current.push(item);
+      evidenceByStop.set(
+        item.stop_id,
+        current,
+      );
+    }
+
     return NextResponse.json({
       portalType: session.portalType,
       job: {
         ...job,
-        stops: stops ?? [],
+        stops: (stops ?? []).map(
+          (stop) => ({
+            ...stop,
+            evidence:
+              evidenceByStop.get(stop.id) ??
+              [],
+          }),
+        ),
       },
     });
   } catch (error) {
