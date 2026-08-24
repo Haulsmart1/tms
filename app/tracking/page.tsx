@@ -35,6 +35,102 @@ const CLOCK = new Intl.DateTimeFormat("en-GB", {
   timeZone: OPERATOR_TIME_ZONE, hour: "2-digit", minute: "2-digit", hour12: false,
 });
 
+const TRACKING_GEOCODE_BATCH = 20;
+
+async function geocodeMissingTrackingStops<T extends {
+  stops: Array<{
+    id: string;
+    lat: number | null;
+    lng: number | null;
+  }>;
+}>(
+  jobs: T[],
+  isCancelled: () => boolean
+): Promise<T[]> {
+  const missingStopIds = jobs.flatMap((job) =>
+    job.stops
+      .filter((stop) => stop.lat === null || stop.lng === null)
+      .map((stop) => stop.id)
+  );
+
+  if (missingStopIds.length === 0) {
+    return jobs;
+  }
+
+  const coordinates = new Map<
+    string,
+    { lat: number; lng: number }
+  >();
+
+  for (
+    let start = 0;
+    start < missingStopIds.length;
+    start += TRACKING_GEOCODE_BATCH
+  ) {
+    if (isCancelled()) {
+      return jobs;
+    }
+
+    const batch = missingStopIds.slice(
+      start,
+      start + TRACKING_GEOCODE_BATCH
+    );
+
+    let response: Response;
+
+    try {
+      response = await fetch("/api/tomtom/geocode", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          stopIds: batch,
+        }),
+      });
+    } catch {
+      break;
+    }
+
+    if (!response.ok) {
+      break;
+    }
+
+    const payload = await response.json();
+
+    for (const item of payload.geocoded ?? []) {
+      if (
+        typeof item?.id === "string" &&
+        typeof item?.lat === "number" &&
+        typeof item?.lng === "number"
+      ) {
+        coordinates.set(item.id, {
+          lat: item.lat,
+          lng: item.lng,
+        });
+      }
+    }
+  }
+
+  if (coordinates.size === 0 || isCancelled()) {
+    return jobs;
+  }
+
+  return jobs.map((job) => ({
+    ...job,
+    stops: job.stops.map((stop) => {
+      const coordinate = coordinates.get(stop.id);
+
+      return coordinate
+        ? {
+            ...stop,
+            lat: coordinate.lat,
+            lng: coordinate.lng,
+          }
+        : stop;
+    }),
+  }));
+}
 export default function TrackingPage() {
   const supabase = createClient();
   const tenant = useTenant();
@@ -161,7 +257,14 @@ export default function TrackingPage() {
 
         if (cancelled) return;
 
-        setJobs(mapped);
+        const geocodedJobs = await geocodeMissingTrackingStops(
+        mapped,
+        () => cancelled
+      );
+
+      if (cancelled) return;
+
+      setJobs(geocodedJobs);
         setPositions(readings);
         setRefreshFailed(false);
         setLoading(false);
