@@ -195,6 +195,7 @@ export default function QuotationPanel({
   const [message, setMessage] = useState("");
 
   const [showForm, setShowForm] = useState(false);
+  const [draftRestored, setDraftRestored] = useState(false);
   const [preview, setPreview] = useState<Quotation | null>(null);
   const [activeQuoteRequestId, setActiveQuoteRequestId] = useState("");
 
@@ -228,6 +229,9 @@ export default function QuotationPanel({
     emptyStop("collection"),
     emptyStop("delivery"),
   ]);
+
+  const quotationDraftStorageKey =
+    `tms:quotation-draft:${tenantId}`;
 
   const selectedCustomer = availableCustomers.find(
     (customer) => customer.id === customerId
@@ -537,6 +541,169 @@ export default function QuotationPanel({
       50
     );
   }
+  useEffect(() => {
+    try {
+      const rawDraft =
+        window.localStorage.getItem(
+          quotationDraftStorageKey
+        );
+
+      if (!rawDraft) {
+        setDraftRestored(true);
+        return;
+      }
+
+      const draft = JSON.parse(
+        rawDraft
+      ) as {
+        activeQuoteRequestId?: string;
+        customerId?: string;
+        quoteDate?: string;
+        validUntil?: string;
+        serviceDate?: string;
+        customerReference?: string;
+        poReference?: string;
+        notes?: string;
+        terms?: string;
+        lines?: LineDraft[];
+        stops?: StopDraft[];
+      };
+
+      setActiveQuoteRequestId(
+        draft.activeQuoteRequestId ?? ""
+      );
+
+      setCustomerId(
+        draft.customerId ?? ""
+      );
+
+      setQuoteDate(
+        draft.quoteDate || today()
+      );
+
+      setValidUntil(
+        draft.validUntil ||
+          addDays(today(), 14)
+      );
+
+      setServiceDate(
+        draft.serviceDate ?? ""
+      );
+
+      setCustomerReference(
+        draft.customerReference ?? ""
+      );
+
+      setPoReference(
+        draft.poReference ?? ""
+      );
+
+      setNotes(
+        draft.notes ?? ""
+      );
+
+      setTerms(
+        draft.terms ||
+          "Quotation valid for 14 days from date of issue."
+      );
+
+      setLines(
+        Array.isArray(draft.lines) &&
+          draft.lines.length > 0
+          ? draft.lines
+          : [emptyLine()]
+      );
+
+      setStops(
+        Array.isArray(draft.stops) &&
+          draft.stops.length > 0
+          ? draft.stops
+          : [
+              emptyStop("collection"),
+              emptyStop("delivery"),
+            ]
+      );
+
+      setEditingQuotation(null);
+      setPreview(null);
+      setShowForm(true);
+      setMessage(
+        "Unsaved quotation draft restored."
+      );
+    } catch (error) {
+      console.error(
+        "Unable to restore quotation draft.",
+        error
+      );
+    } finally {
+      setDraftRestored(true);
+    }
+  }, [quotationDraftStorageKey]);
+
+  useEffect(() => {
+    if (
+      !draftRestored ||
+      !showForm ||
+      editingQuotation
+    ) {
+      return;
+    }
+
+    const draft = {
+      activeQuoteRequestId,
+      customerId,
+      quoteDate,
+      validUntil,
+      serviceDate,
+      customerReference,
+      poReference,
+      notes,
+      terms,
+      lines,
+      stops,
+    };
+
+    try {
+      window.localStorage.setItem(
+        quotationDraftStorageKey,
+        JSON.stringify(draft)
+      );
+    } catch (error) {
+      console.error(
+        "Unable to autosave quotation draft.",
+        error
+      );
+    }
+  }, [
+    draftRestored,
+    showForm,
+    editingQuotation,
+    quotationDraftStorageKey,
+    activeQuoteRequestId,
+    customerId,
+    quoteDate,
+    validUntil,
+    serviceDate,
+    customerReference,
+    poReference,
+    notes,
+    terms,
+    lines,
+    stops,
+  ]);
+
+  function clearSavedQuotationDraft() {
+    try {
+      window.localStorage.removeItem(
+        quotationDraftStorageKey
+      );
+    } catch (error) {
+      console.error(
+        "Unable to clear quotation draft.",
+        error
+      );
+    }
+  }
   function resetForm() {
     const date = today();
 
@@ -809,7 +976,6 @@ export default function QuotationPanel({
   function openNewQuotation() {
     setEditingQuotation(null);
     setPreview(null);
-    resetForm();
     setShowForm(true);
     setMessage("");
 
@@ -1351,6 +1517,7 @@ export default function QuotationPanel({
         `${body.quotation?.quote_number || "Quotation"} created.`
       );
 
+      clearSavedQuotationDraft();
       resetForm();
       setShowForm(false);
       await load();
@@ -1681,8 +1848,10 @@ export default function QuotationPanel({
             }
 
             if (showForm) {
-              resetForm();
               setShowForm(false);
+              setMessage(
+                "Quotation draft saved. You can return to it later."
+              );
               return;
             }
 
