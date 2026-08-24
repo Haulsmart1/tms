@@ -1,5 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 import { cn } from "../lib/cn";
+import Skeleton from "./Skeleton";
 
 export type Column<T> = {
   header: string;
@@ -83,7 +84,7 @@ export default function DataTable<T>({
                 <tr key={`skeleton-${rowIndex}`} className="border-b border-line last:border-0">
                   {columns.map((col, i) => (
                     <td key={`${col.header}-${i}`} className="px-4 py-3">
-                      <span className="block h-3 w-3/4 animate-pulse rounded bg-surface-2" />
+                      <Skeleton w="75%" h="0.75rem" />
                     </td>
                   ))}
                 </tr>
