@@ -1211,7 +1211,13 @@ function Info({
     <div className="text-sm">
       <span className="text-kicker uppercase text-ink-2">{label}</span>{" "}
       <strong className="block text-ink">
-        {loading ? <Skeleton w="80%" h="0.875rem" /> : value || "—"}
+        {/* display="inline" is load-bearing, not cosmetic. This <strong> is
+            block-level at text-sm, so its line box is 18px with text in it. A
+            block skeleton would make it 14px instead, shrinking every Info cell
+            by 4px: three rows of them, so the card jumps 12px shorter while
+            loading and back again on arrival. inline-block keeps the 18px strut
+            and the cell holds its height. */}
+        {loading ? <Skeleton display="inline" w="80%" h="0.875rem" /> : value || "—"}
       </strong>
     </div>
   );
