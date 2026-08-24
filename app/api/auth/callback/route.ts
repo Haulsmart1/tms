@@ -12,6 +12,7 @@ import type {
   EmailOtpType,
 } from "@supabase/supabase-js";
 import {
+  authCallbackRedirectStatus,
   decideAuthCallbackVerification,
 } from "../../../../lib/auth/callback";
 import {
@@ -121,6 +122,10 @@ async function completeAuthentication(
   request: NextRequest,
   input: VerificationInput,
 ) {
+  const redirectStatus =
+    authCallbackRedirectStatus(
+      request.method,
+    );
   const url =
     new URL(request.url);
 
@@ -142,6 +147,7 @@ async function completeAuthentication(
         input.requestedNext,
         url.origin,
       ),
+      { status: redirectStatus },
     );
 
   const supabaseUrl =
@@ -477,6 +483,7 @@ export async function POST(
         "/login?error=invalid_link",
         url.origin,
       ),
+      { status: 303 },
     );
   }
 

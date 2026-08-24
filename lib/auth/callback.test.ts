@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { decideAuthCallbackVerification } from "./callback";
+import {
+  authCallbackRedirectStatus,
+  decideAuthCallbackVerification,
+} from "./callback";
 
 describe("decideAuthCallbackVerification", () => {
   it("continues normally when token verification succeeds", () => {
@@ -24,5 +27,19 @@ describe("decideAuthCallbackVerification", () => {
     expect(
       decideAuthCallbackVerification(true, true),
     ).toBe("recover-existing-session");
+  });
+});
+
+describe("authCallbackRedirectStatus", () => {
+  it("uses 303 after a POST so the browser follows with GET", () => {
+    expect(
+      authCallbackRedirectStatus("POST"),
+    ).toBe(303);
+  });
+
+  it("keeps legacy GET redirects method-preserving", () => {
+    expect(
+      authCallbackRedirectStatus("GET"),
+    ).toBe(307);
   });
 });

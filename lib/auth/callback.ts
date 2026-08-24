@@ -17,3 +17,11 @@ export function decideAuthCallbackVerification(
 
   return "reject";
 }
+
+export function authCallbackRedirectStatus(
+  method: string,
+): 303 | 307 {
+  return method.toUpperCase() === "POST"
+    ? 303
+    : 307;
+}
