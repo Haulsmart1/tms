@@ -2696,207 +2696,279 @@ export default function QuotationPanel({
         </article>
       ) : null}
 
-      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div className="mt-4 overflow-hidden rounded-lg border border-line bg-surface-2">
         {loading ? (
-          <p className="col-span-full py-8 text-center text-sm text-ink-3">
+          <p className="py-8 text-center text-sm text-ink-3">
             Loading quotations...
           </p>
         ) : quotations.length === 0 ? (
-          <p className="col-span-full py-8 text-center text-sm text-ink-3">
+          <p className="py-8 text-center text-sm text-ink-3">
             No quotations yet.
           </p>
         ) : (
-          quotations.map((quotation) => {
-            const converted =
-              Boolean(quotation.converted_job_id);
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px] border-collapse text-sm">
+              <thead className="bg-surface">
+                <tr className="border-b border-line text-left text-xs font-semibold uppercase tracking-wide text-ink-3">
+                  <th className="px-4 py-3">
+                    Quote
+                  </th>
 
-            return (
-              <article
-                key={quotation.id}
-                className="rounded-lg border border-line bg-surface-2 p-3"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <strong className="font-mono text-sm text-ink">
-                      {quotation.quote_number}
-                    </strong>
+                  <th className="px-4 py-3">
+                    Customer
+                  </th>
 
-                    <div className="text-sm text-ink-3">
-                      {quotation.customers?.name ||
-                        "Customer"}
-                    </div>
-                  </div>
+                  <th className="px-4 py-3">
+                    Quote date
+                  </th>
 
-                  <span className="rounded-full border border-line px-2 py-1 text-xs font-semibold capitalize text-ink">
-                    {quotation.status}
-                  </span>
-                </div>
+                  <th className="px-4 py-3">
+                    Valid until
+                  </th>
 
-                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                  <PreviewInfo
-                    label="Quote date"
-                    value={quotation.quote_date}
-                  />
-                  <PreviewInfo
-                    label="Valid until"
-                    value={
-                      quotation.valid_until || "—"
-                    }
-                  />
-                  <PreviewInfo
-                    label="Total"
-                    value={money(
-                      quotation.total,
-                      quotation.currency_code
-                    )}
-                  />
-                  <PreviewInfo
-                    label="Stops"
-                    value={String(
-                      quotation.quotation_stops?.length ?? 0
-                    )}
-                  />
-                </div>
+                  <th className="px-4 py-3 text-center">
+                    Stops
+                  </th>
 
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => setPreview(quotation)}
-                  >
-                    Preview
-                  </Button>
+                  <th className="px-4 py-3 text-right">
+                    Total
+                  </th>
 
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={working}
-                    onClick={() =>
-                      void copyShareLink(quotation)
-                    }
-                  >
-                    Copy Share Link
-                  </Button>
+                  <th className="px-4 py-3">
+                    Status
+                  </th>
 
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={working}
-                    onClick={() =>
-                      void emailQuotation(quotation)
-                    }
-                  >
-                    {working
-                      ? "Working..."
-                      : "Email Quotation"}
-                  </Button>
+                  <th className="px-4 py-3">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
 
-                  {["draft", "sent"].includes(
-                    quotation.status
-                  ) &&
-                  !quotation.converted_job_id ? (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      disabled={working}
+              <tbody>
+                {quotations.map((quotation) => {
+                  const converted =
+                    Boolean(
+                      quotation.converted_job_id
+                    );
+
+                  return (
+                    <tr
+                      key={quotation.id}
+                      tabIndex={0}
+                      className="cursor-pointer border-b border-line transition-colors last:border-b-0 hover:bg-surface focus:bg-surface focus:outline-none"
                       onClick={() =>
-                        startEditQuotation(
+                        setPreview(
                           quotation
                         )
                       }
-                    >
-                      Edit
-                    </Button>
-                  ) : null}
+                      onKeyDown={(event) => {
+                        if (
+                          event.key === "Enter" ||
+                          event.key === " "
+                        ) {
+                          event.preventDefault();
 
-                  {quotation.status === "draft" ? (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      disabled={working}
-                      onClick={() =>
-                        void setStatus(
-                          quotation,
-                          "sent"
-                        )
-                      }
-                    >
-                      Mark Sent
-                    </Button>
-                  ) : null}
-
-                  {["draft", "sent"].includes(
-                    quotation.status
-                  ) ? (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      disabled={working}
-                      onClick={() =>
-                        void setStatus(
-                          quotation,
-                          "accepted"
-                        )
-                      }
-                    >
-                      Accept
-                    </Button>
-                  ) : null}
-
-                  {["draft", "sent"].includes(
-                    quotation.status
-                  ) ? (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      disabled={working}
-                      onClick={() =>
-                        void setStatus(
-                          quotation,
-                          "declined"
-                        )
-                      }
-                    >
-                      Decline
-                    </Button>
-                  ) : null}
-
-                  {quotation.status === "accepted" &&
-                  !converted ? (
-                    <Button
-                      type="button"
-                      disabled={working}
-                      onClick={() =>
-                        void convertToJob(quotation)
-                      }
-                    >
-                      Convert to Job
-                    </Button>
-                  ) : null}
-
-                  {converted ? (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => {
-                        window.location.href =
-                          `/jobs?job=${encodeURIComponent(
-                            String(
-                              quotation.converted_job_id
-                            )
-                          )}`;
+                          setPreview(
+                            quotation
+                          );
+                        }
                       }}
                     >
-                      View Job
-                    </Button>
-                  ) : null}
-                </div>
-              </article>
-            );
-          })
+                      <td className="whitespace-nowrap px-4 py-3 align-middle">
+                        <strong className="font-mono text-sm text-ink">
+                          {quotation.quote_number}
+                        </strong>
+                      </td>
+
+                      <td className="px-4 py-3 align-middle text-ink">
+                        {quotation.customers?.name ||
+                          "Customer"}
+                      </td>
+
+                      <td className="whitespace-nowrap px-4 py-3 align-middle text-ink-2">
+                        {quotation.quote_date}
+                      </td>
+
+                      <td className="whitespace-nowrap px-4 py-3 align-middle text-ink-2">
+                        {quotation.valid_until || "—"}
+                      </td>
+
+                      <td className="px-4 py-3 text-center align-middle text-ink-2">
+                        {quotation.quotation_stops?.length ?? 0}
+                      </td>
+
+                      <td className="whitespace-nowrap px-4 py-3 text-right align-middle font-semibold text-ink">
+                        {money(
+                          quotation.total,
+                          quotation.currency_code
+                        )}
+                      </td>
+
+                      <td className="px-4 py-3 align-middle">
+                        <span className="inline-flex rounded-full border border-line px-2 py-1 text-xs font-semibold capitalize text-ink">
+                          {quotation.status}
+                        </span>
+                      </td>
+
+                      <td
+                        className="px-4 py-3 align-middle"
+                        onClick={(event) =>
+                          event.stopPropagation()
+                        }
+                        onKeyDown={(event) =>
+                          event.stopPropagation()
+                        }
+                      >
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            onClick={() =>
+                              setPreview(
+                                quotation
+                              )
+                            }
+                          >
+                            Open
+                          </Button>
+
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            disabled={working}
+                            onClick={() =>
+                              void emailQuotation(
+                                quotation
+                              )
+                            }
+                          >
+                            {working
+                              ? "Working..."
+                              : "Email"}
+                          </Button>
+
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            disabled={working}
+                            onClick={() =>
+                              void copyShareLink(
+                                quotation
+                              )
+                            }
+                          >
+                            Share
+                          </Button>
+
+                          {["draft", "sent"].includes(
+                            quotation.status
+                          ) &&
+                          !quotation.converted_job_id ? (
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              disabled={working}
+                              onClick={() =>
+                                startEditQuotation(
+                                  quotation
+                                )
+                              }
+                            >
+                              Edit
+                            </Button>
+                          ) : null}
+
+                          {quotation.status === "draft" ? (
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              disabled={working}
+                              onClick={() =>
+                                void setStatus(
+                                  quotation,
+                                  "sent"
+                                )
+                              }
+                            >
+                              Mark Sent
+                            </Button>
+                          ) : null}
+
+                          {["draft", "sent"].includes(
+                            quotation.status
+                          ) ? (
+                            <>
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                disabled={working}
+                                onClick={() =>
+                                  void setStatus(
+                                    quotation,
+                                    "accepted"
+                                  )
+                                }
+                              >
+                                Accept
+                              </Button>
+
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                disabled={working}
+                                onClick={() =>
+                                  void setStatus(
+                                    quotation,
+                                    "declined"
+                                  )
+                                }
+                              >
+                                Decline
+                              </Button>
+                            </>
+                          ) : null}
+
+                          {quotation.status === "accepted" &&
+                          !converted ? (
+                            <Button
+                              type="button"
+                              disabled={working}
+                              onClick={() =>
+                                void convertToJob(
+                                  quotation
+                                )
+                              }
+                            >
+                              Convert to Job
+                            </Button>
+                          ) : null}
+
+                          {converted ? (
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              onClick={() => {
+                                window.location.href =
+                                  `/jobs?job=${encodeURIComponent(
+                                    String(
+                                      quotation.converted_job_id
+                                    )
+                                  )}`;
+                              }}
+                            >
+                              View Job
+                            </Button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
-
       <style jsx>{`
         .control {
           height: 2.5rem;
