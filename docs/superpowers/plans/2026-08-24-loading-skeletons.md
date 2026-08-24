@@ -837,35 +837,35 @@ Replace the whole stat grid (lines 210-231) with:
             {showSkeleton ? <span className="sr-only" role="status">Loading dashboard</span> : null}
             <Stat
               label="Jobs today"
-              value={showSkeleton ? <Skeleton display="inline" w="2.5ch" h="1.25rem" /> : String(kpis.jobsToday)}
+              value={showSkeleton ? <Skeleton display="inline-block" w="2.5ch" h="1.25rem" /> : String(kpis.jobsToday)}
             />
             <Stat
               label="Unassigned"
-              value={showSkeleton ? <Skeleton display="inline" w="2.5ch" h="1.25rem" /> : String(kpis.unassigned)}
+              value={showSkeleton ? <Skeleton display="inline-block" w="2.5ch" h="1.25rem" /> : String(kpis.unassigned)}
               sub={kpis.unassigned > 0 ? "needs a vehicle/driver" : undefined}
               subTone="warning"
             />
             <Stat
               label="On the road"
-              value={showSkeleton ? <Skeleton display="inline" w="2.5ch" h="1.25rem" /> : String(kpis.onTheRoad)}
+              value={showSkeleton ? <Skeleton display="inline-block" w="2.5ch" h="1.25rem" /> : String(kpis.onTheRoad)}
               sub="rostered today"
             />
             <Stat
               label="PODs awaiting"
-              value={showSkeleton ? <Skeleton display="inline" w="2.5ch" h="1.25rem" /> : String(kpis.podsAwaiting)}
+              value={showSkeleton ? <Skeleton display="inline-block" w="2.5ch" h="1.25rem" /> : String(kpis.podsAwaiting)}
               sub={kpis.podsAwaiting > 0 ? "open delivery stops" : undefined}
               subTone="warning"
             />
             <Stat
               label="Overdue invoices"
-              value={showSkeleton ? <Skeleton display="inline" w="6ch" h="1.25rem" /> : money(kpis.overdueInvoicesTotal)}
+              value={showSkeleton ? <Skeleton display="inline-block" w="6ch" h="1.25rem" /> : money(kpis.overdueInvoicesTotal)}
               sub={kpis.overdueInvoicesTotal > 0 ? "past due" : undefined}
               subTone="danger"
             />
           </div>
 ```
 
-`display="inline"` matters here: the value sits in a `text-2xl` span whose line box is 36px. A block child would collapse that line box and shrink every tile.
+`display="inline-block"` matters here: the value sits in a `text-2xl` span whose line box is 36px. A block child would collapse that line box and shrink every tile.
 
 - [ ] **Step 5: Feed the table its loading state**
 
@@ -1123,17 +1123,17 @@ export default function CustomerCard({ customer, loading = false, onEdit, onDele
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 className="m-0 text-md font-semibold text-ink">
-            {loading ? <Skeleton display="inline" w="9ch" h="1rem" /> : customer.name}
+            {loading ? <Skeleton display="inline-block" w="9ch" h="1rem" /> : customer.name}
           </h3>
           <span className="font-mono text-xs text-ink-3">
             {loading
-              ? <Skeleton display="inline" w="6ch" h="0.75rem" />
+              ? <Skeleton display="inline-block" w="6ch" h="0.75rem" />
               : customer.account_code || "No account code"}
           </span>
         </div>
 
         {loading ? (
-          <Skeleton w="4.5rem" h="1.375rem" rounded="full" />
+          <Skeleton w="4.5rem" h="1.375rem" pill />
         ) : customer.credit_hold ? (
           <Badge tone="danger">Credit Hold</Badge>
         ) : customer.active ? (
@@ -1170,8 +1170,8 @@ export default function CustomerCard({ customer, loading = false, onEdit, onDele
       <div className="mt-2 flex flex-wrap gap-1.5">
         {loading ? (
           <>
-            <Skeleton w="3.5rem" h="1.375rem" rounded="full" />
-            <Skeleton w="4.5rem" h="1.375rem" rounded="full" />
+            <Skeleton w="3.5rem" h="1.375rem" pill />
+            <Skeleton w="4.5rem" h="1.375rem" pill />
           </>
         ) : (
           <>
@@ -1211,13 +1211,13 @@ function Info({
     <div className="text-sm">
       <span className="text-kicker uppercase text-ink-2">{label}</span>{" "}
       <strong className="block text-ink">
-        {/* display="inline" is load-bearing, not cosmetic. This <strong> is
+        {/* display="inline-block" is load-bearing, not cosmetic. This <strong> is
             block-level at text-sm, so its line box is 18px with text in it. A
             block skeleton would make it 14px instead, shrinking every Info cell
             by 4px: three rows of them, so the card jumps 12px shorter while
             loading and back again on arrival. inline-block keeps the 18px strut
             and the cell holds its height. */}
-        {loading ? <Skeleton display="inline" w="80%" h="0.875rem" /> : value || "—"}
+        {loading ? <Skeleton display="inline-block" w="80%" h="0.875rem" /> : value || "—"}
       </strong>
     </div>
   );
@@ -1460,7 +1460,11 @@ Report to the user: the Task 0 versus Step 4 Playwright comparison, and the resu
 
 One, worth flagging at review:
 
-**`Skeleton` gained a `display` prop** (`"block" | "inline"`, default `"block"`), which the spec's sketch did not have. A `block` skeleton inside an inline text container collapses the parent's line box, which shrinks every `Stat` tile the moment it loads: the opposite of the zero-shift goal. `display="inline"` renders `inline-block align-middle` so the parent's line height still governs. Used by the stat tiles and the card's name, account code and `Info` values.
+**`Skeleton` gained a `display` prop** (`"block" | "inline-block"`, default `"block"`), which the spec's sketch did not have. A `block` skeleton inside an inline text container sets that box's height outright, which shrinks every `Stat` tile and every `Info` cell the moment it loads: the opposite of the zero-shift goal. `display="inline-block"` emits `inline-block align-middle`, so the parent's line-height strut still governs and nothing moves. The rule to apply when adding call sites in later batches: **an inline-block skeleton preserves the line box only while its `h` is smaller than the surrounding line-height.** Give it a taller `h` and the line box legitimately grows to fit it.
+
+**`Skeleton` uses `pill?: boolean` rather than the spec's `rounded`.** A two-value enum was proposed as `"sm" | "full"`, but `"sm"` emitted the class `rounded`, which is 8px in this repo's overridden `borderRadius` scale (`tailwind.config.ts:97`), while `rounded-sm` is 6px. The value name said one thing and the output was another. `pill` is unambiguous: set it where a skeleton stands in for a `Badge`, omit it everywhere else. Behaviour is identical to the original proposal.
+
+Both names were corrected after Task 2's code review, while the component had zero call sites.
 
 ## What this plan deliberately does not do
 
