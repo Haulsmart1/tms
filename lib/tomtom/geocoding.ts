@@ -79,6 +79,7 @@ export function selectGeocodePosition(
       };
       address?: {
         postalCode?: unknown;
+        freeformAddress?: unknown;
       };
     };
 
@@ -95,12 +96,21 @@ export function selectGeocodePosition(
     }
 
     if (expectedPostcode) {
-      const returnedPostcode =
+      const structuredPostcode =
         typeof result.address?.postalCode === "string"
           ? normalizeUkPostcode(result.address.postalCode)
           : null;
 
-      if (returnedPostcode !== expectedPostcode) {
+      const freeformPostcode =
+        typeof result.address?.freeformAddress === "string"
+          ? normalizeUkPostcode(result.address.freeformAddress)
+          : null;
+
+      const postcodeMatches =
+        structuredPostcode === expectedPostcode ||
+        freeformPostcode === expectedPostcode;
+
+      if (!postcodeMatches) {
         continue;
       }
     }

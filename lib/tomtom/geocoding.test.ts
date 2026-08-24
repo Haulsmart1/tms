@@ -79,6 +79,42 @@ describe("selectGeocodePosition", () => {
     });
   });
 
+  it("accepts a full postcode found in freeformAddress when TomTom only returns the outward code structurally", () => {
+    expect(
+      selectGeocodePosition(
+        {
+          results: [
+            {
+              position: {
+                lat: 51.6597686,
+                lon: -3.0066075,
+              },
+              address: {
+                postalCode: "NP44",
+                freeformAddress:
+                  "15 Heol ty Gwyn, Croesyceiliog, Cwmbran, NP44 2EZ",
+              },
+            },
+            {
+              position: {
+                lat: 51.2930346,
+                lon: 0.2942925,
+              },
+              address: {
+                postalCode: "TN15",
+                freeformAddress:
+                  "Ightham, Sevenoaks, TN15 9HZ",
+              },
+            },
+          ],
+        },
+        "TN15 9HZ",
+      ),
+    ).toEqual({
+      lat: 51.2930346,
+      lng: 0.2942925,
+    });
+  });
   it("uses the first valid candidate when no postcode is available", () => {
     expect(
       selectGeocodePosition(
