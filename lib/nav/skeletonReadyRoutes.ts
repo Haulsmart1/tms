@@ -21,8 +21,16 @@
    Adding a path before steps 1 and 2 is the one way to make this change worse
    than what it replaced. See the spec for the four pages that already do this.
 
-   When every route is listed, this file, its test, and TenantGate's loading
-   panel can all be deleted in one commit. */
+   WHEN EVERY ROUTE IS LISTED, the teardown is bigger than this file. In one
+   commit: delete this file and its test, delete TenantGate's loading panel,
+   AND unwind the two consumers, which will not compile without it.
+     - lib/nav/shouldShowShell.ts collapses to
+       `status === "ready" || status === "loading"`, since every non-exempt
+       route is skeleton-ready by then.
+     - app/components/TenantGate.tsx drops its isSkeletonReadyRoute branch and
+       passes through unconditionally while loading.
+   Both fail at build time rather than silently, so this is a reminder about
+   scope, not a hazard. */
 export const SKELETON_READY_ROUTES: readonly string[] = [
   // Populated per page. /dashboard and /customers land in this batch.
 ];
