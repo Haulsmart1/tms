@@ -96,15 +96,23 @@ npm run typecheck
 
 Expected: no output, exit 0.
 
-- [ ] **Step 4: Record the Playwright baseline**
+If it reports `Cannot find module 'pdf-lib'` or `Cannot find module 'stripe'`, `node_modules` is an incomplete install rather than the code being broken: both are declared in `package.json`. Run `npm install` and try again. This was the state on 2026-08-24 and `npm install` cleared all six errors without touching `package-lock.json`. **`npm run typecheck` must be green before Task 1 starts**, because every later task uses it as the gate that catches the `Stat.value` and `Info.value` widenings.
 
-`tests/` is a separate npm project. Two specs assert against the `TenantGate` panel (`tests/tracking-layout.spec.mjs:134`, `tests/pod-layout.spec.mjs:106`), and Task 7 edits that component, so you need to know their starting state.
+- [ ] **Step 4: Confirm the Playwright specs cannot be affected**
+
+The two specs in `tests/` are **not** `@playwright/test` suites, so `npx playwright test` correctly finds nothing. They are standalone node scripts (`import { chromium } from "playwright"`) that need a running dev server and a signed-in magic link. Per the header of `tests/pod-layout.spec.mjs`, the real invocation is:
 
 ```bash
-cd tests && npm install && npx playwright test; cd ..
+LINK=$(node scripts/dev-login.mjs <email> /pod | grep -o 'http://[^ ]*')
+POD_AUTH_URL="$LINK" node tests/pod-layout.spec.mjs
 ```
 
-Write the result down (pass, fail, or "cannot run locally"). Whatever it is, it is the baseline you compare against in Task 10. Do not fix a pre-existing failure as part of this plan.
+**Do not run that here.** It needs the dev server up and it authenticates against the LIVE Supabase. It belongs to the signed-in pass in Task 10 Step 5.
+
+Instead, confirm by inspection that Task 7 cannot affect them. Read `tests/pod-layout.spec.mjs:105-120` and `tests/tracking-layout.spec.mjs:132-148`. Both carry an `assertOnRealPage` guard whose whole job is to abort when `TenantGate`'s panel rendered instead of the real page. Record both of these:
+
+1. Neither `/pod` nor `/tracking` joins `SKELETON_READY_ROUTES` in this batch, so `TenantGate` still blocks both exactly as it does today. Task 7 is inert for them.
+2. `tracking-layout.spec.mjs:145` aborts when `document.body.innerText` contains `"Loading jobs"`. That string is `/tracking`'s current loading state, and a skeleton will replace it when `/tracking` is converted in a later batch, at which point this guard needs a new signal. Note it. Do not change it now.
 
 ---
 
@@ -1415,13 +1423,15 @@ npm run build
 
 Expected: build succeeds.
 
-- [ ] **Step 4: Playwright, compared against Task 0**
+- [ ] **Step 4: Re-confirm the Playwright specs are untouched**
+
+These are standalone node scripts needing a dev server and a live magic link, not an automated gate. See Task 0 Step 4. The check here is the same inspection: confirm `SKELETON_READY_ROUTES` still contains only `/dashboard` and `/customers`, and therefore that `TenantGate` behaves identically on `/pod` and `/tracking`.
 
 ```bash
-cd tests && npx playwright test; cd ..
+grep -A4 "SKELETON_READY_ROUTES: readonly" lib/nav/skeletonReadyRoutes.ts
 ```
 
-Expected: identical to the Task 0 baseline. `tests/tracking-layout.spec.mjs:134` and `tests/pod-layout.spec.mjs:106` assert against the `TenantGate` panel, and neither `/tracking` nor `/pod` is on the allowlist, so both should behave exactly as before. **If either changed, stop and investigate before merging.**
+Expected: exactly the two converted routes and nothing else. If `/pod` or `/tracking` appears there, someone exceeded this batch's scope and both specs need re-running by hand before merging.
 
 - [ ] **Step 5: Signed-in manual pass**
 
@@ -1453,3 +1463,4 @@ Recorded so none of it gets refiled as a review finding:
 - **The `TenantContextValue` discriminated union.** The real compile-time guard against querying before tenant resolution. Deferred because every page destructures `filterByTenant` unconditionally, making it a roughly 15-page compile break. See the spec.
 - **The other 14 design-system pages**, the 7 legacy pages, and route-level `loading.tsx` for the async server components.
 - **The three other false-data pages** (`/jobs`, `/settings/invoices`, `/pod`). `/dashboard`'s is fixed only because it is being converted anyway.
+- **`tracking-layout.spec.mjs:145`'s `"Loading jobs"` guard.** That spec aborts when it sees `/tracking`'s current loading text, which is exactly right today and becomes wrong the moment `/tracking` gets a skeleton. Whoever converts `/tracking` in a later batch must give that guard a new signal. Out of scope here because `/tracking` is not on the allowlist in this batch.
