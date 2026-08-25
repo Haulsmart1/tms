@@ -177,7 +177,7 @@ git commit -m "fix: give Tabs a visible fill so inactive tabs don't blend into t
 - Modify: `app/pod/page.tsx:1704`
 - Modify: `app/tracking/page.tsx:374`
 
-- [ ] **Step 1: `components/Button.tsx`**
+- [x] **Step 1: `components/Button.tsx`**
 
 Old (lines 21-24):
 ```tsx
@@ -197,7 +197,7 @@ New:
 
 This is the shared `Button` component used app-wide — this single change fixes every `variant="secondary"` and `variant="ghost"` button's hover state everywhere it's used, including the four Invoices buttons that will be migrated onto it in Task 4.
 
-- [ ] **Step 2: `components/DataTable.tsx`**
+- [x] **Step 2: `components/DataTable.tsx`**
 
 Old (line 113):
 ```tsx
@@ -219,7 +219,7 @@ New:
               className="mt-2 inline-flex h-9 items-center rounded-md border border-line-strong px-3 text-sm font-semibold text-ink hover:bg-surface-hover"
 ```
 
-- [ ] **Step 3: `app/dashboard/page.tsx`**
+- [x] **Step 3: `app/dashboard/page.tsx`**
 
 Old (line 300):
 ```tsx
@@ -231,7 +231,7 @@ New:
                         <Link href={item.href} className="block rounded-md px-2 py-1.5 -mx-2 hover:bg-surface-hover">
 ```
 
-- [ ] **Step 4: `app/tracking/TrackingRail.tsx`**
+- [x] **Step 4: `app/tracking/TrackingRail.tsx`**
 
 Old (line 45):
 ```tsx
@@ -243,7 +243,7 @@ New:
                       : "bg-transparent hover:bg-surface-hover"
 ```
 
-- [ ] **Step 5: `app/tracking/TrackingHeader.tsx`**
+- [x] **Step 5: `app/tracking/TrackingHeader.tsx`**
 
 Old (line 110):
 ```tsx
@@ -265,7 +265,7 @@ New:
           className="rounded-sm px-2.5 py-1 text-xs font-semibold text-ink-2 hover:bg-surface-hover hover:text-ink"
 ```
 
-- [ ] **Step 6: `app/pod/page.tsx`**
+- [x] **Step 6: `app/pod/page.tsx`**
 
 Old (line 1704):
 ```tsx
@@ -277,7 +277,7 @@ New:
             "hover:bg-surface-hover",
 ```
 
-- [ ] **Step 7: `app/tracking/page.tsx`**
+- [x] **Step 7: `app/tracking/page.tsx`**
 
 Old (line 374):
 ```tsx
@@ -289,22 +289,22 @@ New:
                 className="mt-3 rounded-sm border border-line bg-surface px-3 py-1.5 text-xs font-semibold text-ink hover:border-line-strong hover:bg-surface-hover"
 ```
 
-- [ ] **Step 8: Verify no `hover:bg-surface-2` remains**
+- [x] **Step 8: Verify no `hover:bg-surface-2` remains**
 
 Run: `grep -rn "hover:bg-surface-2\|focus-visible:bg-surface-2" app components`
 Expected: no output (empty).
 
-- [ ] **Step 9: Run the full test suite**
+- [x] **Step 9: Run the full test suite**
 
 Run: `npm test`
 Expected: PASS, 0 failures.
 
-- [ ] **Step 10: Run typecheck**
+- [x] **Step 10: Run typecheck**
 
 Run: `npm run typecheck`
 Expected: PASS, no errors (these are all string-literal class changes, no type surface changed).
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add components/Button.tsx components/DataTable.tsx app/dashboard/page.tsx app/tracking/TrackingRail.tsx app/tracking/TrackingHeader.tsx app/pod/page.tsx app/tracking/page.tsx
