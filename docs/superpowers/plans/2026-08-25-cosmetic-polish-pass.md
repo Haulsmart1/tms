@@ -1759,27 +1759,27 @@ git commit -m "fix: replace POD share page lock emoji with a lucide icon"
 
 **Files:** none (verification only)
 
-- [ ] **Step 1: Full test suite**
+- [x] **Step 1: Full test suite**
 
 Run: `npm test`
 Expected: PASS, 0 failures.
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 Run: `npm run typecheck`
 Expected: PASS, 0 errors.
 
-- [ ] **Step 3: Production build**
+- [x] **Step 3: Production build**
 
 Run: `npm run build`
 Expected: builds successfully (catches anything the dev server's fast refresh might mask, e.g. unused-import lint-adjacent issues in strict mode).
 
-- [ ] **Step 4: Grep for any remaining emoji in JSX**
+- [x] **Step 4: Grep for any remaining emoji in JSX**
 
 Run: `grep -rnP "[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}]" app components --include="*.tsx" | grep -v "node_modules"`
 Expected: no output, or only matches inside comments/strings that were already out of scope per the design spec (typographic arrows `→`/`←` are not emoji and won't match this range).
 
-- [ ] **Step 5: Signed-in manual QA pass**
+- [x] **Step 5: Signed-in manual QA pass**
 
 Run: `npm run dev`, sign in (see the local sign-in helper), and check, in both dark (default) and light mode:
 - `/invoices` — all ten tabs readable and visibly clickable; hover works; the four Credit Notes buttons visible on hover.
@@ -1791,6 +1791,6 @@ Run: `npm run dev`, sign in (see the local sign-in helper), and check, in both d
 - A `<select>` on at least two different pages (e.g. `/jobs` new job form, `/invoices` credit note editor) — custom chevron, no overlap with text.
 - A date input (e.g. `/jobs` new job form) — visible calendar icon in dark mode; switch to light mode and confirm it's still visible.
 
-- [ ] **Step 6: Update README if page status changed**
+- [x] **Step 6: Update README if page status changed**
 
 Read `README.md`'s page inventory table. This pass doesn't change any page's functional status (OK/PARTIAL/LAUNCHER/STUB/PLANNED) — it's cosmetic only — so no update should be needed. Confirm this assumption holds; if any touched page's status line references outdated visual details, update it.
