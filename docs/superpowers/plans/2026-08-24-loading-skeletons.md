@@ -13,6 +13,18 @@ Branch: `ethan/loading-skeletons`, already created.
 
 ---
 
+## Status: COMPLETE, 2026-08-25
+
+All ten tasks done on `ethan/loading-skeletons`, NOT yet pushed. `npm test` 341 passing with
+nothing skipped, `npm run typecheck` clean, `npm run build` succeeds. `SKELETON_READY_ROUTES`
+holds `/dashboard` and `/customers`, so `/pod` and `/tracking` are untouched and neither
+Playwright layout spec can be affected.
+
+Task 10 Step 5, the signed-in manual pass, was run by Ethan on 2026-08-25 and all six checks
+passed: both pages cold-load with the shell immediate and no height shift on arrival, light
+mode keeps the skeletons visible, reduced motion stops the pulse, `/jobs` still shows the old
+full-screen panel, and signed-out still redirects to `/login` with no flash of the shell.
+
 ## Orientation for someone new to this codebase
 
 Five things that are unusual here and will cost you time if you do not know them:
@@ -72,7 +84,7 @@ Establish that everything passes *before* you change anything. If a Playwright s
 
 **Files:** none (read-only)
 
-- [ ] **Step 1: Confirm the branch**
+- [x] **Step 1: Confirm the branch**
 
 ```bash
 git branch --show-current
@@ -80,7 +92,7 @@ git branch --show-current
 
 Expected: `ethan/loading-skeletons`. If not, run `git checkout ethan/loading-skeletons`.
 
-- [ ] **Step 2: Run the unit tests**
+- [x] **Step 2: Run the unit tests**
 
 ```bash
 npm test
@@ -88,7 +100,7 @@ npm test
 
 Expected: PASS, all files green.
 
-- [ ] **Step 3: Run the typechecker**
+- [x] **Step 3: Run the typechecker**
 
 ```bash
 npm run typecheck
@@ -98,7 +110,7 @@ Expected: no output, exit 0.
 
 If it reports `Cannot find module 'pdf-lib'` or `Cannot find module 'stripe'`, `node_modules` is an incomplete install rather than the code being broken: both are declared in `package.json`. Run `npm install` and try again. This was the state on 2026-08-24 and `npm install` cleared all six errors without touching `package-lock.json`. **`npm run typecheck` must be green before Task 1 starts**, because every later task uses it as the gate that catches the `Stat.value` and `Info.value` widenings.
 
-- [ ] **Step 4: Confirm the Playwright specs cannot be affected**
+- [x] **Step 4: Confirm the Playwright specs cannot be affected**
 
 The two specs in `tests/` are **not** `@playwright/test` suites, so `npx playwright test` correctly finds nothing. They are standalone node scripts (`import { chromium } from "playwright"`) that need a running dev server and a signed-in magic link. Per the header of `tests/pod-layout.spec.mjs`, the real invocation is:
 
@@ -125,7 +137,7 @@ Test first: the contrast test reads `app/tokens.css` from disk, so asserting on 
 - Modify: `app/tokens.css`
 - Modify: `tailwind.config.ts:63-65`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 In `lib/theme/contrast.test.ts`, add this constant immediately after `const AA_NON_TEXT = 3;` (line 95):
 
@@ -149,7 +161,7 @@ Then add these three entries at the end of the `PAIRS` array, after the `focus o
   { label: "skeleton on canvas",          fg: "--skeleton",          bg: "--canvas",        min: SKELETON_VISIBLE },
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 npx vitest run lib/theme/contrast.test.ts
@@ -157,7 +169,7 @@ npx vitest run lib/theme/contrast.test.ts
 
 Expected: FAIL. Several failures, including `--skeleton missing from :root` and the structural test `declares the same token names in every block` if you only added it to one block later. Right now you should see the `missing from` assertions.
 
-- [ ] **Step 3: Add the token to all three blocks**
+- [x] **Step 3: Add the token to all three blocks**
 
 `lib/theme/contrast.test.ts:81-89` asserts every block declares identical token *names*, and that `.dark` is value-identical to `:root`. So this goes in all three, and `.dark` must match `:root` exactly.
 
@@ -182,7 +194,7 @@ In the `.light` block, after its `--line-strong: #B9BFCC;` (line 182):
   --skeleton: #CDD4E1;
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 npx vitest run lib/theme/contrast.test.ts
@@ -190,7 +202,7 @@ npx vitest run lib/theme/contrast.test.ts
 
 Expected: PASS. The three new pairs measure 1.40 / 1.47 / 1.54 in `:root` and 1.49 / 1.30 / 1.35 in `.light`, all above 1.25.
 
-- [ ] **Step 5: Expose it to Tailwind**
+- [x] **Step 5: Expose it to Tailwind**
 
 Without this, `bg-skeleton` compiles to nothing, silently. In `tailwind.config.ts`, in the `colors` map, immediately after the `line:` entry (line 66):
 
@@ -198,7 +210,7 @@ Without this, `bg-skeleton` compiles to nothing, silently. In `tailwind.config.t
         skeleton: "var(--skeleton)",
 ```
 
-- [ ] **Step 6: Run the full suite and typecheck**
+- [x] **Step 6: Run the full suite and typecheck**
 
 ```bash
 npm test && npm run typecheck
@@ -206,7 +218,7 @@ npm test && npm run typecheck
 
 Expected: both pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add app/tokens.css tailwind.config.ts lib/theme/contrast.test.ts
@@ -222,7 +234,7 @@ No unit test: vitest does not cover `components/`. Verified by typecheck here an
 **Files:**
 - Create: `components/Skeleton.tsx`
 
-- [ ] **Step 1: Write the component**
+- [x] **Step 1: Write the component**
 
 ```tsx
 import { cn } from "../lib/cn";
@@ -269,7 +281,7 @@ export default function Skeleton({
 }
 ```
 
-- [ ] **Step 2: Verify it compiles**
+- [x] **Step 2: Verify it compiles**
 
 ```bash
 npm run typecheck
@@ -277,7 +289,7 @@ npm run typecheck
 
 Expected: no output, exit 0.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add components/Skeleton.tsx
@@ -293,7 +305,7 @@ The app's one current skeleton is invisible in dark (1.05:1) and animates infini
 **Files:**
 - Modify: `components/DataTable.tsx:1-2, 86`
 
-- [ ] **Step 1: Add the import**
+- [x] **Step 1: Add the import**
 
 At the top of `components/DataTable.tsx`, after the `cn` import on line 2:
 
@@ -301,7 +313,7 @@ At the top of `components/DataTable.tsx`, after the `cn` import on line 2:
 import Skeleton from "./Skeleton";
 ```
 
-- [ ] **Step 2: Replace the bar**
+- [x] **Step 2: Replace the bar**
 
 Replace line 86 exactly:
 
@@ -315,7 +327,7 @@ with:
                       <Skeleton w="75%" h="0.75rem" />
 ```
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 ```bash
 npm test && npm run typecheck
@@ -323,7 +335,7 @@ npm test && npm run typecheck
 
 Expected: both pass. No test asserts on this markup, so this is a compile check.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add components/DataTable.tsx
@@ -340,7 +352,7 @@ This is the token-refresh guard. `TenantProvider.resolve()` resets status to `lo
 - Create: `lib/loading/skeletonVisibility.ts`
 - Create: `lib/loading/skeletonVisibility.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `lib/loading/skeletonVisibility.test.ts`:
 
@@ -383,7 +395,7 @@ describe("shouldShowSkeleton", () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 ```bash
 npx vitest run lib/loading/skeletonVisibility.test.ts
@@ -391,7 +403,7 @@ npx vitest run lib/loading/skeletonVisibility.test.ts
 
 Expected: FAIL, "Failed to resolve import ./skeletonVisibility".
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `lib/loading/skeletonVisibility.ts`:
 
@@ -418,7 +430,7 @@ export function shouldShowSkeleton({ tenantStatus, fetching, hasData }: Args): b
 }
 ```
 
-- [ ] **Step 4: Run it to verify it passes**
+- [x] **Step 4: Run it to verify it passes**
 
 ```bash
 npx vitest run lib/loading/skeletonVisibility.test.ts
@@ -426,7 +438,7 @@ npx vitest run lib/loading/skeletonVisibility.test.ts
 
 Expected: PASS, 7 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add lib/loading/skeletonVisibility.ts lib/loading/skeletonVisibility.test.ts
@@ -443,7 +455,7 @@ git commit -m "feat: add shouldShowSkeleton with token-refresh guard"
 - Create: `lib/nav/skeletonReadyRoutes.ts`
 - Create: `lib/nav/skeletonReadyRoutes.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `lib/nav/skeletonReadyRoutes.test.ts`:
 
@@ -473,7 +485,7 @@ describe("isSkeletonReadyRoute", () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 ```bash
 npx vitest run lib/nav/skeletonReadyRoutes.test.ts
@@ -481,7 +493,7 @@ npx vitest run lib/nav/skeletonReadyRoutes.test.ts
 
 Expected: FAIL, "Failed to resolve import ./skeletonReadyRoutes".
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `lib/nav/skeletonReadyRoutes.ts`:
 
@@ -524,7 +536,7 @@ export function isSkeletonReadyRoute(pathname: string): boolean {
 }
 ```
 
-- [ ] **Step 4: Run it to verify it passes**
+- [x] **Step 4: Run it to verify it passes**
 
 ```bash
 npx vitest run lib/nav/skeletonReadyRoutes.test.ts
@@ -532,7 +544,7 @@ npx vitest run lib/nav/skeletonReadyRoutes.test.ts
 
 Expected: PASS, 4 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add lib/nav/skeletonReadyRoutes.ts lib/nav/skeletonReadyRoutes.test.ts
@@ -547,7 +559,7 @@ git commit -m "feat: add SKELETON_READY_ROUTES allowlist, initially empty"
 - Modify: `lib/nav/shouldShowShell.test.ts`
 - Modify: `lib/nav/shouldShowShell.ts`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 The existing test at `lib/nav/shouldShowShell.test.ts:21-25` asserts `shouldShowShell("/jobs", "loading") === false`. `/jobs` is not on the allowlist and never will be in this batch, so that test stays true and must not be edited.
 
@@ -569,7 +581,7 @@ Add these two cases inside the existing `describe("shouldShowShell", ...)` block
   });
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 ```bash
 npx vitest run lib/nav/shouldShowShell.test.ts
@@ -577,7 +589,7 @@ npx vitest run lib/nav/shouldShowShell.test.ts
 
 Expected: FAIL on "shows on a skeleton-ready route while tenant context is still loading", `expected false to be true`. The signed-out case already passes; that is fine, it is there to pin the behaviour against regression.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Replace the whole body of `lib/nav/shouldShowShell.ts` with:
 
@@ -605,7 +617,7 @@ export function shouldShowShell(pathname: string, status: TenantStatus): boolean
 }
 ```
 
-- [ ] **Step 4: Run again, and expect it to still fail for the right reason**
+- [x] **Step 4: Run again, and expect it to still fail for the right reason**
 
 ```bash
 npx vitest run lib/nav/shouldShowShell.test.ts
@@ -619,7 +631,7 @@ To keep the suite green between here and Task 8, temporarily mark that one test 
   // UNSKIP IN TASK 8, when /dashboard joins SKELETON_READY_ROUTES.
 ```
 
-- [ ] **Step 5: Confirm the rest is green**
+- [x] **Step 5: Confirm the rest is green**
 
 ```bash
 npm test && npm run typecheck
@@ -627,7 +639,7 @@ npm test && npm run typecheck
 
 Expected: pass, with one skipped test.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add lib/nav/shouldShowShell.ts lib/nav/shouldShowShell.test.ts
@@ -643,7 +655,7 @@ The `signed-out` and `no-tenant` branches are deliberately untouched. Only the `
 **Files:**
 - Modify: `app/components/TenantGate.tsx`
 
-- [ ] **Step 1: Rewrite the component**
+- [x] **Step 1: Rewrite the component**
 
 Replace the whole of `app/components/TenantGate.tsx` with:
 
@@ -704,7 +716,7 @@ export default function TenantGate({ children }: { children: ReactNode }) {
 }
 ```
 
-- [ ] **Step 2: Verify**
+- [x] **Step 2: Verify**
 
 ```bash
 npm test && npm run typecheck
@@ -712,7 +724,7 @@ npm test && npm run typecheck
 
 Expected: both pass. Behaviour is unchanged on every route so far, because the allowlist is still empty.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add app/components/TenantGate.tsx
@@ -731,7 +743,7 @@ Four regions need work. The `DataTable` needs none: it already passes `state="lo
 - Modify: `lib/nav/skeletonReadyRoutes.ts`
 - Modify: `lib/nav/shouldShowShell.test.ts` (unskip)
 
-- [ ] **Step 1: Widen `Stat.value`**
+- [x] **Step 1: Widen `Stat.value`**
 
 `string` is assignable to `ReactNode`, so this is a safe widening, but it touches every `Stat` call site in the app. `npm run typecheck` in step 8 is the check.
 
@@ -762,7 +774,7 @@ to:
   value: ReactNode;
 ```
 
-- [ ] **Step 2: Add the imports to the dashboard**
+- [x] **Step 2: Add the imports to the dashboard**
 
 In `app/dashboard/page.tsx`, after the `isAwaitingPod` import (line 11):
 
@@ -771,7 +783,7 @@ import Skeleton from "../../components/Skeleton";
 import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
 ```
 
-- [ ] **Step 3: Guard the loader and derive the flag**
+- [x] **Step 3: Guard the loader and derive the flag**
 
 Replace the effect's opening lines. Change lines 48-52 from:
 
@@ -829,7 +841,7 @@ Then add this immediately after the `maxRevenue` line (line 191):
   });
 ```
 
-- [ ] **Step 4: Skeletonise the stat tiles**
+- [x] **Step 4: Skeletonise the stat tiles**
 
 Replace the whole stat grid (lines 210-231) with:
 
@@ -870,7 +882,7 @@ Replace the whole stat grid (lines 210-231) with:
 
 `display="inline-block"` matters here: the value sits in a `text-2xl` span whose line box is 36px. A block child would collapse that line box and shrink every tile.
 
-- [ ] **Step 5: Feed the table its loading state**
+- [x] **Step 5: Feed the table its loading state**
 
 The `DataTable` currently derives `state` from the page's own `state` only, so during tenant resolution it would show "No jobs scheduled today". Replace line 245:
 
@@ -884,7 +896,7 @@ with:
                 state={showSkeleton ? "loading" : state === "error" ? "error" : todayJobs.length ? "ready" : "empty"}
 ```
 
-- [ ] **Step 6: Skeletonise "Needs attention"**
+- [x] **Step 6: Skeletonise "Needs attention"**
 
 This panel currently renders "Nothing needs attention right now." while the query is in flight, which is a false statement rather than a missing skeleton. Replace lines 251-267 with:
 
@@ -917,7 +929,7 @@ This panel currently renders "Nothing needs attention right now." while the quer
               </div>
 ```
 
-- [ ] **Step 7: Skeletonise the revenue chart**
+- [x] **Step 7: Skeletonise the revenue chart**
 
 This is the one genuinely zero-shift region in the plan: the bar count is known ahead of time, because it is always seven days. Replace lines 273-282 with:
 
@@ -942,7 +954,7 @@ This is the one genuinely zero-shift region in the plan: the bar count is known 
                 </div>
 ```
 
-- [ ] **Step 8: Verify before wiring the route in**
+- [x] **Step 8: Verify before wiring the route in**
 
 ```bash
 npm run typecheck
@@ -950,7 +962,7 @@ npm run typecheck
 
 Expected: no output. If a `Stat` call site elsewhere in the app now fails, that is the widening from Step 1 doing its job; the fix is always to leave that call site alone, because `string` remains valid.
 
-- [ ] **Step 9: Add the route to the allowlist**
+- [x] **Step 9: Add the route to the allowlist**
 
 In `lib/nav/skeletonReadyRoutes.ts`, replace the placeholder comment inside the array with:
 
@@ -958,7 +970,7 @@ In `lib/nav/skeletonReadyRoutes.ts`, replace the placeholder comment inside the 
   "/dashboard",               // app/dashboard/page.tsx
 ```
 
-- [ ] **Step 10: Update the two allowlist tests**
+- [x] **Step 10: Update the two allowlist tests**
 
 In `lib/nav/skeletonReadyRoutes.test.ts`, change the last test's expectation from `toEqual([])` to:
 
@@ -980,7 +992,7 @@ and add a positive case as the first test in the describe block:
 
 In `lib/nav/shouldShowShell.test.ts`, remove the `.skip` and the `// UNSKIP IN TASK 8` comment you added in Task 6 Step 4.
 
-- [ ] **Step 11: Run everything**
+- [x] **Step 11: Run everything**
 
 ```bash
 npm test && npm run typecheck
@@ -988,7 +1000,7 @@ npm test && npm run typecheck
 
 Expected: all pass, nothing skipped.
 
-- [ ] **Step 12: Commit**
+- [x] **Step 12: Commit**
 
 ```bash
 git add components/Stat.tsx app/dashboard/page.tsx lib/nav/skeletonReadyRoutes.ts lib/nav/skeletonReadyRoutes.test.ts lib/nav/shouldShowShell.test.ts
@@ -1011,7 +1023,7 @@ Note `/customers` fetches through `/api/customers` with an `x-tenant-id` header 
 - Modify: `app/customers/page.tsx`
 - Modify: `lib/nav/skeletonReadyRoutes.ts`, `lib/nav/skeletonReadyRoutes.test.ts`
 
-- [ ] **Step 1: Extract the row type**
+- [x] **Step 1: Extract the row type**
 
 Delete lines 11-69 of `app/customers/page.tsx` (the block from `type Customer = {` through its closing `};`, ending with the `notes: string | null;` field). Create `app/customers/types.ts` with exactly this content:
 
@@ -1087,7 +1099,7 @@ Then add this import to `app/customers/page.tsx`, after the `MessageBanner` impo
 import type { Customer } from "./types";
 ```
 
-- [ ] **Step 2: Verify the move compiled**
+- [x] **Step 2: Verify the move compiled**
 
 ```bash
 npm run typecheck
@@ -1095,7 +1107,7 @@ npm run typecheck
 
 Expected: no output. If it complains that `Customer` is unused or missing, you either left the original type in place or missed a field.
 
-- [ ] **Step 3: Create the card**
+- [x] **Step 3: Create the card**
 
 Create `app/customers/CustomerCard.tsx`. `Info` moves here from `page.tsx:1081-1094` with its `value` widened to `ReactNode`, since it is only used by this card.
 
@@ -1227,7 +1239,7 @@ function Info({
 }
 ```
 
-- [ ] **Step 4: Confirm `Button` accepts `disabled`**
+- [x] **Step 4: Confirm `Button` accepts `disabled`**
 
 ```bash
 grep -n "disabled" components/Button.tsx
@@ -1235,7 +1247,7 @@ grep -n "disabled" components/Button.tsx
 
 Expected: a `disabled` prop or a spread of button attributes. If `Button` does not accept it, add `disabled?: boolean` to its props and pass it to the underlying `<button>`, then re-run `npm run typecheck`.
 
-- [ ] **Step 5: Wire the page up**
+- [x] **Step 5: Wire the page up**
 
 In `app/customers/page.tsx`:
 
@@ -1311,7 +1323,7 @@ Derive the flag. Add immediately after the `useEffect` above:
   });
 ```
 
-- [ ] **Step 6: Replace the grid**
+- [x] **Step 6: Replace the grid**
 
 Replace lines 854-959 (the `{loading ? ... : customers.length === 0 ? ... : (grid)}` block, from `{loading ? (` through the closing `)}` before `</section>`) with:
 
@@ -1348,7 +1360,7 @@ Replace lines 854-959 (the `{loading ? ... : customers.length === 0 ? ... : (gri
             )}
 ```
 
-- [ ] **Step 7: Add the placeholder row**
+- [x] **Step 7: Add the placeholder row**
 
 `CustomerCard` requires a `Customer` even when loading, because it is one component rendering two states. Add this above the page component, next to `EMPTY_FORM`:
 
@@ -1359,11 +1371,11 @@ Replace lines 854-959 (the `{loading ? ... : customers.length === 0 ? ... : (gri
 const PLACEHOLDER_CUSTOMER = { id: "skeleton" } as Customer;
 ```
 
-- [ ] **Step 8: Delete the old `Info`**
+- [x] **Step 8: Delete the old `Info`**
 
 Remove the now-unused `function Info(...)` from `app/customers/page.tsx:1081-1094`. It lives in `CustomerCard.tsx` now.
 
-- [ ] **Step 9: Verify**
+- [x] **Step 9: Verify**
 
 ```bash
 npm run typecheck
@@ -1371,7 +1383,7 @@ npm run typecheck
 
 Expected: no output. A "declared but never read" error on `Badge` or `Button` in `page.tsx` means those imports are now unused there; check whether the page still uses them elsewhere before deleting.
 
-- [ ] **Step 10: Add the route to the allowlist**
+- [x] **Step 10: Add the route to the allowlist**
 
 In `lib/nav/skeletonReadyRoutes.ts`, after the `/dashboard` line:
 
@@ -1385,7 +1397,7 @@ In `lib/nav/skeletonReadyRoutes.test.ts`, update the exhaustive list:
     expect([...SKELETON_READY_ROUTES].sort()).toEqual(["/dashboard", "/customers"].sort());
 ```
 
-- [ ] **Step 11: Run everything**
+- [x] **Step 11: Run everything**
 
 ```bash
 npm test && npm run typecheck
@@ -1393,7 +1405,7 @@ npm test && npm run typecheck
 
 Expected: all pass.
 
-- [ ] **Step 12: Commit**
+- [x] **Step 12: Commit**
 
 ```bash
 git add app/customers/ lib/nav/skeletonReadyRoutes.ts lib/nav/skeletonReadyRoutes.test.ts
@@ -1406,7 +1418,7 @@ git commit -m "feat: skeletonise /customers via an extracted CustomerCard"
 
 **Files:** none
 
-- [ ] **Step 1: Full unit suite**
+- [x] **Step 1: Full unit suite**
 
 ```bash
 npm test
@@ -1414,7 +1426,7 @@ npm test
 
 Expected: PASS, including `lib/theme/contrast.test.ts` (which reads `app/tokens.css` from disk and will catch a token typo) and nothing skipped.
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 ```bash
 npm run typecheck
@@ -1422,7 +1434,7 @@ npm run typecheck
 
 Expected: no output, exit 0.
 
-- [ ] **Step 3: Production build**
+- [x] **Step 3: Production build**
 
 The one check that catches a Tailwind class that compiles to nothing.
 
@@ -1432,7 +1444,7 @@ npm run build
 
 Expected: build succeeds.
 
-- [ ] **Step 4: Re-confirm the Playwright specs are untouched**
+- [x] **Step 4: Re-confirm the Playwright specs are untouched**
 
 These are standalone node scripts needing a dev server and a live magic link, not an automated gate. See Task 0 Step 4. The check here is the same inspection: confirm `SKELETON_READY_ROUTES` still contains only `/dashboard` and `/customers`, and therefore that `TenantGate` behaves identically on `/pod` and `/tracking`.
 
@@ -1442,7 +1454,7 @@ grep -A4 "SKELETON_READY_ROUTES: readonly" lib/nav/skeletonReadyRoutes.ts
 
 Expected: exactly the two converted routes and nothing else. If `/pod` or `/tracking` appears there, someone exceeded this batch's scope and both specs need re-running by hand before merging.
 
-- [ ] **Step 5: Signed-in manual pass**
+- [x] **Step 5: Signed-in manual pass**
 
 Automated tests cannot see any of this. Sign in (`scripts/dev-login.mjs`; note `.env.local` points at the LIVE Supabase, so do not write data) and check:
 
@@ -1453,7 +1465,7 @@ Automated tests cannot see any of this. Sign in (`scripts/dev-login.mjs`; note `
 5. **An unconverted route, e.g. `/jobs`.** Must still show the old full-screen "Loading..." panel. If it does not, the allowlist is wrong.
 6. **Signed out.** Visit `/dashboard` in a private window. It must still redirect to `/login` and must not flash the populated shell.
 
-- [ ] **Step 6: Commit any fixes, then report**
+- [x] **Step 6: Commit any fixes, then report**
 
 Report to the user: the Task 0 versus Step 4 Playwright comparison, and the result of each of the six manual checks. Do not claim the work is complete until Step 5 has actually been run.
 
