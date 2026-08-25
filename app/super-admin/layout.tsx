@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "../../lib/supabase/server";
 import { SUPER_ADMIN_ROLE, extractRoleName } from "../../lib/roles";
+import { Zap } from "lucide-react";
 
 export default async function SuperAdminLayout({
   children,
@@ -58,7 +59,9 @@ export default async function SuperAdminLayout({
             flexWrap: "wrap",
           }}
         >
-          <strong style={{ fontSize: 18 }}>⚡ Super Admin</strong>
+          <strong style={{ fontSize: 18, display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <Zap size={16} aria-hidden /> Super Admin
+          </strong>
 
           <div
             style={{

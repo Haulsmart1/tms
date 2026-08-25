@@ -1,57 +1,59 @@
+import { Building2, Truck, Users, Banknote, FileText, type LucideIcon } from "lucide-react";
+
 export default function SuperAdminPage() {
 
-    const stats = [
+    const stats: Array<{ title: string; value: string; description: string; icon: LucideIcon }> = [
         {
             title: "Companies",
             value: "24",
             description: "Active companies using TMS",
-            icon: "🏢",
+            icon: Building2,
         },
         {
             title: "Vehicles",
             value: "186",
             description: "Total registered vehicles",
-            icon: "🚚",
+            icon: Truck,
         },
         {
             title: "Users",
             value: "93",
             description: "Active system users",
-            icon: "👥",
+            icon: Users,
         },
         {
             title: "Monthly Revenue",
             value: "£4,320",
             description: "Vehicle based billing",
-            icon: "💷",
+            icon: Banknote,
         },
     ];
 
 
-    const links = [
+    const links: Array<{ title: string; description: string; href: string; icon: LucideIcon }> = [
         {
             title: "Companies",
             description: "View and manage customer companies",
             href: "/super-admin/companies",
-            icon: "🏢",
+            icon: Building2,
         },
         {
             title: "Users",
             description: "Manage platform users",
             href: "/super-admin/users",
-            icon: "👥",
+            icon: Users,
         },
         {
             title: "Billing",
             description: "Vehicle based billing configuration",
             href: "/super-admin/billing",
-            icon: "💷",
+            icon: Banknote,
         },
         {
             title: "Invoices",
             description: "Generate and track invoices",
             href: "/super-admin/invoices",
-            icon: "📄",
+            icon: FileText,
         },
     ];
 
@@ -108,8 +110,8 @@ export default function SuperAdminPage() {
                             }}
                         >
 
-                            <div style={{ fontSize: 28, marginBottom: 8 }}>
-                                {item.icon}
+                            <div style={{ marginBottom: 8, color: "#333" }}>
+                                <item.icon size={28} aria-hidden />
                             </div>
 
                             <h2 style={{ margin: 0 }}>
@@ -167,13 +169,8 @@ export default function SuperAdminPage() {
                             }}
                         >
 
-                            <div
-                                style={{
-                                    fontSize: 30,
-                                    marginBottom: 10,
-                                }}
-                            >
-                                {card.icon}
+                            <div style={{ marginBottom: 10, color: "#333" }}>
+                                <card.icon size={30} aria-hidden />
                             </div>
 
                             <h2
