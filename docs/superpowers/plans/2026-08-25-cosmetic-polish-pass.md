@@ -490,7 +490,7 @@ disappear on hover."
 **Files:**
 - Modify: `app/tokens.css`
 
-- [ ] **Step 1: Add `color-scheme` to `:root`**
+- [x] **Step 1: Add `color-scheme` to `:root`**
 
 In `app/tokens.css`, inside the `:root` block, directly after the opening `:root {` line (line 35):
 
@@ -501,7 +501,7 @@ In `app/tokens.css`, inside the `:root` block, directly after the opening `:root
   --canvas: #0F1626;
 ```
 
-- [ ] **Step 2: Add `color-scheme` to `.dark`**
+- [x] **Step 2: Add `color-scheme` to `.dark`**
 
 Inside the `.dark` block, directly after its opening `.dark {` line:
 
@@ -511,7 +511,7 @@ Inside the `.dark` block, directly after its opening `.dark {` line:
   --canvas: #0F1626;
 ```
 
-- [ ] **Step 3: Add `color-scheme` to `.light`**
+- [x] **Step 3: Add `color-scheme` to `.light`**
 
 Inside the `.light` block, directly after its opening `.light {` line:
 
@@ -521,22 +521,22 @@ Inside the `.light` block, directly after its opening `.light {` line:
   --canvas: #F2F4F8;
 ```
 
-- [ ] **Step 4: Run the contrast test's structural check**
+- [x] **Step 4: Run the contrast test's structural check**
 
 Run: `npx vitest run lib/theme/contrast.test.ts -t "declares the same token names"`
 Expected: PASS. `color-scheme` is a plain CSS property, not a custom property (`--*`), so `parseTokenBlocks` (which only collects `--*` declarations) ignores it and the token-name-parity check is unaffected.
 
-- [ ] **Step 5: Manually verify in the browser**
+- [x] **Step 5: Manually verify in the browser**
 
 Run: `npm run dev`, sign in, open any page with a date field (e.g. `/jobs` → New Job, or `/drivers`).
 Expected: the calendar-picker icon inside the date input is now light/white-ish and clearly visible against the dark field, instead of jet-black. Toggle to light mode (the theme toggle in the sidebar) and confirm the icon switches to the dark variant and stays legible on the white field.
 
-- [ ] **Step 6: Run the full test suite**
+- [x] **Step 6: Run the full test suite**
 
 Run: `npm test`
 Expected: PASS, 0 failures.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add app/tokens.css
