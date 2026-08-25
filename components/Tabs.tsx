@@ -25,10 +25,10 @@ export default function Tabs({ tabs, activeId, onChange, label }: Props) {
             aria-selected={active}
             onClick={() => onChange(tab.id)}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-semibold transition-colors",
+              "inline-flex items-center gap-1.5 rounded-md border-b-2 px-3 py-1.5 text-sm font-semibold transition-colors",
               active
-                ? "border-primary-tint-border bg-primary-tint text-primary-deep"
-                : "border-transparent text-ink-3 hover:bg-surface-2 hover:text-ink-2",
+                ? "border-b-primary-tint-border bg-primary-tint text-primary-deep"
+                : "border-b-transparent bg-surface-2 text-ink-2 hover:bg-surface-hover hover:text-ink",
             )}
           >
             {tab.label}
