@@ -1315,7 +1315,7 @@ git commit -m "fix: replace Stats page emoji with lucide icons"
 - Modify: `app/super-admin/page.tsx`
 - Modify: `app/super-admin/layout.tsx`
 
-- [ ] **Step 1: `app/super-admin/page.tsx` — add imports and swap the `stats` array**
+- [x] **Step 1: `app/super-admin/page.tsx` — add imports and swap the `stats` array**
 
 At the top of the file, before `export default function SuperAdminPage() {`:
 
@@ -1388,7 +1388,7 @@ export default function SuperAdminPage() {
     ];
 ```
 
-- [ ] **Step 2: Swap the `links` array**
+- [x] **Step 2: Swap the `links` array**
 
 Old (lines 31-56):
 ```tsx
@@ -1450,7 +1450,7 @@ New:
     ];
 ```
 
-- [ ] **Step 3: Update the two render blocks to render the icon component**
+- [x] **Step 3: Update the two render blocks to render the icon component**
 
 Old (lines 111-113, inside the `stats.map`):
 ```tsx
@@ -1485,7 +1485,7 @@ New:
                             </div>
 ```
 
-- [ ] **Step 4: `app/super-admin/layout.tsx` — swap the header emoji**
+- [x] **Step 4: `app/super-admin/layout.tsx` — swap the header emoji**
 
 Old (line 61):
 ```tsx
@@ -1505,17 +1505,17 @@ Then replace line 61:
           </strong>
 ```
 
-- [ ] **Step 5: Manually verify in the browser**
+- [x] **Step 5: Manually verify in the browser**
 
 Run: `npm run dev`, sign in as a super admin (or use the local dev-login helper with a super-admin account), go to `/super-admin`.
 Expected: the four stat cards and four link cards show plain dark icons instead of emoji; the "Super Admin" header label shows a small lightning-bolt icon before the text.
 
-- [ ] **Step 6: Run typecheck and tests**
+- [x] **Step 6: Run typecheck and tests**
 
 Run: `npm run typecheck && npm test`
 Expected: both PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add app/super-admin/page.tsx app/super-admin/layout.tsx
