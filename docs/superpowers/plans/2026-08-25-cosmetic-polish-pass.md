@@ -1707,7 +1707,7 @@ git commit -m "fix: replace tracking map truck marker emoji with an inline lucid
 **Files:**
 - Modify: `app/pod/share/[token]/page.tsx:469-473`
 
-- [ ] **Step 1: Add the import**
+- [x] **Step 1: Add the import**
 
 After the existing imports (after line 4, `import ShareActions from "./ShareActions";`):
 
@@ -1715,7 +1715,7 @@ After the existing imports (after line 4, `import ShareActions from "./ShareActi
 import { Lock } from "lucide-react";
 ```
 
-- [ ] **Step 2: Replace the emoji**
+- [x] **Step 2: Replace the emoji**
 
 Old (lines 469-473):
 ```tsx
@@ -1737,16 +1737,16 @@ New:
 
 (Dropped `text-lg`, which only sized the emoji glyph — the icon is sized directly via the `size` prop instead.)
 
-- [ ] **Step 3: Manually verify in the browser**
+- [x] **Step 3: Manually verify in the browser**
 
 This page is only reachable via a valid signed share token. If you don't have one handy, at minimum confirm the change compiles and typechecks; a full visual check can happen in the signed-in QA pass (Task 13).
 
-- [ ] **Step 4: Run typecheck and tests**
+- [x] **Step 4: Run typecheck and tests**
 
 Run: `npm run typecheck && npm test`
 Expected: both PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add "app/pod/share/[token]/page.tsx"
