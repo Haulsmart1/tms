@@ -119,7 +119,7 @@ git commit -m "feat: add --surface-hover token for visible interactive hover fil
 **Files:**
 - Modify: `components/Tabs.tsx`
 
-- [ ] **Step 1: Replace the tab styling**
+- [x] **Step 1: Replace the tab styling**
 
 Read the current file first — it's short (43 lines). Replace the `className` block inside the `.map()` (currently lines 27-32):
 
@@ -145,17 +145,17 @@ New:
 
 This gives every tab a visible fill at all times (`bg-surface-2` inactive — here it's fine as a static fill, not a hover-visibility fill, so the earlier contrast conflict doesn't apply), a brighter `text-ink-2` inactive label (up from `text-ink-3`, since the label now needs to read clearly against a real background rather than transparent canvas), a visible `hover:bg-surface-hover` using the new token from Task 1, and keeps the active tab's existing `bg-primary-tint` fill plus adds a bottom-border underline in the primary accent color layered on top (the fill+underline hybrid from the design spec).
 
-- [ ] **Step 2: Manually verify in the browser**
+- [x] **Step 2: Manually verify in the browser**
 
 Run: `npm run dev`, sign in (see `lib/dev-login` / the local sign-in helper if you don't have a session), navigate to `/invoices`.
 Expected: All ten tabs ("Ready to Invoice", "Invoices", "Credit Notes", ...) are visible as filled chips even when inactive; the active tab additionally has a blue underline; hovering an inactive tab visibly lightens it.
 
-- [ ] **Step 3: Run the full test suite**
+- [x] **Step 3: Run the full test suite**
 
 Run: `npm test`
 Expected: PASS, no regressions (Tabs has no dedicated unit test today — this is a visual-only component).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add components/Tabs.tsx
