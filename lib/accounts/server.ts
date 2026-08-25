@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
+import { isRoleAuthorized } from "./authz";
 
 export async function createUserClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -44,7 +45,10 @@ export function createAdminClient() {
   });
 }
 
-export async function requireTenantAccess(tenantId: string) {
+export async function requireTenantAccess(
+  tenantId: string,
+  allowedRoles?: readonly string[],
+) {
   const userClient = await createUserClient();
 
   const {
@@ -73,11 +77,13 @@ export async function requireTenantAccess(tenantId: string) {
     throw new Error("FORBIDDEN");
   }
 
-  return {
-    admin,
-    user,
-    role: String(membership.role ?? ""),
-  };
+  const role = String(membership.role ?? "");
+
+  if (!isRoleAuthorized(role, allowedRoles)) {
+    throw new Error("FORBIDDEN");
+  }
+
+  return { admin, user, role };
 }
 
 export function errorResponse(error: unknown) {
