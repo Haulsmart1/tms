@@ -8,6 +8,10 @@ function stop(over: Partial<TrackingStop> = {}): TrackingStop {
     city: "Hull", postcode: "HU3 4AB", planned_at: "2026-08-14T08:00:00Z",
     delivered_at: null, pod_status: "pending", recipient_name: null,
     pod_updated_at: null, pod_photo_url: null, pod_document_url: null,
+    /* Required on TrackingStop, not optional: these come from a Supabase
+       select, where a selected nullable column is always present and may be
+       null. The fixture has to say so. */
+    lat: null, lng: null,
     ...over,
   };
 }
