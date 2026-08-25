@@ -33,6 +33,7 @@
    reads THIS FILE, so it fails the build if a value here regresses. */
 
 :root {
+  color-scheme: dark;
   /* surfaces */
   --canvas: #0F1626;
   --surface: #161F31;
@@ -120,6 +121,7 @@
    .light, see the header comment. Keep these values in sync with :root;
    lib/theme/contrast.test.ts asserts the two blocks are deep-equal. */
 .dark {
+  color-scheme: dark;
   --canvas: #0F1626;
   --surface: #161F31;
   --surface-2: #131B2B;
@@ -188,6 +190,7 @@
    new --on-* tokens. Three known contrast gaps here are pre-existing and are
    documented in lib/theme/contrast.test.ts rather than fixed. */
 .light {
+  color-scheme: light;
   --canvas: #F2F4F8;
   --surface: #FFFFFF;
   --surface-2: #EDF0F5;
