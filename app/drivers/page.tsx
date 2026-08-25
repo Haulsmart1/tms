@@ -10,6 +10,7 @@ import type { FormEvent } from "react";
 import { createClient } from "../../lib/supabase/browser";
 import Badge from "../../components/Badge";
 import Button from "../../components/Button";
+import { CircleCheck, TriangleAlert } from "lucide-react";
 
 type Driver = {
   id: string;
@@ -1625,7 +1626,8 @@ export default function DriversPage() {
                     <div className="mb-3 flex flex-wrap gap-1.5">
                       {warnings.length === 0 ? (
                         <Badge tone="success">
-                          ✓ Compliance current
+                          <CircleCheck size={12} aria-hidden />
+                          Compliance current
                         </Badge>
                       ) : (
                         warnings.map((warning) => (
@@ -1633,7 +1635,8 @@ export default function DriversPage() {
                             key={warning}
                             tone="warning"
                           >
-                            ⚠ {warning}
+                            <TriangleAlert size={12} aria-hidden />
+                            {warning}
                           </Badge>
                         ))
                       )}
