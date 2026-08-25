@@ -34,8 +34,7 @@ describe("shouldShowShell", () => {
      popping in afterwards. Uses a literal path rather than importing
      SKELETON_READY_ROUTES so the test still means something when the list is
      emptied out at the end of the migration. */
-  // UNSKIP IN TASK 8, when /dashboard joins SKELETON_READY_ROUTES.
-  it.skip("shows on a skeleton-ready route while tenant context is still loading", () => {
+  it("shows on a skeleton-ready route while tenant context is still loading", () => {
     expect(shouldShowShell("/dashboard", "loading")).toBe(true);
   });
 

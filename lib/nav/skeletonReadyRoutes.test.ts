@@ -2,6 +2,14 @@ import { describe, it, expect } from "vitest";
 import { isSkeletonReadyRoute, SKELETON_READY_ROUTES } from "./skeletonReadyRoutes";
 
 describe("isSkeletonReadyRoute", () => {
+  it("returns true for a converted route", () => {
+    expect(isSkeletonReadyRoute("/dashboard")).toBe(true);
+  });
+
+  it("ignores a trailing slash, which Next can produce depending on config", () => {
+    expect(isSkeletonReadyRoute("/dashboard/")).toBe(true);
+  });
+
   it("returns false for an unlisted route, so a new page is gate-blocked by default rather than showing a false empty state", () => {
     expect(isSkeletonReadyRoute("/jobs")).toBe(false);
     expect(isSkeletonReadyRoute("/some-page-added-next-year")).toBe(false);
@@ -18,6 +26,6 @@ describe("isSkeletonReadyRoute", () => {
   });
 
   it("lists exactly the routes converted so far, and nothing aspirational", () => {
-    expect([...SKELETON_READY_ROUTES].sort()).toEqual([]);
+    expect([...SKELETON_READY_ROUTES].sort()).toEqual(["/dashboard"].sort());
   });
 });

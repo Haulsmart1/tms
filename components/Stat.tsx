@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { cn } from "../lib/cn";
 
 type Tone = "positive" | "warning" | "danger" | "neutral";
@@ -18,7 +19,9 @@ const subTextTone: Record<Tone, string> = {
 
 type Props = {
   label: string;
-  value: string;
+  // ReactNode, not string, so a loading tile can pass a <Skeleton /> and keep
+  // this component the single definition of a stat tile's layout.
+  value: ReactNode;
   sub?: string;
   subTone?: Tone;
   onClick?: () => void;

@@ -40,7 +40,7 @@
    Both fail at build time rather than silently, so this is a reminder about
    scope, not a hazard. */
 export const SKELETON_READY_ROUTES: readonly string[] = [
-  // Populated per page. /dashboard and /customers land in this batch.
+  "/dashboard",               // app/dashboard/page.tsx
 ];
 
 export function isSkeletonReadyRoute(pathname: string): boolean {
