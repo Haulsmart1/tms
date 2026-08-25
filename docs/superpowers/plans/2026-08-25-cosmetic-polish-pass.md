@@ -554,7 +554,7 @@ git commit -m "fix: declare color-scheme so native date-picker icons follow the 
 **Files:**
 - Modify: `app/globals.css`
 
-- [ ] **Step 1: Add the global select-arrow rule**
+- [x] **Step 1: Add the global select-arrow rule**
 
 Add this at the end of `app/globals.css` (after the existing `@layer components { ... }` block, so it is NOT nested inside any `@layer` — see the "Why this isn't in a layer" note below):
 
@@ -591,7 +591,7 @@ select:not([multiple]) {
 
 The SVG is Lucide's `chevron-down` glyph inlined as a data URI (no network request, no new dependency). The stroke colors are `--ink-3`'s dark (`#7787A0`) and light (`#737D8F`) values — `var()` can't be used inside a `background-image` data URI, so these are the two theme values written out directly, one per selector, matching how `--chrome-link` is handled the same way in `app/tokens.css`.
 
-- [ ] **Step 2: Manually verify in the browser**
+- [x] **Step 2: Manually verify in the browser**
 
 Run: `npm run dev`, sign in, open a page with a `<select>` in both themes:
 - A shared-component one: `/settings/licences` (uses `components/Select.tsx`).
@@ -599,12 +599,12 @@ Run: `npm run dev`, sign in, open a page with a `<select>` in both themes:
 
 Expected: every dropdown shows a clean, centered chevron instead of the native arrow, in both dark and light mode, with no visible overlap between the arrow and the selected option's text.
 
-- [ ] **Step 3: Run the full test suite**
+- [x] **Step 3: Run the full test suite**
 
 Run: `npm test`
 Expected: PASS, 0 failures (this is a CSS-only change with no test surface).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add app/globals.css
