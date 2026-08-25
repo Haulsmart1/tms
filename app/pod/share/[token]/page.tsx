@@ -469,7 +469,7 @@ export default async function PodSharePage({
 
         <footer className="rounded-xl border border-slate-700 bg-[#111c2e] p-5 print:border-slate-300 print:bg-white">
           <div className="flex items-start gap-4">
-            <div className="flex h-10 w-10 flex-none items-center justify-center rounded-full border border-blue-500 text-blue-400">
+            <div className="flex h-10 w-10 flex-none items-center justify-center rounded-full border border-blue-500 text-blue-400 print:border-slate-300 print:text-black">
               <Lock size={18} aria-hidden />
             </div>
 
