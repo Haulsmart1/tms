@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  ACCOUNTS_ADMIN_ROLES,
   createAdminClient,
   errorResponse,
   requireTenantAccess,
@@ -73,7 +74,7 @@ export async function GET(
 
   try {
     const { user } =
-      await requireTenantAccess(tenantId);
+      await requireTenantAccess(tenantId, ACCOUNTS_ADMIN_ROLES);
 
     const token =
       await exchangeXeroCode(code);

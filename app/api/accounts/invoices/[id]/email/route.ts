@@ -4,6 +4,7 @@ import {
 } from "next/server";
 
 import {
+  ACCOUNTS_ADMIN_ROLES,
   errorResponse,
   requireTenantAccess,
 } from "../../../../../../lib/accounts/server";
@@ -169,7 +170,8 @@ export async function POST(
       user,
     } =
       await requireTenantAccess(
-        tenantId
+        tenantId,
+        ACCOUNTS_ADMIN_ROLES
       );
 
     const {

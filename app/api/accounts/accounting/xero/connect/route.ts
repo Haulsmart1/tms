@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import {
+  ACCOUNTS_ADMIN_ROLES,
   errorResponse,
   requireTenantAccess,
 } from "../../../../../../lib/accounts/server";
@@ -26,7 +27,7 @@ export async function GET(
       );
     }
 
-    await requireTenantAccess(tenantId);
+    await requireTenantAccess(tenantId, ACCOUNTS_ADMIN_ROLES);
 
     const state =
       crypto.randomBytes(32).toString("hex");

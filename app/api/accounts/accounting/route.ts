@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { errorResponse, requireTenantAccess } from "../../../../lib/accounts/server";
+import { ACCOUNTS_ADMIN_ROLES, errorResponse, requireTenantAccess } from "../../../../lib/accounts/server";
 
 export const dynamic = "force-dynamic";
 
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { admin, user } = await requireTenantAccess(tenantId);
+    const { admin, user } = await requireTenantAccess(tenantId, ACCOUNTS_ADMIN_ROLES);
 
     const payload = {
       tenant_id: tenantId,

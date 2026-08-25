@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  ACCOUNTS_ADMIN_ROLES,
   errorResponse,
   requireTenantAccess,
 } from "../../../../../../lib/accounts/server";
@@ -28,7 +29,7 @@ export async function POST(
     }
 
     const { admin, user } =
-      await requireTenantAccess(tenantId);
+      await requireTenantAccess(tenantId, ACCOUNTS_ADMIN_ROLES);
 
     const { data: integration, error } =
       await admin

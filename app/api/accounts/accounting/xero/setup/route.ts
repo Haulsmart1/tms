@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  ACCOUNTS_ADMIN_ROLES,
   errorResponse,
   requireTenantAccess,
 } from "../../../../../../lib/accounts/server";
@@ -82,7 +83,8 @@ export async function GET(
     const {
       admin,
     } = await requireTenantAccess(
-      tenantId
+      tenantId,
+      ACCOUNTS_ADMIN_ROLES
     );
 
     const {

@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { isRoleAuthorized } from "./authz";
+export { ACCOUNTS_ADMIN_ROLES } from "./authz";
 
 export async function createUserClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;

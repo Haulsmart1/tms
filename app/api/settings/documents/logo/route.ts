@@ -4,6 +4,7 @@ import {
 } from "next/server";
 
 import {
+  ACCOUNTS_ADMIN_ROLES,
   errorResponse,
   requireTenantAccess,
 } from "../../../../../lib/accounts/server";
@@ -143,7 +144,8 @@ export async function POST(
       admin,
     } =
       await requireTenantAccess(
-        tenantId
+        tenantId,
+        ACCOUNTS_ADMIN_ROLES
       );
 
     const {
@@ -320,7 +322,8 @@ export async function DELETE(
       admin,
     } =
       await requireTenantAccess(
-        tenantId
+        tenantId,
+        ACCOUNTS_ADMIN_ROLES
       );
 
     const {
