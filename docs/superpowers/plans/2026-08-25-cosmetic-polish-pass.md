@@ -618,7 +618,7 @@ git commit -m "fix: replace native select arrows with a single owned chevron app
 **Files:**
 - Modify: `app/settings/page.tsx`
 
-- [ ] **Step 1: Replace the emoji strings with icon components**
+- [x] **Step 1: Replace the emoji strings with icon components**
 
 Read the full current file first (73 lines). Replace it entirely with:
 
@@ -709,17 +709,17 @@ export default function SettingsPage() {
 }
 ```
 
-- [ ] **Step 2: Manually verify in the browser**
+- [x] **Step 2: Manually verify in the browser**
 
 Run: `npm run dev`, sign in, go to `/settings`.
 Expected: each card shows a small blue-tinted icon square instead of an emoji.
 
-- [ ] **Step 3: Run typecheck and tests**
+- [x] **Step 3: Run typecheck and tests**
 
 Run: `npm run typecheck && npm test`
 Expected: both PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add app/settings/page.tsx
