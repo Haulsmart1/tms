@@ -144,6 +144,8 @@ const PAIRS: Pair[] = [
   { label: "skeleton on surface",         fg: "--skeleton",          bg: "--surface",       min: SKELETON_VISIBLE },
   { label: "skeleton on surface-2",       fg: "--skeleton",          bg: "--surface-2",     min: SKELETON_VISIBLE },
   { label: "skeleton on canvas",          fg: "--skeleton",          bg: "--canvas",        min: SKELETON_VISIBLE },
+  { label: "surface-hover on canvas (hover fill must be visible)", fg: "--surface-hover", bg: "--canvas",  min: AA_NON_TEXT },
+  { label: "surface-hover on surface (hover fill must be visible)", fg: "--surface-hover", bg: "--surface", min: AA_NON_TEXT },
 ];
 
 describe.each([

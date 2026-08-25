@@ -37,6 +37,13 @@
   --canvas: #0F1626;
   --surface: #161F31;
   --surface-2: #131B2B;
+  /* Hover fill for interactive elements (tabs, secondary/ghost buttons, table
+     rows). Deliberately NOT --surface-2: that token also hosts --ink text
+     elsewhere and brightening it to clear 3:1 against --canvas/--surface (the
+     WCAG non-text minimum for a UI-component boundary) drops ink-on-surface-2
+     below the 4.5:1 text minimum lib/theme/contrast.test.ts asserts. Same
+     reasoning as --skeleton above, for the same underlying conflict. */
+  --surface-hover: #4E6AB4;
   --line: #26324A;
   --line-strong: #586B90;
   /* Fill for loading skeletons. Deliberately NOT --surface-2: in the dark theme
@@ -116,6 +123,7 @@
   --canvas: #0F1626;
   --surface: #161F31;
   --surface-2: #131B2B;
+  --surface-hover: #4E6AB4;
   --line: #26324A;
   --line-strong: #586B90;
   --skeleton: #2B3852;
@@ -183,6 +191,7 @@
   --canvas: #F2F4F8;
   --surface: #FFFFFF;
   --surface-2: #EDF0F5;
+  --surface-hover: #7B8CAB;
   --line: #E4E7EE;
   --line-strong: #B9BFCC;
   --skeleton: #CDD4E1;
