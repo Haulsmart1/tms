@@ -110,7 +110,7 @@ export default function DataTable<T>({
                     }
                     className={cn(
                       "border-b border-line last:border-0",
-                      onRowClick && "cursor-pointer hover:bg-surface-2 focus-visible:bg-surface-2",
+                      onRowClick && "cursor-pointer hover:bg-surface-hover focus-visible:bg-surface-hover",
                     )}
                   >
                     {columns.map((col, i) => (
@@ -150,7 +150,7 @@ export default function DataTable<T>({
             <button
               type="button"
               onClick={onRetry}
-              className="mt-2 inline-flex h-9 items-center rounded-md border border-line-strong px-3 text-sm font-semibold text-ink hover:bg-surface-2"
+              className="mt-2 inline-flex h-9 items-center rounded-md border border-line-strong px-3 text-sm font-semibold text-ink hover:bg-surface-hover"
             >
               Retry
             </button>

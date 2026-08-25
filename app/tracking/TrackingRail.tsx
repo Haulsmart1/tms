@@ -42,7 +42,7 @@ export default function TrackingRail({ rows, selectedJobId, onSelect, footNote }
                   className={`flex w-full flex-col gap-1 border-b border-line px-4 py-2.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus ${
                     selected
                       ? "bg-primary-tint shadow-[inset_2px_0_0_var(--primary)]"
-                      : "bg-transparent hover:bg-surface-2"
+                      : "bg-transparent hover:bg-surface-hover"
                   }`}
                 >
                   <span className="flex w-full items-center gap-2">

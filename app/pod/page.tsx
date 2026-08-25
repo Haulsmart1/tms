@@ -1701,7 +1701,7 @@ function EvidenceUpload({
           className={[
             "inline-flex w-full items-center justify-center rounded-md border border-line-strong",
             "bg-surface px-3 py-2 text-xs font-semibold text-ink transition",
-            "hover:bg-surface-2",
+            "hover:bg-surface-hover",
             uploading
               ? "cursor-not-allowed opacity-50"
               : "cursor-pointer",

@@ -297,7 +297,7 @@ export default function DashboardPage() {
                   <ul className="flex flex-col gap-2">
                     {attention.slice(0, 5).map((item) => (
                       <li key={item.id}>
-                        <Link href={item.href} className="block rounded-md px-2 py-1.5 -mx-2 hover:bg-surface-2">
+                        <Link href={item.href} className="block rounded-md px-2 py-1.5 -mx-2 hover:bg-surface-hover">
                           <span className="block text-sm font-medium text-ink">{item.title}</span>
                           <span className="block text-xs text-ink-3">{item.meta}</span>
                         </Link>

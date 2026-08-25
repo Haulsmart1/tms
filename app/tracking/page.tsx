@@ -371,7 +371,7 @@ export default function TrackingPage() {
               <button
                 type="button"
                 onClick={() => setReloadToken((t) => t + 1)}
-                className="mt-3 rounded-sm border border-line bg-surface px-3 py-1.5 text-xs font-semibold text-ink hover:border-line-strong hover:bg-surface-2"
+                className="mt-3 rounded-sm border border-line bg-surface px-3 py-1.5 text-xs font-semibold text-ink hover:border-line-strong hover:bg-surface-hover"
               >
                 Try again
               </button>

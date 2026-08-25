@@ -107,7 +107,7 @@ export default function TrackingHeader({ job, phase, journey, reading, now }: Pr
         {driverPhone ? (
           <a
             href={`tel:${driverPhone}`}
-            className="rounded-sm border border-line px-2.5 py-1 text-xs font-semibold text-ink hover:border-line-strong hover:bg-surface-2"
+            className="rounded-sm border border-line px-2.5 py-1 text-xs font-semibold text-ink hover:border-line-strong hover:bg-surface-hover"
           >
             Call {job.driver_name ?? "driver"}
           </a>
@@ -118,7 +118,7 @@ export default function TrackingHeader({ job, phase, journey, reading, now }: Pr
             always honest; the label was not. */}
         <Link
           href="/jobs"
-          className="rounded-sm px-2.5 py-1 text-xs font-semibold text-ink-2 hover:bg-surface-2 hover:text-ink"
+          className="rounded-sm px-2.5 py-1 text-xs font-semibold text-ink-2 hover:bg-surface-hover hover:text-ink"
         >
           All jobs
         </Link>

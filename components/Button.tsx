@@ -19,8 +19,8 @@ const variants: Record<Variant, string> = {
   // the most-clicked control in the app. The token is #FFFFFF in light and dark
   // ink in dark, so both themes are correct with no per-theme class.
   primary: "bg-primary text-on-primary hover:bg-primary-hover",
-  secondary: "bg-surface text-ink border border-line-strong hover:bg-surface-2",
-  ghost: "bg-transparent text-ink hover:bg-surface-2",
+  secondary: "bg-surface text-ink border border-line-strong hover:bg-surface-hover",
+  ghost: "bg-transparent text-ink hover:bg-surface-hover",
   danger: "bg-danger text-on-danger hover:bg-danger-hover",
 };
 
