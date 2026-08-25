@@ -323,7 +323,7 @@ git commit -m "fix: repoint interactive hover fills from the invisible surface-2
 - Modify: `app/invoices/page.tsx:3047-3066` (Approve & Apply)
 - Modify: `app/invoices/page.tsx:3068-3082` (Cancel Credit)
 
-- [ ] **Step 1: Cancel Edit**
+- [x] **Step 1: Cancel Edit**
 
 Old (lines 2440-2447):
 ```tsx
@@ -349,7 +349,7 @@ New:
                         </Button>
 ```
 
-- [ ] **Step 2: Edit**
+- [x] **Step 2: Edit**
 
 Old (lines 3032-3045):
 ```tsx
@@ -381,7 +381,7 @@ New:
                                       </Button>
 ```
 
-- [ ] **Step 3: Approve & Apply**
+- [x] **Step 3: Approve & Apply**
 
 Old (lines 3047-3066):
 ```tsx
@@ -422,7 +422,7 @@ New:
                                       </Button>
 ```
 
-- [ ] **Step 4: Cancel Credit**
+- [x] **Step 4: Cancel Credit**
 
 Old (lines 3068-3082):
 ```tsx
@@ -455,22 +455,22 @@ New:
                                       </Button>
 ```
 
-- [ ] **Step 5: Run typecheck**
+- [x] **Step 5: Run typecheck**
 
 Run: `npm run typecheck`
 Expected: PASS. `Button`'s `Props` type extends `ButtonHTMLAttributes<HTMLButtonElement>`, so `onClick`/`disabled` are accepted as before; `type="button"` no longer needs to be set explicitly since `Button` already defaults to `type="button"` (see `components/Button.tsx:59`).
 
-- [ ] **Step 6: Manually verify in the browser**
+- [x] **Step 6: Manually verify in the browser**
 
 Run: `npm run dev`, sign in, go to `/invoices` → Credit Notes tab.
 Expected: "Cancel Edit" (when editing an existing credit note), "Edit", "Approve & Apply" and "Cancel Credit" all render with a visible border/background and stay visible on hover (lighten, don't vanish).
 
-- [ ] **Step 7: Run the full test suite**
+- [x] **Step 7: Run the full test suite**
 
 Run: `npm test`
 Expected: PASS, 0 failures.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add app/invoices/page.tsx
