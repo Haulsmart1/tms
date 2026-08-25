@@ -11,7 +11,7 @@ import MessageBanner from "../../components/MessageBanner";
 import {
   Package, CircleCheck, Calendar, Banknote, Receipt, TrendingUp, Truck, MapPin,
   Camera, Timer, Clock, Send, TriangleAlert, CircleDollarSign, Sparkles, Siren,
-  Radio, Briefcase, Wrench, UserCheck, FileText, type LucideIcon,
+  Radio, Briefcase, Wrench, UserCheck, FileText, AlarmClock, type LucideIcon,
 } from "lucide-react";
 
 const DAILY_DRIVING_LIMIT_MINUTES = 540;
@@ -1224,7 +1224,7 @@ export default function StatsPage() {
                 />
 
                 <StatCard
-                  icon={Clock}
+                  icon={AlarmClock}
                   value={hoursAlerts}
                   title="Drivers' hours alerts"
                   caption="Driver-days over 9 hours"
