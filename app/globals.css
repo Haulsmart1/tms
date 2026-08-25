@@ -91,9 +91,19 @@
    utilities;) compile into @layer utilities, and call sites set their own
    px-3-style padding as a class on the <select> itself. An unlayered rule
    already outranks any layered rule regardless of specificity per the CSS
-   Cascade Layers spec, but the properties below also carry !important to
-   guarantee the reserved icon space survives even if a future refactor moves
-   this rule inside a layer by accident. */
+   Cascade Layers spec.
+
+   !important is not just future-proofing for a layer refactor: some call
+   sites style selects via mechanisms other than Tailwind utility classes,
+   which the layer argument above doesn't cover at all. app/invoices/
+   QuotationPanel.tsx's `<select className="control">` is styled by a
+   styled-jsx `.control { padding: 0 0.75rem; ... }` rule, which compiles to
+   an unlayered, scoped selector at (0,2,0) specificity, higher than this
+   rule's `select:not([multiple])` at (0,1,1), and would win on ordinary
+   cascade specificity alone, no layers involved. Without !important here,
+   QuotationPanel's selects would lose their reserved icon space today, not
+   just after some hypothetical future change. Do not drop !important under
+   the assumption that avoiding @layer is sufficient on its own. */
 select:not([multiple]) {
   appearance: none !important;
   -webkit-appearance: none !important;
