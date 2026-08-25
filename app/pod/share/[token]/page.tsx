@@ -2,6 +2,7 @@
 import { verifyPodShareToken } from "../../../../lib/pod/shareToken";
 import { loadSharedPod } from "../../../../lib/pod/shareData";
 import ShareActions from "./ShareActions";
+import { Lock } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -468,8 +469,8 @@ export default async function PodSharePage({
 
         <footer className="rounded-xl border border-slate-700 bg-[#111c2e] p-5 print:border-slate-300 print:bg-white">
           <div className="flex items-start gap-4">
-            <div className="flex h-10 w-10 flex-none items-center justify-center rounded-full border border-blue-500 text-lg text-blue-400">
-              🔒
+            <div className="flex h-10 w-10 flex-none items-center justify-center rounded-full border border-blue-500 text-blue-400">
+              <Lock size={18} aria-hidden />
             </div>
 
             <div>
