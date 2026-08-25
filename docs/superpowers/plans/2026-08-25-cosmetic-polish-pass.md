@@ -733,7 +733,7 @@ git commit -m "fix: replace Settings page emoji with lucide icons"
 **Files:**
 - Modify: `app/stats/page.tsx`
 
-- [ ] **Step 1: Add the icon imports**
+- [x] **Step 1: Add the icon imports**
 
 At the top of `app/stats/page.tsx`, after the existing imports (after line 10, `import MessageBanner from "../../components/MessageBanner";`):
 
@@ -745,7 +745,7 @@ import {
 } from "lucide-react";
 ```
 
-- [ ] **Step 2: Update `StatCard` to take an icon component instead of a string**
+- [x] **Step 2: Update `StatCard` to take an icon component instead of a string**
 
 Old (lines 264-294):
 ```tsx
@@ -820,7 +820,7 @@ function StatCard({
 }
 ```
 
-- [ ] **Step 3: Replace every `icon="<emoji>"` call site**
+- [x] **Step 3: Replace every `icon="<emoji>"` call site**
 
 This is one contiguous block (originally lines 1075-1301). Replace the whole block:
 
@@ -1288,17 +1288,17 @@ New (identical structure, only the `icon="<emoji>"` props change to `icon={Compo
               </div>
 ```
 
-- [ ] **Step 4: Manually verify in the browser**
+- [x] **Step 4: Manually verify in the browser**
 
 Run: `npm run dev`, sign in, go to `/stats`.
 Expected: every KPI tile shows a small blue-tinted icon square instead of an emoji, correctly matched per the mapping above.
 
-- [ ] **Step 5: Run typecheck and tests**
+- [x] **Step 5: Run typecheck and tests**
 
 Run: `npm run typecheck && npm test`
 Expected: both PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add app/stats/page.tsx
