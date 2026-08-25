@@ -2437,14 +2437,14 @@ export default function CustomerAccountsPage() {
                       </div>
 
                       {editingCreditNote ? (
-                        <button
-                          type="button"
+                        <Button
+                          variant="secondary"
+                          size="sm"
                           disabled={working}
                           onClick={resetCreditEditor}
-                          className="rounded-md border border-line bg-surface px-3 py-2 text-sm font-medium text-ink hover:bg-canvas"
                         >
                           Cancel Edit
-                        </button>
+                        </Button>
                       ) : null}
                     </div>
 
@@ -3029,57 +3029,35 @@ export default function CustomerAccountsPage() {
                                 <div className="mt-3 flex flex-wrap gap-2 border-t border-line pt-3">
                                   {canEdit ? (
                                     <>
-                                      <button
-                                        type="button"
-                                        disabled={
-                                          working
-                                        }
-                                        onClick={() =>
-                                          void editCreditNote(
-                                            note
-                                          )
-                                        }
-                                        className="rounded-md border border-line bg-surface px-3 py-2 text-sm font-medium text-ink hover:bg-canvas"
+                                      <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        disabled={working}
+                                        onClick={() => void editCreditNote(note)}
                                       >
                                         Edit
-                                      </button>
+                                      </Button>
 
-                                      <button
-                                        type="button"
+                                      <Button
+                                        variant="secondary"
+                                        size="sm"
                                         disabled={
                                           working ||
-                                          (
-                                            note.credit_note_lines ??
-                                            []
-                                          ).length ===
-                                            0
+                                          (note.credit_note_lines ?? []).length === 0
                                         }
-                                        onClick={() =>
-                                          void creditNoteAction(
-                                            note,
-                                            "approve"
-                                          )
-                                        }
-                                        className="rounded-md border border-line bg-surface px-3 py-2 text-sm font-medium text-ink hover:bg-canvas"
+                                        onClick={() => void creditNoteAction(note, "approve")}
                                       >
                                         Approve & Apply
-                                      </button>
+                                      </Button>
 
-                                      <button
-                                        type="button"
-                                        disabled={
-                                          working
-                                        }
-                                        onClick={() =>
-                                          void creditNoteAction(
-                                            note,
-                                            "cancel"
-                                          )
-                                        }
-                                        className="rounded-md border border-line bg-surface px-3 py-2 text-sm font-medium text-ink hover:bg-canvas"
+                                      <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        disabled={working}
+                                        onClick={() => void creditNoteAction(note, "cancel")}
                                       >
                                         Cancel Credit
-                                      </button>
+                                      </Button>
                                     </>
                                   ) : null}
 
