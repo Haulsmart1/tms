@@ -119,7 +119,14 @@ function createVehicleMarker(
   const element = document.createElement("div");
   const live = state === "live";
 
-  element.textContent = "🚚";
+  element.innerHTML =
+    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/>' +
+    '<path d="M15 18H9"/>' +
+    '<path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/>' +
+    '<circle cx="17" cy="18" r="2"/>' +
+    '<circle cx="7" cy="18" r="2"/>' +
+    "</svg>";
   element.title = live
     ? "Live vehicle position"
     : "Last known vehicle position";
@@ -131,7 +138,7 @@ function createVehicleMarker(
     "display:flex",
     "align-items:center",
     "justify-content:center",
-    "font-size:20px",
+    "color:white",
     live ? "background:#16a34a" : "background:#d97706",
     "border:3px solid white",
     "box-shadow:0 2px 9px rgba(0,0,0,.5)",
