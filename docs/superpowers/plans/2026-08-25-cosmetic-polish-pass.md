@@ -32,7 +32,7 @@ The dark value `#4E6AB4` and light value `#7B8CAB` below were verified against t
 - Modify: `lib/theme/contrast.test.ts`
 - Test: `lib/theme/contrast.test.ts` (existing file, adding cases to it)
 
-- [ ] **Step 1: Write the failing contrast assertions**
+- [x] **Step 1: Write the failing contrast assertions**
 
 Open `lib/theme/contrast.test.ts` and add two entries to the `PAIRS` array (around line 119), directly after the existing `"skeleton on canvas"` entry:
 
@@ -45,12 +45,12 @@ Open `lib/theme/contrast.test.ts` and add two entries to the `PAIRS` array (arou
 
 (Only add the two new lines — the existing `"skeleton on canvas"` line and the closing `];` already exist; this shows them for placement context.)
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `npx vitest run lib/theme/contrast.test.ts`
 Expected: FAIL — `--surface-hover missing from :root` (and `.light`), because the token doesn't exist in `app/tokens.css` yet.
 
-- [ ] **Step 3: Add the token to all three blocks in `app/tokens.css`**
+- [x] **Step 3: Add the token to all three blocks in `app/tokens.css`**
 
 In `:root` (around line 39, directly after `--surface-2: #131B2B;`):
 
@@ -79,12 +79,12 @@ In `.light` (around line 185, directly after `--surface-2: #EDF0F5;`):
   --surface-hover: #7B8CAB;
 ```
 
-- [ ] **Step 4: Run the test to verify the new assertions pass**
+- [x] **Step 4: Run the test to verify the new assertions pass**
 
 Run: `npx vitest run lib/theme/contrast.test.ts`
 Expected: PASS, including the two new `surface-hover` cases in both the `:root` and `.light` describe blocks, and the "declares the same token names in every block" structural test.
 
-- [ ] **Step 5: Add the Tailwind utility**
+- [x] **Step 5: Add the Tailwind utility**
 
 In `tailwind.config.ts`, find the `surface` entry inside `extend.colors` (around line 65):
 
@@ -100,12 +100,12 @@ Replace with:
 
 This makes `bg-surface-hover` / `hover:bg-surface-hover` / `focus-visible:bg-surface-hover` available as Tailwind utilities.
 
-- [ ] **Step 6: Run the full test suite**
+- [x] **Step 6: Run the full test suite**
 
 Run: `npm test`
 Expected: PASS, 384+ tests (386 after Step 1's two additions), 0 failures.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add app/tokens.css tailwind.config.ts lib/theme/contrast.test.ts
