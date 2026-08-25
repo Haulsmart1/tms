@@ -41,6 +41,7 @@
    scope, not a hazard. */
 export const SKELETON_READY_ROUTES: readonly string[] = [
   "/dashboard",               // app/dashboard/page.tsx
+  "/customers",               // app/customers/page.tsx
 ];
 
 export function isSkeletonReadyRoute(pathname: string): boolean {
