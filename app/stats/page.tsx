@@ -8,6 +8,11 @@ import { applyTenantFilter } from "../../lib/tenant/filter";
 import Button from "../../components/Button";
 import Card from "../../components/Card";
 import MessageBanner from "../../components/MessageBanner";
+import {
+  Package, CircleCheck, Calendar, Banknote, Receipt, TrendingUp, Truck, MapPin,
+  Camera, Timer, Clock, Send, TriangleAlert, CircleDollarSign, Sparkles, Siren,
+  Radio, Briefcase, Wrench, UserCheck, FileText, type LucideIcon,
+} from "lucide-react";
 
 const DAILY_DRIVING_LIMIT_MINUTES = 540;
 const SPEED_ALERT_THRESHOLD = 90;
@@ -262,20 +267,23 @@ function groupJobsBy(
 }
 
 function StatCard({
-  icon,
+  icon: Icon,
   value,
   title,
   caption,
 }: {
-  icon: string;
+  icon: LucideIcon;
   value: string | number;
   title: string;
   caption: string;
 }) {
   return (
     <div className="flex min-w-0 flex-col items-start gap-1 rounded-lg border border-line bg-surface p-4 shadow-sm">
-      <div aria-hidden="true" className="text-2xl">
-        {icon}
+      <div
+        aria-hidden="true"
+        className="mb-1 flex h-8 w-8 items-center justify-center rounded-md bg-primary-tint text-primary-deep"
+      >
+        <Icon size={16} />
       </div>
 
       <h2 className="m-0 font-mono text-2xl font-semibold tabular-nums slashed-zero text-ink">
@@ -1073,7 +1081,7 @@ export default function StatsPage() {
 
               <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
                 <StatCard
-                  icon="📦"
+                  icon={Package}
                   value={
                     periodJobs.length
                   }
@@ -1082,7 +1090,7 @@ export default function StatsPage() {
                 />
 
                 <StatCard
-                  icon="✅"
+                  icon={CircleCheck}
                   value={
                     completedJobs.length
                   }
@@ -1091,7 +1099,7 @@ export default function StatsPage() {
                 />
 
                 <StatCard
-                  icon="🗓️"
+                  icon={Calendar}
                   value={
                     plannedJobs.length
                   }
@@ -1100,7 +1108,7 @@ export default function StatsPage() {
                 />
 
                 <StatCard
-                  icon="💷"
+                  icon={Banknote}
                   value={formatMoney(
                     revenue
                   )}
@@ -1109,7 +1117,7 @@ export default function StatsPage() {
                 />
 
                 <StatCard
-                  icon="🧾"
+                  icon={Receipt}
                   value={formatMoney(
                     subcontractorCost
                   )}
@@ -1118,7 +1126,7 @@ export default function StatsPage() {
                 />
 
                 <StatCard
-                  icon="📈"
+                  icon={TrendingUp}
                   value={formatMoney(
                     margin
                   )}
@@ -1129,7 +1137,7 @@ export default function StatsPage() {
                 />
 
                 <StatCard
-                  icon="🚚"
+                  icon={Truck}
                   value={`${ownFleetJobs} / ${subbedJobs.length}`}
                   title="Own fleet / subbed"
                   caption="In-house vs subcontracted"
@@ -1142,21 +1150,21 @@ export default function StatsPage() {
 
               <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
                 <StatCard
-                  icon="📍"
+                  icon={MapPin}
                   value={`${deliveredStops.length} / ${deliveryStops.length}`}
                   title="Stops delivered"
                   caption="Delivered vs delivery stops"
                 />
 
                 <StatCard
-                  icon="📸"
+                  icon={Camera}
                   value={podRate}
                   title="POD rate"
                   caption="Delivery completion rate"
                 />
 
                 <StatCard
-                  icon="⏳"
+                  icon={Timer}
                   value={pendingPods}
                   title="PODs pending"
                   caption="Delivery stops awaiting POD"
@@ -1169,7 +1177,7 @@ export default function StatsPage() {
 
               <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
                 <StatCard
-                  icon="💷"
+                  icon={Banknote}
                   value={formatMoney(
                     invoicedTotal
                   )}
@@ -1178,14 +1186,14 @@ export default function StatsPage() {
                 />
 
                 <StatCard
-                  icon="📤"
+                  icon={Send}
                   value={`${draftCount} / ${sentCount} / ${paidCount}`}
                   title="Draft / sent / paid"
                   caption="Invoice pipeline"
                 />
 
                 <StatCard
-                  icon="⚠️"
+                  icon={TriangleAlert}
                   value={
                     overdueInvoices.length
                   }
@@ -1194,7 +1202,7 @@ export default function StatsPage() {
                 />
 
                 <StatCard
-                  icon="💸"
+                  icon={CircleDollarSign}
                   value={formatMoney(
                     overdueValue
                   )}
@@ -1209,21 +1217,21 @@ export default function StatsPage() {
 
               <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
                 <StatCard
-                  icon="🆕"
+                  icon={Sparkles}
                   value={newCustomers}
                   title="New customers"
                   caption="Customers added in this period"
                 />
 
                 <StatCard
-                  icon="⏱️"
+                  icon={Clock}
                   value={hoursAlerts}
                   title="Drivers' hours alerts"
                   caption="Driver-days over 9 hours"
                 />
 
                 <StatCard
-                  icon="🚨"
+                  icon={Siren}
                   value={
                     violationEvents
                   }
@@ -1232,14 +1240,14 @@ export default function StatsPage() {
                 />
 
                 <StatCard
-                  icon="📡"
+                  icon={Radio}
                   value={speedAlerts}
                   title="Speed alerts"
                   caption={`Readings over ${SPEED_ALERT_THRESHOLD} km/h`}
                 />
 
                 <StatCard
-                  icon="🕒"
+                  icon={Clock}
                   value={`${drivingHours.toFixed(
                     1
                   )} h`}
@@ -1260,14 +1268,14 @@ export default function StatsPage() {
 
               <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
                 <StatCard
-                  icon="🚛"
+                  icon={Truck}
                   value={`${activeVehicles} / ${vehicles.length}`}
                   title="Active vehicles"
                   caption="Active vs total fleet"
                 />
 
                 <StatCard
-                  icon="💼"
+                  icon={Briefcase}
                   value={
                     billableVehicles
                   }
@@ -1276,7 +1284,7 @@ export default function StatsPage() {
                 />
 
                 <StatCard
-                  icon="🛠️"
+                  icon={Wrench}
                   value={
                     vehiclesOffRoad
                   }
@@ -1285,14 +1293,14 @@ export default function StatsPage() {
                 />
 
                 <StatCard
-                  icon="🧑‍✈️"
+                  icon={UserCheck}
                   value={`${activeDrivers} / ${drivers.length}`}
                   title="Active drivers"
                   caption="Active vs total drivers"
                 />
 
                 <StatCard
-                  icon="📄"
+                  icon={FileText}
                   value={
                     licencesExpiringSoon
                   }
