@@ -1530,7 +1530,7 @@ git commit -m "fix: replace Super Admin dashboard emoji with lucide icons"
 - Modify: `components/Badge.tsx`
 - Modify: `app/drivers/page.tsx`
 
-- [ ] **Step 1: Give `Badge` room for an icon**
+- [x] **Step 1: Give `Badge` room for an icon**
 
 Lucide icons default to `stroke="currentColor"`, so they automatically pick up whatever text color `Badge`'s `tone` sets — no color prop needed. `Badge` just needs a small gap between an icon and its text.
 
@@ -1544,7 +1544,7 @@ New:
         "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium",
 ```
 
-- [ ] **Step 2: Add the icon imports to `app/drivers/page.tsx`**
+- [x] **Step 2: Add the icon imports to `app/drivers/page.tsx`**
 
 After the existing imports (after line 12, `import Button from "../../components/Button";`):
 
@@ -1552,7 +1552,7 @@ After the existing imports (after line 12, `import Button from "../../components
 import { CircleCheck, TriangleAlert } from "lucide-react";
 ```
 
-- [ ] **Step 3: Replace the compliance badges**
+- [x] **Step 3: Replace the compliance badges**
 
 Old (lines 1625-1640):
 ```tsx
@@ -1596,17 +1596,17 @@ New:
                     </div>
 ```
 
-- [ ] **Step 4: Manually verify in the browser**
+- [x] **Step 4: Manually verify in the browser**
 
 Run: `npm run dev`, sign in, go to `/drivers`.
 Expected: compliance badges show a small check or warning-triangle icon before the text instead of a Unicode ✓/⚠ glyph, in the same green/amber tone as before.
 
-- [ ] **Step 5: Run typecheck and tests**
+- [x] **Step 5: Run typecheck and tests**
 
 Run: `npm run typecheck && npm test`
 Expected: both PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add components/Badge.tsx app/drivers/page.tsx
