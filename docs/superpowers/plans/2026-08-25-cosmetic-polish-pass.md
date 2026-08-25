@@ -1622,7 +1622,7 @@ git commit -m "fix: replace driver compliance badge glyphs with lucide icons"
 **Files:**
 - Modify: `app/tracking/TrackingMap.tsx:115-135` (`createVehicleMarker`)
 
-- [ ] **Step 1: Replace the emoji with an inline SVG, and set an explicit icon color**
+- [x] **Step 1: Replace the emoji with an inline SVG, and set an explicit icon color**
 
 The current `cssText` (lines 127-138) sets a `background` (green when live, amber otherwise) but no `color`, so an SVG using `stroke="currentColor"` would inherit whatever text color the map surface happens to have, not necessarily something visible against green/amber. Add an explicit white `color` alongside the icon swap.
 
@@ -1683,17 +1683,17 @@ New:
 
 (`font-size:20px` is dropped — it only sized the emoji glyph; the SVG is sized directly via its own `width`/`height` attributes.)
 
-- [ ] **Step 2: Manually verify in the browser**
+- [x] **Step 2: Manually verify in the browser**
 
 Run: `npm run dev`, sign in, go to `/tracking` with an active job that has a vehicle position.
 Expected: the vehicle marker on the map shows a clean white truck icon instead of the emoji glyph, visible against both the green (live) and amber (last known) marker backgrounds.
 
-- [ ] **Step 3: Run the full test suite**
+- [x] **Step 3: Run the full test suite**
 
 Run: `npm test`
 Expected: PASS, 0 failures.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add app/tracking/TrackingMap.tsx
