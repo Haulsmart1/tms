@@ -9,6 +9,8 @@ import Stat from "../../components/Stat";
 import DataTable, { type Column } from "../../components/DataTable";
 import { buildNeedsAttention, buildRevenueLast7Days, type AttentionItem, type RevenueDay } from "../../lib/dashboard/aggregate";
 import { isAwaitingPod } from "../../lib/pod/overdue";
+import Skeleton from "../../components/Skeleton";
+import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
 
 type Kpis = {
   jobsToday: number;
@@ -46,6 +48,20 @@ export default function DashboardPage() {
   const [revenue, setRevenue] = useState<RevenueDay[]>([]);
 
   useEffect(() => {
+    /* This guard fixes an existing bug rather than preventing a new one.
+       TenantGate is an element inside this component's own JSX, not a wrapper
+       around it, so it only ever gated the rendered DOM: DashboardPage mounts
+       and this effect fires while status is still "loading", and has always
+       done so. Every query below therefore ran with activeTenantId === null on
+       each cold load. RLS is the isolation boundary (see CLAUDE.md), so that
+       was a wasted round trip returning nothing, not a leak, which is why it
+       went unnoticed.
+
+       Returning BEFORE setState("loading") also stops a token refresh flashing
+       a skeleton over a populated page: resolve() re-enters "loading" on every
+       auth event, and this effect must not reset the page for that. */
+    if (tenant.status !== "ready") return;
+
     let cancelled = false;
 
     async function load() {
@@ -173,7 +189,7 @@ export default function DashboardPage() {
 
     load();
     return () => { cancelled = true; };
-  }, [tenant.activeTenantId]);
+  }, [tenant.activeTenantId, tenant.status]);
 
   const jobColumns: Column<TodayJobRow>[] = [
     { header: "Reference", cell: (r) => <span className="font-mono text-sm font-medium text-ink">{r.reference}</span> },
@@ -189,6 +205,12 @@ export default function DashboardPage() {
   ];
 
   const maxRevenue = Math.max(1, ...revenue.map((d) => d.total));
+
+  const showSkeleton = shouldShowSkeleton({
+    tenantStatus: tenant.status,
+    fetching: state === "loading",
+    hasData: state === "ready",
+  });
 
   return (
     <TenantGate>
@@ -207,24 +229,34 @@ export default function DashboardPage() {
             </div>
           ) : null}
 
-          <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-5">
-            <Stat label="Jobs today" value={state === "loading" ? "—" : String(kpis.jobsToday)} />
+          <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-5" aria-busy={showSkeleton}>
+            {/* One announcement for the whole page, not one per skeleton bar.
+                Replaces the announcement the old "Loading..." text gave free. */}
+            {showSkeleton ? <span className="sr-only" role="status">Loading dashboard</span> : null}
+            <Stat
+              label="Jobs today"
+              value={showSkeleton ? <Skeleton display="inline-block" w="2.5ch" h="1.25rem" /> : String(kpis.jobsToday)}
+            />
             <Stat
               label="Unassigned"
-              value={state === "loading" ? "—" : String(kpis.unassigned)}
+              value={showSkeleton ? <Skeleton display="inline-block" w="2.5ch" h="1.25rem" /> : String(kpis.unassigned)}
               sub={kpis.unassigned > 0 ? "needs a vehicle/driver" : undefined}
               subTone="warning"
             />
-            <Stat label="On the road" value={state === "loading" ? "—" : String(kpis.onTheRoad)} sub="rostered today" />
+            <Stat
+              label="On the road"
+              value={showSkeleton ? <Skeleton display="inline-block" w="2.5ch" h="1.25rem" /> : String(kpis.onTheRoad)}
+              sub="rostered today"
+            />
             <Stat
               label="PODs awaiting"
-              value={state === "loading" ? "—" : String(kpis.podsAwaiting)}
+              value={showSkeleton ? <Skeleton display="inline-block" w="2.5ch" h="1.25rem" /> : String(kpis.podsAwaiting)}
               sub={kpis.podsAwaiting > 0 ? "open delivery stops" : undefined}
               subTone="warning"
             />
             <Stat
               label="Overdue invoices"
-              value={state === "loading" ? "—" : money(kpis.overdueInvoicesTotal)}
+              value={showSkeleton ? <Skeleton display="inline-block" w="6ch" h="1.25rem" /> : money(kpis.overdueInvoicesTotal)}
               sub={kpis.overdueInvoicesTotal > 0 ? "past due" : undefined}
               subTone="danger"
             />
@@ -242,15 +274,24 @@ export default function DashboardPage() {
                 columns={jobColumns}
                 rows={todayJobs}
                 rowKey={(r) => r.id}
-                state={state === "loading" ? "loading" : state === "error" ? "error" : todayJobs.length ? "ready" : "empty"}
+                state={showSkeleton ? "loading" : state === "error" ? "error" : todayJobs.length ? "ready" : "empty"}
                 emptyTitle="No jobs scheduled today"
               />
             </section>
 
             <section className="flex flex-col gap-4">
-              <div className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+              <div className="rounded-lg border border-line bg-surface p-4 shadow-sm" aria-busy={showSkeleton}>
                 <h2 className="mb-2 text-sm font-semibold text-ink">Needs attention</h2>
-                {attention.length === 0 ? (
+                {showSkeleton ? (
+                  <ul className="flex flex-col gap-2">
+                    {[0, 1, 2].map((i) => (
+                      <li key={`attention-skeleton-${i}`} className="px-2 py-1.5 -mx-2">
+                        <Skeleton w="70%" h="0.875rem" className="mb-1.5" />
+                        <Skeleton w="45%" h="0.75rem" />
+                      </li>
+                    ))}
+                  </ul>
+                ) : attention.length === 0 ? (
                   <p className="text-sm text-ink-3">Nothing needs attention right now.</p>
                 ) : (
                   <ul className="flex flex-col gap-2">
@@ -270,15 +311,23 @@ export default function DashboardPage() {
                 <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-3">
                   Revenue · last 7 days
                 </h2>
-                <div className="flex h-16 items-end gap-1.5">
-                  {revenue.map((d) => (
-                    <div key={d.date} className="flex-1" title={`${d.label}: ${money(d.total)}`}>
-                      <div
-                        className="w-full rounded-t bg-primary"
-                        style={{ height: `${Math.max(4, (d.total / maxRevenue) * 100)}%` }}
-                      />
-                    </div>
-                  ))}
+                <div className="flex h-16 items-end gap-1.5" aria-busy={showSkeleton}>
+                  {showSkeleton
+                    ? [0, 1, 2, 3, 4, 5, 6].map((i) => (
+                        // Fixed heights, not random: a skeleton that reshuffles
+                        // on every render reads as data arriving when it is not.
+                        <div key={`revenue-skeleton-${i}`} className="flex-1">
+                          <Skeleton w="100%" h={`${[40, 65, 30, 80, 55, 70, 45][i]}%`} />
+                        </div>
+                      ))
+                    : revenue.map((d) => (
+                        <div key={d.date} className="flex-1" title={`${d.label}: ${money(d.total)}`}>
+                          <div
+                            className="w-full rounded-t bg-primary"
+                            style={{ height: `${Math.max(4, (d.total / maxRevenue) * 100)}%` }}
+                          />
+                        </div>
+                      ))}
                 </div>
               </div>
             </section>

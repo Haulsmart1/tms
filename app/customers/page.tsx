@@ -4,69 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
-import Badge from "../../components/Badge";
 import Button from "../../components/Button";
 import MessageBanner from "../../components/MessageBanner";
-
-type Customer = {
-  id: string;
-  name: string;
-  legal_name: string | null;
-  trading_name: string | null;
-  account_code: string | null;
-  company_number: string | null;
-  vat_number: string | null;
-  eori_number: string | null;
-  website: string | null;
-  industry_type: string | null;
-  active: boolean;
-  contact_name: string | null;
-  job_title: string | null;
-  phone: string | null;
-  mobile: string | null;
-  email: string | null;
-  accounts_email: string | null;
-  operations_email: string | null;
-  address_line_1: string | null;
-  address_line_2: string | null;
-  city: string | null;
-  county_region: string | null;
-  postcode: string | null;
-  country_code: string | null;
-  payment_terms_days: number | null;
-  credit_limit: number | null;
-  credit_status: string | null;
-  currency_code: string | null;
-  requires_po: boolean;
-  default_po_reference: string | null;
-  fuel_surcharge_percent: number | null;
-  vat_rate: number | null;
-  default_collection_instructions: string | null;
-  default_delivery_instructions: string | null;
-  default_vehicle_type: string | null;
-  tail_lift_required: boolean;
-  adr_required: boolean;
-  temperature_control_required: boolean;
-  timed_delivery_required: boolean;
-  pod_required: boolean;
-  invoice_pod_attachment_required: boolean;
-  pallet_exchange_required: boolean;
-  weekend_delivery_allowed: boolean;
-  booking_reference_required: boolean;
-  default_depot: string | null;
-  default_contact_method: string | null;
-  account_manager: string | null;
-  service_level: string | null;
-  customer_status: string | null;
-  credit_hold: boolean;
-  out_of_hours_contact: string | null;
-  external_customer_id: string | null;
-  accounting_customer_id: string | null;
-  crm_customer_id: string | null;
-  api_enabled: boolean;
-  webhook_url: string | null;
-  notes: string | null;
-};
+import type { Customer } from "./types";
+import CustomerCard from "./CustomerCard";
+import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
 
 type CustomerForm = {
   name: string;
@@ -126,6 +68,11 @@ type CustomerForm = {
   webhook_url: string;
   notes: string;
 };
+
+/* Never rendered: every field CustomerCard reads is behind `loading`. It exists
+   so the card can keep one required `customer` prop rather than an optional one
+   that every real call site would then have to null-check. */
+const PLACEHOLDER_CUSTOMER = { id: "skeleton" } as Customer;
 
 const EMPTY_FORM: CustomerForm = {
   name: "",
@@ -195,6 +142,9 @@ export default function CustomersPage() {
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Distinct from `loading`: this stays true across refetches, so a token
+  // refresh cannot flash a skeleton over the cards already on screen.
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -243,16 +193,29 @@ export default function CustomersPage() {
       );
     } finally {
       setLoading(false);
+      setHasLoaded(true);
     }
   }, [headers, search]);
 
   useEffect(() => {
+    /* This page mounts during tenant resolution now that TenantGate passes
+       through, and the x-tenant-id header would otherwise go out empty.
+       Returning before the timer is also what stops a token refresh, which
+       re-enters status "loading", from restarting the fetch. */
+    if (tenant.status !== "ready") return;
+
     const timer = window.setTimeout(() => {
       void loadCustomers();
     }, 250);
 
     return () => window.clearTimeout(timer);
-  }, [loadCustomers]);
+  }, [loadCustomers, tenant.status]);
+
+  const showSkeleton = shouldShowSkeleton({
+    tenantStatus: tenant.status,
+    fetching: loading,
+    hasData: hasLoaded,
+  });
 
   function updateForm<K extends keyof CustomerForm>(
     field: K,
@@ -851,109 +814,33 @@ export default function CustomersPage() {
               />
             </div>
 
-            {loading ? (
-              <p className="py-10 text-center text-sm text-ink-3">Loading customers...</p>
+            {showSkeleton ? (
+              <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3" aria-busy>
+                <span className="sr-only" role="status">Loading customers</span>
+                {/* Six is a guess. However many customers arrive, this grid
+                    resizes: pixel-faithful fixes each card's shape, not the
+                    count. Recorded in the spec. */}
+                {[0, 1, 2, 3, 4, 5].map((i) => (
+                  <CustomerCard
+                    key={`customer-skeleton-${i}`}
+                    loading
+                    customer={PLACEHOLDER_CUSTOMER}
+                    onEdit={() => {}}
+                    onDelete={() => {}}
+                  />
+                ))}
+              </div>
             ) : customers.length === 0 ? (
               <p className="py-10 text-center text-sm text-ink-3">No customers found.</p>
             ) : (
               <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {customers.map((customer) => (
-                  <article
+                  <CustomerCard
                     key={customer.id}
-                    className="rounded-lg border border-line bg-surface-2 p-3"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div>
-                        <h3 className="m-0 text-md font-semibold text-ink">
-                          {customer.name}
-                        </h3>
-                        <span className="font-mono text-xs text-ink-3">
-                          {customer.account_code || "No account code"}
-                        </span>
-                      </div>
-
-                      {customer.credit_hold ? (
-                        <Badge tone="danger">Credit Hold</Badge>
-                      ) : customer.active ? (
-                        <Badge tone="success">Active</Badge>
-                      ) : (
-                        <Badge tone="neutral">Inactive</Badge>
-                      )}
-                    </div>
-
-                    <div className="my-2 grid grid-cols-2 gap-2">
-                      <Info
-                        label="Contact"
-                        value={customer.contact_name || customer.email}
-                      />
-                      <Info label="Phone" value={customer.phone} />
-                      <Info
-                        label="Location"
-                        value={
-                          [customer.city, customer.postcode]
-                            .filter(Boolean)
-                            .join(", ") || null
-                        }
-                      />
-                      <Info
-                        label="Terms"
-                        value={`${customer.payment_terms_days ?? 30} days`}
-                      />
-                      <Info
-                        label="Credit Limit"
-                        value={
-                          customer.credit_limit === null
-                            ? "—"
-                            : `£${Number(customer.credit_limit).toLocaleString(
-                                "en-GB",
-                                { minimumFractionDigits: 2 }
-                              )}`
-                        }
-                      />
-                      <Info
-                        label="Service"
-                        value={customer.service_level || "Standard"}
-                      />
-                    </div>
-
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {customer.adr_required ? (
-                        <Badge tone="neutral">ADR</Badge>
-                      ) : null}
-                      {customer.tail_lift_required ? (
-                        <Badge tone="neutral">Tail Lift</Badge>
-                      ) : null}
-                      {customer.timed_delivery_required ? (
-                        <Badge tone="neutral">Timed</Badge>
-                      ) : null}
-                      {customer.pod_required ? (
-                        <Badge tone="neutral">POD</Badge>
-                      ) : null}
-                      {customer.api_enabled ? (
-                        <Badge tone="info">API</Badge>
-                      ) : null}
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        type="button"
-                        onClick={() => startEdit(customer)}
-                      >
-                        Edit
-                      </Button>
-
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        type="button"
-                        onClick={() => void deleteCustomer(customer)}
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  </article>
+                    customer={customer}
+                    onEdit={startEdit}
+                    onDelete={(c) => void deleteCustomer(c)}
+                  />
                 ))}
               </div>
             )}
@@ -1075,20 +962,5 @@ function CheckboxField({
       />
       {label}
     </label>
-  );
-}
-
-function Info({
-  label,
-  value,
-}: {
-  label: string;
-  value: string | null | undefined;
-}) {
-  return (
-    <div className="text-sm">
-      <span className="text-kicker uppercase text-ink-2">{label}</span>{" "}
-      <strong className="block text-ink">{value || "—"}</strong>
-    </div>
   );
 }

@@ -39,6 +39,10 @@
   --surface-2: #131B2B;
   --line: #26324A;
   --line-strong: #586B90;
+  /* Fill for loading skeletons. Deliberately NOT --surface-2: in the dark theme
+     --surface-2 (#131B2B) is darker than the --surface (#161F31) card it sits
+     on and measures 1.05:1, i.e. invisible. See lib/theme/contrast.test.ts. */
+  --skeleton: #2B3852;
   /* chrome, the sidebar surface */
   --chrome: #0C1220;
   --chrome-raised: #1A2438;
@@ -114,6 +118,7 @@
   --surface-2: #131B2B;
   --line: #26324A;
   --line-strong: #586B90;
+  --skeleton: #2B3852;
   --chrome: #0C1220;
   --chrome-raised: #1A2438;
   --chrome-border: #26324A;
@@ -180,6 +185,7 @@
   --surface-2: #EDF0F5;
   --line: #E4E7EE;
   --line-strong: #B9BFCC;
+  --skeleton: #CDD4E1;
   /* Chrome is dark in BOTH themes, so these look like they should equal the
      dark block's. They deliberately do not: these are the values that shipped
      on 2026-08-11 and this branch does not change already-shipped light
