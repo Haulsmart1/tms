@@ -110,10 +110,10 @@ While `pod-files` was privatized (rls_10*), the sibling `job-files` bucket retai
 
 Per the approved spec, only HIGH/CRITICAL are patched now:
 
-- **H1 (code):** patched on `ethan/security-patches` with TDD — a pure `isRoleAuthorized` helper in `lib/accounts/`, an `allowedRoles` parameter on `requireTenantAccess`, and role enforcement wired into the affected routes. Scope pending the decision below.
-- **C1, H2, M7 (SQL):** drafted as unapplied numbered migrations in `docs/sql/` for Ethan to review, apply, and verify manually (no automated runner; no live writes performed by this audit).
+- **H1 (code):** patched on `ethan/security-patches` with TDD, using **option B** (gate only the integration, settings, and document-email actions; leave transactional writes at the member level the RLS model already permits). A pure `isRoleAuthorized` helper in `lib/accounts/authz.ts`, an `allowedRoles` parameter on `requireTenantAccess`, and `ACCOUNTS_ADMIN_ROLES` enforced on the Xero (connect/disconnect/setup/callback/test/sync), accounting-integration settings, Stripe Connect, document/branding settings + logo, and invoice/quotation email routes.
+- **C1, H2 (SQL):** drafted as unapplied numbered migrations in `docs/sql/` (`rls_11_enable_rls_explicit.sql`, `rls_12_job_files_lockdown.sql`) for Ethan to review, apply, and verify manually (no automated runner; no live writes performed by this audit).
 
-Everything under MEDIUM/LOW is queued here, not patched.
+Everything under MEDIUM/LOW is queued here, not patched. M7 (pod-files restrictive-policy reproducibility) is a small companion to C1 but left queued to stay within the HIGH/CRITICAL scope; its fix is to move the already-live restrictive policies from `rls_10a_pod_files_restrictive.sql`'s comments into a reproducible migration.
 
 ## Open scope decision (blocks H1 patch)
 
