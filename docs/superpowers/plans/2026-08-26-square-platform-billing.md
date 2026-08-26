@@ -2146,24 +2146,67 @@ Naming note: the page already has a `billingRows` memo, so the new `company_bill
 
 - [ ] **Step 1: Refactor the count onto the shared definition**
 
+Code review of Tasks 4-6 flagged that passing `companyTenantIds: []` here would let the
+page display a lower count than the cron charges (vehicles are normally keyed by real
+tenant ids). So the page must fetch tenants and pass the real ids: displayed and charged
+counts then come from the same inputs and the same function.
+
 Import at the top of the file:
 
 ```ts
 import { countBillableVehicles } from "../../../lib/billing/vehicleCount";
 ```
 
-In the `billingRows` memo, keep the existing `companyVehicles` filter (still needed for the `totalVehicles` display), but replace the manual `vehicleIds`/`licensedVehicleIds` set logic with:
+Add a tenants fetch. New type and state:
 
 ```ts
+type Tenant = {
+    id: string;
+    company_id?: string | null;
+};
+```
+
+```ts
+const [tenants, setTenants] = useState<Tenant[]>([]);
+```
+
+In the `loadData` `Promise.all`, add:
+
+```ts
+supabase.from("tenants").select("id, company_id"),
+```
+
+and store it like the other results (`setTenants((tenantsData as Tenant[]) || [])`),
+including its error in the error-message chain. Add `tenants` to the memo's dependency
+array.
+
+In the `billingRows` memo, compute the company's tenant ids, widen the existing
+`companyVehicles` filter to include tenant-membership matches (so the `totalVehicles`
+display cannot show fewer vehicles than the billable count), and replace the manual
+`vehicleIds`/`licensedVehicleIds` set logic:
+
+```ts
+const companyTenantIds = tenants
+    .filter((tenant) => tenant.company_id === company.id)
+    .map((tenant) => tenant.id);
+const tenantIdSet = new Set(companyTenantIds);
+
+const companyVehicles = vehicles.filter(
+    (vehicle) =>
+        (vehicle.tenant_id != null && tenantIdSet.has(vehicle.tenant_id)) ||
+        vehicle.tenant_id === company.id ||
+        vehicle.company_id === company.id
+);
+
 const billableVehicleCount = countBillableVehicles({
     companyId: company.id,
-    companyTenantIds: [],
+    companyTenantIds,
     vehicles,
     licences,
 });
 ```
 
-`companyTenantIds: []` preserves the page's current behavior exactly (it never fetched tenants; the shared function's direct `tenant_id`/`company_id` matching covers what the page matched before). The row types on the page are structurally compatible with `VehicleRow`/`LicenceRow`.
+The row types on the page are structurally compatible with `VehicleRow`/`LicenceRow`.
 
 - [ ] **Step 2: Extend the data load**
 
