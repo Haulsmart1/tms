@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../../../lib/supabase/browser";
+import { countBillableVehicles } from "../../../lib/billing/vehicleCount";
 
 const PRICE_PER_LICENSED_VEHICLE = 10;
 
@@ -9,6 +10,11 @@ type Company = {
     id: string;
     name: string;
     created_at?: string;
+};
+
+type Tenant = {
+    id: string;
+    company_id?: string | null;
 };
 
 type Vehicle = {
@@ -34,13 +40,23 @@ type Invoice = {
     created_at?: string;
 };
 
+type CompanyBilling = {
+    company_id: string;
+    status: string | null;
+    next_charge_on: string | null;
+    card_last4: string | null;
+    retry_count: number | null;
+};
+
 export default function SuperAdminBillingPage() {
     const supabase = createClient();
 
     const [companies, setCompanies] = useState<Company[]>([]);
+    const [tenants, setTenants] = useState<Tenant[]>([]);
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
     const [licences, setLicences] = useState<VehicleLicence[]>([]);
     const [invoices, setInvoices] = useState<Invoice[]>([]);
+    const [subscriptionRows, setSubscriptionRows] = useState<CompanyBilling[]>([]);
     const [loading, setLoading] = useState(true);
     const [message, setMessage] = useState("");
 
@@ -50,30 +66,47 @@ export default function SuperAdminBillingPage() {
 
         const [
             { data: companiesData, error: companiesError },
+            { data: tenantsData, error: tenantsError },
             { data: vehiclesData, error: vehiclesError },
             { data: licencesData, error: licencesError },
             { data: invoicesData, error: invoicesError },
+            { data: subscriptionRowsData, error: subscriptionRowsError },
         ] = await Promise.all([
             supabase.from("companies").select("*").order("name"),
+            supabase.from("tenants").select("id, company_id"),
             supabase.from("vehicles").select("id, tenant_id, company_id, registration"),
             supabase.from("vehicle_licences").select("id, tenant_id, vehicle_id, active"),
             supabase.from("invoices").select("*").order("created_at", { ascending: false }),
+            supabase
+                .from("company_billing")
+                .select("company_id, status, next_charge_on, card_last4, retry_count"),
         ]);
 
-        if (companiesError || vehiclesError || licencesError || invoicesError) {
+        if (
+            companiesError ||
+            tenantsError ||
+            vehiclesError ||
+            licencesError ||
+            invoicesError ||
+            subscriptionRowsError
+        ) {
             setMessage(
                 companiesError?.message ||
+                tenantsError?.message ||
                 vehiclesError?.message ||
                 licencesError?.message ||
                 invoicesError?.message ||
+                subscriptionRowsError?.message ||
                 "Unable to load billing data."
             );
         }
 
         setCompanies((companiesData as Company[]) || []);
+        setTenants((tenantsData as Tenant[]) || []);
         setVehicles((vehiclesData as Vehicle[]) || []);
         setLicences((licencesData as VehicleLicence[]) || []);
         setInvoices((invoicesData as Invoice[]) || []);
+        setSubscriptionRows((subscriptionRowsData as CompanyBilling[]) || []);
         setLoading(false);
     }
 
@@ -83,22 +116,24 @@ export default function SuperAdminBillingPage() {
 
     const billingRows = useMemo(() => {
         return companies.map((company) => {
+            const companyTenantIds = tenants
+                .filter((tenant) => tenant.company_id === company.id)
+                .map((tenant) => tenant.id);
+            const tenantIdSet = new Set(companyTenantIds);
+
             const companyVehicles = vehicles.filter(
                 (vehicle) =>
-                    vehicle.tenant_id === company.id || vehicle.company_id === company.id
+                    (vehicle.tenant_id != null && tenantIdSet.has(vehicle.tenant_id)) ||
+                    vehicle.tenant_id === company.id ||
+                    vehicle.company_id === company.id
             );
 
-            const vehicleIds = new Set(companyVehicles.map((vehicle) => vehicle.id));
-
-            const licensedVehicleIds = new Set(
-                licences
-                    .filter(
-                        (licence) => licence.active && vehicleIds.has(licence.vehicle_id)
-                    )
-                    .map((licence) => licence.vehicle_id)
-            );
-
-            const billableVehicleCount = licensedVehicleIds.size;
+            const billableVehicleCount = countBillableVehicles({
+                companyId: company.id,
+                companyTenantIds,
+                vehicles,
+                licences,
+            });
             const monthlyCharge = billableVehicleCount * PRICE_PER_LICENSED_VEHICLE;
 
             const latestInvoice = invoices.find(
@@ -113,7 +148,7 @@ export default function SuperAdminBillingPage() {
                 latestInvoice,
             };
         });
-    }, [companies, vehicles, licences, invoices]);
+    }, [companies, tenants, vehicles, licences, invoices]);
 
     async function createInvoice(companyId: string, vehicleCount: number, amount: number) {
         setMessage("");
@@ -210,6 +245,39 @@ export default function SuperAdminBillingPage() {
                             <div style={{ opacity: 0.8, marginBottom: 12 }}>
                                 Monthly Charge: £{row.monthlyCharge}
                             </div>
+
+                            {(() => {
+                                const sub = subscriptionRows.find(
+                                    (s) => s.company_id === row.company.id
+                                );
+                                if (!sub) {
+                                    return (
+                                        <div style={{ opacity: 0.8, marginBottom: 12 }}>
+                                            Subscription: no card on file
+                                        </div>
+                                    );
+                                }
+                                const isPastDue = sub.status === "past_due";
+                                return (
+                                    <div
+                                        style={{
+                                            marginBottom: 12,
+                                            color: isPastDue ? "#b91c1c" : undefined,
+                                            fontWeight: isPastDue ? 700 : undefined,
+                                            opacity: isPastDue ? 1 : 0.8,
+                                        }}
+                                    >
+                                        Subscription: {sub.status}
+                                        {sub.card_last4 ? ` • card ****${sub.card_last4}` : ""}
+                                        {sub.next_charge_on
+                                            ? ` • next charge ${sub.next_charge_on}`
+                                            : ""}
+                                        {isPastDue
+                                            ? ` • ${sub.retry_count ?? 0} failed attempts`
+                                            : ""}
+                                    </div>
+                                );
+                            })()}
 
                             <div style={{ opacity: 0.8, marginBottom: 12 }}>
                                 Latest Invoice:{" "}
