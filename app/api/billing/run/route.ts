@@ -25,16 +25,31 @@ export async function GET(request: NextRequest) {
   const { data: rows, error } = await admin
     .from("company_billing")
     .select("*")
-    .neq("status", "canceled");
+    .neq("status", "canceled")
+    .order("next_charge_on", { ascending: true });
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  // PostgREST caps unscoped selects at 1000 rows by default. Hitting this cap
+  // means some due companies are silently missing from this run; refuse
+  // rather than under-charge. Same discipline as fetchBillableVehicleCount.
+  if ((rows ?? []).length >= 1000) {
+    return NextResponse.json(
+      {
+        error:
+          "Billing refused: company_billing query hit the 1000-row cap; results may be truncated.",
+      },
+      { status: 500 }
+    );
   }
 
   const results: Array<Record<string, unknown>> = [];
   let succeeded = 0;
   let failed = 0;
   let skipped = 0;
+  let conflicts = 0;
 
   for (const raw of rows ?? []) {
     const row: CompanyBillingRow = {
@@ -84,11 +99,13 @@ export async function GET(request: NextRequest) {
         throw new Error(updateError.message);
       }
       if (!updatedRows || updatedRows.length === 0) {
-        skipped += 1;
+        conflicts += 1;
         results.push({
           companyId: row.company_id,
           cycleDate: action.cycleDate,
           attempt: action.attempt,
+          succeeded: result.succeeded,
+          grossPence: result.grossPence,
           skippedReason: "concurrent billing update, outcome not applied",
         });
         continue;
@@ -114,7 +131,12 @@ export async function GET(request: NextRequest) {
       const message =
         cycleError instanceof Error ? cycleError.message : "Unknown error.";
       console.error(`billing cron: company ${row.company_id} failed:`, message);
-      results.push({ companyId: row.company_id, error: message });
+      results.push({
+        companyId: row.company_id,
+        cycleDate: action.cycleDate,
+        attempt: action.attempt,
+        error: message,
+      });
     }
   }
 
@@ -125,6 +147,7 @@ export async function GET(request: NextRequest) {
     charged: succeeded,
     failed,
     skipped,
+    conflicts,
     results,
   });
 }

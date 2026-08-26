@@ -1800,6 +1800,14 @@ git commit -m "feat(billing): card setup route with immediate first charge"
 
 - [ ] **Step 1: Write the route**
 
+Review-driven changes on top of the first draft: a compare-and-swap guard on
+the per-company update so a concurrent `/api/billing/card` retry is never
+clobbered, a row-cap tripwire on the `company_billing` fetch matching the
+discipline in `fetchBillableVehicleCount`, an ordered fetch (most-overdue
+first) so repeated partial runs converge instead of starving the tail, and a
+separate `conflicts` counter (distinct from `skipped`) so a payment that
+executed but lost the bookkeeping race stays visible in the summary.
+
 ```ts
 // app/api/billing/run/route.ts
 import { NextRequest, NextResponse } from "next/server";
@@ -1829,16 +1837,31 @@ export async function GET(request: NextRequest) {
   const { data: rows, error } = await admin
     .from("company_billing")
     .select("*")
-    .neq("status", "canceled");
+    .neq("status", "canceled")
+    .order("next_charge_on", { ascending: true });
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  // PostgREST caps unscoped selects at 1000 rows by default. Hitting this cap
+  // means some due companies are silently missing from this run; refuse
+  // rather than under-charge. Same discipline as fetchBillableVehicleCount.
+  if ((rows ?? []).length >= 1000) {
+    return NextResponse.json(
+      {
+        error:
+          "Billing refused: company_billing query hit the 1000-row cap; results may be truncated.",
+      },
+      { status: 500 }
+    );
   }
 
   const results: Array<Record<string, unknown>> = [];
   let succeeded = 0;
   let failed = 0;
   let skipped = 0;
+  let conflicts = 0;
 
   for (const raw of rows ?? []) {
     const row: CompanyBillingRow = {
@@ -1873,12 +1896,31 @@ export async function GET(request: NextRequest) {
         succeeded: result.succeeded,
       });
 
-      const { error: updateError } = await admin
+      // Compare-and-swap on the dunning state: if a concurrent card update
+      // already moved this row (the /api/billing/card route retries
+      // immediately on card replacement), skip rather than clobber its
+      // outcome with ours.
+      const { data: updatedRows, error: updateError } = await admin
         .from("company_billing")
         .update({ ...outcome, updated_at: new Date().toISOString() })
-        .eq("company_id", row.company_id);
+        .eq("company_id", row.company_id)
+        .eq("status", row.status)
+        .eq("retry_count", row.retry_count)
+        .select("company_id");
       if (updateError) {
         throw new Error(updateError.message);
+      }
+      if (!updatedRows || updatedRows.length === 0) {
+        conflicts += 1;
+        results.push({
+          companyId: row.company_id,
+          cycleDate: action.cycleDate,
+          attempt: action.attempt,
+          succeeded: result.succeeded,
+          grossPence: result.grossPence,
+          skippedReason: "concurrent billing update, outcome not applied",
+        });
+        continue;
       }
 
       if (result.succeeded) {
@@ -1901,7 +1943,12 @@ export async function GET(request: NextRequest) {
       const message =
         cycleError instanceof Error ? cycleError.message : "Unknown error.";
       console.error(`billing cron: company ${row.company_id} failed:`, message);
-      results.push({ companyId: row.company_id, error: message });
+      results.push({
+        companyId: row.company_id,
+        cycleDate: action.cycleDate,
+        attempt: action.attempt,
+        error: message,
+      });
     }
   }
 
@@ -1912,6 +1959,7 @@ export async function GET(request: NextRequest) {
     charged: succeeded,
     failed,
     skipped,
+    conflicts,
     results,
   });
 }
