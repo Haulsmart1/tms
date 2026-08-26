@@ -101,7 +101,7 @@ Status tags: [OK] functional against live data, [PARTIAL] real data but view-onl
 - **`/settings/users`** [OK]: invite users by magic link (admin action).
 - **`/settings/permissions`** [PARTIAL]: per-user, per-page access checkboxes writing to `user_permissions`. Grant path works; revoke path and controlled state are incomplete.
 - **`/settings/invoices`** [PARTIAL]: this tenant's monthly charge (active licensed vehicles x GBP 10).
-- **`/settings/billing`** [OK]: subscription payment method (Square card on file, 3DS verified) and charge history; company admins only (super_admin is redirected to `/super-admin/billing`; staff see a notice).
+- **`/settings/billing`** [OK]: subscription payment method (Square card on file, 3DS verified) and charge history; company admins only (super_admin sees a notice linking to `/super-admin/billing`; staff see a notice).
 
 ### Super-admin (platform operator)
 - **`/super-admin`** [STUB]: overview with hardcoded KPI tiles (placeholder numbers).

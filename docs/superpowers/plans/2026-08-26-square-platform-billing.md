@@ -1446,6 +1446,25 @@ decline, and a next-day retry after a partial failure could double-charge. The f
 - **Malformed JSON returns 400, not 500**: `request.json()` is wrapped in its own try/catch so a
   parse failure gets the same 400 treatment as a zod validation failure.
 
+A final whole-branch review found one more Important seam bug plus a response-honesty gap, both
+folded into the version below:
+- **First-time attempt is derived from the audit trail, not hardcoded to 1**: the original code
+  always charged the first-time path as attempt 1. After a same-day decline, that attempt already
+  spent idempotency key `(company, today, 1)`; hardcoding attempt 1 again on a same-day retry with a
+  different card sent a new request body under the same key, which Square rejects as
+  `IDEMPOTENCY_KEY_REUSED`, blocking the admin from trying another card until the next London day.
+  The route now queries the max recorded `attempt` in `platform_charges` for `(company, today)` (any
+  status counts, since a failed attempt still spent its key) and charges `attempt: maxAttempt + 1`.
+- **Honest 409 for a still-settling payment**: both `runChargeCycle` call sites now catch an error
+  whose message starts with `PAYMENT_INDETERMINATE` and return
+  `{ error: "A previous payment attempt is still settling with Square..." }` at 409, instead of
+  letting it fall through to the outer catch as an opaque 500. All other errors still fall through
+  to the outer catch unchanged. Accepted limitation: if the first-time charge itself comes back
+  PENDING, same-day setup is wedged behind this 409 until the London calendar date rolls over
+  (changing the idempotency key); it does not self-heal from same-day retries alone, only from the
+  date change. Recorded in
+  `docs/superpowers/reviews/2026-08-26-square-platform-billing-review-notes.md`.
+
 - [ ] **Step 1: Write the route**
 
 ```ts
@@ -1623,14 +1642,51 @@ export async function POST(request: NextRequest) {
 
       // First-time setup: immediate first charge; write company_billing only
       // on success so a declined card leaves no half-configured subscription.
+      //
+      // Attempt number is derived from the audit trail, not hardcoded to 1: a
+      // declined first attempt today already used idempotency key
+      // (company, today, 1), and the admin can retry same-day with a
+      // different card. Reusing attempt 1 for that retry would send a NEW
+      // request body under the SAME key, which Square rejects as
+      // IDEMPOTENCY_KEY_REUSED. Any recorded attempt (succeeded or failed)
+      // counts, since either way that key is already spent.
+      const { data: attemptRows, error: attemptError } = await admin
+        .from("platform_charges")
+        .select("attempt")
+        .eq("company_id", companyId)
+        .eq("cycle_date", today)
+        .order("attempt", { ascending: false })
+        .limit(1);
+      if (attemptError) {
+        throw new Error(attemptError.message);
+      }
+      const firstTimeAttempt = Number(attemptRows?.[0]?.attempt ?? 0) + 1;
+
       const anchorDay = Number(today.slice(8, 10));
-      const result = await runChargeCycle(admin, {
-        companyId,
-        cycleDate: today,
-        attempt: 1,
-        squareCustomerId: customerId,
-        squareCardId: card.id,
-      });
+      let result;
+      try {
+        result = await runChargeCycle(admin, {
+          companyId,
+          cycleDate: today,
+          attempt: firstTimeAttempt,
+          squareCustomerId: customerId,
+          squareCardId: card.id,
+        });
+      } catch (chargeError) {
+        if (
+          chargeError instanceof Error &&
+          chargeError.message.startsWith("PAYMENT_INDETERMINATE")
+        ) {
+          return NextResponse.json(
+            {
+              error:
+                "A previous payment attempt is still settling with Square. Please wait a few minutes and try again; if this persists, charges resume automatically tomorrow.",
+            },
+            { status: 409 }
+          );
+        }
+        throw chargeError;
+      }
 
       if (!result.succeeded) {
         return NextResponse.json(
@@ -1692,13 +1748,30 @@ export async function POST(request: NextRequest) {
     }
 
     const { cycleDate, attempt } = action;
-    const result = await runChargeCycle(admin, {
-      companyId,
-      cycleDate,
-      attempt,
-      squareCustomerId: customerId,
-      squareCardId: card.id,
-    });
+    let result;
+    try {
+      result = await runChargeCycle(admin, {
+        companyId,
+        cycleDate,
+        attempt,
+        squareCustomerId: customerId,
+        squareCardId: card.id,
+      });
+    } catch (chargeError) {
+      if (
+        chargeError instanceof Error &&
+        chargeError.message.startsWith("PAYMENT_INDETERMINATE")
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "A previous payment attempt is still settling with Square. Please wait a few minutes and try again; if this persists, charges resume automatically tomorrow.",
+          },
+          { status: 409 }
+        );
+      }
+      throw chargeError;
+    }
 
     const outcome = applyChargeOutcome({
       row: {
@@ -1775,7 +1848,7 @@ export async function POST(request: NextRequest) {
 }
 ```
 
-One subtlety to preserve: a card-replacement retry while `past_due` uses `attempt = retry_count + 1` (attempt 5 and up). The `platform_charges` check constraint allows any attempt >= 1 for exactly this reason. `square.cards.disable` takes `{ cardId }`, not a plain string id (verified against `node_modules/square` types).
+One subtlety to preserve: a card-replacement retry while `past_due` uses `attempt = retry_count + 1` (attempt 5 and up). The `platform_charges` check constraint allows any attempt >= 1 for exactly this reason. `square.cards.disable` takes `{ cardId }`, not a plain string id (verified against `node_modules/square` types). Same idea applies to the first-time path: its attempt number is now derived from the max recorded `platform_charges` attempt for `(company, today)` rather than hardcoded, for the same "never reuse a spent idempotency key" reason.
 
 - [ ] **Step 2: Typecheck**
 
