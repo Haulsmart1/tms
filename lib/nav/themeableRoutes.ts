@@ -66,6 +66,7 @@ export const THEMEABLE_ROUTES: readonly string[] = [
   "/settings/portal-invites", // app/settings/portal-invites/page.tsx
   "/settings/licences",       // app/settings/licences/page.tsx
   "/settings/company",        // app/settings/company/page.tsx
+  "/settings/billing",        // app/settings/billing/page.tsx
 ];
 
 export function isThemeableRoute(pathname: string): boolean {
