@@ -42,9 +42,22 @@ describe("computeChargeAmounts", () => {
 });
 
 describe("chargeIdempotencyKey", () => {
-  it("is deterministic over company, cycle and attempt", () => {
-    expect(chargeIdempotencyKey("abc-123", "2026-08-26", 2)).toBe(
-      "chg_abc-123_2026-08-26_2"
+  it("is deterministic and compact over company, cycle and attempt", () => {
+    expect(
+      chargeIdempotencyKey(
+        "0c8b6a1e-4f2d-4e7b-9a3c-1d5e7f9b2a4c",
+        "2026-08-26",
+        2
+      )
+    ).toBe("0c8b6a1e4f2d4e7b9a3c1d5e7f9b2a4c_20260826_2");
+  });
+
+  it("stays within Square's 45-character idempotency key limit", () => {
+    const key = chargeIdempotencyKey(
+      "0c8b6a1e-4f2d-4e7b-9a3c-1d5e7f9b2a4c",
+      "2026-08-26",
+      99
     );
+    expect(key.length).toBeLessThanOrEqual(45);
   });
 });

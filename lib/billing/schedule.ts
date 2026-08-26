@@ -53,6 +53,7 @@ export function computeNextChargeOn(cycleDate: string, anchorDay: number): strin
 // After failedAttempt attempts have failed, when is the next try? Two days per
 // failed attempt from the cycle date puts attempts on days 1, 3, 5 and 7.
 // Null means dunning is exhausted and the company goes past_due.
+// Precondition: failedAttempt >= 1 (attempt numbers start at 1).
 export function nextRetryOn(cycleDate: string, failedAttempt: number): string | null {
   if (failedAttempt >= MAX_ATTEMPTS) return null;
   return addDays(cycleDate, 2 * failedAttempt);

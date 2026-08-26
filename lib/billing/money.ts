@@ -28,12 +28,17 @@ export function computeChargeAmounts(vehicleCount: number): ChargeAmounts {
   };
 }
 
-// One key per (company, cycle, attempt): a crashed-and-rerun cron reuses the
-// same key, so Square deduplicates and a double charge is impossible.
+// Square's CreatePayment idempotency_key allows at most 45 characters, so the
+// key is compacted: UUID without dashes (32) + date without dashes (8) +
+// attempt, joined by underscores. One key per (company, cycle, attempt): a
+// crashed-and-rerun cron reuses the same key, so Square deduplicates and a
+// double charge is impossible.
 export function chargeIdempotencyKey(
   companyId: string,
   cycleDate: string,
   attempt: number
 ): string {
-  return `chg_${companyId}_${cycleDate}_${attempt}`;
+  const compactCompany = companyId.replace(/-/g, "");
+  const compactDate = cycleDate.replace(/-/g, "");
+  return `${compactCompany}_${compactDate}_${attempt}`;
 }

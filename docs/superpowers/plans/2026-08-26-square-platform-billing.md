@@ -168,10 +168,23 @@ describe("computeChargeAmounts", () => {
 });
 
 describe("chargeIdempotencyKey", () => {
-  it("is deterministic over company, cycle and attempt", () => {
-    expect(chargeIdempotencyKey("abc-123", "2026-08-26", 2)).toBe(
-      "chg_abc-123_2026-08-26_2"
+  it("is deterministic and compact over company, cycle and attempt", () => {
+    expect(
+      chargeIdempotencyKey(
+        "0c8b6a1e-4f2d-4e7b-9a3c-1d5e7f9b2a4c",
+        "2026-08-26",
+        2
+      )
+    ).toBe("0c8b6a1e4f2d4e7b9a3c1d5e7f9b2a4c_20260826_2");
+  });
+
+  it("stays within Square's 45-character idempotency key limit", () => {
+    const key = chargeIdempotencyKey(
+      "0c8b6a1e-4f2d-4e7b-9a3c-1d5e7f9b2a4c",
+      "2026-08-26",
+      99
     );
+    expect(key.length).toBeLessThanOrEqual(45);
   });
 });
 ```
@@ -215,21 +228,26 @@ export function computeChargeAmounts(vehicleCount: number): ChargeAmounts {
   };
 }
 
-// One key per (company, cycle, attempt): a crashed-and-rerun cron reuses the
-// same key, so Square deduplicates and a double charge is impossible.
+// Square's CreatePayment idempotency_key allows at most 45 characters, so the
+// key is compacted: UUID without dashes (32) + date without dashes (8) +
+// attempt, joined by underscores. One key per (company, cycle, attempt): a
+// crashed-and-rerun cron reuses the same key, so Square deduplicates and a
+// double charge is impossible.
 export function chargeIdempotencyKey(
   companyId: string,
   cycleDate: string,
   attempt: number
 ): string {
-  return `chg_${companyId}_${cycleDate}_${attempt}`;
+  const compactCompany = companyId.replace(/-/g, "");
+  const compactDate = cycleDate.replace(/-/g, "");
+  return `${compactCompany}_${compactDate}_${attempt}`;
 }
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `npx vitest run lib/billing/money.test.ts`
-Expected: PASS (6 tests).
+Expected: PASS (7 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -404,7 +422,7 @@ export function nextRetryOn(cycleDate: string, failedAttempt: number): string | 
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `npx vitest run lib/billing/schedule.test.ts`
-Expected: PASS (13 tests). The BST test relies on vitest's pinned `TZ=Europe/London` plus the explicit `timeZone` option; both point the same way.
+Expected: PASS (15 tests). The BST test relies on vitest's pinned `TZ=Europe/London` plus the explicit `timeZone` option; both point the same way.
 
 - [ ] **Step 5: Commit**
 
