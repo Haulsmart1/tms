@@ -24,6 +24,20 @@ accepted limitations for Ethan to triage.
    still settling. Rare in practice, since Square's card payments normally complete synchronously;
    manual resolution if it does not clear on its own is the Square dashboard.
 
+   Two residual variants of the same rare family, both accepted for v1 (final re-review of
+   ba88def):
+   - **Settled-PENDING off-book double charge.** If the wedged first payment later settles
+     COMPLETED at Square, it was never recorded in `platform_charges`, so the next-day self-heal
+     charges a fresh first cycle: the customer pays twice for the overlapping first month, with
+     the first payment visible only in the Square dashboard. Remedy: manual refund via the Square
+     dashboard.
+   - **Recovery-path indeterminate does not self-heal.** In the card-replacement branch an
+     indeterminate retry returns the 409 before the CAS, so the new card is never stored, and the
+     cycle date never changes mid-dunning, so the idempotency key never refreshes: the cron and
+     re-replacements both keep hitting IDEMPOTENCY_KEY_REUSED until resolved manually. The 409's
+     "resumes automatically tomorrow" wording is only accurate for the first-time path; softening
+     or branching that message is a cheap follow-up.
+
 3. **Verify the Vercel plan supports `maxDuration = 300` on `/api/billing/run`.** Legacy
    (non-Fluid) Hobby plans clamp function duration to 60 seconds regardless of what the route
    declares. Check the actual Vercel plan and Fluid Compute setting when `CRON_SECRET` and the
