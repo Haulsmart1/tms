@@ -3,6 +3,7 @@ import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import AppShell from "./components/AppShell";
 import ThemeScope from "./components/ThemeScope";
 import { TenantProvider } from "./components/TenantProvider";
+import PastDueBanner from "../components/billing/PastDueBanner";
 import { THEME_SCRIPT } from "../lib/theme/themeScript";
 import "./globals.css";
 
@@ -78,6 +79,7 @@ export default function RootLayout({
             lib/theme/themeScript.ts for why. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <TenantProvider>
+          <PastDueBanner />
           <div style={{ display: "flex", minHeight: "100vh" }}>
             <AppShell />
             <ThemeScope>{children}</ThemeScope>
