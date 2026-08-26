@@ -68,6 +68,7 @@ describe("isThemeableRoute", () => {
         "/settings/portal-invites",
         "/settings/licences",
         "/settings/company",
+        "/settings/billing",
       ].sort(),
     );
   });
