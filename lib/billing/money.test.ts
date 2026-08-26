@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { chargeIdempotencyKey, computeChargeAmounts } from "./money";
+import {
+  chargeIdempotencyKey,
+  classifyPaymentResult,
+  computeChargeAmounts,
+} from "./money";
 
 describe("computeChargeAmounts", () => {
   it("charges 1000 pence net per vehicle plus 20% VAT", () => {
@@ -59,5 +63,49 @@ describe("chargeIdempotencyKey", () => {
       99
     );
     expect(key.length).toBeLessThanOrEqual(45);
+  });
+});
+
+describe("classifyPaymentResult", () => {
+  it("treats COMPLETED as success", () => {
+    expect(classifyPaymentResult({ status: "COMPLETED" })).toEqual({
+      kind: "succeeded",
+    });
+  });
+
+  it("treats FAILED and CANCELED as terminal failures", () => {
+    expect(classifyPaymentResult({ status: "FAILED" })).toEqual({
+      kind: "failed",
+      failureCode: "FAILED",
+    });
+    expect(classifyPaymentResult({ status: "CANCELED" })).toEqual({
+      kind: "failed",
+      failureCode: "CANCELED",
+    });
+  });
+
+  it("treats a missing payment as a terminal failure", () => {
+    expect(classifyPaymentResult(undefined)).toEqual({
+      kind: "failed",
+      failureCode: "NO_PAYMENT_RETURNED",
+    });
+  });
+
+  it("treats PENDING and APPROVED as indeterminate, never failed", () => {
+    expect(classifyPaymentResult({ status: "PENDING" })).toEqual({
+      kind: "indeterminate",
+      status: "PENDING",
+    });
+    expect(classifyPaymentResult({ status: "APPROVED" })).toEqual({
+      kind: "indeterminate",
+      status: "APPROVED",
+    });
+  });
+
+  it("treats an unknown status as indeterminate", () => {
+    expect(classifyPaymentResult({ status: "SOMETHING_NEW" })).toEqual({
+      kind: "indeterminate",
+      status: "SOMETHING_NEW",
+    });
   });
 });

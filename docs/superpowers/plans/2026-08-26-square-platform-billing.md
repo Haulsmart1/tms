@@ -187,7 +187,56 @@ describe("chargeIdempotencyKey", () => {
     expect(key.length).toBeLessThanOrEqual(45);
   });
 });
+
+describe("classifyPaymentResult", () => {
+  it("treats COMPLETED as success", () => {
+    expect(classifyPaymentResult({ status: "COMPLETED" })).toEqual({
+      kind: "succeeded",
+    });
+  });
+
+  it("treats FAILED and CANCELED as terminal failures", () => {
+    expect(classifyPaymentResult({ status: "FAILED" })).toEqual({
+      kind: "failed",
+      failureCode: "FAILED",
+    });
+    expect(classifyPaymentResult({ status: "CANCELED" })).toEqual({
+      kind: "failed",
+      failureCode: "CANCELED",
+    });
+  });
+
+  it("treats a missing payment as a terminal failure", () => {
+    expect(classifyPaymentResult(undefined)).toEqual({
+      kind: "failed",
+      failureCode: "NO_PAYMENT_RETURNED",
+    });
+  });
+
+  it("treats PENDING and APPROVED as indeterminate, never failed", () => {
+    expect(classifyPaymentResult({ status: "PENDING" })).toEqual({
+      kind: "indeterminate",
+      status: "PENDING",
+    });
+    expect(classifyPaymentResult({ status: "APPROVED" })).toEqual({
+      kind: "indeterminate",
+      status: "APPROVED",
+    });
+  });
+
+  it("treats an unknown status as indeterminate", () => {
+    expect(classifyPaymentResult({ status: "SOMETHING_NEW" })).toEqual({
+      kind: "indeterminate",
+      status: "SOMETHING_NEW",
+    });
+  });
+});
 ```
+
+(`classifyPaymentResult` was added during Task 7's code review: PENDING/APPROVED are not
+failures, and misclassifying them as failed would schedule a retry under a NEW idempotency
+key, double-charging the customer if the pending payment later completes. See Task 7 for
+how `runChargeCycle` uses this.)
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -242,12 +291,35 @@ export function chargeIdempotencyKey(
   const compactDate = cycleDate.replace(/-/g, "");
   return `${compactCompany}_${compactDate}_${attempt}`;
 }
+
+export type PaymentClassification =
+  | { kind: "succeeded" }
+  | { kind: "failed"; failureCode: string }
+  | { kind: "indeterminate"; status: string };
+
+// COMPLETED is the only success; FAILED and CANCELED are terminal failures
+// safe to retry under a new idempotency key. Anything else (PENDING, APPROVED,
+// unknown) is not finished: the caller must NOT record an outcome, so the next
+// run replays the SAME key and reads the payment's eventual terminal state.
+export function classifyPaymentResult(
+  payment: { status?: string | null } | undefined
+): PaymentClassification {
+  if (!payment) {
+    return { kind: "failed", failureCode: "NO_PAYMENT_RETURNED" };
+  }
+  const status = payment.status ?? "NO_STATUS";
+  if (status === "COMPLETED") return { kind: "succeeded" };
+  if (status === "FAILED" || status === "CANCELED") {
+    return { kind: "failed", failureCode: status };
+  }
+  return { kind: "indeterminate", status };
+}
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `npx vitest run lib/billing/money.test.ts`
-Expected: PASS (7 tests).
+Expected: PASS (12 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -977,6 +1049,16 @@ git commit -m "feat(billing): Square server client with env guards"
 
 Impure glue shared by both API routes: company-admin auth, vehicle-count fetch, and the execute-one-charge-cycle function. No unit tests (network + DB); the gate is `npm run typecheck`, and Task 14 exercises it against the sandbox. Keep every branch of logic that CAN be pure delegated to the Task 2-5 modules.
 
+Code review on the first implementation found three issues, folded into the version below: (1)
+the `platform_charges` insert must tolerate a Postgres duplicate-key error (23505) as
+already-recorded rather than throwing forever on a crash-and-rerun; (2) a non-terminal Square
+payment status (PENDING/APPROVED) must not be classified as failed, or the retry-under-a-new-key
+can double-charge once the pending payment completes -- classification now lives in
+`classifyPaymentResult` (Task 2) and an indeterminate result throws before the audit insert runs;
+(3) `fetchBillableVehicleCount` must scope its vehicle/licence queries to the company rather than
+selecting all rows unfiltered, with a tripwire that refuses to proceed if either query hits
+PostgREST's 1000-row cap, since a silent truncation there means silent underbilling.
+
 - [ ] **Step 1: Write the module**
 
 ```ts
@@ -985,11 +1067,22 @@ Impure glue shared by both API routes: company-admin auth, vehicle-count fetch, 
 // Square calls live here; all decisions are delegated to the pure modules.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { SquareError } from "square";
 import { createAdminClient, createUserClient } from "../accounts/server";
+import { ACCOUNTS_ADMIN_ROLES, isRoleAuthorized } from "../accounts/authz";
 import { extractRoleName } from "../roles";
 import { getSquare, getSquareLocationId } from "../payments/square";
-import { chargeIdempotencyKey, computeChargeAmounts } from "./money";
+import {
+  chargeIdempotencyKey,
+  classifyPaymentResult,
+  computeChargeAmounts,
+} from "./money";
 import { countBillableVehicles } from "./vehicleCount";
+
+// PostgREST caps unscoped selects at 1000 rows by default. Hitting this cap
+// means the vehicle/licence count below is silently truncated, which
+// undercounts and underbills; refuse rather than guess.
+const POSTGREST_ROW_CAP = 1000;
 
 export async function requireCompanyAdmin() {
   const userClient = await createUserClient();
@@ -1006,7 +1099,7 @@ export async function requireCompanyAdmin() {
 
   const { data: profile, error: profileError } = await admin
     .from("profiles")
-    .select("company_id, role_id, roles(name)")
+    .select("company_id, roles(name)")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -1016,7 +1109,7 @@ export async function requireCompanyAdmin() {
 
   const role = extractRoleName(profile?.roles);
 
-  if (!profile?.company_id || (role !== "admin" && role !== "super_admin")) {
+  if (!profile?.company_id || !isRoleAuthorized(role, ACCOUNTS_ADMIN_ROLES)) {
     throw new Error("FORBIDDEN");
   }
 
@@ -1027,33 +1120,75 @@ export async function fetchBillableVehicleCount(
   admin: SupabaseClient,
   companyId: string
 ): Promise<number> {
-  const [tenantsRes, vehiclesRes, licencesRes] = await Promise.all([
-    admin.from("tenants").select("id").eq("company_id", companyId),
-    admin.from("vehicles").select("id, tenant_id, company_id"),
-    admin.from("vehicle_licences").select("vehicle_id, active").eq("active", true),
-  ]);
+  const tenantsRes = await admin
+    .from("tenants")
+    .select("id")
+    .eq("company_id", companyId);
 
-  const firstError =
-    tenantsRes.error ?? vehiclesRes.error ?? licencesRes.error;
-  if (firstError) {
-    throw new Error(`Unable to load billing data: ${firstError.message}`);
+  if (tenantsRes.error) {
+    throw new Error(`Unable to load billing data: ${tenantsRes.error.message}`);
+  }
+
+  const tenantIds = (tenantsRes.data ?? []).map((t) => t.id as string);
+
+  // Scope vehicles to this company's tenants (or a direct company_id match,
+  // the legacy data shape countBillableVehicles also supports). companyId is
+  // always in the list, so `in.(...)` is never empty even with zero tenants.
+  const idList = [...tenantIds, companyId];
+  const vehiclesRes = await admin
+    .from("vehicles")
+    .select("id, tenant_id, company_id")
+    .or(`tenant_id.in.(${idList.join(",")}),company_id.eq.${companyId}`);
+
+  if (vehiclesRes.error) {
+    throw new Error(`Unable to load billing data: ${vehiclesRes.error.message}`);
+  }
+
+  const vehicles = vehiclesRes.data ?? [];
+  if (vehicles.length >= POSTGREST_ROW_CAP) {
+    throw new Error(
+      `Billing refused: query hit the 1000-row cap for company ${companyId}; counts may be truncated`
+    );
+  }
+
+  const vehicleIds = vehicles.map((v) => v.id as string);
+  if (vehicleIds.length === 0) {
+    return 0;
+  }
+
+  const licencesRes = await admin
+    .from("vehicle_licences")
+    .select("vehicle_id, active")
+    .eq("active", true)
+    .in("vehicle_id", vehicleIds);
+
+  if (licencesRes.error) {
+    throw new Error(`Unable to load billing data: ${licencesRes.error.message}`);
+  }
+
+  const licences = licencesRes.data ?? [];
+  if (licences.length >= POSTGREST_ROW_CAP) {
+    throw new Error(
+      `Billing refused: query hit the 1000-row cap for company ${companyId}; counts may be truncated`
+    );
   }
 
   return countBillableVehicles({
     companyId,
-    companyTenantIds: (tenantsRes.data ?? []).map((t) => t.id as string),
-    vehicles: vehiclesRes.data ?? [],
-    licences: licencesRes.data ?? [],
+    companyTenantIds: tenantIds,
+    vehicles,
+    licences,
   });
 }
 
 function extractSquareFailureCode(error: unknown): string {
-  // v45 throws SquareError with an errors array; fall back to the message.
-  const maybe = error as { errors?: Array<{ code?: string }>; message?: string };
-  return (
-    maybe?.errors?.[0]?.code ??
-    (maybe?.message ? maybe.message.slice(0, 120) : "UNKNOWN")
-  );
+  // v45 throws SquareError with a typed errors array; fall back to the
+  // message for anything else (network errors, etc).
+  if (error instanceof SquareError) {
+    return error.errors[0]?.code ?? error.message.slice(0, 120);
+  }
+  const maybe = error as { message?: string };
+  return maybe?.message ? maybe.message.slice(0, 120) : "UNKNOWN";
 }
 
 export type CycleResult = {
@@ -1074,6 +1209,14 @@ export type CycleResult = {
 // for zero vehicles), append the platform_charges audit row. Does NOT touch
 // company_billing; callers persist applyChargeOutcome themselves, because the
 // first-ever charge creates the row while cron charges update it.
+//
+// If Square returns a non-terminal status (PENDING/APPROVED), this throws
+// PAYMENT_INDETERMINATE before writing the audit row: recording it as either
+// succeeded or failed would be wrong (succeeded is a lie; failed schedules a
+// retry under a NEW idempotency key, and if the pending payment later
+// completes the customer is charged twice). The next run replays the SAME
+// (company, cycle, attempt) idempotency key and observes the payment's
+// eventual terminal state.
 export async function runChargeCycle(
   admin: SupabaseClient,
   args: {
@@ -1093,6 +1236,9 @@ export async function runChargeCycle(
   let receiptUrl: string | null = null;
 
   if (amounts.grossPence > 0) {
+    let payment: { id?: string; receiptUrl?: string; status?: string } | undefined;
+    let callThrew = false;
+
     try {
       const square = getSquare();
       const response = await square.payments.create({
@@ -1110,17 +1256,35 @@ export async function runChargeCycle(
         },
         note: `TMS Wizzard subscription ${args.cycleDate}: ${vehicleCount} vehicles`,
       });
-
-      const payment = response.payment;
-      squarePaymentId = payment?.id ?? null;
-      receiptUrl = payment?.receiptUrl ?? null;
-      succeeded = payment?.status === "COMPLETED";
-      if (!succeeded) {
-        failureCode = payment?.status ?? "NO_PAYMENT_RETURNED";
-      }
+      payment = response.payment;
     } catch (error) {
+      callThrew = true;
       succeeded = false;
       failureCode = extractSquareFailureCode(error);
+    }
+
+    // Classification happens outside the try/catch: the try/catch only
+    // captures network/SDK-level failures. A successful call that returned a
+    // non-terminal payment status must throw here, BEFORE the audit insert
+    // below, so nothing is recorded for this attempt.
+    if (!callThrew) {
+      squarePaymentId = payment?.id ?? null;
+      receiptUrl = payment?.receiptUrl ?? null;
+
+      const classification = classifyPaymentResult(payment);
+      if (classification.kind === "indeterminate") {
+        throw new Error(
+          "PAYMENT_INDETERMINATE: payment " +
+            (squarePaymentId ?? "unknown") +
+            " has status " +
+            classification.status +
+            "; no outcome recorded, next run re-checks with the same idempotency key"
+        );
+      }
+
+      succeeded = classification.kind === "succeeded";
+      failureCode =
+        classification.kind === "failed" ? classification.failureCode : null;
     }
   }
 
@@ -1140,9 +1304,13 @@ export async function runChargeCycle(
     failure_code: failureCode,
   });
 
-  if (insertError) {
-    // The payment (if any) went through; surface the bookkeeping failure
-    // loudly rather than pretending the cycle did not happen.
+  // 23505 = Postgres unique_violation. A rerun of the same (company, cycle,
+  // attempt) after a crash reuses the same idempotency key, so Square
+  // returns the SAME payment and the recomputed outcome matches the row
+  // already recorded: treat the duplicate as already-recorded, not an error.
+  // Any other insert error keeps the loud throw (the payment, if any, went
+  // through, so pretending the cycle did not happen would be worse).
+  if (insertError && insertError.code !== "23505") {
     throw new Error(
       `Charge recorded at Square but platform_charges insert failed: ${insertError.message}`
     );

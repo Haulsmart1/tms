@@ -42,3 +42,26 @@ export function chargeIdempotencyKey(
   const compactDate = cycleDate.replace(/-/g, "");
   return `${compactCompany}_${compactDate}_${attempt}`;
 }
+
+export type PaymentClassification =
+  | { kind: "succeeded" }
+  | { kind: "failed"; failureCode: string }
+  | { kind: "indeterminate"; status: string };
+
+// COMPLETED is the only success; FAILED and CANCELED are terminal failures
+// safe to retry under a new idempotency key. Anything else (PENDING, APPROVED,
+// unknown) is not finished: the caller must NOT record an outcome, so the next
+// run replays the SAME key and reads the payment's eventual terminal state.
+export function classifyPaymentResult(
+  payment: { status?: string | null } | undefined
+): PaymentClassification {
+  if (!payment) {
+    return { kind: "failed", failureCode: "NO_PAYMENT_RETURNED" };
+  }
+  const status = payment.status ?? "NO_STATUS";
+  if (status === "COMPLETED") return { kind: "succeeded" };
+  if (status === "FAILED" || status === "CANCELED") {
+    return { kind: "failed", failureCode: status };
+  }
+  return { kind: "indeterminate", status };
+}
