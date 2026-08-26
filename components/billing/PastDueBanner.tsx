@@ -35,7 +35,7 @@ export default function PastDueBanner() {
   if (pathname === "/settings/billing") return null;
 
   return (
-    <div className="ds fixed inset-x-0 top-0 z-50 flex items-center justify-center gap-3 bg-danger px-4 py-2 font-sans text-sm font-semibold text-on-danger">
+    <div className="ds sticky top-0 z-50 flex w-full items-center justify-center gap-3 bg-danger px-4 py-2 font-sans text-sm font-semibold text-on-danger">
       <span>A subscription payment failed. Please update your card.</span>
       <Link href="/settings/billing" className="underline">
         Go to billing

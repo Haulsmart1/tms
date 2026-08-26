@@ -58,16 +58,35 @@ export default function SquareCardForm({ onComplete }: Props) {
 
     let cancelled = false;
 
-    async function init() {
-      if (!window.Square) {
+    async function loadSdk(): Promise<void> {
+      if (window.Square) return;
+      // Reuse an existing tag (e.g. a second mount, or React StrictMode's
+      // double-invoke) instead of appending a duplicate script element.
+      const existing = document.querySelector<HTMLScriptElement>(
+        `script[src="${SDK_URL}"]`
+      );
+      if (existing) {
         await new Promise<void>((resolve, reject) => {
-          const script = document.createElement("script");
-          script.src = SDK_URL;
-          script.onload = () => resolve();
-          script.onerror = () => reject(new Error("Square SDK failed to load."));
-          document.head.appendChild(script);
+          existing.addEventListener("load", () => resolve(), { once: true });
+          existing.addEventListener(
+            "error",
+            () => reject(new Error("Square SDK failed to load.")),
+            { once: true }
+          );
         });
+        return;
       }
+      await new Promise<void>((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = SDK_URL;
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error("Square SDK failed to load."));
+        document.head.appendChild(script);
+      });
+    }
+
+    async function init() {
+      await loadSdk();
       if (cancelled || !window.Square) return;
       const payments = window.Square.payments(APP_ID, LOCATION_ID);
       const card = await payments.card();
@@ -76,6 +95,10 @@ export default function SquareCardForm({ onComplete }: Props) {
         return;
       }
       await card.attach("#square-card-container");
+      if (cancelled) {
+        await card.destroy();
+        return;
+      }
       paymentsRef.current = payments;
       cardRef.current = card;
       setReady(true);
@@ -91,6 +114,7 @@ export default function SquareCardForm({ onComplete }: Props) {
       cancelled = true;
       cardRef.current?.destroy().catch(() => {});
       cardRef.current = null;
+      paymentsRef.current = null;
     };
   }, []);
 

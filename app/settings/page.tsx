@@ -1,4 +1,4 @@
-import { Building2, Users, Lock, FileText, Banknote, type LucideIcon } from "lucide-react";
+import { Building2, Users, Lock, FileText, Banknote, CreditCard, type LucideIcon } from "lucide-react";
 
 export default function SettingsPage() {
     const cards: Array<{ title: string; description: string; href: string; icon: LucideIcon }> = [
@@ -39,6 +39,12 @@ export default function SettingsPage() {
             description: "View billing and invoice settings",
             href: "/settings/invoices",
             icon: Banknote,
+        },
+        {
+            title: "Billing",
+            description: "Subscription payment method and charge history",
+            href: "/settings/billing",
+            icon: CreditCard,
         },
     ];
 

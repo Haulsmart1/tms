@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "../../../lib/supabase/browser";
 import { useTenant } from "../../components/TenantProvider";
@@ -43,6 +44,7 @@ export default function BillingSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [showCardForm, setShowCardForm] = useState(false);
   const [notice, setNotice] = useState("");
+  const [loadError, setLoadError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -55,6 +57,12 @@ export default function BillingSettingsPage() {
         .limit(24),
       supabase.from("vehicle_licences").select("vehicle_id").eq("active", true),
     ]);
+    const error = billingRes.error ?? chargesRes.error ?? licencesRes.error;
+    if (error) {
+      setLoadError(error.message);
+    } else {
+      setLoadError("");
+    }
     setBilling((billingRes.data as BillingRow) ?? null);
     setCharges((chargesRes.data as ChargeRow[]) ?? []);
     setVehicleCount(new Set(licencesRes.data?.map((l) => l.vehicle_id)).size);
@@ -65,10 +73,29 @@ export default function BillingSettingsPage() {
     load();
   }, [load]);
 
-  const isAdmin = role === "admin" || role === "super_admin";
   const amounts = computeChargeAmounts(vehicleCount);
 
-  if (!isAdmin) {
+  // super_admin's RLS scope returns every company's rows on this page (not
+  // just their own), so maybeSingle() errors and the counts here would be
+  // platform-wide, not this admin's. Platform billing across all companies
+  // lives in the super-admin console instead.
+  if (role === "super_admin") {
+    return (
+      <div className="ds min-h-screen bg-canvas font-sans text-ink">
+        <main className="mx-auto max-w-[1480px] px-6 py-8">
+          <p className="text-sm text-ink-3">
+            Platform billing for all companies lives in the super-admin
+            console.{" "}
+            <Link href="/super-admin/billing" className="text-primary underline">
+              Go to super-admin billing
+            </Link>
+          </p>
+        </main>
+      </div>
+    );
+  }
+
+  if (role !== "admin") {
     return (
       <div className="ds min-h-screen bg-canvas font-sans text-ink">
         <main className="mx-auto max-w-[1480px] px-6 py-8">
@@ -93,6 +120,12 @@ export default function BillingSettingsPage() {
             your card on your billing date.
           </p>
         </header>
+
+        {loadError ? (
+          <div className="mb-4 rounded-md border border-danger px-4 py-3 text-sm text-danger">
+            Could not load billing data: {loadError}
+          </div>
+        ) : null}
 
         {billing?.status === "past_due" ? (
           <div className="mb-4 rounded-md border border-danger px-4 py-3 text-sm text-danger">
@@ -142,10 +175,16 @@ export default function BillingSettingsPage() {
                 type="button"
                 onClick={() => setShowCardForm(true)}
                 className="rounded-md border border-line px-3 py-1.5 text-sm font-semibold text-ink"
+                disabled={!!loadError}
               >
                 Replace card
               </button>
             </div>
+          ) : loadError ? (
+            <p className="text-sm text-ink-3">
+              Card management is unavailable until billing data loads
+              successfully.
+            </p>
           ) : (
             <SquareCardForm
               onComplete={(response) => {
@@ -175,6 +214,7 @@ export default function BillingSettingsPage() {
                 <thead>
                   <tr className="border-b border-line text-left text-ink-3">
                     <th className="px-3 py-2 font-medium">Billing date</th>
+                    <th className="px-3 py-2 font-medium">Attempt</th>
                     <th className="px-3 py-2 font-medium">Vehicles</th>
                     <th className="px-3 py-2 font-medium">Amount</th>
                     <th className="px-3 py-2 font-medium">Status</th>
@@ -185,6 +225,7 @@ export default function BillingSettingsPage() {
                   {charges.map((charge) => (
                     <tr key={charge.id} className="border-b border-line">
                       <td className="px-3 py-2">{charge.cycle_date}</td>
+                      <td className="px-3 py-2">{charge.attempt}</td>
                       <td className="px-3 py-2">{charge.vehicle_count}</td>
                       <td className="px-3 py-2">{pounds(charge.gross_pence)}</td>
                       <td className="px-3 py-2">

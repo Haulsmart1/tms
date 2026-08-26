@@ -2073,16 +2073,35 @@ export default function SquareCardForm({ onComplete }: Props) {
 
     let cancelled = false;
 
-    async function init() {
-      if (!window.Square) {
+    async function loadSdk(): Promise<void> {
+      if (window.Square) return;
+      // Reuse an existing tag (e.g. a second mount, or React StrictMode's
+      // double-invoke) instead of appending a duplicate script element.
+      const existing = document.querySelector<HTMLScriptElement>(
+        `script[src="${SDK_URL}"]`
+      );
+      if (existing) {
         await new Promise<void>((resolve, reject) => {
-          const script = document.createElement("script");
-          script.src = SDK_URL;
-          script.onload = () => resolve();
-          script.onerror = () => reject(new Error("Square SDK failed to load."));
-          document.head.appendChild(script);
+          existing.addEventListener("load", () => resolve(), { once: true });
+          existing.addEventListener(
+            "error",
+            () => reject(new Error("Square SDK failed to load.")),
+            { once: true }
+          );
         });
+        return;
       }
+      await new Promise<void>((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = SDK_URL;
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error("Square SDK failed to load."));
+        document.head.appendChild(script);
+      });
+    }
+
+    async function init() {
+      await loadSdk();
       if (cancelled || !window.Square) return;
       const payments = window.Square.payments(APP_ID, LOCATION_ID);
       const card = await payments.card();
@@ -2091,6 +2110,10 @@ export default function SquareCardForm({ onComplete }: Props) {
         return;
       }
       await card.attach("#square-card-container");
+      if (cancelled) {
+        await card.destroy();
+        return;
+      }
       paymentsRef.current = payments;
       cardRef.current = card;
       setReady(true);
@@ -2106,6 +2129,7 @@ export default function SquareCardForm({ onComplete }: Props) {
       cancelled = true;
       cardRef.current?.destroy().catch(() => {});
       cardRef.current = null;
+      paymentsRef.current = null;
     };
   }, []);
 
@@ -2200,6 +2224,13 @@ export default function SquareCardForm({ onComplete }: Props) {
 
 Token classes used (`bg-surface`, `border-line`, `text-danger`, `bg-primary`, `text-on-primary`, `text-ink`): check `app/tokens.css` / `app/globals.css` for the exact utility names in this repo and substitute the real ones (for example if the border token utility is `border-border` or the surface is `bg-panel`). Do not introduce raw color literals.
 
+**Post-review minor fixes** (folded into the block above): (a) `loadSdk()` now checks for an
+existing `<script src="...">` tag before appending a new one, and attaches load/error listeners to
+that tag instead of creating a duplicate; (b) a second `cancelled` check was added immediately
+after `await card.attach(...)`, since `attach` is itself async and the component can unmount while
+it is in flight; on cancellation the card is destroyed and neither ref is set; the cleanup function
+now also nulls `paymentsRef.current`, matching what it already did for `cardRef.current`.
+
 - [ ] **Step 2: Typecheck**
 
 Run: `npm run typecheck`
@@ -2219,23 +2250,34 @@ git commit -m "feat(billing): Square Web Payments card form with 3DS verify"
 **Files:**
 - Create: `app/settings/billing/page.tsx`
 - Modify: `lib/nav/themeableRoutes.ts` (add `"/settings/billing"` entry)
+- Modify: `app/settings/page.tsx` (add the launcher card, added during code review; see below)
 
 - [ ] **Step 1: Write the page**
 
 Follow the ds pattern of `app/settings/invoices/page.tsx` (root `className="ds min-h-screen bg-canvas font-sans text-ink"`, `Stat` from `components/Stat`).
 
+**Post-review update (code review after first implementation):** the block below is the FINAL
+version, after review found: (1) `super_admin`'s RLS scope on `company_billing`/`platform_charges`
+returns every company's rows, so `maybeSingle()` errors and the on-page counts would be
+platform-wide, not any one company's; `super_admin` now gets its own early return pointing at
+`/super-admin/billing` instead of falling into the `admin` branch, (2) Supabase read errors were
+silently swallowed (a failed `company_billing` select rendered as "not set up" instead of an
+error), so `load()` now collects `billingRes.error ?? chargesRes.error ?? licencesRes.error` into
+a `loadError` state, rendered as a danger notice, and the card form is not rendered while it is
+set, (3) the charge-history table gained an "Attempt" column so retried cycles are distinguishable
+from first attempts.
+
 ```tsx
 // app/settings/billing/page.tsx
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "../../../lib/supabase/browser";
 import { useTenant } from "../../components/TenantProvider";
 import Stat from "../../../components/Stat";
 import SquareCardForm from "../../../components/billing/SquareCardForm";
-import {
-  computeChargeAmounts,
-} from "../../../lib/billing/money";
+import { computeChargeAmounts } from "../../../lib/billing/money";
 
 type BillingRow = {
   company_id: string;
@@ -2273,6 +2315,7 @@ export default function BillingSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [showCardForm, setShowCardForm] = useState(false);
   const [notice, setNotice] = useState("");
+  const [loadError, setLoadError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -2285,6 +2328,12 @@ export default function BillingSettingsPage() {
         .limit(24),
       supabase.from("vehicle_licences").select("vehicle_id").eq("active", true),
     ]);
+    const error = billingRes.error ?? chargesRes.error ?? licencesRes.error;
+    if (error) {
+      setLoadError(error.message);
+    } else {
+      setLoadError("");
+    }
     setBilling((billingRes.data as BillingRow) ?? null);
     setCharges((chargesRes.data as ChargeRow[]) ?? []);
     setVehicleCount(new Set(licencesRes.data?.map((l) => l.vehicle_id)).size);
@@ -2295,10 +2344,29 @@ export default function BillingSettingsPage() {
     load();
   }, [load]);
 
-  const isAdmin = role === "admin" || role === "super_admin";
   const amounts = computeChargeAmounts(vehicleCount);
 
-  if (!isAdmin) {
+  // super_admin's RLS scope returns every company's rows on this page (not
+  // just their own), so maybeSingle() errors and the counts here would be
+  // platform-wide, not this admin's. Platform billing across all companies
+  // lives in the super-admin console instead.
+  if (role === "super_admin") {
+    return (
+      <div className="ds min-h-screen bg-canvas font-sans text-ink">
+        <main className="mx-auto max-w-[1480px] px-6 py-8">
+          <p className="text-sm text-ink-3">
+            Platform billing for all companies lives in the super-admin
+            console.{" "}
+            <Link href="/super-admin/billing" className="text-primary underline">
+              Go to super-admin billing
+            </Link>
+          </p>
+        </main>
+      </div>
+    );
+  }
+
+  if (role !== "admin") {
     return (
       <div className="ds min-h-screen bg-canvas font-sans text-ink">
         <main className="mx-auto max-w-[1480px] px-6 py-8">
@@ -2323,6 +2391,12 @@ export default function BillingSettingsPage() {
             your card on your billing date.
           </p>
         </header>
+
+        {loadError ? (
+          <div className="mb-4 rounded-md border border-danger px-4 py-3 text-sm text-danger">
+            Could not load billing data: {loadError}
+          </div>
+        ) : null}
 
         {billing?.status === "past_due" ? (
           <div className="mb-4 rounded-md border border-danger px-4 py-3 text-sm text-danger">
@@ -2372,10 +2446,16 @@ export default function BillingSettingsPage() {
                 type="button"
                 onClick={() => setShowCardForm(true)}
                 className="rounded-md border border-line px-3 py-1.5 text-sm font-semibold text-ink"
+                disabled={!!loadError}
               >
                 Replace card
               </button>
             </div>
+          ) : loadError ? (
+            <p className="text-sm text-ink-3">
+              Card management is unavailable until billing data loads
+              successfully.
+            </p>
           ) : (
             <SquareCardForm
               onComplete={(response) => {
@@ -2405,6 +2485,7 @@ export default function BillingSettingsPage() {
                 <thead>
                   <tr className="border-b border-line text-left text-ink-3">
                     <th className="px-3 py-2 font-medium">Billing date</th>
+                    <th className="px-3 py-2 font-medium">Attempt</th>
                     <th className="px-3 py-2 font-medium">Vehicles</th>
                     <th className="px-3 py-2 font-medium">Amount</th>
                     <th className="px-3 py-2 font-medium">Status</th>
@@ -2415,6 +2496,7 @@ export default function BillingSettingsPage() {
                   {charges.map((charge) => (
                     <tr key={charge.id} className="border-b border-line">
                       <td className="px-3 py-2">{charge.cycle_date}</td>
+                      <td className="px-3 py-2">{charge.attempt}</td>
                       <td className="px-3 py-2">{charge.vehicle_count}</td>
                       <td className="px-3 py-2">{pounds(charge.gross_pence)}</td>
                       <td className="px-3 py-2">
@@ -2453,6 +2535,10 @@ Notes for the implementer:
 - `useTenant()` provides `role`; confirm the exact field names against `app/components/TenantProvider.tsx` before relying on them.
 - The vehicle-count preview intentionally mirrors `app/settings/invoices/page.tsx` (active licences visible under RLS). The authoritative count happens server-side at charge time.
 - Same token-utility caveat as Task 10: verify class names against `app/tokens.css`.
+- The page is gated `role === "admin"` only. `role === "super_admin"` gets its own early return
+  linking to `/super-admin/billing`, because that role's RLS scope on `company_billing` and
+  `platform_charges` covers every company, not one, so this page's `maybeSingle()` call and its
+  counts would be meaningless (or erroring) for that role.
 
 - [ ] **Step 2: Add the route to the theme allowlist**
 
@@ -2462,15 +2548,30 @@ In `lib/nav/themeableRoutes.ts`, add to `THEMEABLE_ROUTES` after the `"/settings
   "/settings/billing",        // app/settings/billing/page.tsx
 ```
 
-- [ ] **Step 3: Typecheck**
+- [ ] **Step 3: Add the launcher card (added during code review)**
+
+`app/settings/page.tsx` renders a static `cards` array with no role-gating (every entry is
+ungated; the target page gates itself). Add a `CreditCard` icon import from `lucide-react` and a
+card following the existing entries exactly:
+
+```ts
+{
+    title: "Billing",
+    description: "Subscription payment method and charge history",
+    href: "/settings/billing",
+    icon: CreditCard,
+},
+```
+
+- [ ] **Step 4: Typecheck**
 
 Run: `npm run typecheck`
 Expected: clean.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add app/settings/billing/page.tsx lib/nav/themeableRoutes.ts
+git add app/settings/billing/page.tsx lib/nav/themeableRoutes.ts app/settings/page.tsx
 git commit -m "feat(billing): subscription settings page with card management"
 ```
 
@@ -2481,6 +2582,13 @@ git commit -m "feat(billing): subscription settings page with card management"
 **Files:**
 - Create: `components/billing/PastDueBanner.tsx`
 - Modify: `app/layout.tsx` (mount the banner inside `TenantProvider`)
+
+**Post-review update:** code review found the original `fixed inset-x-0 top-0` overlay covers the
+sidebar logo and the page header underneath it, since it is removed from normal flow. The banner
+is mounted as a sibling BEFORE the flex row (`<TenantProvider><PastDueBanner /><div style={{
+display: "flex", ... }}>...`), so a normal-flow `sticky top-0` block on it pushes the flex row
+(sidebar + content) down instead of covering it, while still staying pinned to the viewport top
+on scroll. The block below is the final version.
 
 - [ ] **Step 1: Write the component**
 
@@ -2523,12 +2631,9 @@ export default function PastDueBanner() {
   if (pathname === "/settings/billing") return null;
 
   return (
-    <div className="ds fixed inset-x-0 top-0 z-50 flex items-center justify-center gap-3 bg-danger px-4 py-2 font-sans text-sm font-semibold text-on-danger">
+    <div className="ds sticky top-0 z-50 flex w-full items-center justify-center gap-3 bg-danger px-4 py-2 font-sans text-sm font-semibold text-on-danger">
       <span>A subscription payment failed. Please update your card.</span>
-      <Link
-        href="/settings/billing"
-        className="underline"
-      >
+      <Link href="/settings/billing" className="underline">
         Go to billing
       </Link>
     </div>
@@ -2540,7 +2645,7 @@ Same caveats as before: confirm `useTenant()`'s `role`/`status` field names and 
 
 - [ ] **Step 2: Mount it in the root layout**
 
-In `app/layout.tsx`, import it and render it as the first child inside `TenantProvider` (it is a fixed overlay, so it must not sit inside the flex row):
+In `app/layout.tsx`, import it and render it as the first child inside `TenantProvider`, before the flex row, so its normal-flow `sticky` block pushes the row down instead of the row's flex layout swallowing it:
 
 ```tsx
 import PastDueBanner from "../components/billing/PastDueBanner";
@@ -2723,7 +2828,7 @@ git commit -m "feat(billing): shared count and subscription status on super-admi
 
 - [ ] **Step 1: Update README.md**
 
-- Page inventory: add a `/settings/billing` row, status [OK], description like: "subscription payment method (Square card on file) and charge history; company admins only". Update the `/super-admin/billing` row's description to mention subscription status.
+- Page inventory: add a `/settings/billing` row, status [OK], description like: "subscription payment method (Square card on file) and charge history; company-admin only (super_admin is redirected to /super-admin/billing)". Update the `/super-admin/billing` row's description to mention subscription status.
 - Environment variables section: add `SQUARE_ACCESS_TOKEN`, `SQUARE_ENVIRONMENT`, `SQUARE_LOCATION_ID`, `NEXT_PUBLIC_SQUARE_APP_ID`, `NEXT_PUBLIC_SQUARE_LOCATION_ID`, `CRON_SECRET` with one-line descriptions.
 - Integrations section: add Square (platform subscription billing), distinct from the existing Stripe Connect entry.
 - Note `docs/sql/billing_01_platform_billing.sql` wherever the RLS migration list is documented.
