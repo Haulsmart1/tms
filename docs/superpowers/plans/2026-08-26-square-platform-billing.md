@@ -679,12 +679,18 @@ git commit -m "feat(billing): shared billable vehicle count definition"
 
 Two pure functions: `selectDueAction` (given a billing row and today, should we charge, and which cycle/attempt?) and `applyChargeOutcome` (given the result, what does the row become?). The cron route is a thin loop over these.
 
+Code review on Task 8 (the card route) found that card replacement needed its own decision
+function, `selectRecoveryAction`: the card route does not know "today", so it cannot reuse
+`selectDueAction` directly, but the retry-or-not logic (past_due or mid-dunning means retry now,
+canceled or clean-active means nothing to do) is the same shape. Added below alongside the
+original two functions, with its own TDD cycle (tests written and shown failing first).
+
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
 // lib/billing/run.test.ts
 import { describe, expect, it } from "vitest";
-import { applyChargeOutcome, selectDueAction } from "./run";
+import { applyChargeOutcome, selectDueAction, selectRecoveryAction } from "./run";
 import type { CompanyBillingRow } from "./run";
 
 function row(overrides: Partial<CompanyBillingRow> = {}): CompanyBillingRow {
@@ -805,12 +811,41 @@ describe("applyChargeOutcome", () => {
     });
   });
 });
+
+describe("selectRecoveryAction", () => {
+  it("retries the outstanding cycle for a past_due company", () => {
+    const r = row({ status: "past_due", retry_at: null, retry_count: 4 });
+    expect(selectRecoveryAction(r)).toEqual({
+      kind: "charge",
+      cycleDate: "2026-08-26",
+      attempt: 5,
+    });
+  });
+
+  it("retries immediately for a company mid-dunning", () => {
+    const r = row({ retry_at: "2026-08-30", retry_count: 2 });
+    expect(selectRecoveryAction(r)).toEqual({
+      kind: "charge",
+      cycleDate: "2026-08-26",
+      attempt: 3,
+    });
+  });
+
+  it("does nothing for a clean active company", () => {
+    expect(selectRecoveryAction(row())).toEqual({ kind: "none" });
+  });
+
+  it("never charges a canceled company even mid-dunning", () => {
+    const r = row({ status: "canceled", retry_at: "2026-08-28", retry_count: 1 });
+    expect(selectRecoveryAction(r)).toEqual({ kind: "none" });
+  });
+});
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `npx vitest run lib/billing/run.test.ts`
-Expected: FAIL, cannot resolve `./run`.
+Expected: FAIL, cannot resolve `./run` (for the first cut of this file) or `selectRecoveryAction is not a function` (when it is added later to an existing `run.ts`).
 
 - [ ] **Step 3: Write the implementation**
 
@@ -859,6 +894,24 @@ export function selectDueAction(
   return { kind: "none" };
 }
 
+// When a new card is stored, is there an outstanding cycle to retry right now?
+// past_due or mid-dunning means yes (attempt numbers simply keep counting past
+// MAX_ATTEMPTS: the DB constraint allows any attempt >= 1). canceled and
+// clean-active companies have nothing to retry.
+export function selectRecoveryAction(
+  row: Pick<CompanyBillingRow, "status" | "next_charge_on" | "retry_at" | "retry_count">
+): DueAction {
+  if (row.status === "canceled") return { kind: "none" };
+  if (row.status === "past_due" || row.retry_at !== null) {
+    return {
+      kind: "charge",
+      cycleDate: row.next_charge_on,
+      attempt: row.retry_count + 1,
+    };
+  }
+  return { kind: "none" };
+}
+
 export type ChargeOutcomeUpdate = {
   status: "active" | "past_due";
   next_charge_on: string;
@@ -898,10 +951,14 @@ export function applyChargeOutcome(args: {
 }
 ```
 
+Note: `selectRecoveryAction` is declared before `ChargeOutcomeUpdate` above only for this plan's
+readability; in the actual file it was added just above `ChargeOutcomeUpdate`, after `DueAction`
+and `selectDueAction`, since it returns the same `DueAction` type.
+
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `npx vitest run lib/billing/run.test.ts`
-Expected: PASS (11 tests).
+Expected: PASS (15 tests: 11 original + 4 for `selectRecoveryAction`).
 
 - [ ] **Step 5: Commit**
 
@@ -1058,6 +1115,15 @@ can double-charge once the pending payment completes -- classification now lives
 (3) `fetchBillableVehicleCount` must scope its vehicle/licence queries to the company rather than
 selecting all rows unfiltered, with a tripwire that refuses to proceed if either query hits
 PostgREST's 1000-row cap, since a silent truncation there means silent underbilling.
+
+A second review, during Task 8, found `runChargeCycle` itself needed two more changes (code block
+not reproduced again here; see Task 8's review paragraph for the full rationale): it now checks
+`platform_charges` for an already-succeeded row for the same (company, cycle) before charging
+again (same-cycle recovery, guards a crash between a successful charge and the caller persisting
+the outcome), and it rethrows `IDEMPOTENCY_KEY_REUSED` from Square as `PAYMENT_INDETERMINATE`
+instead of recording it as a decline (the card route always sends a fresh card token on
+replacement, so Square's idempotency-key replay only works when the request body is unchanged;
+a same-cycle retry with a different card is a legitimate key reuse, not a real decline).
 
 - [ ] **Step 1: Write the module**
 
@@ -1353,6 +1419,33 @@ git commit -m "feat(billing): company-admin auth and charge cycle orchestration"
 
 Handles both first-time setup (create customer, store card, immediate first charge, create `company_billing` only on success) and card replacement (update card, retry outstanding cycle if one exists).
 
+Code review of the first cut found a Critical money bug and several related fixes, all folded into
+the version below. The root problem: Square only replays an idempotency key when the request body
+matches, and this route always sends a NEW card token, so any same-cycle retry with a replacement
+card got an `IDEMPOTENCY_KEY_REUSED` error that the original code misclassified as a plain
+decline, and a next-day retry after a partial failure could double-charge. The fixes:
+- **Key-reuse is indeterminate, never a decline** (`lib/billing/server.ts`): `runChargeCycle`
+  rethrows `IDEMPOTENCY_KEY_REUSED` as `PAYMENT_INDETERMINATE` instead of recording a failure, since
+  a payment may already exist for that key with an outcome this caller cannot see.
+- **Same-cycle success recovery** (`lib/billing/server.ts`): before charging, `runChargeCycle` checks
+  `platform_charges` for an already-succeeded row for the same (company, cycle) and returns it
+  instead of charging again, covering a crash between a successful charge and the caller persisting
+  the outcome.
+- **Orphan recovery on first-time setup**: before the immediate first charge, the route checks for a
+  recent (within 31 days) succeeded `platform_charges` row with no matching `company_billing` row
+  (a charged-but-not-recorded crash) and, if found, skips the charge and just writes the row.
+- **`selectRecoveryAction`** (`lib/billing/run.ts`, see Task 5): replaces the inline
+  `hasOutstandingCycle` boolean and `retry_count + 1` computation in the replacement path.
+- **Compare-and-swap on the retry outcome update**: the replacement-retry update is scoped with
+  `.eq("status", existing.status).eq("retry_count", existing.retry_count)`. Zero rows updated means
+  the cron changed the dunning state mid-flight; the route falls back to writing only the new card
+  fields and returns 409, since the card must be stored regardless of the race.
+- **Best-effort disable of the replaced card**: after a successful `company_billing` write in either
+  replacement sub-path, if the old `square_card_id` differs from the new card's id, the route calls
+  `square.cards.disable({ cardId })` in a try/catch it never lets fail the request.
+- **Malformed JSON returns 400, not 500**: `request.json()` is wrapped in its own try/catch so a
+  parse failure gets the same 400 treatment as a zod validation failure.
+
 - [ ] **Step 1: Write the route**
 
 ```ts
@@ -1365,8 +1458,12 @@ import {
   requireCompanyAdmin,
   runChargeCycle,
 } from "../../../../lib/billing/server";
-import { applyChargeOutcome } from "../../../../lib/billing/run";
-import { computeNextChargeOn, londonDateISO } from "../../../../lib/billing/schedule";
+import { applyChargeOutcome, selectRecoveryAction } from "../../../../lib/billing/run";
+import {
+  addDays,
+  computeNextChargeOn,
+  londonDateISO,
+} from "../../../../lib/billing/schedule";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -1376,9 +1473,36 @@ const BodySchema = z.object({
   verificationToken: z.string().min(1),
 });
 
+// Best effort: after a card replacement, disable the old card at Square so
+// the customer does not accumulate live cards. Nothing charges the old card
+// once company_billing points at the new one, so a failure here is harmless.
+async function disableReplacedCard(
+  square: ReturnType<typeof getSquare>,
+  oldCardId: string | null | undefined,
+  newCardId: string
+) {
+  if (oldCardId && oldCardId !== newCardId) {
+    try {
+      await square.cards.disable({ cardId: oldCardId });
+    } catch {
+      // Best effort only; see comment above.
+    }
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const parsed = BodySchema.safeParse(await request.json());
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { error: "Malformed JSON body." },
+        { status: 400 }
+      );
+    }
+
+    const parsed = BodySchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
         { error: "cardToken and verificationToken are required." },
@@ -1448,6 +1572,55 @@ export async function POST(request: NextRequest) {
     const today = londonDateISO(new Date());
 
     if (!existing) {
+      // Orphan recovery: a prior first-time setup may have charged Square
+      // successfully and then crashed before the company_billing insert
+      // below ran. Detect that state before charging again, which would
+      // double-bill. Only look back 31 days: a stale succeeded charge from
+      // further back is not this crash window and should not be trusted.
+      const { data: orphanRows, error: orphanError } = await admin
+        .from("platform_charges")
+        .select("cycle_date, vehicle_count, gross_pence, receipt_url")
+        .eq("company_id", companyId)
+        .eq("status", "succeeded")
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (orphanError) {
+        throw new Error(orphanError.message);
+      }
+      const orphan = orphanRows?.[0];
+      const recentOrphan =
+        orphan && (orphan.cycle_date as string) >= addDays(today, -31)
+          ? orphan
+          : null;
+
+      if (recentOrphan) {
+        const cycleDate = recentOrphan.cycle_date as string;
+        const anchorDay = Number(cycleDate.slice(8, 10));
+        const nextChargeOn = computeNextChargeOn(cycleDate, anchorDay);
+        const { error: insertError } = await admin.from("company_billing").insert({
+          company_id: companyId,
+          ...cardFields,
+          status: "active",
+          anchor_day: anchorDay,
+          next_charge_on: nextChargeOn,
+          retry_at: null,
+          retry_count: 0,
+        });
+        if (insertError) {
+          throw new Error(insertError.message);
+        }
+
+        return NextResponse.json({
+          ok: true,
+          firstCharge: true,
+          recovered: true,
+          vehicleCount: Number(recentOrphan.vehicle_count),
+          grossPence: Number(recentOrphan.gross_pence),
+          receiptUrl: recentOrphan.receipt_url ?? null,
+          nextChargeOn,
+        });
+      }
+
       // First-time setup: immediate first charge; write company_billing only
       // on success so a declined card leaves no half-configured subscription.
       const anchorDay = Number(today.slice(8, 10));
@@ -1495,10 +1668,14 @@ export async function POST(request: NextRequest) {
 
     // Replacement card: store the new card, then, if a cycle is outstanding
     // (mid-dunning or past_due), retry it immediately.
-    const hasOutstandingCycle =
-      existing.status === "past_due" || existing.retry_at !== null;
+    const action = selectRecoveryAction({
+      status: existing.status,
+      next_charge_on: existing.next_charge_on as string,
+      retry_at: existing.retry_at ?? null,
+      retry_count: Number(existing.retry_count),
+    });
 
-    if (!hasOutstandingCycle) {
+    if (action.kind === "none") {
       const { error: updateError } = await admin
         .from("company_billing")
         .update({ ...cardFields, updated_at: new Date().toISOString() })
@@ -1506,13 +1683,18 @@ export async function POST(request: NextRequest) {
       if (updateError) {
         throw new Error(updateError.message);
       }
+      await disableReplacedCard(
+        square,
+        existing.square_card_id as string | null | undefined,
+        card.id
+      );
       return NextResponse.json({ ok: true, firstCharge: false, retried: false });
     }
 
-    const attempt = Number(existing.retry_count) + 1;
+    const { cycleDate, attempt } = action;
     const result = await runChargeCycle(admin, {
       companyId,
-      cycleDate: existing.next_charge_on as string,
+      cycleDate,
       attempt,
       squareCustomerId: customerId,
       squareCardId: card.id,
@@ -1523,22 +1705,59 @@ export async function POST(request: NextRequest) {
         anchor_day: Number(existing.anchor_day),
         next_charge_on: existing.next_charge_on as string,
       },
-      cycleDate: existing.next_charge_on as string,
+      cycleDate,
       attempt,
       succeeded: result.succeeded,
     });
 
-    const { error: updateError } = await admin
+    // Compare-and-swap: only apply the outcome if the dunning state has not
+    // moved since we read `existing` (guards against a race with the cron,
+    // which may have run the same cycle concurrently). The card fields are
+    // always written on the fallback below regardless of the race, because
+    // the new card replaces the old dead one either way.
+    const { data: casRows, error: updateError } = await admin
       .from("company_billing")
       .update({
         ...cardFields,
         ...outcome,
         updated_at: new Date().toISOString(),
       })
-      .eq("company_id", companyId);
+      .eq("company_id", companyId)
+      .eq("status", existing.status)
+      .eq("retry_count", existing.retry_count)
+      .select("company_id");
     if (updateError) {
       throw new Error(updateError.message);
     }
+
+    if (!casRows || casRows.length === 0) {
+      const { error: fallbackError } = await admin
+        .from("company_billing")
+        .update({ ...cardFields, updated_at: new Date().toISOString() })
+        .eq("company_id", companyId);
+      if (fallbackError) {
+        throw new Error(fallbackError.message);
+      }
+      await disableReplacedCard(
+        square,
+        existing.square_card_id as string | null | undefined,
+        card.id
+      );
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Billing state changed while your card was being processed. The card was saved; charges will settle automatically.",
+        },
+        { status: 409 }
+      );
+    }
+
+    await disableReplacedCard(
+      square,
+      existing.square_card_id as string | null | undefined,
+      card.id
+    );
 
     return NextResponse.json({
       ok: true,
@@ -1556,7 +1775,7 @@ export async function POST(request: NextRequest) {
 }
 ```
 
-One subtlety to preserve: a card-replacement retry while `past_due` uses `attempt = retry_count + 1` (attempt 5 and up). The `platform_charges` check constraint allows any attempt >= 1 for exactly this reason.
+One subtlety to preserve: a card-replacement retry while `past_due` uses `attempt = retry_count + 1` (attempt 5 and up). The `platform_charges` check constraint allows any attempt >= 1 for exactly this reason. `square.cards.disable` takes `{ cardId }`, not a plain string id (verified against `node_modules/square` types).
 
 - [ ] **Step 2: Typecheck**
 
@@ -2496,4 +2715,11 @@ Document the following in the final report as the manual test script for Ethan (
 - Tasks 2 through 6 are independent of each other and of Task 1; they can be done in any order but the listed order keeps dependencies obvious. Tasks 7+ depend on 2 through 6.
 - Task 1's SQL and Task 14's walkthrough are the only steps touching the real Supabase project, and both are manual/Ethan-gated.
 - Nothing in this plan touches the existing Stripe Connect flow, the `invoices` table, or `/super-admin/invoices`.
+- Out of scope, deferred: two company admins racing the first-time card setup flow at the same
+  instant can each create a Square customer (the `customers.search` reference-id lookup only sees
+  customers Square has already indexed) before either has written `company_billing`, leaving a
+  duplicate Square customer for that company. This is harmless: only one request's `company_billing`
+  insert wins, that row's `square_customer_id`/`square_card_id` are correct, and the loser's customer
+  object simply sits unused in Square with no card charges ever routed to it. Not worth a
+  distributed lock for a company-admin-only, one-time setup action.
 - Final state for `superpowers:finishing-a-development-branch`: all tests green, typecheck clean, branch `ethan/square-platform-billing` ready for merge decision. Outstanding for Ethan afterward: apply the migration, add `CRON_SECRET` + the five Square vars to Vercel, run the sandbox walkthrough.

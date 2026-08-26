@@ -162,6 +162,41 @@ export async function runChargeCycle(
     squareCardId: string;
   }
 ): Promise<CycleResult> {
+  const { data: priorRows, error: priorError } = await admin
+    .from("platform_charges")
+    .select(
+      "attempt, vehicle_count, net_pence, vat_pence, gross_pence, square_payment_id, receipt_url"
+    )
+    .eq("company_id", args.companyId)
+    .eq("cycle_date", args.cycleDate)
+    .eq("status", "succeeded")
+    .order("attempt", { ascending: false })
+    .limit(1);
+
+  if (priorError) {
+    throw new Error(`Unable to check for a prior charge: ${priorError.message}`);
+  }
+
+  const prior = priorRows?.[0];
+  if (prior) {
+    // This cycle was already paid (an earlier attempt succeeded but the caller
+    // crashed before persisting the outcome). Return the recorded result so the
+    // caller can finish the bookkeeping; charging again would double-bill.
+    return {
+      companyId: args.companyId,
+      cycleDate: args.cycleDate,
+      attempt: Number(prior.attempt),
+      vehicleCount: Number(prior.vehicle_count),
+      netPence: Number(prior.net_pence),
+      vatPence: Number(prior.vat_pence),
+      grossPence: Number(prior.gross_pence),
+      succeeded: true,
+      failureCode: null,
+      squarePaymentId: prior.square_payment_id ?? null,
+      receiptUrl: prior.receipt_url ?? null,
+    };
+  }
+
   const vehicleCount = await fetchBillableVehicleCount(admin, args.companyId);
   const amounts = computeChargeAmounts(vehicleCount);
 
@@ -193,6 +228,19 @@ export async function runChargeCycle(
       });
       payment = response.payment;
     } catch (error) {
+      if (
+        error instanceof SquareError &&
+        error.errors[0]?.code === "IDEMPOTENCY_KEY_REUSED"
+      ) {
+        // A payment already exists under this (company, cycle, attempt) key
+        // with a body that no longer matches (e.g. a replacement card), so
+        // Square refused to replay it. The prior payment's outcome is unknown
+        // to this caller: recording a failure here would misclassify a
+        // possible success, and recording a success would be a guess.
+        throw new Error(
+          `PAYMENT_INDETERMINATE: idempotency key already used for company ${args.companyId} cycle ${args.cycleDate} attempt ${args.attempt}; a payment exists with unknown outcome, re-run later`
+        );
+      }
       callThrew = true;
       succeeded = false;
       failureCode = extractSquareFailureCode(error);

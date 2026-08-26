@@ -6,8 +6,12 @@ import {
   requireCompanyAdmin,
   runChargeCycle,
 } from "../../../../lib/billing/server";
-import { applyChargeOutcome } from "../../../../lib/billing/run";
-import { computeNextChargeOn, londonDateISO } from "../../../../lib/billing/schedule";
+import { applyChargeOutcome, selectRecoveryAction } from "../../../../lib/billing/run";
+import {
+  addDays,
+  computeNextChargeOn,
+  londonDateISO,
+} from "../../../../lib/billing/schedule";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,9 +21,36 @@ const BodySchema = z.object({
   verificationToken: z.string().min(1),
 });
 
+// Best effort: after a card replacement, disable the old card at Square so
+// the customer does not accumulate live cards. Nothing charges the old card
+// once company_billing points at the new one, so a failure here is harmless.
+async function disableReplacedCard(
+  square: ReturnType<typeof getSquare>,
+  oldCardId: string | null | undefined,
+  newCardId: string
+) {
+  if (oldCardId && oldCardId !== newCardId) {
+    try {
+      await square.cards.disable({ cardId: oldCardId });
+    } catch {
+      // Best effort only; see comment above.
+    }
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const parsed = BodySchema.safeParse(await request.json());
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { error: "Malformed JSON body." },
+        { status: 400 }
+      );
+    }
+
+    const parsed = BodySchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
         { error: "cardToken and verificationToken are required." },
@@ -89,6 +120,55 @@ export async function POST(request: NextRequest) {
     const today = londonDateISO(new Date());
 
     if (!existing) {
+      // Orphan recovery: a prior first-time setup may have charged Square
+      // successfully and then crashed before the company_billing insert
+      // below ran. Detect that state before charging again, which would
+      // double-bill. Only look back 31 days: a stale succeeded charge from
+      // further back is not this crash window and should not be trusted.
+      const { data: orphanRows, error: orphanError } = await admin
+        .from("platform_charges")
+        .select("cycle_date, vehicle_count, gross_pence, receipt_url")
+        .eq("company_id", companyId)
+        .eq("status", "succeeded")
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (orphanError) {
+        throw new Error(orphanError.message);
+      }
+      const orphan = orphanRows?.[0];
+      const recentOrphan =
+        orphan && (orphan.cycle_date as string) >= addDays(today, -31)
+          ? orphan
+          : null;
+
+      if (recentOrphan) {
+        const cycleDate = recentOrphan.cycle_date as string;
+        const anchorDay = Number(cycleDate.slice(8, 10));
+        const nextChargeOn = computeNextChargeOn(cycleDate, anchorDay);
+        const { error: insertError } = await admin.from("company_billing").insert({
+          company_id: companyId,
+          ...cardFields,
+          status: "active",
+          anchor_day: anchorDay,
+          next_charge_on: nextChargeOn,
+          retry_at: null,
+          retry_count: 0,
+        });
+        if (insertError) {
+          throw new Error(insertError.message);
+        }
+
+        return NextResponse.json({
+          ok: true,
+          firstCharge: true,
+          recovered: true,
+          vehicleCount: Number(recentOrphan.vehicle_count),
+          grossPence: Number(recentOrphan.gross_pence),
+          receiptUrl: recentOrphan.receipt_url ?? null,
+          nextChargeOn,
+        });
+      }
+
       // First-time setup: immediate first charge; write company_billing only
       // on success so a declined card leaves no half-configured subscription.
       const anchorDay = Number(today.slice(8, 10));
@@ -136,10 +216,14 @@ export async function POST(request: NextRequest) {
 
     // Replacement card: store the new card, then, if a cycle is outstanding
     // (mid-dunning or past_due), retry it immediately.
-    const hasOutstandingCycle =
-      existing.status === "past_due" || existing.retry_at !== null;
+    const action = selectRecoveryAction({
+      status: existing.status,
+      next_charge_on: existing.next_charge_on as string,
+      retry_at: existing.retry_at ?? null,
+      retry_count: Number(existing.retry_count),
+    });
 
-    if (!hasOutstandingCycle) {
+    if (action.kind === "none") {
       const { error: updateError } = await admin
         .from("company_billing")
         .update({ ...cardFields, updated_at: new Date().toISOString() })
@@ -147,13 +231,18 @@ export async function POST(request: NextRequest) {
       if (updateError) {
         throw new Error(updateError.message);
       }
+      await disableReplacedCard(
+        square,
+        existing.square_card_id as string | null | undefined,
+        card.id
+      );
       return NextResponse.json({ ok: true, firstCharge: false, retried: false });
     }
 
-    const attempt = Number(existing.retry_count) + 1;
+    const { cycleDate, attempt } = action;
     const result = await runChargeCycle(admin, {
       companyId,
-      cycleDate: existing.next_charge_on as string,
+      cycleDate,
       attempt,
       squareCustomerId: customerId,
       squareCardId: card.id,
@@ -164,22 +253,59 @@ export async function POST(request: NextRequest) {
         anchor_day: Number(existing.anchor_day),
         next_charge_on: existing.next_charge_on as string,
       },
-      cycleDate: existing.next_charge_on as string,
+      cycleDate,
       attempt,
       succeeded: result.succeeded,
     });
 
-    const { error: updateError } = await admin
+    // Compare-and-swap: only apply the outcome if the dunning state has not
+    // moved since we read `existing` (guards against a race with the cron,
+    // which may have run the same cycle concurrently). The card fields are
+    // always written on the fallback below regardless of the race, because
+    // the new card replaces the old dead one either way.
+    const { data: casRows, error: updateError } = await admin
       .from("company_billing")
       .update({
         ...cardFields,
         ...outcome,
         updated_at: new Date().toISOString(),
       })
-      .eq("company_id", companyId);
+      .eq("company_id", companyId)
+      .eq("status", existing.status)
+      .eq("retry_count", existing.retry_count)
+      .select("company_id");
     if (updateError) {
       throw new Error(updateError.message);
     }
+
+    if (!casRows || casRows.length === 0) {
+      const { error: fallbackError } = await admin
+        .from("company_billing")
+        .update({ ...cardFields, updated_at: new Date().toISOString() })
+        .eq("company_id", companyId);
+      if (fallbackError) {
+        throw new Error(fallbackError.message);
+      }
+      await disableReplacedCard(
+        square,
+        existing.square_card_id as string | null | undefined,
+        card.id
+      );
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Billing state changed while your card was being processed. The card was saved; charges will settle automatically.",
+        },
+        { status: 409 }
+      );
+    }
+
+    await disableReplacedCard(
+      square,
+      existing.square_card_id as string | null | undefined,
+      card.id
+    );
 
     return NextResponse.json({
       ok: true,

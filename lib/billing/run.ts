@@ -41,6 +41,24 @@ export function selectDueAction(
   return { kind: "none" };
 }
 
+// When a new card is stored, is there an outstanding cycle to retry right now?
+// past_due or mid-dunning means yes (attempt numbers simply keep counting past
+// MAX_ATTEMPTS: the DB constraint allows any attempt >= 1). canceled and
+// clean-active companies have nothing to retry.
+export function selectRecoveryAction(
+  row: Pick<CompanyBillingRow, "status" | "next_charge_on" | "retry_at" | "retry_count">
+): DueAction {
+  if (row.status === "canceled") return { kind: "none" };
+  if (row.status === "past_due" || row.retry_at !== null) {
+    return {
+      kind: "charge",
+      cycleDate: row.next_charge_on,
+      attempt: row.retry_count + 1,
+    };
+  }
+  return { kind: "none" };
+}
+
 export type ChargeOutcomeUpdate = {
   status: "active" | "past_due";
   next_charge_on: string;

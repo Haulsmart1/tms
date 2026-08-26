@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyChargeOutcome, selectDueAction } from "./run";
+import { applyChargeOutcome, selectDueAction, selectRecoveryAction } from "./run";
 import type { CompanyBillingRow } from "./run";
 
 function row(overrides: Partial<CompanyBillingRow> = {}): CompanyBillingRow {
@@ -118,5 +118,34 @@ describe("applyChargeOutcome", () => {
       retry_at: null,
       retry_count: 4,
     });
+  });
+});
+
+describe("selectRecoveryAction", () => {
+  it("retries the outstanding cycle for a past_due company", () => {
+    const r = row({ status: "past_due", retry_at: null, retry_count: 4 });
+    expect(selectRecoveryAction(r)).toEqual({
+      kind: "charge",
+      cycleDate: "2026-08-26",
+      attempt: 5,
+    });
+  });
+
+  it("retries immediately for a company mid-dunning", () => {
+    const r = row({ retry_at: "2026-08-30", retry_count: 2 });
+    expect(selectRecoveryAction(r)).toEqual({
+      kind: "charge",
+      cycleDate: "2026-08-26",
+      attempt: 3,
+    });
+  });
+
+  it("does nothing for a clean active company", () => {
+    expect(selectRecoveryAction(row())).toEqual({ kind: "none" });
+  });
+
+  it("never charges a canceled company even mid-dunning", () => {
+    const r = row({ status: "canceled", retry_at: "2026-08-28", retry_count: 1 });
+    expect(selectRecoveryAction(r)).toEqual({ kind: "none" });
   });
 });
