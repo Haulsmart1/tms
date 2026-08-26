@@ -80,7 +80,10 @@ export default function SquareCardForm({ onComplete }: Props) {
         const script = document.createElement("script");
         script.src = SDK_URL;
         script.onload = () => resolve();
-        script.onerror = () => reject(new Error("Square SDK failed to load."));
+        script.onerror = () => {
+          script.remove();
+          reject(new Error("Square SDK failed to load."));
+        };
         document.head.appendChild(script);
       });
     }

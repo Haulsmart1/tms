@@ -2095,7 +2095,10 @@ export default function SquareCardForm({ onComplete }: Props) {
         const script = document.createElement("script");
         script.src = SDK_URL;
         script.onload = () => resolve();
-        script.onerror = () => reject(new Error("Square SDK failed to load."));
+        script.onerror = () => {
+          script.remove();
+          reject(new Error("Square SDK failed to load."));
+        };
         document.head.appendChild(script);
       });
     }
@@ -2229,7 +2232,11 @@ existing `<script src="...">` tag before appending a new one, and attaches load/
 that tag instead of creating a duplicate; (b) a second `cancelled` check was added immediately
 after `await card.attach(...)`, since `attach` is itself async and the component can unmount while
 it is in flight; on cancellation the card is destroyed and neither ref is set; the cleanup function
-now also nulls `paymentsRef.current`, matching what it already did for `cardRef.current`.
+now also nulls `paymentsRef.current`, matching what it already did for `cardRef.current`; (c) a
+re-review found the create path's `script.onerror` left the failed `<script>` tag in the DOM, so a
+later remount would find that same errored, already-loaded tag under (a)'s reuse path and hang
+forever waiting for a `load`/`error` event that will never fire again; `onerror` now calls
+`script.remove()` before rejecting, so a remount retries with a fresh tag.
 
 - [ ] **Step 2: Typecheck**
 
