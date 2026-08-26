@@ -24,7 +24,7 @@ A multi-tenant Transport Management System (TMS) for UK and EU road-haulage oper
 - **Tests:** Vitest.
 - **Styling:** a hybrid of inline styles (legacy pages) and Tailwind + IBM Plex on opt-in "ds" pages (see Design System). Fonts: IBM Plex Sans / Mono and Inter.
 - **Hosting:** Vercel.
-- **Integrations:** Microsoft Teams (lead alerts), Resend (transactional email), Square (payments, in progress), TomTom (live tracking, planned).
+- **Integrations:** Microsoft Teams (lead alerts), Resend (transactional email), Square (platform subscription billing), TomTom (live tracking, planned).
 
 ## Multi-tenant architecture and security
 
@@ -101,12 +101,13 @@ Status tags: [OK] functional against live data, [PARTIAL] real data but view-onl
 - **`/settings/users`** [OK]: invite users by magic link (admin action).
 - **`/settings/permissions`** [PARTIAL]: per-user, per-page access checkboxes writing to `user_permissions`. Grant path works; revoke path and controlled state are incomplete.
 - **`/settings/invoices`** [PARTIAL]: this tenant's monthly charge (active licensed vehicles x GBP 10).
+- **`/settings/billing`** [OK]: subscription payment method (Square card on file, 3DS verified) and charge history; company admins only (super_admin is redirected to `/super-admin/billing`; staff see a notice).
 
 ### Super-admin (platform operator)
 - **`/super-admin`** [STUB]: overview with hardcoded KPI tiles (placeholder numbers).
 - **`/super-admin/companies`** [PARTIAL]: list of customer companies (read-only).
 - **`/super-admin/users`** [PARTIAL]: list of all platform users with tenant and role (read-only).
-- **`/super-admin/billing`** [OK]: per-company billing (billable vehicles x GBP 10) with invoice generation.
+- **`/super-admin/billing`** [OK]: per-company billing (billable vehicles x GBP 10) with invoice generation, plus each company's subscription status (card on file, next charge, past-due with failed attempts).
 - **`/super-admin/invoices`** [OK]: all invoices; mark paid / pending.
 - **`/super-admin/requests`** [OK]: triage landing-page leads; cross-checks the true row count via the service role to detect an RLS misconfiguration. ds / Plex.
 
@@ -114,7 +115,7 @@ Status tags: [OK] functional against live data, [PARTIAL] real data but view-onl
 
 - **Microsoft Teams** (`TEAMS_WEBHOOK_URL`): Adaptive Card alert to the team when a lead is submitted.
 - **Resend** (`RESEND_API_KEY`, `MAIL_FROM`, `LEAD_INBOX`): transactional email for lead notifications.
-- **Square** (`SQUARE_SANDBOX_TOKEN`): subscription / payments integration, scaffolded under `app/subscription page/` (catalogue, plan creation, test flow), not yet wired into a live route.
+- **Square** (`SQUARE_ACCESS_TOKEN`, `SQUARE_ENVIRONMENT`, `SQUARE_LOCATION_ID`, `NEXT_PUBLIC_SQUARE_APP_ID`, `NEXT_PUBLIC_SQUARE_LOCATION_ID`): platform subscription billing, card on file plus the daily `/api/billing/run` charge cron (see `/settings/billing` and `/super-admin/billing`). This is separate from Stripe Connect (tenant-to-customer invoice payments), which is unrelated to platform billing. The earlier catalogue / plan-creation scaffolding under `app/subscription page/` is superseded by this and not wired into a live route.
 - **TomTom** (planned): live vehicle tracking to replace the current read-only telematics views.
 
 ## Getting started
@@ -143,11 +144,16 @@ RESEND_API_KEY=
 MAIL_FROM=
 LEAD_INBOX=
 
-# Square (in progress)
-SQUARE_SANDBOX_TOKEN=
+# Square (platform subscription billing)
+SQUARE_ACCESS_TOKEN=                # server-only; Square API token
+SQUARE_ENVIRONMENT=                 # sandbox or production
+SQUARE_LOCATION_ID=                 # server-only; payments location
+NEXT_PUBLIC_SQUARE_APP_ID=          # browser; Web Payments SDK
+NEXT_PUBLIC_SQUARE_LOCATION_ID=     # browser; Web Payments SDK
+CRON_SECRET=                        # bearer token protecting /api/billing/run; Vercel Cron sends it automatically
 ```
 
-Database: the schema is managed in Supabase. RLS policies and helper functions are drafted as SQL under `docs/sql/` and applied in the Supabase SQL editor (not through an automated migration runner).
+Database: the schema is managed in Supabase. RLS policies and helper functions are drafted as SQL under `docs/sql/` and applied in the Supabase SQL editor (not through an automated migration runner). This includes `docs/sql/billing_01_platform_billing.sql` (platform billing tables and policies), which is an unapplied draft until it is run there.
 
 ## Project structure
 
@@ -155,16 +161,17 @@ Database: the schema is managed in Supabase. RLS policies and helper functions a
 app/                      Next.js App Router pages and API routes
   components/             shared UI (AppHeader, TenantProvider, TenantGate, TenantSelector, PodLink)
   <feature>/page.tsx      one page per feature (jobs, pod, invoices, ...)
-  api/                    route handlers (auth callback, request-access)
-  subscription page/      Square subscription scaffolding (in progress)
+  api/                    route handlers (auth callback, request-access, billing/run, billing/card)
+  subscription page/      earlier Square catalogue / plan-creation scaffolding, superseded by lib/payments/square.ts
 lib/
   supabase/               browser, server, and admin (service-role) clients
   tenant/                 pure tenant-resolution logic (context, filter) + tests
   pod/                    POD URL classifier / signer + tests
+  payments/               Square client (lib/payments/square.ts) for platform billing + tests
   validation/             Zod schemas
   roles.ts                role-name helper
 docs/
-  sql/                    RLS + storage policy migrations (rls_01..rls_10)
+  sql/                    RLS + storage policy migrations (rls_01..rls_10), plus billing_01_platform_billing.sql (unapplied draft)
   superpowers/specs/      design specs
   superpowers/plans/      implementation plans
   handoffs/               session handoffs
@@ -175,7 +182,7 @@ docs/
 - **Finish the security-week rollout:** apply the tenant-context de-hardcode and the pod-files private-bucket lockdown to production, then a `middleware.ts` auth gate (session refresh + redirect for unauthenticated requests).
 - **Lock down the `job-files` bucket:** a second storage bucket with permissive policies, pending a decision on its ownership and use.
 - **Live tracking:** TomTom integration to make `/tracking` and `/telematics` real-time instead of read-only snapshots.
-- **Payments:** complete the Square subscription flow (pay-by-link first, then card entry).
+- **Payments:** platform subscription billing (Square card on file, daily charge cron, dunning) is live at `/settings/billing`; self-serve signup (a company creating its own account and starting a subscription without an operator provisioning it first) is still future work.
 - **Analytics dashboards:** make `/dashboard` and `/super-admin` data-driven; add cross-tenant "which tenant is performing best" views on top of the admin tenant selector; charts and SQL-view aggregation at scale.
 - **Admin management:** turn the read-only super-admin companies / users pages into full management, and finish the per-page permissions model (revoke path, controlled state).
 - **Design-system rollout:** move the remaining ~14 legacy inline-styled pages onto the design system so they follow the theme. The dark-default "operator theme" itself shipped on 2026-08-13 (see Design system above); what is left is converting those pages' hardcoded colour literals to tokens and adding each path to `lib/nav/themeableRoutes.ts`.
