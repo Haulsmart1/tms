@@ -100,24 +100,40 @@ export default function PlanningMap({
     ) {
       const el = document.createElement("div");
       const live = vehicleSignal === "live";
+      const heading =
+        reading.headingDeg !== null && Number.isFinite(reading.headingDeg)
+          ? reading.headingDeg
+          : null;
 
-      el.textContent = "V";
       el.title = live
         ? `Live vehicle position - ${pingLabel(reading, now)}`
         : `Last known vehicle position - ${pingLabel(reading, now)}`;
       el.style.cssText = [
-        "width:38px",
-        "height:38px",
+        "width:40px",
+        "height:40px",
         "border-radius:50%",
         "display:flex",
         "align-items:center",
         "justify-content:center",
-        "font-size:20px",
         "background:var(--surface)",
         "border:3px solid var(--primary)",
         "box-shadow:0 2px 9px rgba(0,0,0,.5)",
         live ? "opacity:1" : "opacity:.58",
       ].join(";");
+
+      const arrow = document.createElement("div");
+      arrow.setAttribute("aria-hidden", "true");
+      arrow.style.cssText = [
+        "width:0",
+        "height:0",
+        "border-left:7px solid transparent",
+        "border-right:7px solid transparent",
+        "border-bottom:18px solid var(--primary)",
+        "transform-origin:50% 50%",
+        `transform:rotate(${heading ?? 0}deg)`,
+      ].join(";");
+
+      el.appendChild(arrow);
 
       const vehicleMarker = new tt.Marker({ element: el })
         .setLngLat([reading.lng, reading.lat])
