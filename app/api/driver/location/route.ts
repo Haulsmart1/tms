@@ -99,6 +99,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    console.error("[driver/location] GPS request failed", {
+      error:
+        error instanceof Error
+          ? error.message
+          : String(error),
+    });
+
     const response = driverErrorResponse(error);
 
     return NextResponse.json(

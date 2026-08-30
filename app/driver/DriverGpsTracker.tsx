@@ -96,6 +96,12 @@ export default function DriverGpsTracker() {
         setState("active");
         setMessage("GPS tracking active");
       } catch (error) {
+        if (watchId.current !== null) {
+          navigator.geolocation.clearWatch(watchId.current);
+        }
+
+        watchId.current = null;
+        lastSentAt.current = 0;
         setState("error");
         setMessage(
           error instanceof Error
