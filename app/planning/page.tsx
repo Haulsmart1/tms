@@ -18,6 +18,8 @@ import {
 import { bestOrder } from "../../lib/planning/optimize";
 import { sanitizeTravelSeconds } from "../../lib/planning/matrix";
 import type { PlanJob, RouteResult } from "../../lib/planning/types";
+import { createSupabasePositionSource } from "../../lib/tracking/supabasePositions";
+import type { PositionReading } from "../../lib/tracking/position";
 import { operatorDay } from "../../lib/time";
 
 /* Same embedded-relation normalisation as /tracking: Supabase returns an
@@ -34,6 +36,7 @@ type Driver = { id: string; name: string };
 /* The geocode endpoint caps a batch at 100 stop ids and rejects anything
    larger with a 400 (it does not truncate), so the client chunks. */
 const GEOCODE_BATCH = 100;
+const POSITION_POLL_MS = 30_000;
 
 export default function PlanningPage() {
   const router = useRouter();
@@ -44,6 +47,10 @@ export default function PlanningPage() {
   const [jobs, setJobs] = useState<PlanJob[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [positions, setPositions] = useState<Map<string, PositionReading>>(
+    new Map()
+  );
+  const [positionNow, setPositionNow] = useState(() => new Date());
   const [laneOrders, setLaneOrders] = useState<Record<string, string[]>>({});
   const [laneDrivers, setLaneDrivers] = useState<Record<string, string | null>>({});
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
@@ -300,6 +307,71 @@ export default function PlanningPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenant.status, tenant.activeTenantId, date]);
 
+  useEffect(() => {
+    if (tenant.status !== "ready") {
+      setPositions(new Map());
+      return;
+    }
+
+    let cancelled = false;
+    let inFlight = false;
+
+    async function loadPositions() {
+      if (inFlight) return;
+      inFlight = true;
+
+      const startedAt = new Date();
+
+      try {
+        const vehicleIds = vehicles.map((vehicle) => vehicle.id);
+        const source = createSupabasePositionSource(supabase, tenant);
+        const readings = await source.getPositions(vehicleIds);
+
+        if (cancelled) return;
+
+        setPositions(readings);
+        setPositionNow(startedAt);
+      } catch {
+        if (!cancelled) {
+          // Preserve the last known fixes across a transient refresh failure,
+          // but advance "now" so an old reading can correctly become stale.
+          setPositionNow(startedAt);
+        }
+      } finally {
+        inFlight = false;
+      }
+    }
+
+    loadPositions();
+
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        loadPositions();
+      }
+    }, POSITION_POLL_MS);
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        loadPositions();
+      }
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange
+      );
+    };
+
+    // supabase and tenant are stable providers for the lifetime of this
+    // tenant selection; vehicle membership is the trigger that matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenant.status, tenant.activeTenantId, vehicles]);
+
   // Route for the selected vehicle, refetched when its lane content changes.
   const selectedLaneJobs = useMemo(() => {
     if (!selectedVehicleId) return [];
@@ -464,6 +536,10 @@ export default function PlanningPage() {
   }
 
   const selectedRoute = selectedVehicleId ? (routes[selectedVehicleId] ?? null) : null;
+  const selectedVehicleReading = selectedVehicleId
+    ? (positions.get(selectedVehicleId) ?? null)
+    : null;
+
   /* Memoised: a fresh markers array on every parent render tears down and
      rebuilds every TomTom marker, which flickers during a drag.
 
@@ -522,7 +598,13 @@ export default function PlanningPage() {
             </p>
           ) : null}
 
-          <PlanningMap markers={markers} route={selectedRoute} notice={mapNotice} />
+          <PlanningMap
+            markers={markers}
+            route={selectedRoute}
+            notice={mapNotice}
+            reading={selectedVehicleReading}
+            now={positionNow}
+          />
 
           {loading ? (
             <p className="text-sm text-ink-3">Loading the day&apos;s jobs...</p>
