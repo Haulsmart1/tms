@@ -52,6 +52,78 @@ export function geocodeQuery(stop: GeocodeStop): string {
     .join(", ");
 }
 
+function uniqueQueries(queries: string[]): string[] {
+  return [
+    ...new Set(
+      queries
+        .map((query) => cleanPart(query))
+        .filter((query) => query.length > 0),
+    ),
+  ];
+}
+
+/**
+ * Builds progressively simpler address-bearing queries.
+ *
+ * These remain address searches rather than postcode-only searches,
+ * allowing the caller to safely use matching UK outward codes when
+ * TomTom supplies only district-level structured postcode metadata.
+ */
+export function geocodeQueryVariants(
+  stop: GeocodeStop,
+): string[] {
+  const address = cleanPart(stop.address_line);
+  const city = cleanPart(stop.city);
+  const postcode =
+    normalizeUkPostcode(stop.postcode) ??
+    cleanPart(stop.postcode);
+
+  const addressParts = address
+    .split(",")
+    .map((part) => cleanPart(part))
+    .filter((part) => part.length > 0);
+
+  const queries = [geocodeQuery(stop)];
+
+  if (addressParts.length > 1) {
+    const withoutLeadingName =
+      addressParts.slice(1).join(", ");
+
+    queries.push(
+      [withoutLeadingName, city, postcode]
+        .filter((part) => part.length > 0)
+        .join(", "),
+    );
+
+    const firstRemainingPart =
+      addressParts[1];
+
+    const withoutUnit =
+      firstRemainingPart.replace(
+        /^unit\s+[a-z0-9-]+\s+/i,
+        "",
+      );
+
+    if (
+      withoutUnit !== firstRemainingPart &&
+      withoutUnit.length > 0
+    ) {
+      const simplifiedAddress = [
+        withoutUnit,
+        ...addressParts.slice(2),
+      ].join(", ");
+
+      queries.push(
+        [simplifiedAddress, city, postcode]
+          .filter((part) => part.length > 0)
+          .join(", "),
+      );
+    }
+  }
+
+  return uniqueQueries(queries);
+}
+
 /**
  * Selects a valid TomTom result. When the source stop has a UK postcode,
  * candidates with a different postcode are rejected rather than cached.

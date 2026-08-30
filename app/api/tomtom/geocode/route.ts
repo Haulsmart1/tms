@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   geocodeQuery,
+  geocodeQueryVariants,
   normalizeUkPostcode,
   selectGeocodePosition,
 } from "../../../../lib/tomtom/geocoding";
@@ -308,13 +309,56 @@ export async function POST(request: Request) {
           continue;
         }
 
+        const addressQueries =
+          geocodeQueryVariants(stop);
+
+        for (
+          let index = 1;
+          index < addressQueries.length &&
+          !result.position;
+          index += 1
+        ) {
+          result =
+            await geocode(
+              addressQueries[index],
+              key,
+              expectedPostcode,
+              true,
+            );
+
+          console.info(
+            "tomtom/geocode: address retry result",
+            {
+              stopId: stop.id,
+              expectedPostcode,
+              variant: index + 1,
+              status: result.status,
+              matched: Boolean(
+                result.position,
+              ),
+              candidates:
+                result.candidates,
+            },
+          );
+
+          if (result.status !== 200) {
+            console.error(
+              "tomtom/geocode: upstream status",
+              stop.id,
+              result.status,
+            );
+
+            break;
+          }
+        }
+
         /*
-         * If a valid postcode was supplied but the full free-text query
-         * returned no candidate with that postcode, retry using the clean
-         * postcode alone. This is safer than accepting a plausible result
-         * hundreds of miles away.
+         * If the address-bearing queries still produced no valid result,
+         * retry using the clean postcode alone. Outward-code matching is
+         * deliberately disabled for this postcode-only fallback.
          */
         if (
+          result.status === 200 &&
           !result.position &&
           expectedPostcode
         ) {
