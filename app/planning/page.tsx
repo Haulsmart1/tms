@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
@@ -35,6 +36,7 @@ type Driver = { id: string; name: string };
 const GEOCODE_BATCH = 100;
 
 export default function PlanningPage() {
+  const router = useRouter();
   const supabase = createClient();
   const tenant = useTenant();
 
@@ -531,6 +533,9 @@ export default function PlanningPage() {
                 subcontracted={subcontracted}
                 geocodeSettled={geocodeSettled && !geocodeUnavailable}
                 displacedNotes={displacedNotes}
+                onOpenJob={(jobId) =>
+                  router.push(`/jobs?job=${encodeURIComponent(jobId)}`)
+                }
                 onDropJob={(jobId) => moveJob(jobId, null, null)}
               />
               <div className="flex flex-1 flex-col gap-3">
@@ -553,6 +558,9 @@ export default function PlanningPage() {
                       onSelect={() => setSelectedVehicleId(v.id)}
                       onDriverChange={(driverId) =>
                         setLaneDrivers((prev) => ({ ...prev, [v.id]: driverId }))
+                      }
+                      onOpenJob={(jobId) =>
+                        router.push(`/jobs?job=${encodeURIComponent(jobId)}`)
                       }
                       onDropJob={(jobId, beforeJobId) => moveJob(jobId, v.id, beforeJobId)}
                     />

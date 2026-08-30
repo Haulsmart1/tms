@@ -1,6 +1,6 @@
 "use client";
 
-import type { DragEvent } from "react";
+import { useRef, type DragEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { isRoutable, sortedStops } from "../../lib/planning/waypoints";
 import type { PlanJob } from "../../lib/planning/types";
 
@@ -15,11 +15,20 @@ type Props = {
       change to the plan will clear that assignment. */
   note?: string;
   onDropBefore?: (draggedJobId: string) => void;
+  onOpen?: (jobId: string) => void;
 };
 
 export const JOB_ID_MIME = "text/plain";
 
-export default function PlanJobCard({ job, sequence, geocodeSettled, note, onDropBefore }: Props) {
+export default function PlanJobCard({
+  job,
+  sequence,
+  geocodeSettled,
+  note,
+  onDropBefore,
+  onOpen,
+}: Props) {
+  const dragged = useRef(false);
   const stops = sortedStops(job);
   const first = stops[0];
   const last = stops[stops.length - 1];
@@ -32,8 +41,35 @@ export default function PlanJobCard({ job, sequence, geocodeSettled, note, onDro
   const warn = geocodeSettled && !isRoutable(job);
 
   function handleDragStart(e: DragEvent) {
+    dragged.current = true;
     e.dataTransfer.setData(JOB_ID_MIME, job.id);
     e.dataTransfer.effectAllowed = "move";
+  }
+
+  function handleDragEnd() {
+    window.setTimeout(() => {
+      dragged.current = false;
+    }, 0);
+  }
+
+  function handleClick(e: MouseEvent) {
+    e.stopPropagation();
+
+    if (dragged.current || !onOpen) {
+      return;
+    }
+
+    onOpen(job.id);
+  }
+
+  function handleKeyDown(e: KeyboardEvent) {
+    if (!onOpen || (e.key !== "Enter" && e.key !== " ")) {
+      return;
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+    onOpen(job.id);
   }
 
   function handleDragOver(e: DragEvent) {
@@ -51,7 +87,12 @@ export default function PlanJobCard({ job, sequence, geocodeSettled, note, onDro
   return (
     <div
       draggable
+      role={onOpen ? "button" : undefined}
+      tabIndex={onOpen ? 0 : undefined}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
       onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
       className="cursor-grab rounded-md border border-line bg-surface px-2.5 py-2 text-sm shadow-sm active:cursor-grabbing"

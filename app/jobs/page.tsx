@@ -117,6 +117,29 @@ export default function JobsPage() {
 
   useEffect(() => { loadData(); }, [tenant.activeTenantId]);
 
+  useEffect(() => {
+    if (jobs.length === 0) {
+      return;
+    }
+
+    const requestedJobId =
+      new URLSearchParams(window.location.search).get("job");
+
+    if (!requestedJobId) {
+      return;
+    }
+
+    const requestedJob = jobs.find(
+      (job) => job.id === requestedJobId
+    );
+
+    if (!requestedJob) {
+      return;
+    }
+
+    setExpandedJobId(requestedJob.id);
+  }, [jobs]);
+
   function resetForm() {
     setEditingJobId(null);
     setForm({
