@@ -247,15 +247,53 @@ export default function JobsPage() {
   }
 
   async function performDelete(jobId: string) {
-    const { error } = await supabase.from("jobs").delete().eq("id", jobId);
-    if (error) { setMessage(`Delete job error: ${error.message}`); return; }
-    if (editingJobId === jobId) resetForm();
-    setMessage("Job deleted.");
-    await loadData();
+    try {
+      const headers = new Headers();
+
+      if (tenant.activeTenantId) {
+        headers.set("x-tenant-id", tenant.activeTenantId);
+      }
+
+      const response = await fetch(
+        `/api/jobs/${encodeURIComponent(jobId)}`,
+        {
+          method: "DELETE",
+          headers,
+        }
+      );
+
+      const body = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        setMessage(body.error || "Unable to delete job.");
+        return;
+      }
+
+      if (editingJobId === jobId) {
+        resetForm();
+      }
+
+      setMessage("Job deleted.");
+      await loadData();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? `Delete job error: ${error.message}`
+          : "Unable to delete job."
+      );
+    }
   }
 
   function requestDelete(job: any) {
-    if (job.status !== "planned") { setMessage("Only planned jobs can be deleted right now."); return; }
+    if (!["pending_acceptance", "planned"].includes(job.status)) {
+      setMessage(
+        "Only jobs awaiting acceptance or planned jobs can be deleted."
+      );
+      return;
+    }
+
     setDeleteTarget({ id: job.id, reference: job.reference });
   }
 
@@ -456,7 +494,7 @@ export default function JobsPage() {
       <main className="mx-auto max-w-6xl px-6 py-8">
         <h1 className="text-2xl font-semibold tracking-tight text-ink">Jobs</h1>
         <p className="mt-1 text-sm text-ink-2">
-          Create jobs, edit jobs, delete planned jobs, and complete POD from one screen.
+          Create jobs, edit jobs, delete unaccepted or planned jobs, and complete POD from one screen.
         </p>
 
         <div className="mt-6">
