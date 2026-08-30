@@ -131,22 +131,28 @@ export default function PlanningMap({
 
       van.setAttribute(
         "viewBox",
-        "0 0 24 24",
+        "0 0 32 20",
       );
       van.setAttribute(
         "aria-hidden",
         "true",
       );
 
-      // The drawn van faces right (east). Subtracting 90 degrees means a
-      // telemetry heading of 0 points it north, 90 east, 180 south, etc.
+      /*
+       * The artwork naturally faces east. Rotate only when telemetry supplies
+       * a heading; without one, keeping the van side-on is far more readable
+       * than presenting an arbitrary direction.
+       */
       const rotation =
-        (heading ?? 0) - 90;
+        heading === null
+          ? 0
+          : heading - 90;
 
       van.style.cssText = [
-        "width:25px",
-        "height:25px",
+        "width:30px",
+        "height:22px",
         "display:block",
+        "overflow:visible",
         "transform-origin:50% 50%",
         `transform:rotate(${rotation}deg)`,
       ].join(";");
@@ -159,7 +165,7 @@ export default function PlanningMap({
 
       body.setAttribute(
         "d",
-        "M2.5 7.5h11.8v2.4h3.6l3.6 4.2v3.4h-2.2a2.8 2.8 0 0 1-5.4 0H9.8a2.8 2.8 0 0 1-5.4 0H2.5z",
+        "M3 5.2c0-1.1.9-2 2-2h14.2v3.1h4.1c1 0 1.8.4 2.5 1.2l3.2 3.8c.6.7.9 1.5.9 2.4V16h-2.6a3.2 3.2 0 0 1-6.2 0H11a3.2 3.2 0 0 1-6.2 0H3z",
       );
       body.style.fill =
         "var(--primary)";
@@ -172,9 +178,53 @@ export default function PlanningMap({
 
       windscreen.setAttribute(
         "d",
-        "M15.2 10.8h2.15l2.15 2.5h-4.3z",
+        "M20.5 7.5h2.7c.5 0 .9.2 1.2.6l2.6 3.1h-6.5z",
       );
       windscreen.style.fill =
+        "var(--surface)";
+
+      const sideWindow =
+        document.createElementNS(
+          svgNamespace,
+          "rect",
+        );
+
+      sideWindow.setAttribute("x", "16.4");
+      sideWindow.setAttribute("y", "7.5");
+      sideWindow.setAttribute("width", "3");
+      sideWindow.setAttribute("height", "3.7");
+      sideWindow.setAttribute("rx", "0.55");
+      sideWindow.style.fill =
+        "var(--surface)";
+
+      const panelLine =
+        document.createElementNS(
+          svgNamespace,
+          "path",
+        );
+
+      panelLine.setAttribute(
+        "d",
+        "M6 6.4h8.8M14.8 6.4v7.2",
+      );
+      panelLine.style.cssText = [
+        "fill:none",
+        "stroke:var(--surface)",
+        "stroke-width:0.8",
+        "stroke-linecap:round",
+        "opacity:.7",
+      ].join(";");
+
+      const headlight =
+        document.createElementNS(
+          svgNamespace,
+          "circle",
+        );
+
+      headlight.setAttribute("cx", "28.7");
+      headlight.setAttribute("cy", "13.1");
+      headlight.setAttribute("r", "0.75");
+      headlight.style.fill =
         "var(--surface)";
 
       const rearWheel =
@@ -183,9 +233,9 @@ export default function PlanningMap({
           "circle",
         );
 
-      rearWheel.setAttribute("cx", "7.1");
-      rearWheel.setAttribute("cy", "17.2");
-      rearWheel.setAttribute("r", "1.65");
+      rearWheel.setAttribute("cx", "8");
+      rearWheel.setAttribute("cy", "16");
+      rearWheel.setAttribute("r", "2.45");
       rearWheel.style.fill =
         "var(--ink)";
 
@@ -195,17 +245,46 @@ export default function PlanningMap({
           "circle",
         );
 
-      frontWheel.setAttribute("cx", "16.6");
-      frontWheel.setAttribute("cy", "17.2");
-      frontWheel.setAttribute("r", "1.65");
+      frontWheel.setAttribute("cx", "24.2");
+      frontWheel.setAttribute("cy", "16");
+      frontWheel.setAttribute("r", "2.45");
       frontWheel.style.fill =
         "var(--ink)";
+
+      const rearHub =
+        document.createElementNS(
+          svgNamespace,
+          "circle",
+        );
+
+      rearHub.setAttribute("cx", "8");
+      rearHub.setAttribute("cy", "16");
+      rearHub.setAttribute("r", "1.05");
+      rearHub.style.fill =
+        "var(--surface)";
+
+      const frontHub =
+        document.createElementNS(
+          svgNamespace,
+          "circle",
+        );
+
+      frontHub.setAttribute("cx", "24.2");
+      frontHub.setAttribute("cy", "16");
+      frontHub.setAttribute("r", "1.05");
+      frontHub.style.fill =
+        "var(--surface)";
 
       van.append(
         body,
         windscreen,
+        sideWindow,
+        panelLine,
+        headlight,
         rearWheel,
         frontWheel,
+        rearHub,
+        frontHub,
       );
 
       el.appendChild(van);
