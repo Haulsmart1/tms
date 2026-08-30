@@ -220,6 +220,16 @@ export async function POST(request: Request) {
             expectedPostcode,
           );
 
+        console.info(
+          "tomtom/geocode: full query result",
+          {
+            stopId: stop.id,
+            expectedPostcode,
+            status: result.status,
+            matched: Boolean(result.position),
+          },
+        );
+
         if (
           result.status !== 200
         ) {
@@ -248,6 +258,16 @@ export async function POST(request: Request) {
               key,
               expectedPostcode,
             );
+
+          console.info(
+            "tomtom/geocode: postcode retry result",
+            {
+              stopId: stop.id,
+              expectedPostcode,
+              status: result.status,
+              matched: Boolean(result.position),
+            },
+          );
         }
 
         const position =
