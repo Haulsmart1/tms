@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { isDriverJobForDate } from "../../../lib/driver/dashboardJobs";
 
 type Driver = {
   id: string;
@@ -87,7 +88,7 @@ export default function DriverDashboardPage() {
     const today = new Date().toISOString().slice(0, 10);
 
     return data.jobs
-      .filter((job) => (job.job_date || job.scheduled_date) === today)
+      .filter((job) => isDriverJobForDate(job, today))
       .sort((a, b) => {
         const aOrder = a.route_order ?? Number.MAX_SAFE_INTEGER;
         const bOrder = b.route_order ?? Number.MAX_SAFE_INTEGER;
