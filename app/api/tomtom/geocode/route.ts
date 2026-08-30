@@ -113,6 +113,7 @@ async function geocode(
   query: string,
   key: string,
   expectedPostcode: string | null,
+  allowOutwardPostcodeMatch = false,
 ) {
   const response = await fetch(
     geocodeUrl(query, key),
@@ -135,6 +136,7 @@ async function geocode(
     position: selectGeocodePosition(
       json,
       expectedPostcode,
+      allowOutwardPostcodeMatch,
     ),
     status: response.status,
     candidates:
@@ -280,6 +282,7 @@ export async function POST(request: Request) {
             query,
             key,
             expectedPostcode,
+            true,
           );
 
         console.info(

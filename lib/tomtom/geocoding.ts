@@ -59,6 +59,7 @@ export function geocodeQuery(stop: GeocodeStop): string {
 export function selectGeocodePosition(
   json: unknown,
   expectedPostcode: string | null,
+  allowOutwardPostcodeMatch = false,
 ): LatLng | null {
   const results =
     typeof json === "object" &&
@@ -80,6 +81,7 @@ export function selectGeocodePosition(
       address?: {
         postalCode?: unknown;
         freeformAddress?: unknown;
+        countryCode?: unknown;
       };
     };
 
@@ -106,11 +108,32 @@ export function selectGeocodePosition(
           ? normalizeUkPostcode(result.address.freeformAddress)
           : null;
 
-      const postcodeMatches =
+      const exactPostcodeMatch =
         structuredPostcode === expectedPostcode ||
         freeformPostcode === expectedPostcode;
 
-      if (!postcodeMatches) {
+      const structuredOutwardCode =
+        typeof result.address?.postalCode === "string"
+          ? cleanPart(result.address.postalCode).toUpperCase()
+          : null;
+
+      const expectedOutwardCode =
+        expectedPostcode.split(" ")[0];
+
+      const countryCode =
+        typeof result.address?.countryCode === "string"
+          ? result.address.countryCode.toUpperCase()
+          : null;
+
+      const outwardPostcodeMatch =
+        allowOutwardPostcodeMatch &&
+        countryCode === "GB" &&
+        structuredOutwardCode === expectedOutwardCode;
+
+      if (
+        !exactPostcodeMatch &&
+        !outwardPostcodeMatch
+      ) {
         continue;
       }
     }
