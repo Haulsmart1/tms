@@ -100,14 +100,14 @@ export default function PlanningMap({
     ) {
       const el = document.createElement("div");
       const live = vehicleSignal === "live";
-      const heading =
-        reading.headingDeg !== null && Number.isFinite(reading.headingDeg)
-          ? reading.headingDeg
-          : null;
 
+      // Match the Tracking page marker exactly. The Unicode escape keeps the
+      // source ASCII-safe through Windows PowerShell and still renders a truck.
+      el.textContent = "\u{1F69A}";
       el.title = live
         ? `Live vehicle position - ${pingLabel(reading, now)}`
         : `Last known vehicle position - ${pingLabel(reading, now)}`;
+
       el.style.cssText = [
         "width:40px",
         "height:40px",
@@ -115,179 +115,19 @@ export default function PlanningMap({
         "display:flex",
         "align-items:center",
         "justify-content:center",
-        "background:var(--surface)",
-        "border:3px solid var(--primary)",
+        "font-size:20px",
+        live ? "background:#16a34a" : "background:#d97706",
+        "border:3px solid white",
         "box-shadow:0 2px 9px rgba(0,0,0,.5)",
-        live ? "opacity:1" : "opacity:.58",
       ].join(";");
 
-      const svgNamespace =
-        "http://www.w3.org/2000/svg";
-      const van =
-        document.createElementNS(
-          svgNamespace,
-          "svg",
-        );
-
-      van.setAttribute(
-        "viewBox",
-        "0 0 32 20",
-      );
-      van.setAttribute(
-        "aria-hidden",
-        "true",
-      );
-
-      /*
-       * The artwork naturally faces east. Rotate only when telemetry supplies
-       * a heading; without one, keeping the van side-on is far more readable
-       * than presenting an arbitrary direction.
-       */
-      const rotation =
-        heading === null
-          ? 0
-          : heading - 90;
-
-      van.style.cssText = [
-        "width:30px",
-        "height:22px",
-        "display:block",
-        "overflow:visible",
-        "transform-origin:50% 50%",
-        `transform:rotate(${rotation}deg)`,
-      ].join(";");
-
-      const body =
-        document.createElementNS(
-          svgNamespace,
-          "path",
-        );
-
-      body.setAttribute(
-        "d",
-        "M3 5.2c0-1.1.9-2 2-2h14.2v3.1h4.1c1 0 1.8.4 2.5 1.2l3.2 3.8c.6.7.9 1.5.9 2.4V16h-2.6a3.2 3.2 0 0 1-6.2 0H11a3.2 3.2 0 0 1-6.2 0H3z",
-      );
-      body.style.fill =
-        "var(--primary)";
-
-      const windscreen =
-        document.createElementNS(
-          svgNamespace,
-          "path",
-        );
-
-      windscreen.setAttribute(
-        "d",
-        "M20.5 7.5h2.7c.5 0 .9.2 1.2.6l2.6 3.1h-6.5z",
-      );
-      windscreen.style.fill =
-        "var(--surface)";
-
-      const sideWindow =
-        document.createElementNS(
-          svgNamespace,
-          "rect",
-        );
-
-      sideWindow.setAttribute("x", "16.4");
-      sideWindow.setAttribute("y", "7.5");
-      sideWindow.setAttribute("width", "3");
-      sideWindow.setAttribute("height", "3.7");
-      sideWindow.setAttribute("rx", "0.55");
-      sideWindow.style.fill =
-        "var(--surface)";
-
-      const panelLine =
-        document.createElementNS(
-          svgNamespace,
-          "path",
-        );
-
-      panelLine.setAttribute(
-        "d",
-        "M6 6.4h8.8M14.8 6.4v7.2",
-      );
-      panelLine.style.cssText = [
-        "fill:none",
-        "stroke:var(--surface)",
-        "stroke-width:0.8",
-        "stroke-linecap:round",
-        "opacity:.7",
-      ].join(";");
-
-      const headlight =
-        document.createElementNS(
-          svgNamespace,
-          "circle",
-        );
-
-      headlight.setAttribute("cx", "28.7");
-      headlight.setAttribute("cy", "13.1");
-      headlight.setAttribute("r", "0.75");
-      headlight.style.fill =
-        "var(--surface)";
-
-      const rearWheel =
-        document.createElementNS(
-          svgNamespace,
-          "circle",
-        );
-
-      rearWheel.setAttribute("cx", "8");
-      rearWheel.setAttribute("cy", "16");
-      rearWheel.setAttribute("r", "2.45");
-      rearWheel.style.fill =
-        "var(--ink)";
-
-      const frontWheel =
-        document.createElementNS(
-          svgNamespace,
-          "circle",
-        );
-
-      frontWheel.setAttribute("cx", "24.2");
-      frontWheel.setAttribute("cy", "16");
-      frontWheel.setAttribute("r", "2.45");
-      frontWheel.style.fill =
-        "var(--ink)";
-
-      const rearHub =
-        document.createElementNS(
-          svgNamespace,
-          "circle",
-        );
-
-      rearHub.setAttribute("cx", "8");
-      rearHub.setAttribute("cy", "16");
-      rearHub.setAttribute("r", "1.05");
-      rearHub.style.fill =
-        "var(--surface)";
-
-      const frontHub =
-        document.createElementNS(
-          svgNamespace,
-          "circle",
-        );
-
-      frontHub.setAttribute("cx", "24.2");
-      frontHub.setAttribute("cy", "16");
-      frontHub.setAttribute("r", "1.05");
-      frontHub.style.fill =
-        "var(--surface)";
-
-      van.append(
-        body,
-        windscreen,
-        sideWindow,
-        panelLine,
-        headlight,
-        rearWheel,
-        frontWheel,
-        rearHub,
-        frontHub,
-      );
-
-      el.appendChild(van);
+      if (
+        reading.headingDeg !== null &&
+        Number.isFinite(reading.headingDeg)
+      ) {
+        el.style.transform =
+          `rotate(${reading.headingDeg}deg)`;
+      }
 
       const vehicleMarker = new tt.Marker({ element: el })
         .setLngLat([reading.lng, reading.lat])
