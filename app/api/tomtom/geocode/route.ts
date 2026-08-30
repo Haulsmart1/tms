@@ -50,6 +50,65 @@ function parseStopIds(body: unknown): string[] | null {
   );
 }
 
+type GeocodeCandidateDiagnostic = {
+  postalCode: string | null;
+  countryCode: string | null;
+  hasPosition: boolean;
+};
+
+function candidateDiagnostics(
+  json: unknown,
+): GeocodeCandidateDiagnostic[] {
+  if (
+    typeof json !== "object" ||
+    json === null ||
+    !Array.isArray(
+      (json as { results?: unknown }).results,
+    )
+  ) {
+    return [];
+  }
+
+  return (
+    json as { results: unknown[] }
+  ).results.slice(0, 5).map((raw) => {
+    if (
+      typeof raw !== "object" ||
+      raw === null
+    ) {
+      return {
+        postalCode: null,
+        countryCode: null,
+        hasPosition: false,
+      };
+    }
+
+    const candidate = raw as {
+      position?: unknown;
+      address?: {
+        postalCode?: unknown;
+        countryCode?: unknown;
+      };
+    };
+
+    return {
+      postalCode:
+        typeof candidate.address?.postalCode ===
+        "string"
+          ? candidate.address.postalCode
+          : null,
+      countryCode:
+        typeof candidate.address?.countryCode ===
+        "string"
+          ? candidate.address.countryCode
+          : null,
+      hasPosition:
+        typeof candidate.position === "object" &&
+        candidate.position !== null,
+    };
+  });
+}
+
 async function geocode(
   query: string,
   key: string,
@@ -66,6 +125,7 @@ async function geocode(
     return {
       position: null,
       status: response.status,
+      candidates: [] as GeocodeCandidateDiagnostic[],
     };
   }
 
@@ -77,6 +137,8 @@ async function geocode(
       expectedPostcode,
     ),
     status: response.status,
+    candidates:
+      candidateDiagnostics(json),
   };
 }
 
@@ -227,6 +289,7 @@ export async function POST(request: Request) {
             expectedPostcode,
             status: result.status,
             matched: Boolean(result.position),
+            candidates: result.candidates,
           },
         );
 
@@ -266,6 +329,7 @@ export async function POST(request: Request) {
               expectedPostcode,
               status: result.status,
               matched: Boolean(result.position),
+              candidates: result.candidates,
             },
           );
         }
