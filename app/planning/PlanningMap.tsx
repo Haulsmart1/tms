@@ -121,19 +121,94 @@ export default function PlanningMap({
         live ? "opacity:1" : "opacity:.58",
       ].join(";");
 
-      const arrow = document.createElement("div");
-      arrow.setAttribute("aria-hidden", "true");
-      arrow.style.cssText = [
-        "width:0",
-        "height:0",
-        "border-left:7px solid transparent",
-        "border-right:7px solid transparent",
-        "border-bottom:18px solid var(--primary)",
+      const svgNamespace =
+        "http://www.w3.org/2000/svg";
+      const van =
+        document.createElementNS(
+          svgNamespace,
+          "svg",
+        );
+
+      van.setAttribute(
+        "viewBox",
+        "0 0 24 24",
+      );
+      van.setAttribute(
+        "aria-hidden",
+        "true",
+      );
+
+      // The drawn van faces right (east). Subtracting 90 degrees means a
+      // telemetry heading of 0 points it north, 90 east, 180 south, etc.
+      const rotation =
+        (heading ?? 0) - 90;
+
+      van.style.cssText = [
+        "width:25px",
+        "height:25px",
+        "display:block",
         "transform-origin:50% 50%",
-        `transform:rotate(${heading ?? 0}deg)`,
+        `transform:rotate(${rotation}deg)`,
       ].join(";");
 
-      el.appendChild(arrow);
+      const body =
+        document.createElementNS(
+          svgNamespace,
+          "path",
+        );
+
+      body.setAttribute(
+        "d",
+        "M2.5 7.5h11.8v2.4h3.6l3.6 4.2v3.4h-2.2a2.8 2.8 0 0 1-5.4 0H9.8a2.8 2.8 0 0 1-5.4 0H2.5z",
+      );
+      body.style.fill =
+        "var(--primary)";
+
+      const windscreen =
+        document.createElementNS(
+          svgNamespace,
+          "path",
+        );
+
+      windscreen.setAttribute(
+        "d",
+        "M15.2 10.8h2.15l2.15 2.5h-4.3z",
+      );
+      windscreen.style.fill =
+        "var(--surface)";
+
+      const rearWheel =
+        document.createElementNS(
+          svgNamespace,
+          "circle",
+        );
+
+      rearWheel.setAttribute("cx", "7.1");
+      rearWheel.setAttribute("cy", "17.2");
+      rearWheel.setAttribute("r", "1.65");
+      rearWheel.style.fill =
+        "var(--ink)";
+
+      const frontWheel =
+        document.createElementNS(
+          svgNamespace,
+          "circle",
+        );
+
+      frontWheel.setAttribute("cx", "16.6");
+      frontWheel.setAttribute("cy", "17.2");
+      frontWheel.setAttribute("r", "1.65");
+      frontWheel.style.fill =
+        "var(--ink)";
+
+      van.append(
+        body,
+        windscreen,
+        rearWheel,
+        frontWheel,
+      );
+
+      el.appendChild(van);
 
       const vehicleMarker = new tt.Marker({ element: el })
         .setLngLat([reading.lng, reading.lat])

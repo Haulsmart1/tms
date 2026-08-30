@@ -218,3 +218,80 @@ export function selectGeocodePosition(
 
   return null;
 }
+
+/**
+ * Validates a response from a UK postcode lookup service.
+ *
+ * The fallback is deliberately stricter than the TomTom address matcher:
+ * the service must return the exact full UK postcode requested. An outward
+ * code such as "CW5" is never accepted as a substitute for "CW5 8JT".
+ */
+export function selectUkPostcodePosition(
+  json: unknown,
+  expectedPostcode: string,
+): LatLng | null {
+  const normalizedExpected =
+    normalizeUkPostcode(
+      expectedPostcode,
+    );
+
+  if (
+    !normalizedExpected ||
+    typeof json !== "object" ||
+    json === null
+  ) {
+    return null;
+  }
+
+  const result =
+    (json as {
+      result?: unknown;
+    }).result;
+
+  if (
+    typeof result !== "object" ||
+    result === null
+  ) {
+    return null;
+  }
+
+  const value =
+    result as {
+      postcode?: unknown;
+      latitude?: unknown;
+      longitude?: unknown;
+    };
+
+  const returnedPostcode =
+    typeof value.postcode === "string"
+      ? normalizeUkPostcode(
+          value.postcode,
+        )
+      : null;
+
+  if (
+    returnedPostcode !==
+    normalizedExpected
+  ) {
+    return null;
+  }
+
+  const latitude =
+    value.latitude;
+  const longitude =
+    value.longitude;
+
+  if (
+    typeof latitude !== "number" ||
+    !Number.isFinite(latitude) ||
+    typeof longitude !== "number" ||
+    !Number.isFinite(longitude)
+  ) {
+    return null;
+  }
+
+  return {
+    lat: latitude,
+    lng: longitude,
+  };
+}

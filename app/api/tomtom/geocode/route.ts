@@ -4,6 +4,7 @@ import {
   geocodeQueryVariants,
   normalizeUkPostcode,
   selectGeocodePosition,
+  selectUkPostcodePosition,
 } from "../../../../lib/tomtom/geocoding";
 import { geocodeUrl } from "../../../../lib/tomtom/api";
 import {
@@ -19,6 +20,8 @@ const MAX_STOPS = 100;
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TIMEOUT_MS = 5000;
+const UK_POSTCODE_API =
+  "https://api.postcodes.io/postcodes";
 
 function parseStopIds(body: unknown): string[] | null {
   if (typeof body !== "object" || body === null) {
@@ -142,6 +145,41 @@ async function geocode(
     status: response.status,
     candidates:
       candidateDiagnostics(json),
+  };
+}
+
+async function lookupUkPostcode(
+  expectedPostcode: string,
+) {
+  const response = await fetch(
+    `${UK_POSTCODE_API}/${encodeURIComponent(
+      expectedPostcode,
+    )}`,
+    {
+      signal:
+        AbortSignal.timeout(
+          TIMEOUT_MS,
+        ),
+    },
+  );
+
+  if (!response.ok) {
+    return {
+      position: null,
+      status: response.status,
+    };
+  }
+
+  const json =
+    await response.json();
+
+  return {
+    position:
+      selectUkPostcodePosition(
+        json,
+        expectedPostcode,
+      ),
+    status: response.status,
   };
 }
 
@@ -381,8 +419,41 @@ export async function POST(request: Request) {
           );
         }
 
-        const position =
+        let position =
           result.position;
+
+        /*
+         * TomTom sometimes resolves only the outward postcode district
+         * (for example CW5) even when the source contains a full postcode.
+         * Do not weaken TomTom matching. Instead, use an exact UK-postcode
+         * lookup as the final fallback and require that service to return
+         * the same normalized full postcode before coordinates are trusted.
+         */
+        if (
+          !position &&
+          expectedPostcode
+        ) {
+          const postcodeFallback =
+            await lookupUkPostcode(
+              expectedPostcode,
+            );
+
+          console.info(
+            "tomtom/geocode: UK postcode fallback result",
+            {
+              stopId: stop.id,
+              expectedPostcode,
+              status:
+                postcodeFallback.status,
+              matched: Boolean(
+                postcodeFallback.position,
+              ),
+            },
+          );
+
+          position =
+            postcodeFallback.position;
+        }
 
         if (!position) {
           continue;
