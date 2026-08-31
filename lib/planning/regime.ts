@@ -460,7 +460,7 @@ export function classifyComplianceRegime(
     return result(
       "aetr",
       true,
-      forceIncomplete ? "incomplete" : "confirmed",
+      "incomplete",
       combinationMamKg,
       reasons,
       warnings,

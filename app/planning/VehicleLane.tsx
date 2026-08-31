@@ -4,6 +4,10 @@ import type { DragEvent } from "react";
 import PlanJobCard, { JOB_ID_MIME } from "./PlanJobCard";
 import type { PlanJob } from "../../lib/planning/types";
 import type { PlanningCompliance } from "../../lib/planning/compliance";
+import {
+  regimeLabel,
+  type LaneRegimeSummary,
+} from "../../lib/planning/laneRegime";
 import { formatDuration } from "../../lib/planning/format";
 
 type Props = {
@@ -14,6 +18,7 @@ type Props = {
   selected: boolean;
   /** e.g. "3 jobs · 92 km · 2 h 41 m", or null before this lane has a route. */
   summary: string | null;
+  regimeSummary: LaneRegimeSummary;
   compliance: PlanningCompliance;
   geocodeSettled: boolean;
   /** True when the lane's jobs arrived carrying more than one distinct driver,
@@ -27,7 +32,8 @@ type Props = {
 };
 
 export default function VehicleLane({
-  vehicle, jobs, driverId, drivers, selected, summary, compliance,
+  vehicle, jobs, driverId, drivers, selected, summary, regimeSummary,
+  compliance,
   geocodeSettled, driverConflict, onSelect, onDriverChange, onOpenJob,
   onDropJob,
 }: Props) {
@@ -78,6 +84,44 @@ export default function VehicleLane({
           {summary ?? `${jobs.length} ${jobs.length === 1 ? "job" : "jobs"}`}
         </span>
       </header>
+
+      <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
+        <span className="rounded border border-line bg-surface px-1.5 py-0.5 text-ink-2">
+          {regimeSummary.status === "mixed"
+            ? "Mixed regimes"
+            : regimeLabel(regimeSummary.regime)}
+        </span>
+
+        {regimeSummary.reviewRequired ? (
+          <span
+            className="rounded border border-line px-1.5 py-0.5 text-warning"
+            title="One or more jobs have incomplete regime facts or missing required classification metadata."
+          >
+            Review required
+          </span>
+        ) : null}
+
+        {regimeSummary.hasOverrides ? (
+          <span
+            className="rounded border border-line px-1.5 py-0.5 text-ink-2"
+            title="One or more job classifications use a documented operator override."
+          >
+            Override
+          </span>
+        ) : null}
+
+        {regimeSummary.warningCount > 0 ? (
+          <span
+            className="text-warning"
+            title={`${regimeSummary.warningCount} regime classification warning${
+              regimeSummary.warningCount === 1 ? "" : "s"
+            }`}
+          >
+            {regimeSummary.warningCount} regime warning
+            {regimeSummary.warningCount === 1 ? "" : "s"}
+          </span>
+        ) : null}
+      </div>
 
       <div className="mb-2 rounded-md border border-line bg-surface p-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">

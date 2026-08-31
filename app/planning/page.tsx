@@ -25,6 +25,11 @@ import {
   type PlanningCompliance,
   type PlanningComplianceDriver,
 } from "../../lib/planning/compliance";
+import type { ComplianceVehicleFacts } from "../../lib/planning/regime";
+import {
+  summarizeLaneRegimes,
+  type LaneRegimeSummary,
+} from "../../lib/planning/laneRegime";
 import {
   isValidIanaTimeZone,
   OPERATOR_TIME_ZONE,
@@ -39,8 +44,14 @@ function rel(value: any): any {
   return Array.isArray(value) ? (value[0] ?? null) : (value ?? null);
 }
 
-type Vehicle = { id: string; registration: string };
-type VehicleRow = { id: string; registration: string; active: boolean };
+type Vehicle = {
+  id: string;
+  registration: string;
+} & ComplianceVehicleFacts;
+
+type VehicleRow = Vehicle & {
+  active: boolean;
+};
 type Driver = PlanningComplianceDriver;
 
 /* The geocode endpoint caps a batch at 100 stop ids and rejects anything
@@ -53,7 +64,21 @@ export default function PlanningPage() {
   const supabase = createClient();
   const tenant = useTenant();
 
-  const [date, setDate] = useState(() => operatorDay(new Date()));
+  const [date, setDate] = useState(() => {
+    const fallback = operatorDay(new Date());
+
+    if (typeof window === "undefined") {
+      return fallback;
+    }
+
+    const requestedDate =
+      new URLSearchParams(window.location.search).get("date");
+
+    return requestedDate &&
+      /^\d{4}-\d{2}-\d{2}$/.test(requestedDate)
+      ? requestedDate
+      : fallback;
+  });
   const [planningTimeZone, setPlanningTimeZone] = useState(OPERATOR_TIME_ZONE);
   const [jobs, setJobs] = useState<PlanJob[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -151,6 +176,8 @@ export default function PlanningPage() {
       .select(`
         id, reference, status, scheduled_date, vehicle_id, driver_id,
         subcontractor_id, route_order,
+        journey_scope, origin_country_code, destination_country_code,
+        compliance_regime_override, compliance_override_reason,
         customers ( name ),
         job_stops ( id, stop_order, type, address_line, city, postcode, lat, lng )
       `)
@@ -161,7 +188,18 @@ export default function PlanningPage() {
       .filterByTenant(jobsQuery)
       .order("created_at", { ascending: true });
     const { data: vehicleData, error: vehicleError } = await tenant
-      .filterByTenant(supabase.from("vehicles").select("id, registration, active"))
+      .filterByTenant(
+        supabase.from("vehicles").select(`
+          id,
+          registration,
+          active,
+          mam_kg,
+          trailer_mam_kg,
+          tachograph_fitted,
+          tachograph_type,
+          home_country_code
+        `)
+      )
       .order("registration", { ascending: true });
     const { data: driverData, error: driverError } = await tenant
       .filterByTenant(
@@ -207,6 +245,11 @@ export default function PlanningPage() {
       driver_id: row.driver_id,
       subcontractor_id: row.subcontractor_id,
       route_order: row.route_order,
+      journey_scope: row.journey_scope,
+      origin_country_code: row.origin_country_code,
+      destination_country_code: row.destination_country_code,
+      compliance_regime_override: row.compliance_regime_override,
+      compliance_override_reason: row.compliance_override_reason,
       customer_name: rel(row.customers)?.name ?? null,
       stops: (row.job_stops ?? []).map((s: any) => ({
         id: s.id, stop_order: s.stop_order, type: s.type,
@@ -222,7 +265,15 @@ export default function PlanningPage() {
     const allVehicles: VehicleRow[] = vehicleData ?? [];
     const vehicleList: Vehicle[] = allVehicles
       .filter((v) => v.active)
-      .map((v) => ({ id: v.id, registration: v.registration }));
+      .map((v) => ({
+        id: v.id,
+        registration: v.registration,
+        mam_kg: v.mam_kg,
+        trailer_mam_kg: v.trailer_mam_kg,
+        tachograph_fitted: v.tachograph_fitted,
+        tachograph_type: v.tachograph_type,
+        home_country_code: v.home_country_code,
+      }));
     const activeVehicleIds = new Set(vehicleList.map((v) => v.id));
     const registrationById = new Map(allVehicles.map((v) => [v.id, v.registration]));
 
@@ -590,6 +641,23 @@ export default function PlanningPage() {
     ? (positions.get(selectedVehicleId) ?? null)
     : null;
 
+  const laneRegimeByVehicle = useMemo(() => {
+    const result = new Map<string, LaneRegimeSummary>();
+
+    for (const vehicle of vehicles) {
+      const laneJobs = (laneOrders[vehicle.id] ?? [])
+        .map((jobId) => jobById.get(jobId))
+        .filter((job): job is PlanJob => Boolean(job));
+
+      result.set(
+        vehicle.id,
+        summarizeLaneRegimes(vehicle, laneJobs)
+      );
+    }
+
+    return result;
+  }, [vehicles, laneOrders, jobById]);
+
   const laneComplianceByVehicle = useMemo(() => {
     const today = operatorDayInTimeZone(positionNow, planningTimeZone);
     const result = new Map<string, PlanningCompliance>();
@@ -810,6 +878,10 @@ export default function PlanningPage() {
                       drivers={drivers}
                       selected={v.id === selectedVehicleId}
                       summary={laneSummary(v.id)}
+                      regimeSummary={
+                        laneRegimeByVehicle.get(v.id) ??
+                        summarizeLaneRegimes(v, [])
+                      }
                       compliance={
                         laneComplianceByVehicle.get(v.id) ??
                         evaluatePlanningCompliance({

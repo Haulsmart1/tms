@@ -269,6 +269,29 @@ export default function JobsPage() {
     await loadData();
   }
 
+  function sendToPlanning(job: any) {
+    setMessage("");
+
+    if (job.status !== "planned") {
+      setMessage("Only planned jobs can be sent to Planning.");
+      return;
+    }
+
+    if (
+      typeof job.scheduled_date !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(job.scheduled_date)
+    ) {
+      setMessage(
+        "Set a scheduled date on this job before sending it to Planning."
+      );
+      return;
+    }
+
+    window.location.assign(
+      `/planning?date=${encodeURIComponent(job.scheduled_date)}`
+    );
+  }
+
   async function performDelete(jobId: string) {
     try {
       const headers = new Headers();
@@ -1033,6 +1056,18 @@ export default function JobsPage() {
                                 </div>
 
                                 <div className="flex flex-wrap gap-2">
+                                  {job.status === "planned" ? (
+                                    <Button
+                                      type="button"
+                                      variant="secondary"
+                                      onClick={() =>
+                                        sendToPlanning(job)
+                                      }
+                                    >
+                                      Send to Planning
+                                    </Button>
+                                  ) : null}
+
                                   <Button
                                     type="button"
                                     variant="secondary"
@@ -1370,8 +1405,13 @@ export default function JobsPage() {
         open={!!deleteTarget}
         jobReference={deleteTarget?.reference ?? ""}
         onCancel={() => setDeleteTarget(null)}
-        onConfirm={() => {
-          if (deleteTarget) performDelete(deleteTarget.id);
+        onConfirm={async () => {
+          if (!deleteTarget) {
+            return;
+          }
+
+          const target = deleteTarget;
+          await performDelete(target.id);
           setDeleteTarget(null);
         }}
       />

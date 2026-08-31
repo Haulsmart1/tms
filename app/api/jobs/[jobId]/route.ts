@@ -57,13 +57,40 @@ export async function DELETE(
         .limit(1),
     ]);
 
-    const linkedRecordError =
-      invoiceJobsResult.error ??
-      invoicesResult.error ??
-      supplierPurchaseOrdersResult.error;
+    if (invoiceJobsResult.error) {
+      console.error(
+        "Job delete invoice_jobs safety check failed",
+        invoiceJobsResult.error
+      );
 
-    if (linkedRecordError) {
-      throw new ApiError(400, linkedRecordError.message);
+      throw new ApiError(
+        500,
+        `Unable to verify invoice links: ${invoiceJobsResult.error.message}`
+      );
+    }
+
+    if (invoicesResult.error) {
+      console.error(
+        "Job delete invoices safety check failed",
+        invoicesResult.error
+      );
+
+      throw new ApiError(
+        500,
+        `Unable to verify direct invoice links: ${invoicesResult.error.message}`
+      );
+    }
+
+    if (supplierPurchaseOrdersResult.error) {
+      console.error(
+        "Job delete supplier purchase-order safety check failed",
+        supplierPurchaseOrdersResult.error
+      );
+
+      throw new ApiError(
+        500,
+        `Unable to verify supplier links: ${supplierPurchaseOrdersResult.error.message}`
+      );
     }
 
     const hasProtectedLinks = hasProtectedJobLinks({

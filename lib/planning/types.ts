@@ -24,6 +24,22 @@ export type PlanJob = {
   subcontractor_id: string | null;
   route_order: number | null;
   customer_name: string | null;
+
+  /** Compliance classification facts. The Planning loader always supplies
+      these; optional keeps older pure-planning fixtures source-compatible. */
+  journey_scope?: "gb_domestic" | "uk_eu" | "aetr" | "international_other" | null;
+  origin_country_code?: string | null;
+  destination_country_code?: string | null;
+  compliance_regime_override?:
+    | "gb_domestic"
+    | "assimilated"
+    | "aetr"
+    | "international_light_goods"
+    | "exempt"
+    | "unknown"
+    | null;
+  compliance_override_reason?: string | null;
+
   stops: PlanStop[];
 };
 

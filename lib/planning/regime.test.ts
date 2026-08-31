@@ -187,6 +187,10 @@ describe("classifyComplianceRegime", () => {
     expect(atBoundary.confidence).toBe("incomplete");
     expect(aboveBoundary.regime).toBe("aetr");
     expect(aboveBoundary.tachoRequired).toBe(true);
+    expect(aboveBoundary.confidence).toBe("incomplete");
+    expect(aboveBoundary.warnings).toContain(
+      "AETR territorial applicability and specific exemptions still require route review"
+    );
   });
 
   it("applies a documented operator override", () => {
