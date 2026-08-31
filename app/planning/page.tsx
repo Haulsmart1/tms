@@ -25,7 +25,12 @@ import {
   type PlanningCompliance,
   type PlanningComplianceDriver,
 } from "../../lib/planning/compliance";
-import { operatorDay } from "../../lib/time";
+import {
+  isValidIanaTimeZone,
+  OPERATOR_TIME_ZONE,
+  operatorDay,
+  operatorDayInTimeZone,
+} from "../../lib/time";
 
 /* Same embedded-relation normalisation as /tracking: Supabase returns an
    embedded relation as an object or a one-element array depending on how it
@@ -49,6 +54,7 @@ export default function PlanningPage() {
   const tenant = useTenant();
 
   const [date, setDate] = useState(() => operatorDay(new Date()));
+  const [planningTimeZone, setPlanningTimeZone] = useState(OPERATOR_TIME_ZONE);
   const [jobs, setJobs] = useState<PlanJob[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -132,6 +138,13 @@ export default function PlanningPage() {
     setGeocodeSettled(false);
     setGeocodeUnavailable(false);
     setRoutes({});
+    setPlanningTimeZone(OPERATOR_TIME_ZONE);
+
+    const profileQuery = tenant
+      .filterByTenant(
+        supabase.from("company_profiles").select("timezone")
+      )
+      .maybeSingle();
 
     const jobsQuery = supabase
       .from("jobs")
@@ -143,6 +156,7 @@ export default function PlanningPage() {
       `)
       .eq("scheduled_date", date);
 
+    const { data: profileData, error: profileError } = await profileQuery;
     const { data: jobsData, error: jobsError } = await tenant
       .filterByTenant(jobsQuery)
       .order("created_at", { ascending: true });
@@ -167,9 +181,23 @@ export default function PlanningPage() {
       .order("name", { ascending: true });
 
     if (isCancelled()) return;
+    if (profileError) {
+      setMessage(`Company profile load error: ${profileError.message}`);
+      setLoading(false);
+      return;
+    }
     if (jobsError) { setMessage(`Jobs load error: ${jobsError.message}`); setLoading(false); return; }
     if (vehicleError) { setMessage(`Vehicles load error: ${vehicleError.message}`); setLoading(false); return; }
     if (driverError) { setMessage(`Drivers load error: ${driverError.message}`); setLoading(false); return; }
+
+    const profileTimeZone =
+      typeof profileData?.timezone === "string"
+        ? profileData.timezone.trim()
+        : "";
+    const loadedTimeZone =
+      profileTimeZone && isValidIanaTimeZone(profileTimeZone)
+        ? profileTimeZone
+        : OPERATOR_TIME_ZONE;
 
     const loaded: PlanJob[] = (jobsData ?? []).map((row: any) => ({
       id: row.id,
@@ -255,6 +283,7 @@ export default function PlanningPage() {
     }
 
     if (isCancelled()) return;
+    setPlanningTimeZone(loadedTimeZone);
     setJobs(loaded);
     setVehicles(vehicleList);
     setDrivers(driverData ?? []);
@@ -562,7 +591,7 @@ export default function PlanningPage() {
     : null;
 
   const laneComplianceByVehicle = useMemo(() => {
-    const today = operatorDay(positionNow);
+    const today = operatorDayInTimeZone(positionNow, planningTimeZone);
     const result = new Map<string, PlanningCompliance>();
 
     for (const vehicle of vehicles) {
@@ -593,6 +622,7 @@ export default function PlanningPage() {
     routes,
     driverById,
     positionNow,
+    planningTimeZone,
   ]);
 
   const planningHealth = useMemo(() => {
@@ -787,7 +817,10 @@ export default function PlanningPage() {
                           hasPlannedJobs: false,
                           plannedDrivingSeconds: 0,
                           activityDataAvailable: false,
-                          today: operatorDay(positionNow),
+                          today: operatorDayInTimeZone(
+                            positionNow,
+                            planningTimeZone
+                          ),
                         })
                       }
                       geocodeSettled={geocodeSettled && !geocodeUnavailable}
