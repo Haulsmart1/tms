@@ -272,8 +272,13 @@ export default function JobsPage() {
   function sendToPlanning(job: any) {
     setMessage("");
 
-    if (job.status !== "planned") {
-      setMessage("Only planned jobs can be sent to Planning.");
+    if (
+      job.status !== "planned" &&
+      job.status !== "pending_acceptance"
+    ) {
+      setMessage(
+        "Only planned or awaiting-acceptance jobs can be sent to Planning."
+      );
       return;
     }
 
@@ -1056,7 +1061,8 @@ export default function JobsPage() {
                                 </div>
 
                                 <div className="flex flex-wrap gap-2">
-                                  {job.status === "planned" ? (
+                                  {job.status === "planned" ||
+                                  job.status === "pending_acceptance" ? (
                                     <Button
                                       type="button"
                                       variant="secondary"
