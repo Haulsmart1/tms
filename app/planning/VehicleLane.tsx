@@ -3,6 +3,8 @@
 import type { DragEvent } from "react";
 import PlanJobCard, { JOB_ID_MIME } from "./PlanJobCard";
 import type { PlanJob } from "../../lib/planning/types";
+import type { PlanningCompliance } from "../../lib/planning/compliance";
+import { formatDuration } from "../../lib/planning/format";
 
 type Props = {
   vehicle: { id: string; registration: string };
@@ -12,6 +14,7 @@ type Props = {
   selected: boolean;
   /** e.g. "3 jobs · 92 km · 2 h 41 m", or null before this lane has a route. */
   summary: string | null;
+  compliance: PlanningCompliance;
   geocodeSettled: boolean;
   /** True when the lane's jobs arrived carrying more than one distinct driver,
       so the single lane driver above is a normalisation the user should see. */
@@ -24,8 +27,9 @@ type Props = {
 };
 
 export default function VehicleLane({
-  vehicle, jobs, driverId, drivers, selected, summary, geocodeSettled,
-  driverConflict, onSelect, onDriverChange, onOpenJob, onDropJob,
+  vehicle, jobs, driverId, drivers, selected, summary, compliance,
+  geocodeSettled, driverConflict, onSelect, onDriverChange, onOpenJob,
+  onDropJob,
 }: Props) {
   function handleDragOver(e: DragEvent) {
     e.preventDefault();
@@ -74,6 +78,62 @@ export default function VehicleLane({
           {summary ?? `${jobs.length} ${jobs.length === 1 ? "job" : "jobs"}`}
         </span>
       </header>
+
+      <div className="mb-2 rounded-md border border-line bg-surface p-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span
+            className={`text-xs font-semibold ${
+              compliance.status === "warning"
+                ? "text-warning"
+                : compliance.status === "incomplete"
+                  ? "text-ink-3"
+                  : "text-ink-2"
+            }`}
+          >
+            Wizard: {compliance.statusLabel}
+          </span>
+
+          <span className="text-xs text-ink-2">
+            Planned drive{" "}
+            {compliance.plannedDrivingSeconds === null
+              ? "route pending"
+              : formatDuration(compliance.plannedDrivingSeconds)}
+          </span>
+
+          <span className="text-xs text-ink-3">
+            Actual drive{" "}
+            {compliance.dataComplete
+              ? "available"
+              : "no activity data"}
+          </span>
+
+          <span className="text-xs text-ink-3">
+            Break due{" "}
+            {compliance.dataComplete
+              ? "calculated"
+              : "cannot calculate"}
+          </span>
+
+          <span className="text-xs text-ink-3">
+            WTD{" "}
+            {compliance.dataComplete
+              ? "calculated"
+              : "cannot calculate"}
+          </span>
+        </div>
+
+        {compliance.warnings.length > 0 ? (
+          <p className="mt-1 text-xs text-warning">
+            {compliance.warnings.join(" ? ")}
+          </p>
+        ) : null}
+
+        {compliance.missing.length > 0 ? (
+          <p className="mt-1 text-xs text-ink-3">
+            Missing: {compliance.missing.join(" ? ")}
+          </p>
+        ) : null}
+      </div>
 
       <div className="flex flex-wrap items-stretch gap-2">
         {jobs.map((job, index) => (

@@ -20,6 +20,11 @@ import { sanitizeTravelSeconds } from "../../lib/planning/matrix";
 import type { PlanJob, RouteResult } from "../../lib/planning/types";
 import { createSupabasePositionSource } from "../../lib/tracking/supabasePositions";
 import type { PositionReading } from "../../lib/tracking/position";
+import {
+  evaluatePlanningCompliance,
+  type PlanningCompliance,
+  type PlanningComplianceDriver,
+} from "../../lib/planning/compliance";
 import { operatorDay } from "../../lib/time";
 
 /* Same embedded-relation normalisation as /tracking: Supabase returns an
@@ -31,7 +36,7 @@ function rel(value: any): any {
 
 type Vehicle = { id: string; registration: string };
 type VehicleRow = { id: string; registration: string; active: boolean };
-type Driver = { id: string; name: string };
+type Driver = PlanningComplianceDriver;
 
 /* The geocode endpoint caps a batch at 100 stop ids and rejects anything
    larger with a 400 (it does not truncate), so the client chunks. */
@@ -85,6 +90,10 @@ export default function PlanningPage() {
   const loadSeq = useRef(0);
 
   const jobById = useMemo(() => new Map(jobs.map((j) => [j.id, j])), [jobs]);
+  const driverById = useMemo(
+    () => new Map(drivers.map((driver) => [driver.id, driver])),
+    [drivers]
+  );
 
   const fleetJobs = useMemo(() => jobs.filter((j) => !j.subcontractor_id), [jobs]);
   const subcontracted = useMemo(() => jobs.filter((j) => j.subcontractor_id), [jobs]);
@@ -141,7 +150,19 @@ export default function PlanningPage() {
       .filterByTenant(supabase.from("vehicles").select("id, registration, active"))
       .order("registration", { ascending: true });
     const { data: driverData, error: driverError } = await tenant
-      .filterByTenant(supabase.from("drivers").select("id, name"))
+      .filterByTenant(
+        supabase.from("drivers").select(`
+          id,
+          name,
+          tachograph_required,
+          tachograph_card_number,
+          tachograph_expiry,
+          tachograph_next_download_due,
+          cpc_required,
+          cpc_qualified,
+          cpc_expiry
+        `)
+      )
       .eq("active", true)
       .order("name", { ascending: true });
 
@@ -540,6 +561,70 @@ export default function PlanningPage() {
     ? (positions.get(selectedVehicleId) ?? null)
     : null;
 
+  const laneComplianceByVehicle = useMemo(() => {
+    const today = operatorDay(positionNow);
+    const result = new Map<string, PlanningCompliance>();
+
+    for (const vehicle of vehicles) {
+      const jobCount = (laneOrders[vehicle.id] ?? []).length;
+      const driverId = laneDrivers[vehicle.id] ?? null;
+      const route = routes[vehicle.id] ?? null;
+
+      result.set(
+        vehicle.id,
+        evaluatePlanningCompliance({
+          driver: driverId ? (driverById.get(driverId) ?? null) : null,
+          hasPlannedJobs: jobCount > 0,
+          plannedDrivingSeconds:
+            jobCount === 0
+              ? 0
+              : route?.totalTravelTimeSeconds ?? null,
+          activityDataAvailable: false,
+          today,
+        })
+      );
+    }
+
+    return result;
+  }, [
+    vehicles,
+    laneOrders,
+    laneDrivers,
+    routes,
+    driverById,
+    positionNow,
+  ]);
+
+  const planningHealth = useMemo(() => {
+    const plannedVehicleIds = vehicles
+      .filter((vehicle) => (laneOrders[vehicle.id] ?? []).length > 0)
+      .map((vehicle) => vehicle.id);
+
+    const results = plannedVehicleIds
+      .map((vehicleId) => laneComplianceByVehicle.get(vehicleId))
+      .filter((value): value is PlanningCompliance => Boolean(value));
+
+    return {
+      plannedVehicles: plannedVehicleIds.length,
+      unassignedJobs: unassigned.length,
+      routesCalculated: plannedVehicleIds.filter(
+        (vehicleId) => Boolean(routes[vehicleId])
+      ).length,
+      warnings: results.filter(
+        (result) => result.status === "warning"
+      ).length,
+      incomplete: results.filter(
+        (result) => !result.dataComplete
+      ).length,
+    };
+  }, [
+    vehicles,
+    laneOrders,
+    laneComplianceByVehicle,
+    routes,
+    unassigned.length,
+  ]);
+
   /* Memoised: a fresh markers array on every parent render tears down and
      rebuilds every TomTom marker, which flickers during a drag.
 
@@ -598,6 +683,66 @@ export default function PlanningPage() {
             </p>
           ) : null}
 
+          <section
+            aria-label="Planning health"
+            className="grid gap-2 rounded-lg border border-line bg-surface p-3 shadow-sm sm:grid-cols-2 xl:grid-cols-5"
+          >
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ink-3">
+                Planned vehicles
+              </p>
+              <p className="text-lg font-semibold text-ink">
+                {planningHealth.plannedVehicles}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ink-3">
+                Unassigned jobs
+              </p>
+              <p className="text-lg font-semibold text-ink">
+                {planningHealth.unassignedJobs}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ink-3">
+                Routes calculated
+              </p>
+              <p className="text-lg font-semibold text-ink">
+                {planningHealth.routesCalculated}
+                <span className="text-sm font-normal text-ink-3">
+                  {" / "}
+                  {planningHealth.plannedVehicles}
+                </span>
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ink-3">
+                Wizard warnings
+              </p>
+              <p className="text-lg font-semibold text-warning">
+                {planningHealth.warnings}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ink-3">
+                Compliance incomplete
+              </p>
+              <p className="text-lg font-semibold text-ink">
+                {planningHealth.incomplete}
+              </p>
+            </div>
+
+            <p className="sm:col-span-2 xl:col-span-5 text-xs text-ink-3">
+              Advisory mode: no hard dispatch blocks. Actual driving,
+              remaining hours, breaks and WTD stay unknown until driver
+              activity data is available.
+            </p>
+          </section>
+
           <PlanningMap
             markers={markers}
             route={selectedRoute}
@@ -635,6 +780,16 @@ export default function PlanningPage() {
                       drivers={drivers}
                       selected={v.id === selectedVehicleId}
                       summary={laneSummary(v.id)}
+                      compliance={
+                        laneComplianceByVehicle.get(v.id) ??
+                        evaluatePlanningCompliance({
+                          driver: null,
+                          hasPlannedJobs: false,
+                          plannedDrivingSeconds: 0,
+                          activityDataAvailable: false,
+                          today: operatorDay(positionNow),
+                        })
+                      }
                       geocodeSettled={geocodeSettled && !geocodeUnavailable}
                       driverConflict={driverConflicts.has(v.id)}
                       onSelect={() => setSelectedVehicleId(v.id)}
