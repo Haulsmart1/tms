@@ -3,6 +3,12 @@
 import type { DragEvent } from "react";
 import PlanJobCard, { JOB_ID_MIME } from "./PlanJobCard";
 import type { PlanJob } from "../../lib/planning/types";
+import type { PlanningCompliance } from "../../lib/planning/compliance";
+import {
+  regimeLabel,
+  type LaneRegimeSummary,
+} from "../../lib/planning/laneRegime";
+import { formatDuration } from "../../lib/planning/format";
 
 type Props = {
   vehicle: { id: string; registration: string };
@@ -12,19 +18,25 @@ type Props = {
   selected: boolean;
   /** e.g. "3 jobs · 92 km · 2 h 41 m", or null before this lane has a route. */
   summary: string | null;
+  regimeSummary: LaneRegimeSummary;
+  compliance: PlanningCompliance;
   geocodeSettled: boolean;
   /** True when the lane's jobs arrived carrying more than one distinct driver,
       so the single lane driver above is a normalisation the user should see. */
   driverConflict?: boolean;
   onSelect: () => void;
   onDriverChange: (driverId: string | null) => void;
+  onOpenJob: (jobId: string) => void;
+  onAcceptJob: (jobId: string) => void;
   /** beforeJobId null means append to the end of the lane. */
   onDropJob: (draggedJobId: string, beforeJobId: string | null) => void;
 };
 
 export default function VehicleLane({
-  vehicle, jobs, driverId, drivers, selected, summary, geocodeSettled,
-  driverConflict, onSelect, onDriverChange, onDropJob,
+  vehicle, jobs, driverId, drivers, selected, summary, regimeSummary,
+  compliance,
+  geocodeSettled, driverConflict, onSelect, onDriverChange, onOpenJob,
+  onAcceptJob, onDropJob,
 }: Props) {
   function handleDragOver(e: DragEvent) {
     e.preventDefault();
@@ -74,6 +86,100 @@ export default function VehicleLane({
         </span>
       </header>
 
+      <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
+        <span className="rounded border border-line bg-surface px-1.5 py-0.5 text-ink-2">
+          {regimeSummary.status === "mixed"
+            ? "Mixed regimes"
+            : regimeLabel(regimeSummary.regime)}
+        </span>
+
+        {regimeSummary.reviewRequired ? (
+          <span
+            className="rounded border border-line px-1.5 py-0.5 text-warning"
+            title="One or more jobs have incomplete regime facts or missing required classification metadata."
+          >
+            Review required
+          </span>
+        ) : null}
+
+        {regimeSummary.hasOverrides ? (
+          <span
+            className="rounded border border-line px-1.5 py-0.5 text-ink-2"
+            title="One or more job classifications use a documented operator override."
+          >
+            Override
+          </span>
+        ) : null}
+
+        {regimeSummary.warningCount > 0 ? (
+          <span
+            className="text-warning"
+            title={`${regimeSummary.warningCount} regime classification warning${
+              regimeSummary.warningCount === 1 ? "" : "s"
+            }`}
+          >
+            {regimeSummary.warningCount} regime warning
+            {regimeSummary.warningCount === 1 ? "" : "s"}
+          </span>
+        ) : null}
+      </div>
+
+      <div className="mb-2 rounded-md border border-line bg-surface p-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span
+            className={`text-xs font-semibold ${
+              compliance.status === "warning"
+                ? "text-warning"
+                : compliance.status === "incomplete"
+                  ? "text-ink-3"
+                  : "text-ink-2"
+            }`}
+          >
+            Wizard: {compliance.statusLabel}
+          </span>
+
+          <span className="text-xs text-ink-2">
+            Planned drive{" "}
+            {compliance.plannedDrivingSeconds === null
+              ? "route pending"
+              : formatDuration(compliance.plannedDrivingSeconds)}
+          </span>
+
+          <span className="text-xs text-ink-3">
+            Actual drive{" "}
+            {compliance.dataComplete
+              ? "available"
+              : "no activity data"}
+          </span>
+
+          <span className="text-xs text-ink-3">
+            Break due{" "}
+            {compliance.dataComplete
+              ? "calculated"
+              : "cannot calculate"}
+          </span>
+
+          <span className="text-xs text-ink-3">
+            WTD{" "}
+            {compliance.dataComplete
+              ? "calculated"
+              : "cannot calculate"}
+          </span>
+        </div>
+
+        {compliance.warnings.length > 0 ? (
+          <p className="mt-1 text-xs text-warning">
+            {compliance.warnings.join(" ? ")}
+          </p>
+        ) : null}
+
+        {compliance.missing.length > 0 ? (
+          <p className="mt-1 text-xs text-ink-3">
+            Missing: {compliance.missing.join(" ? ")}
+          </p>
+        ) : null}
+      </div>
+
       <div className="flex flex-wrap items-stretch gap-2">
         {jobs.map((job, index) => (
           <PlanJobCard
@@ -81,6 +187,8 @@ export default function VehicleLane({
             job={job}
             sequence={index + 1}
             geocodeSettled={geocodeSettled}
+            onOpen={onOpenJob}
+            onAccept={onAcceptJob}
             onDropBefore={(draggedId) => onDropJob(draggedId, job.id)}
           />
         ))}

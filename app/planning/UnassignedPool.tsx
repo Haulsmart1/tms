@@ -10,11 +10,19 @@ type Props = {
   geocodeSettled: boolean;
   /** job id -> disclosure note for jobs displaced from an inactive vehicle. */
   displacedNotes: Record<string, string>;
+  onOpenJob: (jobId: string) => void;
+  onAcceptJob: (jobId: string) => void;
   onDropJob: (draggedJobId: string) => void;
 };
 
 export default function UnassignedPool({
-  jobs, subcontracted, geocodeSettled, displacedNotes, onDropJob,
+  jobs,
+  subcontracted,
+  geocodeSettled,
+  displacedNotes,
+  onOpenJob,
+  onAcceptJob,
+  onDropJob,
 }: Props) {
   function handleDragOver(e: DragEvent) {
     e.preventDefault();
@@ -45,6 +53,8 @@ export default function UnassignedPool({
             sequence={null}
             geocodeSettled={geocodeSettled}
             note={displacedNotes[job.id]}
+            onOpen={onOpenJob}
+            onAccept={onAcceptJob}
           />
         ))
       )}
