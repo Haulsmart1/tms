@@ -66,14 +66,17 @@ export async function fetchBillableVehicleCount(
 
   const tenantIds = (tenantsRes.data ?? []).map((t) => t.id as string);
 
-  // Scope vehicles to this company's tenants (or a direct company_id match,
-  // the legacy data shape countBillableVehicles also supports). companyId is
-  // always in the list, so `in.(...)` is never empty even with zero tenants.
+  // Scope vehicles to this company's tenants. `vehicles` is keyed by
+  // tenant_id only: there is no company_id column, so do not filter on one
+  // (PostgREST answers 42703 "column vehicles.company_id does not exist" and
+  // the whole charge fails). companyId is included in the list because some
+  // rows carry a company id in tenant_id directly, and it also keeps
+  // `in.(...)` non-empty for a company with zero tenants.
   const idList = [...tenantIds, companyId];
   const vehiclesRes = await admin
     .from("vehicles")
-    .select("id, tenant_id, company_id")
-    .or(`tenant_id.in.(${idList.join(",")}),company_id.eq.${companyId}`);
+    .select("id, tenant_id")
+    .in("tenant_id", idList);
 
   if (vehiclesRes.error) {
     throw new Error(`Unable to load billing data: ${vehiclesRes.error.message}`);

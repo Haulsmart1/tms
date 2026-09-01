@@ -53,20 +53,24 @@ describe("countBillableVehicles", () => {
     expect(count).toBe(1);
   });
 
-  it("matches vehicles keyed directly by company_id (legacy data shape)", () => {
+  it("matches a vehicle whose tenant_id is the company id itself", () => {
     const count = countBillableVehicles({
       companyId: COMPANY,
       companyTenantIds: [],
-      vehicles: [
-        { id: "v1", company_id: COMPANY },
-        { id: "v2", tenant_id: COMPANY },
-      ],
-      licences: [
-        { vehicle_id: "v1", active: true },
-        { vehicle_id: "v2", active: true },
-      ],
+      vehicles: [{ id: "v1", tenant_id: COMPANY }],
+      licences: [{ vehicle_id: "v1", active: true }],
     });
-    expect(count).toBe(2);
+    expect(count).toBe(1);
+  });
+
+  it("ignores a vehicle with no tenant_id", () => {
+    const count = countBillableVehicles({
+      companyId: COMPANY,
+      companyTenantIds: [TENANT_A],
+      vehicles: [{ id: "v1", tenant_id: null }],
+      licences: [{ vehicle_id: "v1", active: true }],
+    });
+    expect(count).toBe(0);
   });
 
   it("returns zero for a company with no vehicles", () => {

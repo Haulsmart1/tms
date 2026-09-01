@@ -2,14 +2,17 @@
 // on what a billable vehicle is; this is the single implementation.
 //
 // Semantics mirror app/super-admin/billing/page.tsx: a vehicle is the
-// company's when its tenant belongs to the company, or when its tenant_id or
-// company_id column equals the company id directly (a legacy data shape the
-// page supports). Billable = has at least one active licence.
+// company's when its tenant belongs to the company, or when its tenant_id
+// equals the company id directly (rows written before tenants existed).
+// Billable = has at least one active licence.
+//
+// There is no vehicles.company_id column in the schema, so nothing here may
+// look for one: doing so made both callers select a column that does not
+// exist and fail with Postgres 42703.
 
 export type VehicleRow = {
   id: string;
   tenant_id?: string | null;
-  company_id?: string | null;
 };
 
 export type LicenceRow = {
@@ -29,9 +32,8 @@ export function countBillableVehicles(args: {
     args.vehicles
       .filter(
         (v) =>
-          (v.tenant_id != null &&
-            (tenantIds.has(v.tenant_id) || v.tenant_id === args.companyId)) ||
-          v.company_id === args.companyId
+          v.tenant_id != null &&
+          (tenantIds.has(v.tenant_id) || v.tenant_id === args.companyId)
       )
       .map((v) => v.id)
   );

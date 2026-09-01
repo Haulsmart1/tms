@@ -20,7 +20,6 @@ type Tenant = {
 type Vehicle = {
     id: string;
     tenant_id?: string | null;
-    company_id?: string | null;
     registration?: string | null;
 };
 
@@ -74,7 +73,9 @@ export default function SuperAdminBillingPage() {
         ] = await Promise.all([
             supabase.from("companies").select("*").order("name"),
             supabase.from("tenants").select("id, company_id"),
-            supabase.from("vehicles").select("id, tenant_id, company_id, registration"),
+            // vehicles has no company_id column; selecting one fails the whole
+            // page with Postgres 42703. Ownership comes from tenant_id.
+            supabase.from("vehicles").select("id, tenant_id, registration"),
             supabase.from("vehicle_licences").select("id, tenant_id, vehicle_id, active"),
             supabase.from("invoices").select("*").order("created_at", { ascending: false }),
             supabase
@@ -124,8 +125,7 @@ export default function SuperAdminBillingPage() {
             const companyVehicles = vehicles.filter(
                 (vehicle) =>
                     (vehicle.tenant_id != null && tenantIdSet.has(vehicle.tenant_id)) ||
-                    vehicle.tenant_id === company.id ||
-                    vehicle.company_id === company.id
+                    vehicle.tenant_id === company.id
             );
 
             const billableVehicleCount = countBillableVehicles({
