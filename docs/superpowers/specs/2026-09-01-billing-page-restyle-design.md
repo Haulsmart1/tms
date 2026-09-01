@@ -135,7 +135,9 @@ States, in priority order:
 
 ### `NextInvoiceCard` (new, `app/settings/billing/NextInvoiceCard.tsx`)
 
-Props: `{ loading, amounts: ChargeAmounts, nextChargeOn: string | null, status }`.
+Props: `{ loading, amounts: ChargeAmounts, nextChargeOn: string | null }`. (A `status` prop was
+originally listed here and dropped during planning: nothing in the card branches on it, since
+`next_charge_on` still holds the retry date when past due.)
 
 Three rows in `text-sm`, values `font-mono tabular-nums` right-aligned:
 

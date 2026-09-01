@@ -43,8 +43,9 @@ export default function NextInvoiceCard({ loading, amounts, nextChargeOn }: Prop
   const money = (pence: number, w: string): ReactNode =>
     loading ? <Skeleton display="inline-block" w={w} h="0.875rem" /> : formatPence(pence);
 
+  // Same wording in both states so only the count changes on load.
   const vehiclesLabel = loading
-    ? `Licensed vehicles × ${formatPence(NET_PENCE_PER_VEHICLE)}`
+    ? `Vehicles × ${formatPence(NET_PENCE_PER_VEHICLE)}`
     : `${amounts.vehicleCount} ${amounts.vehicleCount === 1 ? "vehicle" : "vehicles"} × ${formatPence(NET_PENCE_PER_VEHICLE)}`;
 
   return (
