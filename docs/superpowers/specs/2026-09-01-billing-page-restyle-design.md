@@ -105,8 +105,10 @@ Status badge tones: `active` success "Active"; `past_due` danger "Past due"; `ca
 warning "Cancelled"; no billing row, neutral "Not set up". The mapping is a pure function,
 `billingStatusBadge(status | null)`, in `lib/billing/format.ts` so it is unit tested.
 
-While loading, each `Stat` value is a `Skeleton` (`w="4ch" h="1.75rem"` for the numbers, a
-pill for the status) and the sub-lines are omitted. `Stat.value` already accepts `ReactNode`.
+While loading, each `Stat` value is an inline-block `Skeleton` at `h="1.25rem"` (the dashboard's
+size), with a width in `ch` roughly matching the digits it stands in for: 2.5ch vehicles, 6ch
+monthly total, a 5ch pill for status, 8ch next charge. Sub-lines are omitted. `Stat.value`
+already accepts `ReactNode`.
 
 ## Section 3: the two cards
 
