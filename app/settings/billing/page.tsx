@@ -115,11 +115,12 @@ export default function BillingSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [showCardForm, setShowCardForm] = useState(false);
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState<{ text: string; tone: "success" | "warning" } | null>(null);
   const [loadError, setLoadError] = useState<LoadError | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [billingRes, chargesRes, licencesRes] = await Promise.all([
         supabase.from("company_billing").select("*").maybeSingle(),
@@ -145,6 +146,15 @@ export default function BillingSettingsPage() {
       setVehicleCount(
         new Set((licencesRes.data ?? []).map((l) => l.vehicle_id)).size
       );
+    } catch (error) {
+      /* A thrown client error, as opposed to a returned .error. Without this
+         branch the finally below would flip hasLoaded and the page would
+         render a confident zero state with no banner. */
+      setLoadError({
+        message: error instanceof Error ? error.message : "Unexpected error",
+        billing: true,
+        charges: true,
+      });
     } finally {
       setLoading(false);
       setHasLoaded(true);
@@ -220,7 +230,7 @@ export default function BillingSettingsPage() {
             ? "Your last payment failed. Replace your card below to bring your subscription back up to date."
             : ""}
         </MessageBanner>
-        <MessageBanner tone="success">{notice}</MessageBanner>
+        <MessageBanner tone={notice?.tone ?? "success"}>{notice?.text ?? ""}</MessageBanner>
 
         <div className="mb-4 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
           <Stat
@@ -232,7 +242,7 @@ export default function BillingSettingsPage() {
                 String(vehicleCount)
               )
             }
-            sub={showSkeleton ? undefined : "counted on each billing date"}
+            sub="company-wide, counted on each billing date"
           />
           <Stat
             label="Monthly total"
@@ -285,15 +295,30 @@ export default function BillingSettingsPage() {
             billing={billing}
             loadError={Boolean(loadError?.billing)}
             showForm={showCardForm}
-            onReplace={() => setShowCardForm(true)}
+            onReplace={() => {
+              setNotice(null);
+              setShowCardForm(true);
+            }}
             onCancel={() => setShowCardForm(false)}
             onComplete={(response) => {
               setShowCardForm(false);
-              setNotice(
-                response.firstCharge
-                  ? `Subscription started: ${formatPence(Number(response.grossPence))} charged. Next charge ${formatCycleDate(String(response.nextChargeOn))}.`
-                  : "Card updated."
-              );
+              if (response.firstCharge) {
+                setNotice({
+                  tone: "success",
+                  text: `Subscription started: ${formatPence(Number(response.grossPence))} charged. Next charge ${formatCycleDate(String(response.nextChargeOn))}.`,
+                });
+              } else if (response.retried && response.succeeded === false) {
+                /* The route answers 200 here: the card was saved, but the
+                   outstanding charge it retried was declined again. */
+                setNotice({
+                  tone: "warning",
+                  text: `New card saved, but the outstanding charge was declined (${String(response.failureCode ?? "declined")}). It will be retried automatically.`,
+                });
+              } else if (response.retried) {
+                setNotice({ tone: "success", text: "Card updated and the outstanding charge was taken." });
+              } else {
+                setNotice({ tone: "success", text: "Card updated." });
+              }
               void load();
             }}
           />
