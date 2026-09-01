@@ -233,6 +233,28 @@ Two small pure modules, both in `lib/billing/` so vitest reaches them:
   `DataTable` states want a signed-in manual pass. The past-due and not-set-up branches can
   be provoked in the Square sandbox (see the README's sandbox postcode note).
 
+## Follow-ups found in review, deliberately not fixed here
+
+**The page's vehicle count can disagree with what the cron charges.** The page counts distinct
+`vehicle_id` over `vehicle_licences where active`, under RLS. The cron's authoritative count
+(`lib/billing/vehicleCount.ts`, `lib/billing/server.ts`) differs three ways: it includes legacy
+rows whose `tenant_id` is the company id (invisible to an admin under `can_access_tenant`, so the
+page undercounts); it requires the licence's vehicle to resolve inside the company's tenants
+(the page overcounts a licence whose vehicle was deleted or moved); and it refuses to bill past
+PostgREST's 1000-row cap where the page silently truncates. The unfiltered, company-wide query
+itself is correct for an invoice figure (`/settings/licences` filters by tenant because it is an
+operational view, not a bill). This restyle promotes the number into a "Next invoice" card, so
+the divergence is more visible than before. Fix: a `GET /api/billing/preview` route returning
+`fetchBillableVehicleCount(admin, companyId)`, so page and cron share one implementation; a
+client-side `vehicles` join would still miss the legacy rows RLS hides, so it is not worth doing
+as a stopgap. Cross-link: entry 2 in
+`docs/superpowers/reviews/2026-08-18-console-restyle-remaining-findings.md` flags the same query
+on `/settings/invoices`; one endpoint fixes both pages.
+
+**`MessageBanner` bakes in `mb-4`.** Inside a `grid gap-*` container (this page's card form,
+`/settings/company`) the banner gets both spacings when it has content. `lib/cn` cannot override
+it. Upstream fix: drop the margin from the component and let call sites own spacing.
+
 ## Files
 
 New:
