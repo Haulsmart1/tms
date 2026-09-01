@@ -10,8 +10,11 @@ export type BadgeTone = "success" | "danger" | "warning" | "neutral";
 
 /* Parses a YYYY-MM-DD cycle date as LOCAL midnight before formatting. A bare
    `new Date("2026-10-01")` parses as UTC midnight, which in a negative-offset
-   timezone formats as the previous day. The T00:00:00 suffix is the /drivers
-   page's existing pattern for the same problem. */
+   timezone (anywhere west of Greenwich) formats as the previous day. The
+   T00:00:00 suffix is the /drivers page's existing pattern for the same
+   problem. Not covered by a unit test: vitest pins TZ=Europe/London, where
+   the bug cannot reproduce. Do not remove the suffix on the strength of the
+   tests passing. */
 export function formatCycleDate(isoDate: string): string {
   const date = new Date(`${isoDate}T00:00:00`);
   if (Number.isNaN(date.getTime())) return isoDate;

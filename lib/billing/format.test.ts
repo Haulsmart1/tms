@@ -1,20 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { billingStatusBadge, formatCycleDate } from "./format";
 
-/* vitest.config.ts pins TZ=Europe/London. The DST cases below are only
-   meaningful under that pin; do not "fix" a failure by changing it. */
+/* vitest.config.ts pins TZ=Europe/London. Note what that pin does NOT give
+   us: London is UTC+0 or UTC+1, so a bare UTC-midnight parse never shifts
+   the day here and these cases cannot catch the T00:00:00 suffix being
+   removed. That guard protects users west of Greenwich and is documented in
+   format.ts; it has no unit test because vitest cannot change the process
+   timezone per test. */
 describe("formatCycleDate", () => {
   it("formats a YYYY-MM-DD cycle date as dd/mm/yyyy, like the rest of the app", () => {
     expect(formatCycleDate("2026-10-01")).toBe("01/10/2026");
   });
 
-  it("does not shift the day across the spring DST boundary", () => {
-    // BST begins 2026-03-29 at 01:00 local time.
+  it("formats dates on the BST transition days without shifting the day", () => {
     expect(formatCycleDate("2026-03-29")).toBe("29/03/2026");
-  });
-
-  it("does not shift the day across the autumn DST boundary", () => {
-    // BST ends 2026-10-25 at 02:00 local time.
     expect(formatCycleDate("2026-10-25")).toBe("25/10/2026");
   });
 
