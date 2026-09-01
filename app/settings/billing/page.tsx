@@ -200,9 +200,16 @@ export default function BillingSettingsPage() {
     );
   }
 
+  /* hasLoaded keeps showSkeleton false on a Retry, which is right for the
+     Stat tiles (their last numbers were true a moment ago). The two cards and
+     the table read `billing` and `charges`, which after a failed load are
+     null and empty until the refetch resolves: without this, a Retry would
+     briefly show the "add a card" form and "No charges yet" as fact. */
+  const busy = showSkeleton || loading;
+
   const amounts = computeChargeAmounts(vehicleCount);
   const statusBadge = billingStatusBadge(billing?.status ?? null);
-  const tableState: DataTableState = showSkeleton
+  const tableState: DataTableState = busy
     ? "loading"
     : loadError?.charges
       ? "error"
@@ -212,7 +219,7 @@ export default function BillingSettingsPage() {
 
   return (
     <PageFrame>
-      <div aria-busy={showSkeleton || undefined}>
+      <div aria-busy={busy || undefined}>
         {/* One announcement for the region, not one per skeleton bar. */}
         {showSkeleton ? (
           <span className="sr-only" role="status">
@@ -291,7 +298,7 @@ export default function BillingSettingsPage() {
 
         <div className="mb-6 grid gap-3 md:grid-cols-2">
           <PaymentMethodCard
-            loading={showSkeleton}
+            loading={busy}
             billing={billing}
             loadError={Boolean(loadError?.billing)}
             showForm={showCardForm}
@@ -323,7 +330,7 @@ export default function BillingSettingsPage() {
             }}
           />
           <NextInvoiceCard
-            loading={showSkeleton}
+            loading={busy}
             amounts={amounts}
             nextChargeOn={billing?.next_charge_on ?? null}
           />
