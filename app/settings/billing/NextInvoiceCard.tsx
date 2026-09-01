@@ -11,6 +11,9 @@ import {
 
 type Props = {
   loading: boolean;
+  /** True when the licence count failed to load; the figures are withheld
+      rather than shown as a confident £0.00. */
+  unavailable?: boolean;
   amounts: ChargeAmounts;
   /** company_billing.next_charge_on, or null when no card is on file. */
   nextChargeOn: string | null;
@@ -38,15 +41,27 @@ function Row({
   );
 }
 
-export default function NextInvoiceCard({ loading, amounts, nextChargeOn }: Props) {
+export default function NextInvoiceCard({
+  loading,
+  unavailable = false,
+  amounts,
+  nextChargeOn,
+}: Props) {
   // Skeleton widths are in ch so they roughly match the digits they stand in for.
   const money = (pence: number, w: string): ReactNode =>
-    loading ? <Skeleton display="inline-block" w={w} h="0.875rem" /> : formatPence(pence);
+    loading ? (
+      <Skeleton display="inline-block" w={w} h="0.875rem" />
+    ) : unavailable ? (
+      "-"
+    ) : (
+      formatPence(pence)
+    );
 
   // Same wording in both states so only the count changes on load.
-  const vehiclesLabel = loading
-    ? `Vehicles × ${formatPence(NET_PENCE_PER_VEHICLE)}`
-    : `${amounts.vehicleCount} ${amounts.vehicleCount === 1 ? "vehicle" : "vehicles"} × ${formatPence(NET_PENCE_PER_VEHICLE)}`;
+  const vehiclesLabel =
+    loading || unavailable
+      ? `Vehicles × ${formatPence(NET_PENCE_PER_VEHICLE)}`
+      : `${amounts.vehicleCount} ${amounts.vehicleCount === 1 ? "vehicle" : "vehicles"} × ${formatPence(NET_PENCE_PER_VEHICLE)}`;
 
   return (
     <Card kicker="Next invoice">
@@ -58,6 +73,8 @@ export default function NextInvoiceCard({ loading, amounts, nextChargeOn }: Prop
       <p className="mb-1 mt-3 text-sm text-ink-3">
         {loading ? (
           <Skeleton display="inline-block" w="16ch" h="0.875rem" />
+        ) : unavailable ? (
+          "Unavailable until billing data loads successfully"
         ) : nextChargeOn ? (
           `Charged on ${formatCycleDate(nextChargeOn)}`
         ) : (

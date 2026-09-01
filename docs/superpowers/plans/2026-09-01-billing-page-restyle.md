@@ -40,7 +40,7 @@
 - Modify: `lib/billing/money.ts`
 - Test: `lib/billing/money.test.ts`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `lib/billing/money.test.ts`. Also add `formatPence` to the import list at the top of the file:
 
@@ -76,12 +76,12 @@ describe("formatPence", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `npx vitest run lib/billing/money.test.ts`
 Expected: FAIL. The import of `formatPence` resolves to `undefined`, so the `formatPence` describe block errors with "formatPence is not a function".
 
-- [ ] **Step 3: Implement `formatPence`**
+- [x] **Step 3: Implement `formatPence`**
 
 Add to `lib/billing/money.ts`, directly after the `computeChargeAmounts` function (before the `chargeIdempotencyKey` comment):
 
@@ -93,12 +93,12 @@ export function formatPence(pence: number): string {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run lib/billing/money.test.ts`
 Expected: PASS, all tests in the file green (the existing `computeChargeAmounts`, `chargeIdempotencyKey`, `classifyPaymentResult` suites plus the four new `formatPence` cases).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add lib/billing/money.ts lib/billing/money.test.ts
@@ -121,7 +121,7 @@ EOF
 - Create: `lib/billing/format.ts`
 - Test: `lib/billing/format.test.ts`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `lib/billing/format.test.ts`:
 
@@ -172,12 +172,12 @@ describe("billingStatusBadge", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `npx vitest run lib/billing/format.test.ts`
 Expected: FAIL with "Failed to resolve import "./format"" (the module does not exist yet).
 
-- [ ] **Step 3: Implement the module**
+- [x] **Step 3: Implement the module**
 
 Create `lib/billing/format.ts`:
 
@@ -218,12 +218,12 @@ export function billingStatusBadge(
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run lib/billing/format.test.ts`
 Expected: PASS, 8 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add lib/billing/format.ts lib/billing/format.test.ts
@@ -248,7 +248,7 @@ This task lands the allowlist entry before the page is converted. That is the re
 - Modify: `lib/nav/skeletonReadyRoutes.ts`
 - Modify: `lib/nav/skeletonReadyRoutes.test.ts`
 
-- [ ] **Step 1: Update the exhaustive test**
+- [x] **Step 1: Update the exhaustive test**
 
 In `lib/nav/skeletonReadyRoutes.test.ts`, replace the final test:
 
@@ -269,12 +269,12 @@ Also add one case above it, after the "matches exactly" test:
   });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `npx vitest run lib/nav/skeletonReadyRoutes.test.ts`
 Expected: FAIL, two tests: the exhaustive list mismatch and the new `/settings/billing` case returning false.
 
-- [ ] **Step 3: Add the route**
+- [x] **Step 3: Add the route**
 
 In `lib/nav/skeletonReadyRoutes.ts`, replace the array:
 
@@ -286,7 +286,7 @@ export const SKELETON_READY_ROUTES: readonly string[] = [
 ];
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run lib/nav/skeletonReadyRoutes.test.ts`
 Expected: PASS, 7 tests.
@@ -302,7 +302,7 @@ Logic is untouched: the SDK loader, `tokenize`, `verifyBuyer`, the POST to `/api
 **Files:**
 - Modify: `components/billing/SquareCardForm.tsx`
 
-- [ ] **Step 1: Replace the imports and `Props`**
+- [x] **Step 1: Replace the imports and `Props`**
 
 At the top of `components/billing/SquareCardForm.tsx`, change the React import line and add three component imports:
 
@@ -337,7 +337,7 @@ export default function SquareCardForm({
 }: Props) {
 ```
 
-- [ ] **Step 2: Replace the returned JSX**
+- [x] **Step 2: Replace the returned JSX**
 
 Replace everything from `return (` to the end of the component with:
 
@@ -384,12 +384,12 @@ Replace everything from `return (` to the end of the component with:
 }
 ```
 
-- [ ] **Step 3: Typecheck**
+- [x] **Step 3: Typecheck**
 
 Run: `npm run typecheck`
 Expected: exit 0, no errors. (`Field` accepts arbitrary input attributes, `Button` defaults `type="button"`.)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add components/billing/SquareCardForm.tsx
@@ -414,7 +414,7 @@ A loading-aware card, per the skeletons spec: one component, `loading` prop, lab
 **Files:**
 - Create: `app/settings/billing/NextInvoiceCard.tsx`
 
-- [ ] **Step 1: Create the component**
+- [x] **Step 1: Create the component**
 
 ```tsx
 import type { ReactNode } from "react";
@@ -492,12 +492,12 @@ export default function NextInvoiceCard({ loading, amounts, nextChargeOn }: Prop
 
 Note: the spec listed a `status` prop on this card. It is omitted here because nothing in the card branches on it (the footer depends only on `nextChargeOn`, which still holds the retry date when past due). YAGNI.
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 Run: `npm run typecheck`
 Expected: exit 0. The component is not imported anywhere yet, which is fine.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add app/settings/billing/NextInvoiceCard.tsx
@@ -520,7 +520,7 @@ Owns the five display states from the spec (loading, load error, card on file, f
 **Files:**
 - Create: `app/settings/billing/PaymentMethodCard.tsx`
 
-- [ ] **Step 1: Create the component**
+- [x] **Step 1: Create the component**
 
 ```tsx
 "use client";
@@ -650,12 +650,12 @@ export default function PaymentMethodCard({
 }
 ```
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 Run: `npm run typecheck`
 Expected: exit 0.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add app/settings/billing/PaymentMethodCard.tsx
@@ -678,7 +678,7 @@ EOF
 - Rewrite: `app/settings/billing/page.tsx`
 - Commit (from Task 3): `lib/nav/skeletonReadyRoutes.ts`, `lib/nav/skeletonReadyRoutes.test.ts`
 
-- [ ] **Step 1: Replace the whole file**
+- [x] **Step 1: Replace the whole file**
 
 ```tsx
 "use client";
@@ -989,7 +989,7 @@ export default function BillingSettingsPage() {
 }
 ```
 
-- [ ] **Step 2: Typecheck and run the full test suite**
+- [x] **Step 2: Typecheck and run the full test suite**
 
 Run: `npm run typecheck`
 Expected: exit 0.
@@ -997,7 +997,7 @@ Expected: exit 0.
 Run: `npm test`
 Expected: all test files pass, including `lib/billing/money.test.ts`, `lib/billing/format.test.ts`, `lib/nav/skeletonReadyRoutes.test.ts`, and `lib/theme/contrast.test.ts` (no tokens were changed, so it must still pass unchanged).
 
-- [ ] **Step 3: Commit page and allowlist together**
+- [x] **Step 3: Commit page and allowlist together**
 
 ```bash
 git add app/settings/billing/page.tsx lib/nav/skeletonReadyRoutes.ts lib/nav/skeletonReadyRoutes.test.ts
@@ -1022,17 +1022,17 @@ EOF
 
 **Files:** none changed unless a check fails.
 
-- [ ] **Step 1: Confirm no em-dashes crept in**
+- [x] **Step 1: Confirm no em-dashes crept in**
 
-Run: `git diff main --name-only | xargs grep -n "—" ; echo "exit: $?"`
+Run: `git diff main --name-only | xargs grep -n $'\xe2\x80\x94' ; echo "exit: $?"`
 Expected: no lines printed, `exit: 1` (grep found nothing). If any line prints, replace the character and amend into a new commit.
 
-- [ ] **Step 2: Confirm the page has no leftover raw `<table>` or hand-rolled banner**
+- [x] **Step 2: Confirm the page has no leftover raw `<table>` or hand-rolled banner**
 
 Run: `grep -nE "<table|border-danger px-4|Loading\.\.\." app/settings/billing/page.tsx ; echo "exit: $?"`
 Expected: `exit: 1`.
 
-- [ ] **Step 3: Run the dev server and do the signed-in pass**
+- [x] **Step 3: Run the dev server and do the signed-in pass**
 
 Run: `npm run dev`, then sign in as a company admin (`scripts/dev-login.mjs` if needed; note `.env.local` points at the live Supabase, so do not add a real card outside the Square sandbox).
 
@@ -1046,6 +1046,6 @@ Check, in both themes (toggle in the AppShell header):
 6. With no charges (a fresh sandbox company), the table shows "No charges yet" and its description, not an empty grid.
 7. Signed in as staff: header plus the info banner only. Signed in as super_admin: header plus the info banner with a working link.
 
-- [ ] **Step 4: Record the result**
+- [x] **Step 4: Record the result**
 
 If everything above holds, the branch is ready for the finishing-a-development-branch step (merge to main, push). If anything fails, fix it in a follow-up commit on this branch and re-run Steps 1 to 3.

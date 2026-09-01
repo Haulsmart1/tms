@@ -90,7 +90,13 @@ is what keeps its live region announcing):
 | --- | --- | --- |
 | Load error | danger | "Could not load billing data: {message}" |
 | Past due | danger | "Your last payment failed. Replace your card below to bring your subscription back up to date." |
-| Notice | success | Set by `SquareCardForm.onComplete`: "Subscription started: £X charged. Next charge dd/mm/yyyy." or "Card updated." |
+| Notice | success or warning | Set by `SquareCardForm.onComplete` from the route's response: first charge, "Subscription started: £X charged. Next charge dd/mm/yyyy." (success); replacement whose dunning retry succeeded, "Card updated and the outstanding charge was taken." (success); replacement whose retry was declined again (the route answers HTTP 200 with `succeeded: false`), "New card saved, but the outstanding charge was declined (CODE). It will be retried automatically." (warning); plain replacement, "Card updated." (success). Cleared when a replace begins. |
+
+`loadError` is not one flag but `{ message, billing, charges, licences }`, one boolean per query,
+so each region withholds only what it cannot vouch for: the payment card on the billing query,
+the history table on the charges query, and the two count tiles plus the next-invoice figures on
+the licences query (rendered "-" rather than a confident £0.00). The banner shows the first
+message. A thrown client error, as opposed to a returned `.error`, is caught and sets all three.
 
 Stat row, `grid grid-cols-2 gap-2.5 lg:grid-cols-4`, four `Stat` tiles:
 
@@ -185,7 +191,7 @@ An `h2` "Charge history" (`text-base font-semibold`), then `DataTable<ChargeRow>
 | Status | left | success `Badge` "Paid", or danger `Badge` "Failed" followed by the failure code in `text-xs text-ink-3` |
 | Receipt | left | `<a target="_blank" rel="noreferrer" className="text-primary underline">View</a>`, or "-" |
 
-`state` is derived: `loading` while `showSkeleton`; `error` when `loadError` is set, with
+`state` is derived: `loading` while `busy` (see Section 5); `error` when `loadError.charges` is set, with
 `onRetry={load}`; `empty` when the array is empty, with `emptyTitle="No charges yet"` and
 `emptyDescription="Your first charge appears here after your billing date."`; otherwise
 `ready`. Widths are left unset (the "all or none" rule in `DataTable`'s comment).
@@ -199,7 +205,18 @@ Following `/customers`:
   resolution; this stops it.
 - `hasLoaded` is set in the loader's `finally`. `showSkeleton = shouldShowSkeleton({
   tenantStatus, fetching: loading, hasData: hasLoaded })`.
-- The admin page body carries `aria-busy={showSkeleton || undefined}` and an
+- Two flags, not one. `showSkeleton` (from `shouldShowSkeleton`) drives the `Stat` tiles: once
+  `hasLoaded` is true it stays false, so a refetch never flashes a skeleton over numbers that
+  were true a moment ago. `busy = showSkeleton || loading` drives the two cards and the table,
+  because those read `billing` and `charges`, which after a failed load are null and empty until
+  the Retry resolves; on `showSkeleton` alone, a Retry would briefly offer the "add a card" form
+  and state "No charges yet" as fact. `busy` also covers the refetch after a card save, where the
+  card details on screen are known stale (the card the user just replaced), so a skeleton beats
+  showing the old last-four under a "Card updated." banner.
+- The three banners sit outside the busy region: the success notice is set in the same batch as
+  the refetch it describes, and assistive tech may defer or drop a live-region update inside a
+  container marked busy.
+- The admin page body carries `aria-busy={busy || undefined}` and an
   `sr-only role="status"` line "Loading billing" while `showSkeleton`.
 - `/settings/billing` is added to `SKELETON_READY_ROUTES`, and the exhaustive assertion in
   `lib/nav/skeletonReadyRoutes.test.ts` (`lists exactly the routes converted so far`) is

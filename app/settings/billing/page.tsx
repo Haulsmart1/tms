@@ -34,7 +34,12 @@ type ChargeRow = {
 /* Which of the three queries failed, so each region withholds only what it
    cannot vouch for: a charge-history failure must not hide a valid card on
    file, and vice versa. `message` is the first error, for the banner. */
-type LoadError = { message: string; billing: boolean; charges: boolean };
+type LoadError = {
+  message: string;
+  billing: boolean;
+  charges: boolean;
+  licences: boolean;
+};
 
 /* No widths: DataTable's comment says set them on every column or none. */
 const CHARGE_COLUMNS: Column<ChargeRow>[] = [
@@ -129,6 +134,10 @@ export default function BillingSettingsPage() {
           .select("*")
           .order("created_at", { ascending: false })
           .limit(24),
+        /* Company-wide on purpose, no filterByTenant: this is the bill, not
+           an operational view, and the charge spans every tenant under the
+           company. RLS scopes it to the admin's company. See the
+           count-divergence follow-up in the spec before "fixing" this. */
         supabase.from("vehicle_licences").select("vehicle_id").eq("active", true),
       ]);
       const firstError = billingRes.error ?? chargesRes.error ?? licencesRes.error;
@@ -138,6 +147,7 @@ export default function BillingSettingsPage() {
               message: firstError.message,
               billing: Boolean(billingRes.error),
               charges: Boolean(chargesRes.error),
+              licences: Boolean(licencesRes.error),
             }
           : null
       );
@@ -154,6 +164,7 @@ export default function BillingSettingsPage() {
         message: error instanceof Error ? error.message : "Unexpected error",
         billing: true,
         charges: true,
+        licences: true,
       });
     } finally {
       setLoading(false);
@@ -219,6 +230,21 @@ export default function BillingSettingsPage() {
 
   return (
     <PageFrame>
+      {/* Banners sit OUTSIDE the aria-busy region below. The success notice
+          is set in the same batch as the refetch it describes, and assistive
+          tech may defer or drop a live-region update inside a busy container.
+          All three stay mounted; MessageBanner renders sr-only when empty,
+          which is what keeps its live region announcing. */}
+      <MessageBanner tone="danger">
+        {loadError ? `Could not load billing data: ${loadError.message}` : ""}
+      </MessageBanner>
+      <MessageBanner tone="danger">
+        {billing?.status === "past_due"
+          ? "Your last payment failed. Replace your card below to bring your subscription back up to date."
+          : ""}
+      </MessageBanner>
+      <MessageBanner tone={notice?.tone ?? "success"}>{notice?.text ?? ""}</MessageBanner>
+
       <div aria-busy={busy || undefined}>
         {/* One announcement for the region, not one per skeleton bar. */}
         {showSkeleton ? (
@@ -227,24 +253,14 @@ export default function BillingSettingsPage() {
           </span>
         ) : null}
 
-        {/* All three banners stay mounted; MessageBanner renders sr-only when
-            empty, which is what keeps its live region announcing. */}
-        <MessageBanner tone="danger">
-          {loadError ? `Could not load billing data: ${loadError.message}` : ""}
-        </MessageBanner>
-        <MessageBanner tone="danger">
-          {billing?.status === "past_due"
-            ? "Your last payment failed. Replace your card below to bring your subscription back up to date."
-            : ""}
-        </MessageBanner>
-        <MessageBanner tone={notice?.tone ?? "success"}>{notice?.text ?? ""}</MessageBanner>
-
         <div className="mb-4 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
           <Stat
             label="Licensed vehicles"
             value={
               showSkeleton ? (
                 <Skeleton display="inline-block" w="2.5ch" h="1.25rem" />
+              ) : loadError?.licences ? (
+                "-"
               ) : (
                 String(vehicleCount)
               )
@@ -256,12 +272,14 @@ export default function BillingSettingsPage() {
             value={
               showSkeleton ? (
                 <Skeleton display="inline-block" w="6ch" h="1.25rem" />
+              ) : loadError?.licences ? (
+                "-"
               ) : (
                 formatPence(amounts.grossPence)
               )
             }
             sub={
-              showSkeleton
+              showSkeleton || loadError?.licences
                 ? undefined
                 : `${formatPence(amounts.netPence)} + ${formatPence(amounts.vatPence)} VAT`
             }
@@ -331,6 +349,7 @@ export default function BillingSettingsPage() {
           />
           <NextInvoiceCard
             loading={busy}
+            unavailable={Boolean(loadError?.licences)}
             amounts={amounts}
             nextChargeOn={billing?.next_charge_on ?? null}
           />
