@@ -3,6 +3,7 @@ import {
   chargeIdempotencyKey,
   classifyPaymentResult,
   computeChargeAmounts,
+  formatPence,
 } from "./money";
 
 describe("computeChargeAmounts", () => {
@@ -107,5 +108,24 @@ describe("classifyPaymentResult", () => {
       kind: "indeterminate",
       status: "SOMETHING_NEW",
     });
+  });
+});
+
+describe("formatPence", () => {
+  it("formats zero", () => {
+    expect(formatPence(0)).toBe("£0.00");
+  });
+
+  it("formats whole pounds with two decimals", () => {
+    expect(formatPence(1000)).toBe("£10.00");
+  });
+
+  it("formats pence", () => {
+    expect(formatPence(5)).toBe("£0.05");
+    expect(formatPence(14400)).toBe("£144.00");
+  });
+
+  it("does not group thousands, matching the page's existing pounds() helper", () => {
+    expect(formatPence(123456789)).toBe("£1234567.89");
   });
 });
