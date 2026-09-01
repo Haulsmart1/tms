@@ -195,8 +195,12 @@ export default function SquareCardForm({
         autoComplete="cc-name"
       />
 
-      <div className="grid gap-1.5">
-        <span className="text-sm font-medium text-ink-2">Card details</span>
+      {/* role="group" + aria-labelledby, not <label htmlFor>: the SDK injects
+          an iframe here, so there is no labelable element to point at. */}
+      <div className="grid gap-1.5" role="group" aria-labelledby="cc-details-label">
+        <span id="cc-details-label" className="text-sm font-medium text-ink-2">
+          Card details
+        </span>
         {/* The Square SDK attaches its iframe by this selector (see init()
             above), so the id is load-bearing. border-ink-3 matches Field's
             input border for the reason documented in components/Field.tsx. */}
@@ -215,6 +219,9 @@ export default function SquareCardForm({
         <Button onClick={submit} disabled={!ready} loading={submitting}>
           {submitLabel}
         </Button>
+        {/* Disabled, not hidden, while submitting. Button warns against
+            disabling the FOCUSED control; focus is on the submit button at
+            this point, so Cancel can be disabled without dropping focus. */}
         {onCancel ? (
           <Button variant="ghost" onClick={onCancel} disabled={submitting}>
             Cancel
