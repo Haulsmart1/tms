@@ -17,8 +17,14 @@ export type PlanStop = {
 
 export type PlanJob = {
   id: string;
+  tenant_id: string | null;
   reference: string | null;
   status: string | null;
+  collection_eta: string | null;
+  delivery_eta: string | null;
+  acceptance_note: string | null;
+  accepted_at: string | null;
+  accepted_by: string | null;
   vehicle_id: string | null;
   driver_id: string | null;
   subcontractor_id: string | null;

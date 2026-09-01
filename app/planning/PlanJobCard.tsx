@@ -16,6 +16,7 @@ type Props = {
   note?: string;
   onDropBefore?: (draggedJobId: string) => void;
   onOpen?: (jobId: string) => void;
+  onAccept?: (jobId: string) => void;
 };
 
 export const JOB_ID_MIME = "text/plain";
@@ -27,6 +28,7 @@ export default function PlanJobCard({
   note,
   onDropBefore,
   onOpen,
+  onAccept,
 }: Props) {
   const dragged = useRef(false);
   const stops = sortedStops(job);
@@ -120,6 +122,36 @@ export default function PlanJobCard({
       <p className="text-xs text-ink-3">
         {job.customer_name ?? "No customer"} · {placeSummary}
       </p>
+
+      {job.status === "pending_acceptance" ? (
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <span className="rounded border border-line px-1.5 py-0.5 text-xs text-warning">
+            {sequence !== null
+              ? "Assigned · Awaiting acceptance"
+              : "Awaiting acceptance"}
+          </span>
+
+          {onAccept ? (
+            <button
+              type="button"
+              draggable={false}
+              className="rounded-md border border-line bg-surface px-2 py-1 text-xs font-semibold text-ink hover:bg-surface-2"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onAccept(job.id);
+              }}
+              onKeyDown={(e) => e.stopPropagation()}
+              onDragStart={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+            >
+              Accept
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

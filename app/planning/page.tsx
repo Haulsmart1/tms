@@ -112,6 +112,17 @@ export default function PlanningPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [optimizing, setOptimizing] = useState(false);
+  const [acceptanceTarget, setAcceptanceTarget] = useState<{
+    id: string;
+    tenant_id: string;
+    reference: string | null;
+  } | null>(null);
+  const [acceptanceForm, setAcceptanceForm] = useState({
+    collection_eta: "",
+    delivery_eta: "",
+    acceptance_note: "",
+  });
+  const [accepting, setAccepting] = useState(false);
   const [message, setMessage] = useState("");
   const [mapNotice, setMapNotice] = useState<string | null>(null);
   /* Generation counter: each load claims the next value, and its predicate
@@ -174,14 +185,17 @@ export default function PlanningPage() {
     const jobsQuery = supabase
       .from("jobs")
       .select(`
-        id, reference, status, scheduled_date, vehicle_id, driver_id,
-        subcontractor_id, route_order,
+        id, tenant_id, reference, status, scheduled_date, planning_date,
+        collection_eta, delivery_eta, acceptance_note, accepted_at, accepted_by,
+        vehicle_id, driver_id, subcontractor_id, route_order,
         journey_scope, origin_country_code, destination_country_code,
         compliance_regime_override, compliance_override_reason,
         customers ( name ),
         job_stops ( id, stop_order, type, address_line, city, postcode, lat, lng )
       `)
-      .eq("scheduled_date", date);
+      .or(
+        `planning_date.eq.${date},and(planning_date.is.null,scheduled_date.eq.${date})`
+      );
 
     const { data: profileData, error: profileError } = await profileQuery;
     const { data: jobsData, error: jobsError } = await tenant
@@ -239,8 +253,14 @@ export default function PlanningPage() {
 
     const loaded: PlanJob[] = (jobsData ?? []).map((row: any) => ({
       id: row.id,
+      tenant_id: row.tenant_id,
       reference: row.reference,
       status: row.status,
+      collection_eta: row.collection_eta,
+      delivery_eta: row.delivery_eta,
+      acceptance_note: row.acceptance_note,
+      accepted_at: row.accepted_at,
+      accepted_by: row.accepted_by,
       vehicle_id: row.vehicle_id,
       driver_id: row.driver_id,
       subcontractor_id: row.subcontractor_id,
@@ -555,15 +575,237 @@ export default function PlanningPage() {
     });
   }
 
+  function openAcceptance(jobId: string) {
+    const job = jobById.get(jobId);
+
+    if (!job || job.status !== "pending_acceptance") {
+      setMessage("This job is no longer awaiting acceptance.");
+      return;
+    }
+
+    if (!job.tenant_id) {
+      setMessage("Cannot accept this job because its tenant is unavailable.");
+      return;
+    }
+
+    setMessage("");
+    setAcceptanceTarget({
+      id: job.id,
+      tenant_id: job.tenant_id,
+      reference: job.reference,
+    });
+    setAcceptanceForm({
+      collection_eta: "",
+      delivery_eta: "",
+      acceptance_note: "",
+    });
+  }
+
+  function cancelAcceptance() {
+    if (accepting) {
+      return;
+    }
+
+    setAcceptanceTarget(null);
+    setAcceptanceForm({
+      collection_eta: "",
+      delivery_eta: "",
+      acceptance_note: "",
+    });
+  }
+
+  async function confirmAcceptance() {
+    if (!acceptanceTarget || accepting) {
+      return;
+    }
+
+    setMessage("");
+
+    if (!acceptanceForm.collection_eta) {
+      setMessage("Enter a collection ETA before accepting the job.");
+      return;
+    }
+
+    const collectionDate = new Date(acceptanceForm.collection_eta);
+
+    if (Number.isNaN(collectionDate.getTime())) {
+      setMessage("Enter a valid collection ETA.");
+      return;
+    }
+
+    let deliveryDate: Date | null = null;
+
+    if (acceptanceForm.delivery_eta) {
+      deliveryDate = new Date(acceptanceForm.delivery_eta);
+
+      if (Number.isNaN(deliveryDate.getTime())) {
+        setMessage("Enter a valid delivery ETA.");
+        return;
+      }
+
+      if (deliveryDate.getTime() < collectionDate.getTime()) {
+        setMessage(
+          "Delivery ETA cannot be earlier than collection ETA."
+        );
+        return;
+      }
+    }
+
+    setAccepting(true);
+
+    try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        setMessage(
+          "Your session has expired. Please sign in again."
+        );
+        return;
+      }
+
+      const acceptedAt = new Date().toISOString();
+      const collectionEta = collectionDate.toISOString();
+      const deliveryEta = deliveryDate
+        ? deliveryDate.toISOString()
+        : null;
+      const acceptanceNote =
+        acceptanceForm.acceptance_note.trim() || null;
+
+      const {
+        data: acceptedJob,
+        error: acceptanceError,
+      } = await supabase
+        .from("jobs")
+        .update({
+          status: "planned",
+          accepted_at: acceptedAt,
+          accepted_by: user.id,
+          collection_eta: collectionEta,
+          delivery_eta: deliveryEta,
+          acceptance_note: acceptanceNote,
+        })
+        .eq("id", acceptanceTarget.id)
+        .eq("tenant_id", acceptanceTarget.tenant_id)
+        .eq("status", "pending_acceptance")
+        .select("id")
+        .maybeSingle();
+
+      if (acceptanceError) {
+        setMessage(
+          `Accept job error: ${acceptanceError.message}`
+        );
+        return;
+      }
+
+      if (!acceptedJob) {
+        const {
+          data: currentJob,
+          error: currentJobError,
+        } = await supabase
+          .from("jobs")
+          .select(
+            "status, collection_eta, delivery_eta, acceptance_note, accepted_at, accepted_by"
+          )
+          .eq("id", acceptanceTarget.id)
+          .eq("tenant_id", acceptanceTarget.tenant_id)
+          .maybeSingle();
+
+        if (!currentJobError && currentJob) {
+          setJobs((prev) =>
+            prev.map((job) =>
+              job.id === acceptanceTarget.id
+                ? {
+                    ...job,
+                    status: currentJob.status,
+                    collection_eta: currentJob.collection_eta,
+                    delivery_eta: currentJob.delivery_eta,
+                    acceptance_note: currentJob.acceptance_note,
+                    accepted_at: currentJob.accepted_at,
+                    accepted_by: currentJob.accepted_by,
+                  }
+                : job
+            )
+          );
+        }
+
+        setMessage(
+          "This job has already been accepted or is no longer awaiting acceptance."
+        );
+        setAcceptanceTarget(null);
+        return;
+      }
+
+      setJobs((prev) =>
+        prev.map((job) =>
+          job.id === acceptanceTarget.id
+            ? {
+                ...job,
+                status: "planned",
+                collection_eta: collectionEta,
+                delivery_eta: deliveryEta,
+                acceptance_note: acceptanceNote,
+                accepted_at: acceptedAt,
+                accepted_by: user.id,
+              }
+            : job
+        )
+      );
+
+      setMessage(
+        `Job ${acceptanceTarget.reference ?? acceptanceTarget.id} accepted.`
+      );
+
+      setAcceptanceTarget(null);
+      setAcceptanceForm({
+        collection_eta: "",
+        delivery_eta: "",
+        acceptance_note: "",
+      });
+    } finally {
+      setAccepting(false);
+    }
+  }
+
   async function savePlan() {
     if (saving || pendingUpdates.length === 0) return;
+
+    const missingTenantUpdate = pendingUpdates.find(
+      (update) => !jobById.get(update.id)?.tenant_id
+    );
+
+    if (missingTenantUpdate) {
+      setMessage(
+        "Save error: one or more jobs are missing tenant information."
+      );
+      return;
+    }
+
     setSaving(true);
     setMessage("");
+
     for (const u of pendingUpdates) {
+      const tenantId = jobById.get(u.id)?.tenant_id;
+
+      if (!tenantId) {
+        setMessage(
+          "Save error: one or more jobs are missing tenant information."
+        );
+        setSaving(false);
+        return;
+      }
+
       const { error } = await supabase
         .from("jobs")
-        .update({ vehicle_id: u.vehicle_id, driver_id: u.driver_id, route_order: u.route_order })
-        .eq("id", u.id);
+        .update({
+          vehicle_id: u.vehicle_id,
+          driver_id: u.driver_id,
+          route_order: u.route_order,
+        })
+        .eq("id", u.id)
+        .eq("tenant_id", tenantId);
       if (error) {
         const failure = `Save error: ${error.message}`;
         setMessage(failure);
@@ -861,6 +1103,7 @@ export default function PlanningPage() {
                 onOpenJob={(jobId) =>
                   router.push(`/jobs?job=${encodeURIComponent(jobId)}`)
                 }
+                onAcceptJob={openAcceptance}
                 onDropJob={(jobId) => moveJob(jobId, null, null)}
               />
               <div className="flex flex-1 flex-col gap-3">
@@ -904,7 +1147,10 @@ export default function PlanningPage() {
                       onOpenJob={(jobId) =>
                         router.push(`/jobs?job=${encodeURIComponent(jobId)}`)
                       }
-                      onDropJob={(jobId, beforeJobId) => moveJob(jobId, v.id, beforeJobId)}
+                      onAcceptJob={openAcceptance}
+                      onDropJob={(jobId, beforeJobId) =>
+                        moveJob(jobId, v.id, beforeJobId)
+                      }
                     />
                   ))
                 )}
@@ -913,6 +1159,104 @@ export default function PlanningPage() {
           )}
         </div>
       </div>
+      {acceptanceTarget ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="planning-acceptance-title"
+          onClick={cancelAcceptance}
+        >
+          <form
+            className="w-full max-w-lg rounded-lg border border-line bg-surface p-5 shadow-xl"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void confirmAcceptance();
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4">
+              <h2
+                id="planning-acceptance-title"
+                className="text-lg font-semibold text-ink"
+              >
+                Accept job
+              </h2>
+              <p className="mt-1 text-sm text-ink-3">
+                {acceptanceTarget.reference ?? acceptanceTarget.id}
+              </p>
+            </div>
+
+            <div className="grid gap-4">
+              <label className="grid gap-1 text-sm text-ink">
+                <span>Collection ETA *</span>
+                <input
+                  type="datetime-local"
+                  required
+                  value={acceptanceForm.collection_eta}
+                  onChange={(e) =>
+                    setAcceptanceForm((prev) => ({
+                      ...prev,
+                      collection_eta: e.target.value,
+                    }))
+                  }
+                  className="rounded-md border border-line bg-surface px-3 py-2 text-ink"
+                />
+              </label>
+
+              <label className="grid gap-1 text-sm text-ink">
+                <span>Delivery ETA</span>
+                <input
+                  type="datetime-local"
+                  value={acceptanceForm.delivery_eta}
+                  onChange={(e) =>
+                    setAcceptanceForm((prev) => ({
+                      ...prev,
+                      delivery_eta: e.target.value,
+                    }))
+                  }
+                  className="rounded-md border border-line bg-surface px-3 py-2 text-ink"
+                />
+              </label>
+
+              <label className="grid gap-1 text-sm text-ink">
+                <span>Acceptance note</span>
+                <textarea
+                  rows={3}
+                  value={acceptanceForm.acceptance_note}
+                  onChange={(e) =>
+                    setAcceptanceForm((prev) => ({
+                      ...prev,
+                      acceptance_note: e.target.value,
+                    }))
+                  }
+                  className="rounded-md border border-line bg-surface px-3 py-2 text-ink"
+                />
+              </label>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={accepting}
+                onClick={cancelAcceptance}
+                className="rounded-md border border-line bg-surface px-3 py-2 text-sm font-medium text-ink disabled:opacity-50"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="submit"
+                disabled={accepting}
+                className="rounded-md border border-line bg-surface-2 px-3 py-2 text-sm font-semibold text-ink disabled:opacity-50"
+              >
+                {accepting ? "Accepting..." : "Accept job"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
     </TenantGate>
   );
 }

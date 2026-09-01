@@ -62,6 +62,11 @@ export default function JobsPage() {
   const [accepting, setAccepting] = useState(false);
 
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
+  const [selectedPlanningJobIds, setSelectedPlanningJobIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [planningDate, setPlanningDate] = useState("");
+  const [sendingToPlanning, setSendingToPlanning] = useState(false);
 
   const [jobFilters, setJobFilters] = useState({
     search: "",
@@ -83,7 +88,7 @@ export default function JobsPage() {
   async function loadData() {
     setMessage("");
     const jobsQuery = supabase.from("jobs").select(`
-        id, tenant_id, reference, status, scheduled_date, customer_id, vehicle_id, driver_id,
+        id, tenant_id, reference, status, scheduled_date, planning_date, customer_id, vehicle_id, driver_id,
         customer_price, subcontractor_id, subcontractor_cost,
         accepted_at, accepted_by, collection_eta, delivery_eta, acceptance_note,
         customers ( name ), vehicles ( registration ), drivers ( name ),
@@ -269,32 +274,147 @@ export default function JobsPage() {
     await loadData();
   }
 
-  function sendToPlanning(job: any) {
+  function isPlanningEligible(job: any) {
+    return (
+      job.status === "planned" ||
+      job.status === "pending_acceptance"
+    );
+  }
+
+  function isIsoDate(value: string) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(value);
+  }
+
+  function togglePlanningSelection(jobId: string) {
+    setSelectedPlanningJobIds((current) => {
+      const next = new Set(current);
+
+      if (next.has(jobId)) {
+        next.delete(jobId);
+      } else {
+        next.add(jobId);
+      }
+
+      return next;
+    });
+  }
+
+  function selectFilteredForPlanning(filtered: any[]) {
+    const eligibleIds = filtered
+      .filter(isPlanningEligible)
+      .map((job) => job.id);
+
+    setSelectedPlanningJobIds(new Set(eligibleIds));
+  }
+
+  async function sendJobsToPlanning(
+    selectedJobs: any[],
+    targetDate: string
+  ) {
     setMessage("");
 
-    if (
-      job.status !== "planned" &&
-      job.status !== "pending_acceptance"
-    ) {
+    if (!isIsoDate(targetDate)) {
+      setMessage("Choose a valid Planning date.");
+      return false;
+    }
+
+    if (selectedJobs.length === 0) {
+      setMessage("Select at least one eligible job.");
+      return false;
+    }
+
+    if (selectedJobs.some((job) => !isPlanningEligible(job))) {
       setMessage(
         "Only planned or awaiting-acceptance jobs can be sent to Planning."
       );
-      return;
+      return false;
     }
 
-    if (
-      typeof job.scheduled_date !== "string" ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(job.scheduled_date)
-    ) {
+    const tenantIds = Array.from(
+      new Set(
+        selectedJobs
+          .map((job) => job.tenant_id)
+          .filter((value): value is string => Boolean(value))
+      )
+    );
+
+    if (tenantIds.length !== 1) {
       setMessage(
-        "Set a scheduled date on this job before sending it to Planning."
+        "Selected jobs must belong to one company before sending to Planning."
+      );
+      return false;
+    }
+
+    const tenantId = tenantIds[0];
+    const jobIds = selectedJobs.map((job) => job.id);
+
+    setSendingToPlanning(true);
+
+    try {
+      const { data, error } = await supabase
+        .from("jobs")
+        .update({ planning_date: targetDate })
+        .eq("tenant_id", tenantId)
+        .in("id", jobIds)
+        .in("status", ["planned", "pending_acceptance"])
+        .select("id");
+
+      if (error) {
+        setMessage(`Planning update failed: ${error.message}`);
+        return false;
+      }
+
+      if ((data?.length ?? 0) !== jobIds.length) {
+        setMessage(
+          "Some selected jobs changed before the Planning update. Refresh and try again."
+        );
+        return false;
+      }
+
+      setSelectedPlanningJobIds(new Set());
+
+      window.location.assign(
+        `/planning?date=${encodeURIComponent(targetDate)}`
+      );
+
+      return true;
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? `Planning update failed: ${error.message}`
+          : "Planning update failed."
+      );
+      return false;
+    } finally {
+      setSendingToPlanning(false);
+    }
+  }
+
+  async function sendSelectedToPlanning() {
+    const selectedJobs = jobs.filter((job) =>
+      selectedPlanningJobIds.has(job.id)
+    );
+
+    await sendJobsToPlanning(selectedJobs, planningDate);
+  }
+
+  async function sendToPlanning(job: any) {
+    const targetDate =
+      isIsoDate(planningDate)
+        ? planningDate
+        : typeof job.planning_date === "string" &&
+            isIsoDate(job.planning_date)
+          ? job.planning_date
+          : job.scheduled_date;
+
+    if (!isIsoDate(targetDate || "")) {
+      setMessage(
+        "Choose a Planning date before sending this job to Planning."
       );
       return;
     }
 
-    window.location.assign(
-      `/planning?date=${encodeURIComponent(job.scheduled_date)}`
-    );
+    await sendJobsToPlanning([job], targetDate);
   }
 
   async function performDelete(jobId: string) {
@@ -916,11 +1036,69 @@ export default function JobsPage() {
               </div>
 
 
+              {/* BULK PLANNING */}
+              <div className="rounded-lg border border-line bg-surface p-4">
+                <div className="flex flex-wrap items-end gap-3">
+                  <label className="grid gap-1 text-xs text-ink-2">
+                    Planning date
+                    <input
+                      type="date"
+                      value={planningDate}
+                      onChange={(event) =>
+                        setPlanningDate(event.target.value)
+                      }
+                      className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink"
+                    />
+                  </label>
+
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() =>
+                      selectFilteredForPlanning(filteredJobs)
+                    }
+                  >
+                    Select filtered
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={selectedPlanningJobIds.size === 0}
+                    onClick={() =>
+                      setSelectedPlanningJobIds(new Set())
+                    }
+                  >
+                    Clear selection
+                  </Button>
+
+                  <Button
+                    type="button"
+                    disabled={
+                      sendingToPlanning ||
+                      selectedPlanningJobIds.size === 0 ||
+                      !isIsoDate(planningDate)
+                    }
+                    onClick={sendSelectedToPlanning}
+                  >
+                    {sendingToPlanning
+                      ? "Sending..."
+                      : `Send selected to Planning (${selectedPlanningJobIds.size})`}
+                  </Button>
+
+                  <span className="text-xs text-ink-3">
+                    Planned and awaiting-acceptance jobs are eligible.
+                    Original job dates and acceptance status are preserved.
+                  </span>
+                </div>
+              </div>
+
               {/* COMPACT JOB LIST */}
               <div className="overflow-x-auto rounded-lg border border-line bg-surface shadow-sm">
                 <div className="min-w-[1080px]">
 
-                  <div className="grid grid-cols-[1.45fr_1.35fr_0.8fr_1.05fr_1.05fr_0.85fr_0.9fr_auto] gap-3 border-b border-line bg-surface-2 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-ink-3">
+                  <div className="grid grid-cols-[auto_1.45fr_1.35fr_0.8fr_1.05fr_1.05fr_0.85fr_0.9fr_auto] gap-3 border-b border-line bg-surface-2 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-ink-3">
+                    <div aria-label="Planning selection">Plan</div>
                     <div>Reference</div>
                     <div>Customer</div>
                     <div>Date</div>
@@ -961,12 +1139,27 @@ export default function JobsPage() {
 
                           {/* ONE-LINE JOB ROW */}
                           <div
-                            className={`grid grid-cols-[1.45fr_1.35fr_0.8fr_1.05fr_1.05fr_0.85fr_0.9fr_auto] items-center gap-3 px-4 py-2.5 text-sm ${
+                            className={`grid grid-cols-[auto_1.45fr_1.35fr_0.8fr_1.05fr_1.05fr_0.85fr_0.9fr_auto] items-center gap-3 px-4 py-2.5 text-sm ${
                               expanded
                                 ? "bg-surface-2"
                                 : "bg-surface"
                             }`}
                           >
+                            <div>
+                              <input
+                                type="checkbox"
+                                aria-label={`Select ${job.reference || "job"} for Planning`}
+                                checked={selectedPlanningJobIds.has(job.id)}
+                                disabled={!isPlanningEligible(job)}
+                                onChange={() =>
+                                  togglePlanningSelection(job.id)
+                                }
+                                onClick={(event) =>
+                                  event.stopPropagation()
+                                }
+                              />
+                            </div>
+
                             <div
                               className="truncate font-mono font-semibold text-ink"
                               title={job.reference}
