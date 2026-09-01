@@ -2934,7 +2934,7 @@ Document the following in the final report as the manual test script for Ethan (
 
 1. Apply `docs/sql/billing_01_platform_billing.sql` in the Supabase SQL editor.
 2. `npm run dev`, sign in as a company admin, open `/settings/billing`.
-3. Add Square's sandbox test card `4111 1111 1111 1111` (any future expiry, any CVV, any postcode). Expect: 3DS challenge, then a success notice showing the charged amount and next charge date; a `succeeded` row in the history table; the payment visible in the Square sandbox dashboard.
+3. Add Square's sandbox test card `4111 1111 1111 1111` (any future expiry, CVV `111`, and ZIP `94103` -- the test card is US-issued, so the SDK renders a numeric-only "ZIP" field that drops the letters in a UK postcode; see the Square bullet in README "Integrations"). Expect: 3DS challenge, then a success notice showing the charged amount and next charge date; a `succeeded` row in the history table; the payment visible in the Square sandbox dashboard.
 4. Trigger the cron manually (PowerShell):
    `Invoke-RestMethod -Uri "http://localhost:3000/api/billing/run" -Headers @{ Authorization = "Bearer <CRON_SECRET value>" }`
    Expect: `charged: 0, skipped: 1` (next charge is a month away).

@@ -116,6 +116,17 @@ Status tags: [OK] functional against live data, [PARTIAL] real data but view-onl
 - **Microsoft Teams** (`TEAMS_WEBHOOK_URL`): Adaptive Card alert to the team when a lead is submitted.
 - **Resend** (`RESEND_API_KEY`, `MAIL_FROM`, `LEAD_INBOX`): transactional email for lead notifications.
 - **Square** (`SQUARE_ACCESS_TOKEN`, `SQUARE_ENVIRONMENT`, `SQUARE_LOCATION_ID`, `NEXT_PUBLIC_SQUARE_APP_ID`, `NEXT_PUBLIC_SQUARE_LOCATION_ID`): platform subscription billing, card on file plus the daily `/api/billing/run` charge cron (see `/settings/billing` and `/super-admin/billing`). This is separate from Stripe Connect (tenant-to-customer invoice payments), which is unrelated to platform billing. The earlier catalogue / plan-creation scaffolding under `app/subscription page/` is superseded by this and not wired into a live route.
+  - **Card form postal code (sandbox gotcha).** The Web Payments SDK picks the postal-code
+    field's format from the *card's* issuing country, not the Square account's country. It sends the
+    typed BIN to `POST /v2/tokenization/product-information` and localises the field from the
+    `country` in the reply. Square's sandbox test cards (`4111 1111 1111 1111` and friends) are
+    US-issued, so the field renders as a numeric-only "ZIP" and silently drops letters: a UK
+    postcode becomes `11` and `tokenize()` returns `Postal code is not valid`. **In the sandbox,
+    enter ZIP `94103`.** Real UK-issued cards return `GB` and the field becomes a text "Postcode"
+    that accepts `SW1A 1AA`, so this does not affect production. The SDK's `card({ postalCode })` /
+    `card.configure({ postalCode })` override cannot work around it: the hydrate response for this
+    application returns the feature flag `can_override_postal_code: "false"`, so a supplied value is
+    ignored and the field stays on screen.
 - **TomTom** (planned): live vehicle tracking to replace the current read-only telematics views.
 
 ## Getting started
