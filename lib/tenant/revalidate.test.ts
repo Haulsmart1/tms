@@ -5,6 +5,7 @@ import {
   REVALIDATE_MIN_INTERVAL_MS,
   applyRevalidation,
   tenantContextEquals,
+  preserveActiveTenant,
 } from "./revalidate";
 import type { TenantContextData } from "./context";
 
@@ -179,5 +180,66 @@ describe("applyRevalidation", () => {
 
     const out: TenantContextData = { ...READY, status: "signed-out" };
     expect(applyRevalidation(READY, { ok: true, data: out })).toBe(out);
+  });
+});
+
+const TENANTS = [{ id: "t1", name: "Depot A" }, { id: "t2", name: "Depot B" }];
+
+describe("preserveActiveTenant", () => {
+  it("keeps an admin's current selection when it still exists", () => {
+    expect(
+      preserveActiveTenant({
+        current: "t2",
+        tenants: TENANTS,
+        role: "admin",
+        homeTenantId: "t1",
+        persisted: "t1",
+      })
+    ).toBe("t2");
+  });
+
+  it("keeps an admin on All tenants", () => {
+    expect(
+      preserveActiveTenant({
+        current: null,
+        tenants: TENANTS,
+        role: "admin",
+        homeTenantId: "t1",
+        persisted: "t1",
+      })
+    ).toBeNull();
+  });
+
+  it("falls back to All tenants when the selected tenant has vanished", () => {
+    expect(
+      preserveActiveTenant({
+        current: "t3",
+        tenants: TENANTS,
+        role: "admin",
+        homeTenantId: "t1",
+        persisted: "t3",
+      })
+    ).toBeNull();
+  });
+
+  it("pins staff to their home tenant regardless of the current value", () => {
+    expect(
+      preserveActiveTenant({
+        current: null,
+        tenants: TENANTS,
+        role: "staff",
+        homeTenantId: "t1",
+        persisted: null,
+      })
+    ).toBe("t1");
+    expect(
+      preserveActiveTenant({
+        current: "t2",
+        tenants: TENANTS,
+        role: "staff",
+        homeTenantId: "t1",
+        persisted: null,
+      })
+    ).toBe("t1");
   });
 });

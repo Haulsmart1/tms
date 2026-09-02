@@ -1,5 +1,6 @@
 import type { AuthChangeEvent } from "@supabase/supabase-js";
-import type { TenantContextData } from "./context";
+import { pickInitialActiveTenant } from "./context";
+import type { TenantContextData, TenantOption, TenantRole } from "./context";
 
 export type ResolveMode = "blocking" | "background" | "skip";
 
@@ -84,4 +85,24 @@ export function applyRevalidation(
      effects keyed on it stay put. */
   if (tenantContextEquals(prev, result.data)) return prev;
   return result.data;
+}
+
+export function preserveActiveTenant(input: {
+  current: string | null;
+  tenants: TenantOption[];
+  role: TenantRole;
+  homeTenantId: string | null;
+  persisted: string | null;
+}): string | null {
+  const { current, tenants, role, homeTenantId, persisted } = input;
+  /* Staff are pinned to their home tenant, so their "selection" is not theirs
+     to keep. Defer to the same rule the initial resolve uses. */
+  if (role === "staff") {
+    return pickInitialActiveTenant(role, homeTenantId, tenants, persisted);
+  }
+  /* null is a real admin choice ("All tenants"), not an absent one. */
+  if (current === null) return null;
+  if (tenants.some((t) => t.id === current)) return current;
+  /* The selected tenant is gone from under them. Rebuild from scratch. */
+  return pickInitialActiveTenant(role, homeTenantId, tenants, persisted);
 }
