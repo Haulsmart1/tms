@@ -1,29 +1,48 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyComplianceRegime,
+  type ComplianceJobFacts,
   type ComplianceRegimeInput,
+  type ComplianceVehicleFacts,
 } from "./regime";
 
+/* Wrapping ComplianceRegimeInput in Partial<> only makes `vehicle` and `job`
+   themselves optional, not their individual fields, so every call site
+   below that supplies a partial vehicle or job object needs these two
+   factories rather than a bare Partial<ComplianceRegimeInput>. */
+function vehicleFacts(
+  over: Partial<ComplianceVehicleFacts> = {}
+): ComplianceVehicleFacts {
+  return {
+    mam_kg: 3500,
+    trailer_mam_kg: 0,
+    tachograph_fitted: true,
+    tachograph_type: "smart_2",
+    home_country_code: "GB",
+    ...over,
+  };
+}
+
+function jobFacts(over: Partial<ComplianceJobFacts> = {}): ComplianceJobFacts {
+  return {
+    journey_scope: "gb_domestic",
+    origin_country_code: "GB",
+    destination_country_code: "GB",
+    compliance_regime_override: null,
+    compliance_override_reason: null,
+    ...over,
+  };
+}
+
 function input(
-  overrides: Partial<ComplianceRegimeInput> = {}
+  overrides: {
+    vehicle?: Partial<ComplianceVehicleFacts>;
+    job?: Partial<ComplianceJobFacts>;
+  } = {}
 ): ComplianceRegimeInput {
   return {
-    vehicle: {
-      mam_kg: 3500,
-      trailer_mam_kg: 0,
-      tachograph_fitted: true,
-      tachograph_type: "smart_2",
-      home_country_code: "GB",
-      ...overrides.vehicle,
-    },
-    job: {
-      journey_scope: "gb_domestic",
-      origin_country_code: "GB",
-      destination_country_code: "GB",
-      compliance_regime_override: null,
-      compliance_override_reason: null,
-      ...overrides.job,
-    },
+    vehicle: vehicleFacts(overrides.vehicle),
+    job: jobFacts(overrides.job),
   };
 }
 

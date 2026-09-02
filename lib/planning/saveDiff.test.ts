@@ -4,7 +4,9 @@ import type { PlanJob } from "./types";
 
 function job(overrides: Partial<PlanJob>): PlanJob {
   return {
-    id: "j1", reference: "JOB-1", status: "planned",
+    id: "j1", tenant_id: "t1", reference: "JOB-1", status: "planned",
+    collection_eta: null, delivery_eta: null, acceptance_note: null,
+    accepted_at: null, accepted_by: null,
     vehicle_id: null, driver_id: null, subcontractor_id: null,
     route_order: null, customer_name: "Acme", stops: [],
     ...overrides,
