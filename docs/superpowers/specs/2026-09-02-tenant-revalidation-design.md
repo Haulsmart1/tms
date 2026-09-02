@@ -13,7 +13,8 @@ remount, and the chain is fully traceable:
 
 1. `@supabase/auth-js` registers a `visibilitychange` listener. On every
    hidden to visible transition it runs `_recoverAndRefresh()`
-   (`node_modules/@supabase/auth-js/dist/main/GoTrueClient.js:4223`).
+   (`node_modules/@supabase/auth-js/dist/main/GoTrueClient.js:4211`, handler
+   at line 4223).
 2. That function re-emits `SIGNED_IN` carrying the *same*, unchanged session
    (same file, line 3852). No sign-in has occurred.
 3. `TenantProvider` treats `SIGNED_IN` as a real sign-in and calls `resolve()`
