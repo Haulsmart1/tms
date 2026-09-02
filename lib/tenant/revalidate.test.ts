@@ -183,7 +183,7 @@ describe("applyRevalidation", () => {
   });
 });
 
-const TENANTS = [{ id: "t1", name: "Depot A" }, { id: "t2", name: "Depot B" }];
+const TENANTS = READY.tenants;
 
 describe("preserveActiveTenant", () => {
   it("keeps an admin's current selection when it still exists", () => {
@@ -220,6 +220,18 @@ describe("preserveActiveTenant", () => {
         persisted: "t3",
       })
     ).toBeNull();
+  });
+
+  it("rebuilds from the persisted tenant when the selection has vanished", () => {
+    expect(
+      preserveActiveTenant({
+        current: "t3",
+        tenants: TENANTS,
+        role: "admin",
+        homeTenantId: "t1",
+        persisted: "t2",
+      })
+    ).toBe("t2");
   });
 
   it("pins staff to their home tenant regardless of the current value", () => {
