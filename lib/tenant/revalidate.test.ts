@@ -1,0 +1,95 @@
+import { describe, it, expect } from "vitest";
+import {
+  decideResolveMode,
+  shouldRevalidate,
+  REVALIDATE_MIN_INTERVAL_MS,
+} from "./revalidate";
+
+describe("decideResolveMode", () => {
+  const ready = { hasReadyContext: true, currentUserId: "u1" };
+
+  it("blocks on the first SIGNED_IN, before any context exists", () => {
+    expect(
+      decideResolveMode({
+        event: "SIGNED_IN",
+        hasReadyContext: false,
+        currentUserId: null,
+        eventUserId: "u1",
+      })
+    ).toBe("blocking");
+  });
+
+  it("backgrounds a repeat SIGNED_IN for the same user", () => {
+    expect(
+      decideResolveMode({ event: "SIGNED_IN", ...ready, eventUserId: "u1" })
+    ).toBe("background");
+  });
+
+  it("backgrounds a repeat SIGNED_IN that carries no user id", () => {
+    expect(
+      decideResolveMode({ event: "SIGNED_IN", ...ready, eventUserId: null })
+    ).toBe("background");
+  });
+
+  it("blocks when SIGNED_IN carries a different user id", () => {
+    expect(
+      decideResolveMode({ event: "SIGNED_IN", ...ready, eventUserId: "u2" })
+    ).toBe("blocking");
+  });
+
+  it("blocks on SIGNED_OUT", () => {
+    expect(
+      decideResolveMode({ event: "SIGNED_OUT", ...ready, eventUserId: null })
+    ).toBe("blocking");
+  });
+
+  it("backgrounds USER_UPDATED", () => {
+    expect(
+      decideResolveMode({ event: "USER_UPDATED", ...ready, eventUserId: "u1" })
+    ).toBe("background");
+  });
+
+  it("skips events we do not care about", () => {
+    expect(
+      decideResolveMode({ event: "TOKEN_REFRESHED", ...ready, eventUserId: "u1" })
+    ).toBe("skip");
+    expect(
+      decideResolveMode({ event: "INITIAL_SESSION", ...ready, eventUserId: "u1" })
+    ).toBe("skip");
+  });
+});
+
+describe("shouldRevalidate", () => {
+  it("allows the first revalidate when nothing has resolved yet", () => {
+    expect(shouldRevalidate({ lastResolvedAt: null, now: 1000 })).toBe(true);
+  });
+
+  it("blocks a revalidate inside the interval", () => {
+    expect(
+      shouldRevalidate({
+        lastResolvedAt: 0,
+        now: REVALIDATE_MIN_INTERVAL_MS - 1,
+      })
+    ).toBe(false);
+  });
+
+  it("allows a revalidate exactly on the interval boundary", () => {
+    expect(
+      shouldRevalidate({ lastResolvedAt: 0, now: REVALIDATE_MIN_INTERVAL_MS })
+    ).toBe(true);
+  });
+
+  it("uses five minutes as the interval", () => {
+    expect(REVALIDATE_MIN_INTERVAL_MS).toBe(5 * 60 * 1000);
+  });
+
+  it("honours an explicit interval override", () => {
+    expect(
+      shouldRevalidate({ lastResolvedAt: 0, now: 50, minIntervalMs: 100 })
+    ).toBe(false);
+  });
+
+  it("treats a clock that jumped backwards as too soon", () => {
+    expect(shouldRevalidate({ lastResolvedAt: 10000, now: 0 })).toBe(false);
+  });
+});
