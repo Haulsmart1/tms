@@ -3,7 +3,10 @@ import {
   decideResolveMode,
   shouldRevalidate,
   REVALIDATE_MIN_INTERVAL_MS,
+  applyRevalidation,
+  tenantContextEquals,
 } from "./revalidate";
+import type { TenantContextData } from "./context";
 
 describe("decideResolveMode", () => {
   const ready = { hasReadyContext: true, currentUserId: "u1" };
@@ -104,9 +107,6 @@ describe("shouldRevalidate", () => {
   });
 });
 
-import { applyRevalidation, tenantContextEquals } from "./revalidate";
-import type { TenantContextData } from "./context";
-
 const READY: TenantContextData = {
   status: "ready",
   role: "admin",
@@ -125,15 +125,30 @@ describe("tenantContextEquals", () => {
     expect(tenantContextEquals(READY, { ...READY, role: "staff" })).toBe(false);
   });
 
-  it("notices a tenant added, removed, renamed or reordered", () => {
+  it("notices a tenant added", () => {
+    expect(
+      tenantContextEquals(READY, {
+        ...READY,
+        tenants: [...READY.tenants, { id: "t3", name: "Depot C" }],
+      })
+    ).toBe(false);
+  });
+
+  it("notices a tenant removed", () => {
     expect(tenantContextEquals(READY, { ...READY, tenants: [READY.tenants[0]] }))
       .toBe(false);
+  });
+
+  it("notices a tenant renamed", () => {
     expect(
       tenantContextEquals(READY, {
         ...READY,
         tenants: [{ id: "t1", name: "Depot A (renamed)" }, READY.tenants[1]],
       })
     ).toBe(false);
+  });
+
+  it("notices a tenant reordered", () => {
     expect(
       tenantContextEquals(READY, {
         ...READY,
