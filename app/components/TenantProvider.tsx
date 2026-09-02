@@ -3,6 +3,7 @@
 import {
   createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode,
 } from "react";
+import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { createClient } from "../../lib/supabase/browser";
 import {
   parseTenantContext, pickInitialActiveTenant, computeWriteTenantId, tenantStorageKey,
@@ -53,6 +54,13 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     let user: { id: string; email?: string | null } | null = null;
     try {
       const res = await supabase.auth.getUser();
+      /* getUser does not throw for network or 5xx failures: it swallows any
+         AuthError and hands back a null user. Treating that null as "signed
+         out" would bounce someone to /login mid-form on a flaky connection,
+         which is the exact failure this change exists to prevent. A genuine
+         session-missing error is not retryable, so revoked access still
+         reaches the signed-out branch below. */
+      if (res.error && isAuthRetryableFetchError(res.error)) throw res.error;
       user = res.data.user;
     } catch {
       /* Could not check. Background keeps the last-good context; blocking stays
@@ -78,6 +86,10 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       raw = res.data;
     } catch {
       if (background) return; // transient: keep the last-good context
+      /* The context is no longer trustworthy, so the next auth event must be
+         allowed to rebuild it rather than being judged a throttled background
+         revalidate against a stale timestamp. */
+      hasReadyRef.current = false;
       setData({ ...LOADING, status: "no-tenant" });
       setActiveTenantIdState(null);
       return;
