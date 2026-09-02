@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  geocodeUrl, matrixBody, matrixUrl, parseGeocode, parseMatrix, parseRoute, routeUrl,
+  geocodeUrl, matrixBody, matrixBodyBetween, matrixUrl, parseGeocode, parseMatrix, parseRoute, routeUrl,
 } from "./api";
 
 describe("geocodeUrl", () => {
@@ -84,26 +84,68 @@ describe("matrixUrl and matrixBody", () => {
       options: { travelMode: "car" },
     });
   });
+
+  it("builds distinct origins and destinations for Smart Optimize", () => {
+    expect(
+      matrixBodyBetween(
+        [{ lat: 10, lng: 11 }, { lat: 20, lng: 21 }],
+        [{ lat: 30, lng: 31 }, { lat: 40, lng: 41 }]
+      )
+    ).toEqual({
+      origins: [
+        { point: { latitude: 10, longitude: 11 } },
+        { point: { latitude: 20, longitude: 21 } },
+      ],
+      destinations: [
+        { point: { latitude: 30, longitude: 31 } },
+        { point: { latitude: 40, longitude: 41 } },
+      ],
+      options: { travelMode: "car" },
+    });
+  });
 });
 
 describe("parseMatrix", () => {
-  it("places travel times by origin and destination index, with a zero diagonal", () => {
+  it("places travel times by origin and destination index", () => {
     const json = {
       data: [
+        { originIndex: 0, destinationIndex: 0, routeSummary: { travelTimeInSeconds: 12 } },
         { originIndex: 0, destinationIndex: 1, routeSummary: { travelTimeInSeconds: 100 } },
         { originIndex: 1, destinationIndex: 0, routeSummary: { travelTimeInSeconds: 90 } },
+        { originIndex: 1, destinationIndex: 1, routeSummary: { travelTimeInSeconds: 15 } },
       ],
     };
     expect(parseMatrix(json, 2)).toEqual([
-      [0, 100],
-      [90, 0],
+      [12, 100],
+      [90, 15],
     ]);
   });
 
   it("leaves unreported cells as Infinity so the optimizer avoids them", () => {
     const m = parseMatrix({ data: [] }, 2)!;
     expect(m[0][1]).toBe(Number.POSITIVE_INFINITY);
-    expect(m[0][0]).toBe(0);
+    expect(m[0][0]).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it("parses rectangular origin/destination matrices", () => {
+    const m = parseMatrix(
+      {
+        data: [
+          {
+            originIndex: 0,
+            destinationIndex: 1,
+            routeSummary: { travelTimeInSeconds: 42 },
+          },
+        ],
+      },
+      2,
+      3
+    )!;
+
+    expect(m).toHaveLength(2);
+    expect(m[0]).toHaveLength(3);
+    expect(m[0][1]).toBe(42);
+    expect(m[1][2]).toBe(Number.POSITIVE_INFINITY);
   });
 
   it("returns null when the response has no data array", () => {

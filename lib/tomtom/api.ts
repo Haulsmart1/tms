@@ -68,31 +68,59 @@ export function matrixUrl(key: string): string {
   return `${BASE}/routing/matrix/2?key=${encodeURIComponent(key)}`;
 }
 
+function matrixLocations(points: LatLng[]): object[] {
+  return points.map((p) => ({
+    point: { latitude: p.lat, longitude: p.lng },
+  }));
+}
+
 export function matrixBody(points: LatLng[]): object {
-  const list = points.map((p) => ({ point: { latitude: p.lat, longitude: p.lng } }));
-  return { origins: list, destinations: list, options: { travelMode: "car" } };
+  return matrixBodyBetween(points, points);
+}
+
+/** Matrix Routing v2 also supports distinct origins and destinations. This is
+    what Smart Optimize needs: each job exits from its final ordered stop and
+    enters at its first ordered stop. */
+export function matrixBodyBetween(
+  origins: LatLng[],
+  destinations: LatLng[]
+): object {
+  return {
+    origins: matrixLocations(origins),
+    destinations: matrixLocations(destinations),
+    options: { travelMode: "car" },
+  };
 }
 
 /** Unreported cells stay Infinity rather than 0: a zero would tell the
     optimizer an unreachable hop is free, which is exactly backwards. */
-export function parseMatrix(json: any, n: number): number[][] | null {
+export function parseMatrix(
+  json: any,
+  originCount: number,
+  destinationCount: number = originCount
+): number[][] | null {
   const data = json?.data;
   if (!Array.isArray(data)) return null;
-  const matrix = Array.from({ length: n }, () =>
-    Array<number>(n).fill(Number.POSITIVE_INFINITY)
+
+  const matrix = Array.from({ length: originCount }, () =>
+    Array<number>(destinationCount).fill(Number.POSITIVE_INFINITY)
   );
-  for (let i = 0; i < n; i++) matrix[i][i] = 0;
+
   for (const cell of data) {
     const i = cell?.originIndex;
     const j = cell?.destinationIndex;
     const t = cell?.routeSummary?.travelTimeInSeconds;
     if (
       Number.isInteger(i) && Number.isInteger(j) &&
-      i >= 0 && i < n && j >= 0 && j < n &&
-      typeof t === "number"
+      i >= 0 && i < originCount &&
+      j >= 0 && j < destinationCount &&
+      typeof t === "number" &&
+      !Number.isNaN(t) &&
+      t >= 0
     ) {
       matrix[i][j] = t;
     }
   }
+
   return matrix;
 }

@@ -17,7 +17,7 @@ import {
 } from "../../lib/planning/boardActions";
 import { formatDistance, formatDuration } from "../../lib/planning/format";
 import {
-  isRoutable, jobRepresentativePoint, laneWaypoints,
+  isRoutable, jobEntryPoint, jobExitPoint, jobRepresentativePoint, laneWaypoints,
 } from "../../lib/planning/waypoints";
 import { bestOrder } from "../../lib/planning/optimize";
 import { sanitizeTravelSeconds } from "../../lib/planning/matrix";
@@ -999,14 +999,27 @@ export default function PlanningPage() {
     setOptimizing(true);
     setMessage("");
     try {
-      const points = routable.flatMap((j) => {
-        const p = jobRepresentativePoint(j);
-        return p ? [p] : [];
+      const origins = routable.flatMap((job) => {
+        const point = jobExitPoint(job);
+        return point ? [point] : [];
       });
+      const destinations = routable.flatMap((job) => {
+        const point = jobEntryPoint(job);
+        return point ? [point] : [];
+      });
+
+      if (
+        origins.length !== routable.length ||
+        destinations.length !== routable.length
+      ) {
+        setMessage("Smart Optimize failed: one or more jobs has no route entry or exit.");
+        return;
+      }
+
       const response = await fetch("/api/tomtom/matrix", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ points }),
+        body: JSON.stringify({ origins, destinations }),
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null);
@@ -1016,16 +1029,28 @@ export default function PlanningPage() {
       const matrix = sanitizeTravelSeconds((await response.json())?.travelSeconds, routable.length);
       if (!matrix) { setMessage("Optimize failed."); return; }
       const order = bestOrder(matrix);
-      // The optimizer must never be able to delete jobs from a lane, whatever
-      // it returns: refuse any order that is not a full permutation.
-      if (order.length !== routable.length) {
-        setMessage("Optimize failed.");
+      // The optimizer must never delete, duplicate or invent jobs.
+      const uniqueIndexes = new Set(order);
+      if (
+        order.length !== routable.length ||
+        uniqueIndexes.size !== routable.length ||
+        order.some(
+          (index) =>
+            !Number.isInteger(index) ||
+            index < 0 ||
+            index >= routable.length
+        )
+      ) {
+        setMessage("Smart Optimize failed.");
         return;
       }
       const reordered = order
         .map((i) => routable[i].id)
         .concat(selectedLaneJobs.filter((j) => !isRoutable(j)).map((j) => j.id));
       setLaneOrders((prev) => ({ ...prev, [selectedVehicleId]: reordered }));
+      setMessage(
+        "Smart Optimize updated the proposed drop order. Review it, then Save plan to persist it."
+      );
       // The lane's order changed, so its cached route describes the old one.
       setRoutes((prev) => {
         const next = { ...prev };
@@ -1033,7 +1058,7 @@ export default function PlanningPage() {
         return next;
       });
     } catch {
-      setMessage("Optimize failed.");
+      setMessage("Smart Optimize failed.");
     } finally {
       setOptimizing(false);
     }
@@ -1329,8 +1354,8 @@ export default function PlanningPage() {
               }
             >
               {selectedVehicle
-                ? `Optimize ${selectedVehicle.registration}`
-                : "Optimize order"}
+                ? `Smart Optimize ${selectedVehicle.registration}`
+                : "Smart Optimize Route"}
             </Button>
 
             <Button
@@ -1350,8 +1375,8 @@ export default function PlanningPage() {
 
             <span className="basis-full text-xs text-ink-3">
               Drop order: drag cards between positions or use Up / Down.
-              Optimize reorders the selected vehicle only; Save plan persists
-              vehicle, driver and drop order.
+              Smart Optimize uses each job's final stop to next job's first stop;
+              Save plan persists vehicle, driver and drop order.
             </span>
           </section>
 

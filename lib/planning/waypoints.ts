@@ -18,10 +18,20 @@ export function jobWaypoints(job: PlanJob): LatLng[] {
   return sortedStops(job).map((s) => ({ lat: s.lat as number, lng: s.lng as number }));
 }
 
-/** The single point that stands in for the whole job during optimization
-    (the spec's "representative point": the first stop). */
-export function jobRepresentativePoint(job: PlanJob): LatLng | null {
+/** The first ordered stop of a routable job. */
+export function jobEntryPoint(job: PlanJob): LatLng | null {
   return jobWaypoints(job)[0] ?? null;
+}
+
+/** The final ordered stop of a routable job. */
+export function jobExitPoint(job: PlanJob): LatLng | null {
+  const points = jobWaypoints(job);
+  return points.length > 0 ? points[points.length - 1] : null;
+}
+
+/** Kept for map markers and backwards compatibility. */
+export function jobRepresentativePoint(job: PlanJob): LatLng | null {
+  return jobEntryPoint(job);
 }
 
 /** Waypoints for one vehicle's day: jobs in lane order, stops in stop_order,
