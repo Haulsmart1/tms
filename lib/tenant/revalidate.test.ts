@@ -56,6 +56,16 @@ describe("decideResolveMode", () => {
     expect(
       decideResolveMode({ event: "INITIAL_SESSION", ...ready, eventUserId: "u1" })
     ).toBe("skip");
+    expect(
+      decideResolveMode({ event: "PASSWORD_RECOVERY", ...ready, eventUserId: "u1" })
+    ).toBe("skip");
+    expect(
+      decideResolveMode({
+        event: "MFA_CHALLENGE_VERIFIED",
+        ...ready,
+        eventUserId: "u1",
+      })
+    ).toBe("skip");
   });
 });
 

@@ -1,3 +1,5 @@
+import type { AuthChangeEvent } from "@supabase/supabase-js";
+
 export type ResolveMode = "blocking" | "background" | "skip";
 
 /* A background revalidate costs two Supabase round trips. Tab-switching fires
@@ -8,7 +10,7 @@ export type ResolveMode = "blocking" | "background" | "skip";
 export const REVALIDATE_MIN_INTERVAL_MS = 5 * 60 * 1000;
 
 export function decideResolveMode(input: {
-  event: string;
+  event: AuthChangeEvent;
   hasReadyContext: boolean;
   currentUserId: string | null;
   eventUserId: string | null;
@@ -42,5 +44,8 @@ export function shouldRevalidate(input: {
     minIntervalMs = REVALIDATE_MIN_INTERVAL_MS,
   } = input;
   if (lastResolvedAt === null) return true;
+  /* A negative delta means the clock moved backwards (system clock change,
+     device sleep/wake skew, and similar). Treat that as too soon rather than
+     overdue, so a wonky clock cannot trigger a burst of revalidates. */
   return now - lastResolvedAt >= minIntervalMs;
 }
