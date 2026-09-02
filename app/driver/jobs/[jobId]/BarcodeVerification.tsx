@@ -1,10 +1,15 @@
-
 "use client";
 
 import {
   useMemo,
   useState,
 } from "react";
+import CameraBarcodeScanner from "./CameraBarcodeScanner";
+import {
+  submitBarcodeScan,
+  type BarcodeSubmitResult,
+  type CameraScanFormat,
+} from "../../../../lib/driver/cameraBarcode";
 
 type JobItem = {
   id: string;
@@ -24,13 +29,6 @@ type JobItemScan = {
   scan_format: string | null;
   scanned_by: string | null;
   scanned_at: string;
-};
-
-type ScanResponse = {
-  ok?: boolean;
-  duplicate?: boolean;
-  message?: string;
-  error?: string;
 };
 
 export default function BarcodeVerification({
@@ -100,9 +98,9 @@ export default function BarcodeVerification({
       (total, item) =>
         total +
         item.expectedSerials.filter(
-          (serial) =>
+          (expectedSerial) =>
             verifiedKeys.has(
-              `${item.id}\u0000${serial}`,
+              `${item.id}\u0000${expectedSerial}`,
             ),
         ).length,
       0,
@@ -124,16 +122,45 @@ export default function BarcodeVerification({
     return null;
   }
 
-  async function verifySerial() {
-    const value =
-      serial.trim();
+  const endpoint =
+    `/api/driver/jobs/${encodeURIComponent(jobId)}` +
+    `/stops/${encodeURIComponent(stopId)}/scans`;
 
-    if (!value) {
+  async function submitSerial(
+    value: string,
+    scanFormat:
+      | "manual"
+      | CameraScanFormat,
+  ): Promise<BarcodeSubmitResult> {
+    const submittedValue =
+      scanFormat === "manual"
+        ? value.trim()
+        : value;
+
+    if (!submittedValue) {
+      const validationMessage =
+        "Enter or scan a barcode / serial number.";
+
       setMessage("");
       setError(
-        "Enter or scan a barcode / serial number.",
+        validationMessage,
       );
-      return;
+
+      return {
+        ok: false,
+        duplicate: false,
+        message:
+          validationMessage,
+      };
+    }
+
+    if (busy) {
+      return {
+        ok: false,
+        duplicate: false,
+        message:
+          "A barcode is already being verified.",
+      };
     }
 
     setBusy(true);
@@ -141,52 +168,64 @@ export default function BarcodeVerification({
     setError("");
 
     try {
-      const response =
-        await fetch(
-          `/api/driver/jobs/${encodeURIComponent(jobId)}/stops/${encodeURIComponent(stopId)}/scans`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-            body: JSON.stringify({
-              serial_number:
-                value,
-              scan_format:
-                "manual",
-            }),
-          },
+      const outcome =
+        await submitBarcodeScan(
+          fetch,
+          endpoint,
+          submittedValue,
+          scanFormat,
         );
 
-      const body =
-        (await response.json()) as ScanResponse;
-
-      if (!response.ok) {
-        throw new Error(
-          body.error ||
-            "Unable to verify this item.",
-        );
+      if (
+        scanFormat ===
+        "manual"
+      ) {
+        setSerial("");
       }
 
-      setSerial("");
-
       setMessage(
-        body.duplicate
-          ? "Already verified on this job."
-          : "Item verified.",
+        outcome.message,
       );
 
       await onChanged();
+
+      return outcome;
     } catch (scanError) {
-      setError(
+      const errorMessage =
         scanError instanceof Error
           ? scanError.message
-          : "Unable to verify this item.",
+          : "Unable to verify this item.";
+
+      setError(
+        errorMessage,
       );
+
+      return {
+        ok: false,
+        duplicate: false,
+        message:
+          errorMessage,
+      };
     } finally {
       setBusy(false);
     }
+  }
+
+  async function verifyManualSerial() {
+    await submitSerial(
+      serial,
+      "manual",
+    );
+  }
+
+  async function verifyCameraSerial(
+    value: string,
+    scanFormat: CameraScanFormat,
+  ): Promise<BarcodeSubmitResult> {
+    return submitSerial(
+      value,
+      scanFormat,
+    );
   }
 
   return (
@@ -260,6 +299,13 @@ export default function BarcodeVerification({
         )}
       </div>
 
+      <CameraBarcodeScanner
+        disabled={busy}
+        onScan={
+          verifyCameraSerial
+        }
+      />
+
       <label className="mt-4 block">
         <span className="text-xs font-black uppercase tracking-wide text-slate-600">
           Barcode / serial
@@ -283,7 +329,7 @@ export default function BarcodeVerification({
               "Enter"
             ) {
               event.preventDefault();
-              void verifySerial();
+              void verifyManualSerial();
             }
           }}
           className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base outline-none focus:border-blue-600"
@@ -295,7 +341,7 @@ export default function BarcodeVerification({
         type="button"
         disabled={busy}
         onClick={() =>
-          void verifySerial()
+          void verifyManualSerial()
         }
         className="mt-2 min-h-12 w-full rounded-xl bg-blue-700 px-4 text-sm font-black text-white disabled:opacity-50"
       >
@@ -305,7 +351,7 @@ export default function BarcodeVerification({
       </button>
 
       <p className="mt-2 text-xs text-slate-500">
-        Camera scanning will use the same server-side verification. Manual entry remains available as a fallback.
+        Camera and manual entry use the same server-side job, assignment, serial and duplicate checks.
       </p>
 
       {message ? (
