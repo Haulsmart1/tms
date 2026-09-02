@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import BarcodeVerification from "./BarcodeVerification";
 import {
   type ChangeEvent,
   use,
@@ -19,6 +20,26 @@ type PodEvidence = {
   mime_type: string | null;
   file_size_bytes: number | null;
   created_at: string;
+};
+
+type JobItem = {
+  id: string;
+  sku: string | null;
+  description: string | null;
+  quantity: number;
+  serial_numbers: string[] | null;
+  external_reference: string | null;
+  notes: string | null;
+};
+
+type JobItemScan = {
+  id: string;
+  stop_id: string;
+  job_item_id: string;
+  serial_number: string;
+  scan_format: string | null;
+  scanned_by: string | null;
+  scanned_at: string;
 };
 
 type Stop = {
@@ -52,6 +73,8 @@ type Job = {
   notes: string | null;
   pod_status: string | null;
   completed_at: string | null;
+  items: JobItem[];
+  scans: JobItemScan[];
   stops: Stop[];
 };
 
@@ -243,6 +266,8 @@ export default function DriverJobPage({
                   key={stop.id}
                   jobId={job.id}
                   stop={stop}
+                  items={job.items}
+                  scans={job.scans}
                   onChanged={loadJob}
                 />
               ),
@@ -263,10 +288,14 @@ export default function DriverJobPage({
 function StopCard({
   jobId,
   stop,
+  items,
+  scans,
   onChanged,
 }: {
   jobId: string;
   stop: Stop;
+  items: JobItem[];
+  scans: JobItemScan[];
   onChanged: () => Promise<void>;
 }) {
   const isCollection =
@@ -514,6 +543,14 @@ function StopCard({
             }
           />
         </div>
+
+        <BarcodeVerification
+          jobId={jobId}
+          stopId={stop.id}
+          items={items}
+          scans={scans}
+          onChanged={onChanged}
+        />
 
         {isDelivery ? (
           <div className="mt-5 border-t border-slate-100 pt-5">

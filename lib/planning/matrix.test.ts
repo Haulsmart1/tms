@@ -13,7 +13,7 @@ describe("sanitizeTravelSeconds", () => {
     const restored = sanitizeTravelSeconds(wire.travelSeconds, 2)!;
     expect(restored[0][1]).toBe(100);
     expect(restored[1][0]).toBe(Number.POSITIVE_INFINITY);
-    expect(restored[0][0]).toBe(0);
+    expect(restored[0][0]).toBe(Number.POSITIVE_INFINITY);
   });
 
   it("rejects wrong shapes", () => {

@@ -8,6 +8,8 @@ import TenantGate from "../components/TenantGate";
 import JobForm from "./JobForm";
 import StopCard from "./StopCard";
 import DeleteJobDialog from "./DeleteJobDialog";
+import JobLabelPrinter from "./JobLabelPrinter";
+import MasterLoadBuilder from "./MasterLoadBuilder";
 import Button from "../../components/Button";
 
 const emptyStop = (type: "collection" | "delivery") => ({ type, address_line: "", city: "", postcode: "" });
@@ -93,7 +95,8 @@ export default function JobsPage() {
         accepted_at, accepted_by, collection_eta, delivery_eta, acceptance_note,
         customers ( name ), vehicles ( registration ), drivers ( name ),
         subcontractors ( name, vehicle_reg, driver_name ),
-        job_stops ( id, stop_order, type, address_line, city, postcode, status, pod_status, recipient_name, delivered_at, pod_notes, pod_photo_url )
+        job_stops ( id, stop_order, type, address_line, city, postcode, status, pod_status, recipient_name, delivered_at, pod_notes, pod_photo_url ),
+        job_items ( id, sku, description, quantity, serial_numbers, external_reference, notes )
       `);
 
     const { data: jobsData, error: jobsError } = await tenant.filterByTenant(jobsQuery).order("created_at", { ascending: false });
@@ -1093,6 +1096,13 @@ export default function JobsPage() {
                 </div>
               </div>
 
+              <MasterLoadBuilder
+                jobs={jobs}
+                vehicles={vehicles}
+                drivers={drivers}
+                tenantId={tenant.activeTenantId}
+              />
+
               {/* COMPACT JOB LIST */}
               <div className="overflow-x-auto rounded-lg border border-line bg-surface shadow-sm">
                 <div className="min-w-[1080px]">
@@ -1266,6 +1276,15 @@ export default function JobsPage() {
                                       Send to Planning
                                     </Button>
                                   ) : null}
+
+                                  <JobLabelPrinter
+                                    jobReference={job.reference}
+                                    customerName={
+                                      job.customers?.name ?? null
+                                    }
+                                    stops={job.job_stops ?? []}
+                                    items={job.job_items ?? []}
+                                  />
 
                                   <Button
                                     type="button"

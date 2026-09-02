@@ -102,6 +102,42 @@ export async function GET(
       throw new Error(evidenceError.message);
     }
 
+    const {
+      data: items,
+      error: itemsError,
+    } = await admin
+      .from("job_items")
+      .select(
+        "id,sku,description,quantity,serial_numbers,external_reference,notes",
+      )
+      .eq("tenant_id", session.tenantId)
+      .eq("job_id", job.id)
+      .order("created_at", {
+        ascending: true,
+      });
+
+    if (itemsError) {
+      throw new Error(itemsError.message);
+    }
+
+    const {
+      data: scans,
+      error: scansError,
+    } = await admin
+      .from("job_item_scans")
+      .select(
+        "id,stop_id,job_item_id,serial_number,scan_format,scanned_by,scanned_at",
+      )
+      .eq("tenant_id", session.tenantId)
+      .eq("job_id", job.id)
+      .order("scanned_at", {
+        ascending: true,
+      });
+
+    if (scansError) {
+      throw new Error(scansError.message);
+    }
+
     const evidenceByStop =
       new Map<string, typeof evidence>();
 
@@ -120,6 +156,8 @@ export async function GET(
       portalType: session.portalType,
       job: {
         ...job,
+        items: items ?? [],
+        scans: scans ?? [],
         stops: (stops ?? []).map(
           (stop) => ({
             ...stop,
