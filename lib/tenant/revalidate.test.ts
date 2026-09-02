@@ -103,3 +103,66 @@ describe("shouldRevalidate", () => {
     expect(shouldRevalidate({ lastResolvedAt: 10000, now: 0 })).toBe(false);
   });
 });
+
+import { applyRevalidation, tenantContextEquals } from "./revalidate";
+import type { TenantContextData } from "./context";
+
+const READY: TenantContextData = {
+  status: "ready",
+  role: "admin",
+  companyId: "c1",
+  homeTenantId: "t1",
+  tenants: [{ id: "t1", name: "Depot A" }, { id: "t2", name: "Depot B" }],
+};
+
+describe("tenantContextEquals", () => {
+  it("treats a structurally identical context as equal", () => {
+    expect(tenantContextEquals(READY, { ...READY, tenants: [...READY.tenants] }))
+      .toBe(true);
+  });
+
+  it("notices a changed role", () => {
+    expect(tenantContextEquals(READY, { ...READY, role: "staff" })).toBe(false);
+  });
+
+  it("notices a tenant added, removed, renamed or reordered", () => {
+    expect(tenantContextEquals(READY, { ...READY, tenants: [READY.tenants[0]] }))
+      .toBe(false);
+    expect(
+      tenantContextEquals(READY, {
+        ...READY,
+        tenants: [{ id: "t1", name: "Depot A (renamed)" }, READY.tenants[1]],
+      })
+    ).toBe(false);
+    expect(
+      tenantContextEquals(READY, {
+        ...READY,
+        tenants: [READY.tenants[1], READY.tenants[0]],
+      })
+    ).toBe(false);
+  });
+});
+
+describe("applyRevalidation", () => {
+  it("keeps the last-good context when the request failed", () => {
+    expect(applyRevalidation(READY, { ok: false })).toBe(READY);
+  });
+
+  it("keeps the previous reference when nothing changed", () => {
+    const next = { ...READY, tenants: [...READY.tenants] };
+    expect(applyRevalidation(READY, { ok: true, data: next })).toBe(READY);
+  });
+
+  it("adopts a genuinely changed context", () => {
+    const next = { ...READY, role: "staff" as const };
+    expect(applyRevalidation(READY, { ok: true, data: next })).toBe(next);
+  });
+
+  it("honours a real loss of access", () => {
+    const gone: TenantContextData = { ...READY, status: "no-tenant", tenants: [] };
+    expect(applyRevalidation(READY, { ok: true, data: gone })).toBe(gone);
+
+    const out: TenantContextData = { ...READY, status: "signed-out" };
+    expect(applyRevalidation(READY, { ok: true, data: out })).toBe(out);
+  });
+});

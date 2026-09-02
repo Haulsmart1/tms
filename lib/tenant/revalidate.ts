@@ -1,4 +1,5 @@
 import type { AuthChangeEvent } from "@supabase/supabase-js";
+import type { TenantContextData } from "./context";
 
 export type ResolveMode = "blocking" | "background" | "skip";
 
@@ -48,4 +49,39 @@ export function shouldRevalidate(input: {
      device sleep/wake skew, and similar). Treat that as too soon rather than
      overdue, so a wonky clock cannot trigger a burst of revalidates. */
   return now - lastResolvedAt >= minIntervalMs;
+}
+
+export type RevalidationResult =
+  | { ok: true; data: TenantContextData }
+  /* ok: false means "we could not check", not "you are out". A network blip on
+     tab-in must never blow away a form the user is filling in. */
+  | { ok: false };
+
+export function tenantContextEquals(
+  a: TenantContextData,
+  b: TenantContextData
+): boolean {
+  if (
+    a.status !== b.status ||
+    a.role !== b.role ||
+    a.companyId !== b.companyId ||
+    a.homeTenantId !== b.homeTenantId ||
+    a.tenants.length !== b.tenants.length
+  ) {
+    return false;
+  }
+  return a.tenants.every(
+    (t, i) => t.id === b.tenants[i].id && t.name === b.tenants[i].name
+  );
+}
+
+export function applyRevalidation(
+  prev: TenantContextData,
+  result: RevalidationResult
+): TenantContextData {
+  if (!result.ok) return prev;
+  /* Returning prev by reference makes setData a no-op, so status and the
+     effects keyed on it stay put. */
+  if (tenantContextEquals(prev, result.data)) return prev;
+  return result.data;
 }
