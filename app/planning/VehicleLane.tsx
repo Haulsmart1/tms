@@ -28,6 +28,7 @@ type Props = {
   onDriverChange: (driverId: string | null) => void;
   onOpenJob: (jobId: string) => void;
   onAcceptJob: (jobId: string) => void;
+  onMoveJob: (jobId: string, offset: -1 | 1) => void;
   /** beforeJobId null means append to the end of the lane. */
   onDropJob: (draggedJobId: string, beforeJobId: string | null) => void;
 };
@@ -36,7 +37,7 @@ export default function VehicleLane({
   vehicle, jobs, driverId, drivers, selected, summary, regimeSummary,
   compliance,
   geocodeSettled, driverConflict, onSelect, onDriverChange, onOpenJob,
-  onAcceptJob, onDropJob,
+  onAcceptJob, onMoveJob, onDropJob,
 }: Props) {
   function handleDragOver(e: DragEvent) {
     e.preventDefault();
@@ -189,6 +190,10 @@ export default function VehicleLane({
             geocodeSettled={geocodeSettled}
             onOpen={onOpenJob}
             onAccept={onAcceptJob}
+            canMoveUp={index > 0}
+            canMoveDown={index < jobs.length - 1}
+            onMoveUp={() => onMoveJob(job.id, -1)}
+            onMoveDown={() => onMoveJob(job.id, 1)}
             onDropBefore={(draggedId) => onDropJob(draggedId, job.id)}
           />
         ))}

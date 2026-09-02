@@ -17,6 +17,12 @@ type Props = {
   onDropBefore?: (draggedJobId: string) => void;
   onOpen?: (jobId: string) => void;
   onAccept?: (jobId: string) => void;
+  selected?: boolean;
+  onSelectedChange?: (selected: boolean) => void;
+  canMoveUp?: boolean;
+  canMoveDown?: boolean;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 };
 
 export const JOB_ID_MIME = "text/plain";
@@ -29,6 +35,12 @@ export default function PlanJobCard({
   onDropBefore,
   onOpen,
   onAccept,
+  selected = false,
+  onSelectedChange,
+  canMoveUp = false,
+  canMoveDown = false,
+  onMoveUp,
+  onMoveDown,
 }: Props) {
   const dragged = useRef(false);
   const stops = sortedStops(job);
@@ -97,8 +109,28 @@ export default function PlanJobCard({
       onDragEnd={handleDragEnd}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
-      className="cursor-grab rounded-md border border-line bg-surface px-2.5 py-2 text-sm shadow-sm active:cursor-grabbing"
+      className={`cursor-grab rounded-md border bg-surface px-2.5 py-2 text-sm shadow-sm active:cursor-grabbing ${
+        selected ? "border-primary ring-1 ring-primary" : "border-line"
+      }`}
     >
+      {onSelectedChange ? (
+        <label
+          className="mb-1.5 flex cursor-pointer items-center gap-2 text-xs font-medium text-ink-2"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <input
+            type="checkbox"
+            draggable={false}
+            checked={selected}
+            onChange={(e) => onSelectedChange(e.currentTarget.checked)}
+            onClick={(e) => e.stopPropagation()}
+            className="h-4 w-4"
+          />
+          Select job
+        </label>
+      ) : null}
+
       <p className="font-semibold text-ink">
         {sequence !== null ? `${sequence} · ` : ""}
         {job.reference ?? "No reference"}
@@ -122,6 +154,44 @@ export default function PlanJobCard({
       <p className="text-xs text-ink-3">
         {job.customer_name ?? "No customer"} · {placeSummary}
       </p>
+
+      {sequence !== null && (onMoveUp || onMoveDown) ? (
+        <div
+          className="mt-2 flex items-center gap-1"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <span className="mr-1 text-xs text-ink-3">Drop {sequence}</span>
+
+          <button
+            type="button"
+            draggable={false}
+            disabled={!canMoveUp}
+            className="rounded border border-line px-2 py-0.5 text-xs text-ink disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onMoveUp?.();
+            }}
+          >
+            Up
+          </button>
+
+          <button
+            type="button"
+            draggable={false}
+            disabled={!canMoveDown}
+            className="rounded border border-line px-2 py-0.5 text-xs text-ink disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onMoveDown?.();
+            }}
+          >
+            Down
+          </button>
+        </div>
+      ) : null}
 
       {job.status === "pending_acceptance" ? (
         <div className="mt-2 flex items-center justify-between gap-2">

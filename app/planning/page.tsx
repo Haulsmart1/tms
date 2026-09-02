@@ -11,6 +11,10 @@ import UnassignedPool from "./UnassignedPool";
 import VehicleLane from "./VehicleLane";
 import { stopsNeedingGeocode } from "../../lib/planning/geocoding";
 import { computeSaveDiff, type LanePlan } from "../../lib/planning/saveDiff";
+import {
+  assignJobsToLane,
+  moveJobInLane,
+} from "../../lib/planning/boardActions";
 import { formatDistance, formatDuration } from "../../lib/planning/format";
 import {
   isRoutable, jobRepresentativePoint, laneWaypoints,
@@ -90,6 +94,10 @@ export default function PlanningPage() {
   const [laneOrders, setLaneOrders] = useState<Record<string, string[]>>({});
   const [laneDrivers, setLaneDrivers] = useState<Record<string, string | null>>({});
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
+  const [bulkVehicleId, setBulkVehicleId] = useState("");
+  const [selectedUnassignedJobIds, setSelectedUnassignedJobIds] = useState<Set<string>>(
+    new Set()
+  );
   const [routes, setRoutes] = useState<Record<string, RouteResult>>({});
   /* The diff the freshly loaded board already implies before the user touches
      anything. Loading normalises the saved plan (one driver per lane, jobs on
@@ -147,6 +155,15 @@ export default function PlanningPage() {
   const unassigned = useMemo(
     () => fleetJobs.filter((j) => !assignedIds.has(j.id)),
     [fleetJobs, assignedIds]
+  );
+
+  const selectedUnassignedCount = useMemo(
+    () =>
+      unassigned.reduce(
+        (count, job) => count + (selectedUnassignedJobIds.has(job.id) ? 1 : 0),
+        0
+      ),
+    [unassigned, selectedUnassignedJobIds]
   );
 
   const lanePlans: LanePlan[] = useMemo(
@@ -356,6 +373,8 @@ export default function PlanningPage() {
     if (isCancelled()) return;
     setPlanningTimeZone(loadedTimeZone);
     setJobs(loaded);
+    setSelectedUnassignedJobIds(new Set());
+    setBulkVehicleId("");
     setVehicles(vehicleList);
     setDrivers(driverData ?? []);
     setLaneOrders(orders);
@@ -545,6 +564,14 @@ export default function PlanningPage() {
   function moveJob(jobId: string, vehicleId: string | null, beforeJobId: string | null) {
     const job = jobById.get(jobId);
     if (!job || job.subcontractor_id) return;
+
+    setSelectedUnassignedJobIds((prev) => {
+      if (!prev.has(jobId)) return prev;
+      const next = new Set(prev);
+      next.delete(jobId);
+      return next;
+    });
+
     /* `routes` is keyed by vehicle id, so a cached route outlives the lane it
        described. Every lane this job leaves, plus the one it enters, now has a
        different composition: drop just those entries and let the route effect
@@ -769,6 +796,90 @@ export default function PlanningPage() {
     }
   }
 
+  function toggleUnassignedSelection(jobId: string, selected: boolean) {
+    if (!unassigned.some((job) => job.id === jobId)) return;
+
+    setSelectedUnassignedJobIds((prev) => {
+      const next = new Set(prev);
+
+      if (selected) {
+        next.add(jobId);
+      } else {
+        next.delete(jobId);
+      }
+
+      return next;
+    });
+  }
+
+  function selectAllUnassigned() {
+    setSelectedUnassignedJobIds(new Set(unassigned.map((job) => job.id)));
+  }
+
+  function clearUnassignedSelection() {
+    setSelectedUnassignedJobIds(new Set());
+  }
+
+  function assignSelectedToVehicle() {
+    const vehicleId = bulkVehicleId || selectedVehicleId;
+
+    if (!vehicleId || !vehicles.some((vehicle) => vehicle.id === vehicleId)) {
+      setMessage("Choose a vehicle before assigning selected jobs.");
+      return;
+    }
+
+    const selectedIds = unassigned
+      .filter((job) => selectedUnassignedJobIds.has(job.id))
+      .map((job) => job.id);
+
+    if (selectedIds.length === 0) {
+      setMessage("Check at least one unassigned job first.");
+      return;
+    }
+
+    setLaneOrders((prev) =>
+      assignJobsToLane(prev, selectedIds, vehicleId)
+    );
+
+    setRoutes((prev) => {
+      const next = { ...prev };
+      delete next[vehicleId];
+      return next;
+    });
+
+    setSelectedVehicleId(vehicleId);
+    setBulkVehicleId(vehicleId);
+    setSelectedUnassignedJobIds(new Set());
+    setMessage("");
+  }
+
+  function moveLaneJob(jobId: string, vehicleId: string, offset: -1 | 1) {
+    const currentLane = laneOrders[vehicleId] ?? [];
+    const currentIndex = currentLane.indexOf(jobId);
+
+    if (
+      currentIndex === -1 ||
+      currentIndex + offset < 0 ||
+      currentIndex + offset >= currentLane.length
+    ) {
+      return;
+    }
+
+    setLaneOrders((prev) =>
+      moveJobInLane(prev, vehicleId, jobId, offset)
+    );
+
+    setRoutes((prev) => {
+      const next = { ...prev };
+      delete next[vehicleId];
+      return next;
+    });
+
+    setSelectedVehicleId(vehicleId);
+    setBulkVehicleId(vehicleId);
+    setMessage("");
+  }
+
   async function savePlan() {
     if (saving || pendingUpdates.length === 0) return;
 
@@ -878,6 +989,9 @@ export default function PlanningPage() {
     }
   }
 
+  const selectedVehicle = selectedVehicleId
+    ? vehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? null
+    : null;
   const selectedRoute = selectedVehicleId ? (routes[selectedVehicleId] ?? null) : null;
   const selectedVehicleReading = selectedVehicleId
     ? (positions.get(selectedVehicleId) ?? null)
@@ -1005,15 +1119,7 @@ export default function PlanningPage() {
                 {formatDistance(selectedRoute.totalDistanceMeters)} · {formatDuration(selectedRoute.totalTravelTimeSeconds)}
               </span>
             ) : null}
-            {dirty ? <span className="text-xs text-ink-3">Unsaved changes</span> : null}
-            <span className="ml-auto flex gap-2">
-              <Button variant="secondary" size="sm" onClick={optimize} loading={optimizing}>
-                Optimize order
-              </Button>
-              <Button size="sm" onClick={savePlan} loading={saving} disabled={!dirty}>
-                Save plan
-              </Button>
-            </span>
+
           </header>
 
           {message ? <p className="text-sm text-danger">{message}</p> : null}
@@ -1091,6 +1197,100 @@ export default function PlanningPage() {
             now={positionNow}
           />
 
+          <section
+            aria-label="Planning actions"
+            className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-2 p-3"
+          >
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={selectAllUnassigned}
+              disabled={unassigned.length === 0}
+            >
+              Check all
+            </Button>
+
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={clearUnassignedSelection}
+              disabled={selectedUnassignedCount === 0}
+            >
+              Clear
+            </Button>
+
+            <span className="min-w-[80px] text-xs font-medium text-ink-2">
+              {selectedUnassignedCount} selected
+            </span>
+
+            <select
+              aria-label="Vehicle for selected jobs"
+              value={bulkVehicleId || selectedVehicleId || ""}
+              onChange={(e) => {
+                const vehicleId = e.target.value;
+                setBulkVehicleId(vehicleId);
+                setSelectedVehicleId(vehicleId || null);
+              }}
+              className="rounded-md border border-line bg-surface px-2 py-1.5 text-sm text-ink"
+            >
+              <option value="">Choose vehicle</option>
+              {vehicles.map((vehicle) => (
+                <option key={vehicle.id} value={vehicle.id}>
+                  {vehicle.registration}
+                </option>
+              ))}
+            </select>
+
+            <Button
+              size="sm"
+              onClick={assignSelectedToVehicle}
+              disabled={
+                selectedUnassignedCount === 0 ||
+                !(bulkVehicleId || selectedVehicleId)
+              }
+            >
+              Send selected to vehicle
+            </Button>
+
+            <span className="hidden h-7 w-px bg-line sm:block" aria-hidden />
+
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={optimize}
+              loading={optimizing}
+              disabled={
+                !selectedVehicleId ||
+                selectedLaneJobs.filter(isRoutable).length < 2
+              }
+            >
+              {selectedVehicle
+                ? `Optimize ${selectedVehicle.registration}`
+                : "Optimize order"}
+            </Button>
+
+            <Button
+              size="sm"
+              onClick={savePlan}
+              loading={saving}
+              disabled={!dirty}
+            >
+              Save plan
+            </Button>
+
+            <span className="text-xs text-ink-3">
+              {dirty
+                ? "Unsaved changes"
+                : "Plan saved"}
+            </span>
+
+            <span className="basis-full text-xs text-ink-3">
+              Drop order: drag cards between positions or use Up / Down.
+              Optimize reorders the selected vehicle only; Save plan persists
+              vehicle, driver and drop order.
+            </span>
+          </section>
+
           {loading ? (
             <p className="text-sm text-ink-3">Loading the day&apos;s jobs...</p>
           ) : (
@@ -1100,6 +1300,8 @@ export default function PlanningPage() {
                 subcontracted={subcontracted}
                 geocodeSettled={geocodeSettled && !geocodeUnavailable}
                 displacedNotes={displacedNotes}
+                selectedJobIds={selectedUnassignedJobIds}
+                onToggleJob={toggleUnassignedSelection}
                 onOpenJob={(jobId) =>
                   router.push(`/jobs?job=${encodeURIComponent(jobId)}`)
                 }
@@ -1140,7 +1342,10 @@ export default function PlanningPage() {
                       }
                       geocodeSettled={geocodeSettled && !geocodeUnavailable}
                       driverConflict={driverConflicts.has(v.id)}
-                      onSelect={() => setSelectedVehicleId(v.id)}
+                      onSelect={() => {
+                        setSelectedVehicleId(v.id);
+                        setBulkVehicleId(v.id);
+                      }}
                       onDriverChange={(driverId) =>
                         setLaneDrivers((prev) => ({ ...prev, [v.id]: driverId }))
                       }
@@ -1148,6 +1353,9 @@ export default function PlanningPage() {
                         router.push(`/jobs?job=${encodeURIComponent(jobId)}`)
                       }
                       onAcceptJob={openAcceptance}
+                      onMoveJob={(jobId, offset) =>
+                        moveLaneJob(jobId, v.id, offset)
+                      }
                       onDropJob={(jobId, beforeJobId) =>
                         moveJob(jobId, v.id, beforeJobId)
                       }
