@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
@@ -10,14 +11,35 @@ import UnassignedPool from "./UnassignedPool";
 import VehicleLane from "./VehicleLane";
 import { stopsNeedingGeocode } from "../../lib/planning/geocoding";
 import { computeSaveDiff, type LanePlan } from "../../lib/planning/saveDiff";
+import {
+  assignJobsToLane,
+  moveJobInLane,
+} from "../../lib/planning/boardActions";
 import { formatDistance, formatDuration } from "../../lib/planning/format";
 import {
-  isRoutable, jobRepresentativePoint, laneWaypoints,
+  isRoutable, jobEntryPoint, jobExitPoint, jobRepresentativePoint, laneWaypoints,
 } from "../../lib/planning/waypoints";
 import { bestOrder } from "../../lib/planning/optimize";
 import { sanitizeTravelSeconds } from "../../lib/planning/matrix";
 import type { PlanJob, RouteResult } from "../../lib/planning/types";
-import { operatorDay } from "../../lib/time";
+import { createSupabasePositionSource } from "../../lib/tracking/supabasePositions";
+import type { PositionReading } from "../../lib/tracking/position";
+import {
+  evaluatePlanningCompliance,
+  type PlanningCompliance,
+  type PlanningComplianceDriver,
+} from "../../lib/planning/compliance";
+import type { ComplianceVehicleFacts } from "../../lib/planning/regime";
+import {
+  summarizeLaneRegimes,
+  type LaneRegimeSummary,
+} from "../../lib/planning/laneRegime";
+import {
+  isValidIanaTimeZone,
+  OPERATOR_TIME_ZONE,
+  operatorDay,
+  operatorDayInTimeZone,
+} from "../../lib/time";
 
 /* Same embedded-relation normalisation as /tracking: Supabase returns an
    embedded relation as an object or a one-element array depending on how it
@@ -26,25 +48,56 @@ function rel(value: any): any {
   return Array.isArray(value) ? (value[0] ?? null) : (value ?? null);
 }
 
-type Vehicle = { id: string; registration: string };
-type VehicleRow = { id: string; registration: string; active: boolean };
-type Driver = { id: string; name: string };
+type Vehicle = {
+  id: string;
+  registration: string;
+} & ComplianceVehicleFacts;
+
+type VehicleRow = Vehicle & {
+  active: boolean;
+};
+type Driver = PlanningComplianceDriver;
 
 /* The geocode endpoint caps a batch at 100 stop ids and rejects anything
    larger with a 400 (it does not truncate), so the client chunks. */
 const GEOCODE_BATCH = 100;
+const POSITION_POLL_MS = 30_000;
 
 export default function PlanningPage() {
+  const router = useRouter();
   const supabase = createClient();
   const tenant = useTenant();
 
-  const [date, setDate] = useState(() => operatorDay(new Date()));
+  const [date, setDate] = useState(() => {
+    const fallback = operatorDay(new Date());
+
+    if (typeof window === "undefined") {
+      return fallback;
+    }
+
+    const requestedDate =
+      new URLSearchParams(window.location.search).get("date");
+
+    return requestedDate &&
+      /^\d{4}-\d{2}-\d{2}$/.test(requestedDate)
+      ? requestedDate
+      : fallback;
+  });
+  const [planningTimeZone, setPlanningTimeZone] = useState(OPERATOR_TIME_ZONE);
   const [jobs, setJobs] = useState<PlanJob[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [positions, setPositions] = useState<Map<string, PositionReading>>(
+    new Map()
+  );
+  const [positionNow, setPositionNow] = useState(() => new Date());
   const [laneOrders, setLaneOrders] = useState<Record<string, string[]>>({});
   const [laneDrivers, setLaneDrivers] = useState<Record<string, string | null>>({});
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
+  const [bulkVehicleId, setBulkVehicleId] = useState("");
+  const [selectedUnassignedJobIds, setSelectedUnassignedJobIds] = useState<Set<string>>(
+    new Set()
+  );
   const [routes, setRoutes] = useState<Record<string, RouteResult>>({});
   /* The diff the freshly loaded board already implies before the user touches
      anything. Loading normalises the saved plan (one driver per lane, jobs on
@@ -67,6 +120,19 @@ export default function PlanningPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [optimizing, setOptimizing] = useState(false);
+  const [acceptanceTarget, setAcceptanceTarget] = useState<{
+    jobs: {
+      id: string;
+      tenant_id: string;
+      reference: string | null;
+    }[];
+  } | null>(null);
+  const [acceptanceForm, setAcceptanceForm] = useState({
+    collection_eta: "",
+    delivery_eta: "",
+    acceptance_note: "",
+  });
+  const [accepting, setAccepting] = useState(false);
   const [message, setMessage] = useState("");
   const [mapNotice, setMapNotice] = useState<string | null>(null);
   /* Generation counter: each load claims the next value, and its predicate
@@ -76,6 +142,10 @@ export default function PlanningPage() {
   const loadSeq = useRef(0);
 
   const jobById = useMemo(() => new Map(jobs.map((j) => [j.id, j])), [jobs]);
+  const driverById = useMemo(
+    () => new Map(drivers.map((driver) => [driver.id, driver])),
+    [drivers]
+  );
 
   const fleetJobs = useMemo(() => jobs.filter((j) => !j.subcontractor_id), [jobs]);
   const subcontracted = useMemo(() => jobs.filter((j) => j.subcontractor_id), [jobs]);
@@ -87,6 +157,15 @@ export default function PlanningPage() {
   const unassigned = useMemo(
     () => fleetJobs.filter((j) => !assignedIds.has(j.id)),
     [fleetJobs, assignedIds]
+  );
+
+  const selectedUnassignedCount = useMemo(
+    () =>
+      unassigned.reduce(
+        (count, job) => count + (selectedUnassignedJobIds.has(job.id) ? 1 : 0),
+        0
+      ),
+    [unassigned, selectedUnassignedJobIds]
   );
 
   const lanePlans: LanePlan[] = useMemo(
@@ -114,41 +193,102 @@ export default function PlanningPage() {
     setGeocodeSettled(false);
     setGeocodeUnavailable(false);
     setRoutes({});
+    setPlanningTimeZone(OPERATOR_TIME_ZONE);
+
+    const profileQuery = tenant
+      .filterByTenant(
+        supabase.from("company_profiles").select("timezone")
+      )
+      .maybeSingle();
 
     const jobsQuery = supabase
       .from("jobs")
       .select(`
-        id, reference, status, scheduled_date, vehicle_id, driver_id,
-        subcontractor_id, route_order,
+        id, tenant_id, reference, status, scheduled_date, planning_date,
+        collection_eta, delivery_eta, acceptance_note, accepted_at, accepted_by,
+        vehicle_id, driver_id, subcontractor_id, route_order,
+        journey_scope, origin_country_code, destination_country_code,
+        compliance_regime_override, compliance_override_reason,
         customers ( name ),
         job_stops ( id, stop_order, type, address_line, city, postcode, lat, lng )
       `)
-      .eq("scheduled_date", date);
+      .or(
+        `planning_date.eq.${date},and(planning_date.is.null,scheduled_date.eq.${date})`
+      );
 
+    const { data: profileData, error: profileError } = await profileQuery;
     const { data: jobsData, error: jobsError } = await tenant
       .filterByTenant(jobsQuery)
       .order("created_at", { ascending: true });
     const { data: vehicleData, error: vehicleError } = await tenant
-      .filterByTenant(supabase.from("vehicles").select("id, registration, active"))
+      .filterByTenant(
+        supabase.from("vehicles").select(`
+          id,
+          registration,
+          active,
+          mam_kg,
+          trailer_mam_kg,
+          tachograph_fitted,
+          tachograph_type,
+          home_country_code
+        `)
+      )
       .order("registration", { ascending: true });
     const { data: driverData, error: driverError } = await tenant
-      .filterByTenant(supabase.from("drivers").select("id, name"))
+      .filterByTenant(
+        supabase.from("drivers").select(`
+          id,
+          name,
+          tachograph_required,
+          tachograph_card_number,
+          tachograph_expiry,
+          tachograph_next_download_due,
+          cpc_required,
+          cpc_qualified,
+          cpc_expiry
+        `)
+      )
       .eq("active", true)
       .order("name", { ascending: true });
 
     if (isCancelled()) return;
+    if (profileError) {
+      setMessage(`Company profile load error: ${profileError.message}`);
+      setLoading(false);
+      return;
+    }
     if (jobsError) { setMessage(`Jobs load error: ${jobsError.message}`); setLoading(false); return; }
     if (vehicleError) { setMessage(`Vehicles load error: ${vehicleError.message}`); setLoading(false); return; }
     if (driverError) { setMessage(`Drivers load error: ${driverError.message}`); setLoading(false); return; }
 
+    const profileTimeZone =
+      typeof profileData?.timezone === "string"
+        ? profileData.timezone.trim()
+        : "";
+    const loadedTimeZone =
+      profileTimeZone && isValidIanaTimeZone(profileTimeZone)
+        ? profileTimeZone
+        : OPERATOR_TIME_ZONE;
+
     const loaded: PlanJob[] = (jobsData ?? []).map((row: any) => ({
       id: row.id,
+      tenant_id: row.tenant_id,
       reference: row.reference,
       status: row.status,
+      collection_eta: row.collection_eta,
+      delivery_eta: row.delivery_eta,
+      acceptance_note: row.acceptance_note,
+      accepted_at: row.accepted_at,
+      accepted_by: row.accepted_by,
       vehicle_id: row.vehicle_id,
       driver_id: row.driver_id,
       subcontractor_id: row.subcontractor_id,
       route_order: row.route_order,
+      journey_scope: row.journey_scope,
+      origin_country_code: row.origin_country_code,
+      destination_country_code: row.destination_country_code,
+      compliance_regime_override: row.compliance_regime_override,
+      compliance_override_reason: row.compliance_override_reason,
       customer_name: rel(row.customers)?.name ?? null,
       stops: (row.job_stops ?? []).map((s: any) => ({
         id: s.id, stop_order: s.stop_order, type: s.type,
@@ -164,7 +304,15 @@ export default function PlanningPage() {
     const allVehicles: VehicleRow[] = vehicleData ?? [];
     const vehicleList: Vehicle[] = allVehicles
       .filter((v) => v.active)
-      .map((v) => ({ id: v.id, registration: v.registration }));
+      .map((v) => ({
+        id: v.id,
+        registration: v.registration,
+        mam_kg: v.mam_kg,
+        trailer_mam_kg: v.trailer_mam_kg,
+        tachograph_fitted: v.tachograph_fitted,
+        tachograph_type: v.tachograph_type,
+        home_country_code: v.home_country_code,
+      }));
     const activeVehicleIds = new Set(vehicleList.map((v) => v.id));
     const registrationById = new Map(allVehicles.map((v) => [v.id, v.registration]));
 
@@ -225,7 +373,10 @@ export default function PlanningPage() {
     }
 
     if (isCancelled()) return;
+    setPlanningTimeZone(loadedTimeZone);
     setJobs(loaded);
+    setSelectedUnassignedJobIds(new Set());
+    setBulkVehicleId("");
     setVehicles(vehicleList);
     setDrivers(driverData ?? []);
     setLaneOrders(orders);
@@ -298,6 +449,71 @@ export default function PlanningPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenant.status, tenant.activeTenantId, date]);
 
+  useEffect(() => {
+    if (tenant.status !== "ready") {
+      setPositions(new Map());
+      return;
+    }
+
+    let cancelled = false;
+    let inFlight = false;
+
+    async function loadPositions() {
+      if (inFlight) return;
+      inFlight = true;
+
+      const startedAt = new Date();
+
+      try {
+        const vehicleIds = vehicles.map((vehicle) => vehicle.id);
+        const source = createSupabasePositionSource(supabase, tenant);
+        const readings = await source.getPositions(vehicleIds);
+
+        if (cancelled) return;
+
+        setPositions(readings);
+        setPositionNow(startedAt);
+      } catch {
+        if (!cancelled) {
+          // Preserve the last known fixes across a transient refresh failure,
+          // but advance "now" so an old reading can correctly become stale.
+          setPositionNow(startedAt);
+        }
+      } finally {
+        inFlight = false;
+      }
+    }
+
+    loadPositions();
+
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        loadPositions();
+      }
+    }, POSITION_POLL_MS);
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        loadPositions();
+      }
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange
+      );
+    };
+
+    // supabase and tenant are stable providers for the lifetime of this
+    // tenant selection; vehicle membership is the trigger that matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenant.status, tenant.activeTenantId, vehicles]);
+
   // Route for the selected vehicle, refetched when its lane content changes.
   const selectedLaneJobs = useMemo(() => {
     if (!selectedVehicleId) return [];
@@ -350,6 +566,14 @@ export default function PlanningPage() {
   function moveJob(jobId: string, vehicleId: string | null, beforeJobId: string | null) {
     const job = jobById.get(jobId);
     if (!job || job.subcontractor_id) return;
+
+    setSelectedUnassignedJobIds((prev) => {
+      if (!prev.has(jobId)) return prev;
+      const next = new Set(prev);
+      next.delete(jobId);
+      return next;
+    });
+
     /* `routes` is keyed by vehicle id, so a cached route outlives the lane it
        described. Every lane this job leaves, plus the one it enters, now has a
        different composition: drop just those entries and let the route effect
@@ -380,15 +604,369 @@ export default function PlanningPage() {
     });
   }
 
+  function openAcceptanceTargets(targetJobs: PlanJob[]) {
+    const pendingTargets = targetJobs.filter(
+      (job) => job.status === "pending_acceptance"
+    );
+
+    if (pendingTargets.length === 0) {
+      setMessage("There are no jobs awaiting acceptance.");
+      return;
+    }
+
+    if (pendingTargets.some((job) => !job.tenant_id)) {
+      setMessage(
+        "Cannot accept these jobs because tenant information is unavailable."
+      );
+      return;
+    }
+
+    const pendingJobs = pendingTargets.filter(
+      (job): job is PlanJob & { tenant_id: string } =>
+        typeof job.tenant_id === "string" && job.tenant_id.length > 0
+    );
+
+    if (pendingJobs.length !== pendingTargets.length) {
+      setMessage(
+        "Cannot accept these jobs because tenant information is unavailable."
+      );
+      return;
+    }
+
+    const tenantIds = new Set(pendingJobs.map((job) => job.tenant_id));
+
+    if (tenantIds.size !== 1) {
+      setMessage("Cannot accept jobs belonging to different tenants together.");
+      return;
+    }
+
+    setMessage("");
+    setAcceptanceTarget({
+      jobs: pendingJobs.map((job) => ({
+        id: job.id,
+        tenant_id: job.tenant_id,
+        reference: job.reference,
+      })),
+    });
+    setAcceptanceForm({
+      collection_eta: "",
+      delivery_eta: "",
+      acceptance_note: "",
+    });
+  }
+
+  function openAcceptance(jobId: string) {
+    const job = jobById.get(jobId);
+
+    if (!job || job.status !== "pending_acceptance") {
+      setMessage("This job is no longer awaiting acceptance.");
+      return;
+    }
+
+    openAcceptanceTargets([job]);
+  }
+
+  function openAcceptAllPending() {
+    openAcceptanceTargets(
+      jobs.filter((job) => job.status === "pending_acceptance")
+    );
+  }
+
+  function cancelAcceptance() {
+    if (accepting) {
+      return;
+    }
+
+    setAcceptanceTarget(null);
+    setAcceptanceForm({
+      collection_eta: "",
+      delivery_eta: "",
+      acceptance_note: "",
+    });
+  }
+
+  async function confirmAcceptance() {
+    if (!acceptanceTarget || accepting) {
+      return;
+    }
+
+    setMessage("");
+
+    if (!acceptanceForm.collection_eta) {
+      setMessage("Enter a collection ETA before accepting the job.");
+      return;
+    }
+
+    const collectionDate = new Date(acceptanceForm.collection_eta);
+
+    if (Number.isNaN(collectionDate.getTime())) {
+      setMessage("Enter a valid collection ETA.");
+      return;
+    }
+
+    let deliveryDate: Date | null = null;
+
+    if (acceptanceForm.delivery_eta) {
+      deliveryDate = new Date(acceptanceForm.delivery_eta);
+
+      if (Number.isNaN(deliveryDate.getTime())) {
+        setMessage("Enter a valid delivery ETA.");
+        return;
+      }
+
+      if (deliveryDate.getTime() < collectionDate.getTime()) {
+        setMessage(
+          "Delivery ETA cannot be earlier than collection ETA."
+        );
+        return;
+      }
+    }
+
+    const targets = acceptanceTarget.jobs;
+
+    if (targets.length === 0) {
+      setMessage("There are no jobs awaiting acceptance.");
+      setAcceptanceTarget(null);
+      return;
+    }
+
+    const tenantIds = new Set(targets.map((target) => target.tenant_id));
+
+    if (tenantIds.size !== 1) {
+      setMessage("Cannot accept jobs belonging to different tenants together.");
+      return;
+    }
+
+    const tenantId = targets[0].tenant_id;
+    const targetIds = Array.from(
+      new Set(targets.map((target) => target.id))
+    );
+
+    if (targetIds.length !== targets.length) {
+      setMessage("Acceptance stopped because duplicate jobs were selected.");
+      return;
+    }
+
+    setAccepting(true);
+
+    try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        setMessage(
+          "Your session has expired. Please sign in again."
+        );
+        return;
+      }
+
+      const acceptedAt = new Date().toISOString();
+      const collectionEta = collectionDate.toISOString();
+      const deliveryEta = deliveryDate
+        ? deliveryDate.toISOString()
+        : null;
+      const acceptanceNote =
+        acceptanceForm.acceptance_note.trim() || null;
+
+      const {
+        data: acceptedJobs,
+        error: acceptanceError,
+      } = await supabase
+        .from("jobs")
+        .update({
+          status: "planned",
+          accepted_at: acceptedAt,
+          accepted_by: user.id,
+          collection_eta: collectionEta,
+          delivery_eta: deliveryEta,
+          acceptance_note: acceptanceNote,
+        })
+        .in("id", targetIds)
+        .eq("tenant_id", tenantId)
+        .eq("status", "pending_acceptance")
+        .select("id");
+
+      if (acceptanceError) {
+        setMessage(
+          `Accept job error: ${acceptanceError.message}`
+        );
+        return;
+      }
+
+      const acceptedIds = new Set(
+        (acceptedJobs ?? []).map((job) => job.id)
+      );
+
+      if (acceptedIds.size !== targetIds.length) {
+        const failure =
+          acceptedIds.size === 0
+            ? "These jobs have already been accepted or are no longer awaiting acceptance."
+            : `${acceptedIds.size} of ${targetIds.length} jobs were accepted. The board has been reloaded because another job changed.`;
+
+        setAcceptanceTarget(null);
+
+        const seq = ++loadSeq.current;
+        await loadData(() => loadSeq.current !== seq);
+        setMessage(failure);
+        return;
+      }
+
+      setJobs((prev) =>
+        prev.map((job) =>
+          acceptedIds.has(job.id)
+            ? {
+                ...job,
+                status: "planned",
+                collection_eta: collectionEta,
+                delivery_eta: deliveryEta,
+                acceptance_note: acceptanceNote,
+                accepted_at: acceptedAt,
+                accepted_by: user.id,
+              }
+            : job
+        )
+      );
+
+      setMessage(
+        targetIds.length === 1
+          ? `Job ${targets[0].reference ?? targets[0].id} accepted.`
+          : `${targetIds.length} jobs accepted.`
+      );
+
+      setAcceptanceTarget(null);
+      setAcceptanceForm({
+        collection_eta: "",
+        delivery_eta: "",
+        acceptance_note: "",
+      });
+    } finally {
+      setAccepting(false);
+    }
+  }
+
+  function toggleUnassignedSelection(jobId: string, selected: boolean) {
+    if (!unassigned.some((job) => job.id === jobId)) return;
+
+    setSelectedUnassignedJobIds((prev) => {
+      const next = new Set(prev);
+
+      if (selected) {
+        next.add(jobId);
+      } else {
+        next.delete(jobId);
+      }
+
+      return next;
+    });
+  }
+
+  function selectAllUnassigned() {
+    setSelectedUnassignedJobIds(new Set(unassigned.map((job) => job.id)));
+  }
+
+  function clearUnassignedSelection() {
+    setSelectedUnassignedJobIds(new Set());
+  }
+
+  function assignSelectedToVehicle() {
+    const vehicleId = bulkVehicleId || selectedVehicleId;
+
+    if (!vehicleId || !vehicles.some((vehicle) => vehicle.id === vehicleId)) {
+      setMessage("Choose a vehicle before assigning selected jobs.");
+      return;
+    }
+
+    const selectedIds = unassigned
+      .filter((job) => selectedUnassignedJobIds.has(job.id))
+      .map((job) => job.id);
+
+    if (selectedIds.length === 0) {
+      setMessage("Check at least one unassigned job first.");
+      return;
+    }
+
+    setLaneOrders((prev) =>
+      assignJobsToLane(prev, selectedIds, vehicleId)
+    );
+
+    setRoutes((prev) => {
+      const next = { ...prev };
+      delete next[vehicleId];
+      return next;
+    });
+
+    setSelectedVehicleId(vehicleId);
+    setBulkVehicleId(vehicleId);
+    setSelectedUnassignedJobIds(new Set());
+    setMessage("");
+  }
+
+  function moveLaneJob(jobId: string, vehicleId: string, offset: -1 | 1) {
+    const currentLane = laneOrders[vehicleId] ?? [];
+    const currentIndex = currentLane.indexOf(jobId);
+
+    if (
+      currentIndex === -1 ||
+      currentIndex + offset < 0 ||
+      currentIndex + offset >= currentLane.length
+    ) {
+      return;
+    }
+
+    setLaneOrders((prev) =>
+      moveJobInLane(prev, vehicleId, jobId, offset)
+    );
+
+    setRoutes((prev) => {
+      const next = { ...prev };
+      delete next[vehicleId];
+      return next;
+    });
+
+    setSelectedVehicleId(vehicleId);
+    setBulkVehicleId(vehicleId);
+    setMessage("");
+  }
+
   async function savePlan() {
     if (saving || pendingUpdates.length === 0) return;
+
+    const missingTenantUpdate = pendingUpdates.find(
+      (update) => !jobById.get(update.id)?.tenant_id
+    );
+
+    if (missingTenantUpdate) {
+      setMessage(
+        "Save error: one or more jobs are missing tenant information."
+      );
+      return;
+    }
+
     setSaving(true);
     setMessage("");
+
     for (const u of pendingUpdates) {
+      const tenantId = jobById.get(u.id)?.tenant_id;
+
+      if (!tenantId) {
+        setMessage(
+          "Save error: one or more jobs are missing tenant information."
+        );
+        setSaving(false);
+        return;
+      }
+
       const { error } = await supabase
         .from("jobs")
-        .update({ vehicle_id: u.vehicle_id, driver_id: u.driver_id, route_order: u.route_order })
-        .eq("id", u.id);
+        .update({
+          vehicle_id: u.vehicle_id,
+          driver_id: u.driver_id,
+          route_order: u.route_order,
+        })
+        .eq("id", u.id)
+        .eq("tenant_id", tenantId);
       if (error) {
         const failure = `Save error: ${error.message}`;
         setMessage(failure);
@@ -421,14 +999,27 @@ export default function PlanningPage() {
     setOptimizing(true);
     setMessage("");
     try {
-      const points = routable.flatMap((j) => {
-        const p = jobRepresentativePoint(j);
-        return p ? [p] : [];
+      const origins = routable.flatMap((job) => {
+        const point = jobExitPoint(job);
+        return point ? [point] : [];
       });
+      const destinations = routable.flatMap((job) => {
+        const point = jobEntryPoint(job);
+        return point ? [point] : [];
+      });
+
+      if (
+        origins.length !== routable.length ||
+        destinations.length !== routable.length
+      ) {
+        setMessage("Smart Optimize failed: one or more jobs has no route entry or exit.");
+        return;
+      }
+
       const response = await fetch("/api/tomtom/matrix", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ points }),
+        body: JSON.stringify({ origins, destinations }),
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null);
@@ -438,16 +1029,28 @@ export default function PlanningPage() {
       const matrix = sanitizeTravelSeconds((await response.json())?.travelSeconds, routable.length);
       if (!matrix) { setMessage("Optimize failed."); return; }
       const order = bestOrder(matrix);
-      // The optimizer must never be able to delete jobs from a lane, whatever
-      // it returns: refuse any order that is not a full permutation.
-      if (order.length !== routable.length) {
-        setMessage("Optimize failed.");
+      // The optimizer must never delete, duplicate or invent jobs.
+      const uniqueIndexes = new Set(order);
+      if (
+        order.length !== routable.length ||
+        uniqueIndexes.size !== routable.length ||
+        order.some(
+          (index) =>
+            !Number.isInteger(index) ||
+            index < 0 ||
+            index >= routable.length
+        )
+      ) {
+        setMessage("Smart Optimize failed.");
         return;
       }
       const reordered = order
         .map((i) => routable[i].id)
         .concat(selectedLaneJobs.filter((j) => !isRoutable(j)).map((j) => j.id));
       setLaneOrders((prev) => ({ ...prev, [selectedVehicleId]: reordered }));
+      setMessage(
+        "Smart Optimize updated the proposed drop order. Review it, then Save plan to persist it."
+      );
       // The lane's order changed, so its cached route describes the old one.
       setRoutes((prev) => {
         const next = { ...prev };
@@ -455,13 +1058,102 @@ export default function PlanningPage() {
         return next;
       });
     } catch {
-      setMessage("Optimize failed.");
+      setMessage("Smart Optimize failed.");
     } finally {
       setOptimizing(false);
     }
   }
 
+  const selectedVehicle = selectedVehicleId
+    ? vehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? null
+    : null;
   const selectedRoute = selectedVehicleId ? (routes[selectedVehicleId] ?? null) : null;
+  const selectedVehicleReading = selectedVehicleId
+    ? (positions.get(selectedVehicleId) ?? null)
+    : null;
+
+  const laneRegimeByVehicle = useMemo(() => {
+    const result = new Map<string, LaneRegimeSummary>();
+
+    for (const vehicle of vehicles) {
+      const laneJobs = (laneOrders[vehicle.id] ?? [])
+        .map((jobId) => jobById.get(jobId))
+        .filter((job): job is PlanJob => Boolean(job));
+
+      result.set(
+        vehicle.id,
+        summarizeLaneRegimes(vehicle, laneJobs)
+      );
+    }
+
+    return result;
+  }, [vehicles, laneOrders, jobById]);
+
+  const laneComplianceByVehicle = useMemo(() => {
+    const today = operatorDayInTimeZone(positionNow, planningTimeZone);
+    const result = new Map<string, PlanningCompliance>();
+
+    for (const vehicle of vehicles) {
+      const jobCount = (laneOrders[vehicle.id] ?? []).length;
+      const driverId = laneDrivers[vehicle.id] ?? null;
+      const route = routes[vehicle.id] ?? null;
+
+      result.set(
+        vehicle.id,
+        evaluatePlanningCompliance({
+          driver: driverId ? (driverById.get(driverId) ?? null) : null,
+          hasPlannedJobs: jobCount > 0,
+          plannedDrivingSeconds:
+            jobCount === 0
+              ? 0
+              : route?.totalTravelTimeSeconds ?? null,
+          activityDataAvailable: false,
+          today,
+        })
+      );
+    }
+
+    return result;
+  }, [
+    vehicles,
+    laneOrders,
+    laneDrivers,
+    routes,
+    driverById,
+    positionNow,
+    planningTimeZone,
+  ]);
+
+  const planningHealth = useMemo(() => {
+    const plannedVehicleIds = vehicles
+      .filter((vehicle) => (laneOrders[vehicle.id] ?? []).length > 0)
+      .map((vehicle) => vehicle.id);
+
+    const results = plannedVehicleIds
+      .map((vehicleId) => laneComplianceByVehicle.get(vehicleId))
+      .filter((value): value is PlanningCompliance => Boolean(value));
+
+    return {
+      plannedVehicles: plannedVehicleIds.length,
+      unassignedJobs: unassigned.length,
+      routesCalculated: plannedVehicleIds.filter(
+        (vehicleId) => Boolean(routes[vehicleId])
+      ).length,
+      warnings: results.filter(
+        (result) => result.status === "warning"
+      ).length,
+      incomplete: results.filter(
+        (result) => !result.dataComplete
+      ).length,
+    };
+  }, [
+    vehicles,
+    laneOrders,
+    laneComplianceByVehicle,
+    routes,
+    unassigned.length,
+  ]);
+
   /* Memoised: a fresh markers array on every parent render tears down and
      rebuilds every TomTom marker, which flickers during a drag.
 
@@ -502,15 +1194,7 @@ export default function PlanningPage() {
                 {formatDistance(selectedRoute.totalDistanceMeters)} · {formatDuration(selectedRoute.totalTravelTimeSeconds)}
               </span>
             ) : null}
-            {dirty ? <span className="text-xs text-ink-3">Unsaved changes</span> : null}
-            <span className="ml-auto flex gap-2">
-              <Button variant="secondary" size="sm" onClick={optimize} loading={optimizing}>
-                Optimize order
-              </Button>
-              <Button size="sm" onClick={savePlan} loading={saving} disabled={!dirty}>
-                Save plan
-              </Button>
-            </span>
+
           </header>
 
           {message ? <p className="text-sm text-danger">{message}</p> : null}
@@ -520,7 +1204,181 @@ export default function PlanningPage() {
             </p>
           ) : null}
 
-          <PlanningMap markers={markers} route={selectedRoute} notice={mapNotice} />
+          <section
+            aria-label="Planning health"
+            className="grid gap-2 rounded-lg border border-line bg-surface p-3 shadow-sm sm:grid-cols-2 xl:grid-cols-5"
+          >
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ink-3">
+                Planned vehicles
+              </p>
+              <p className="text-lg font-semibold text-ink">
+                {planningHealth.plannedVehicles}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ink-3">
+                Unassigned jobs
+              </p>
+              <p className="text-lg font-semibold text-ink">
+                {planningHealth.unassignedJobs}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ink-3">
+                Routes calculated
+              </p>
+              <p className="text-lg font-semibold text-ink">
+                {planningHealth.routesCalculated}
+                <span className="text-sm font-normal text-ink-3">
+                  {" / "}
+                  {planningHealth.plannedVehicles}
+                </span>
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ink-3">
+                Wizard warnings
+              </p>
+              <p className="text-lg font-semibold text-warning">
+                {planningHealth.warnings}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ink-3">
+                Compliance incomplete
+              </p>
+              <p className="text-lg font-semibold text-ink">
+                {planningHealth.incomplete}
+              </p>
+            </div>
+
+            <p className="sm:col-span-2 xl:col-span-5 text-xs text-ink-3">
+              Advisory mode: no hard dispatch blocks. Actual driving,
+              remaining hours, breaks and WTD stay unknown until driver
+              activity data is available.
+            </p>
+          </section>
+
+          <PlanningMap
+            markers={markers}
+            route={selectedRoute}
+            notice={mapNotice}
+            reading={selectedVehicleReading}
+            now={positionNow}
+          />
+
+          <section
+            aria-label="Planning actions"
+            className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-2 p-3"
+          >
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={selectAllUnassigned}
+              disabled={unassigned.length === 0}
+            >
+              Check all
+            </Button>
+
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={clearUnassignedSelection}
+              disabled={selectedUnassignedCount === 0}
+            >
+              Clear
+            </Button>
+
+            <span className="min-w-[80px] text-xs font-medium text-ink-2">
+              {selectedUnassignedCount} selected
+            </span>
+
+            <select
+              aria-label="Vehicle for selected jobs"
+              value={bulkVehicleId || selectedVehicleId || ""}
+              onChange={(e) => {
+                const vehicleId = e.target.value;
+                setBulkVehicleId(vehicleId);
+                setSelectedVehicleId(vehicleId || null);
+              }}
+              className="rounded-md border border-line bg-surface px-2 py-1.5 text-sm text-ink"
+            >
+              <option value="">Choose vehicle</option>
+              {vehicles.map((vehicle) => (
+                <option key={vehicle.id} value={vehicle.id}>
+                  {vehicle.registration}
+                </option>
+              ))}
+            </select>
+
+            <Button
+              size="sm"
+              onClick={assignSelectedToVehicle}
+              disabled={
+                selectedUnassignedCount === 0 ||
+                !(bulkVehicleId || selectedVehicleId)
+              }
+            >
+              Send selected to vehicle
+            </Button>
+
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={openAcceptAllPending}
+              disabled={
+                accepting ||
+                jobs.every((job) => job.status !== "pending_acceptance")
+              }
+            >
+              Accept all pending ({
+                jobs.filter((job) => job.status === "pending_acceptance").length
+              })
+            </Button>
+
+            <span className="hidden h-7 w-px bg-line sm:block" aria-hidden />
+
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={optimize}
+              loading={optimizing}
+              disabled={
+                !selectedVehicleId ||
+                selectedLaneJobs.filter(isRoutable).length < 2
+              }
+            >
+              {selectedVehicle
+                ? `Smart Optimize ${selectedVehicle.registration}`
+                : "Smart Optimize Route"}
+            </Button>
+
+            <Button
+              size="sm"
+              onClick={savePlan}
+              loading={saving}
+              disabled={!dirty}
+            >
+              Save plan
+            </Button>
+
+            <span className="text-xs text-ink-3">
+              {dirty
+                ? "Unsaved changes"
+                : "Plan saved"}
+            </span>
+
+            <span className="basis-full text-xs text-ink-3">
+              Drop order: drag cards between positions or use Up / Down.
+              Smart Optimize uses each job's final stop to next job's first stop;
+              Save plan persists vehicle, driver and drop order.
+            </span>
+          </section>
 
           {loading ? (
             <p className="text-sm text-ink-3">Loading the day&apos;s jobs...</p>
@@ -531,6 +1389,12 @@ export default function PlanningPage() {
                 subcontracted={subcontracted}
                 geocodeSettled={geocodeSettled && !geocodeUnavailable}
                 displacedNotes={displacedNotes}
+                selectedJobIds={selectedUnassignedJobIds}
+                onToggleJob={toggleUnassignedSelection}
+                onOpenJob={(jobId) =>
+                  router.push(`/jobs?job=${encodeURIComponent(jobId)}`)
+                }
+                onAcceptJob={openAcceptance}
                 onDropJob={(jobId) => moveJob(jobId, null, null)}
               />
               <div className="flex flex-1 flex-col gap-3">
@@ -548,13 +1412,42 @@ export default function PlanningPage() {
                       drivers={drivers}
                       selected={v.id === selectedVehicleId}
                       summary={laneSummary(v.id)}
+                      regimeSummary={
+                        laneRegimeByVehicle.get(v.id) ??
+                        summarizeLaneRegimes(v, [])
+                      }
+                      compliance={
+                        laneComplianceByVehicle.get(v.id) ??
+                        evaluatePlanningCompliance({
+                          driver: null,
+                          hasPlannedJobs: false,
+                          plannedDrivingSeconds: 0,
+                          activityDataAvailable: false,
+                          today: operatorDayInTimeZone(
+                            positionNow,
+                            planningTimeZone
+                          ),
+                        })
+                      }
                       geocodeSettled={geocodeSettled && !geocodeUnavailable}
                       driverConflict={driverConflicts.has(v.id)}
-                      onSelect={() => setSelectedVehicleId(v.id)}
+                      onSelect={() => {
+                        setSelectedVehicleId(v.id);
+                        setBulkVehicleId(v.id);
+                      }}
                       onDriverChange={(driverId) =>
                         setLaneDrivers((prev) => ({ ...prev, [v.id]: driverId }))
                       }
-                      onDropJob={(jobId, beforeJobId) => moveJob(jobId, v.id, beforeJobId)}
+                      onOpenJob={(jobId) =>
+                        router.push(`/jobs?job=${encodeURIComponent(jobId)}`)
+                      }
+                      onAcceptJob={openAcceptance}
+                      onMoveJob={(jobId, offset) =>
+                        moveLaneJob(jobId, v.id, offset)
+                      }
+                      onDropJob={(jobId, beforeJobId) =>
+                        moveJob(jobId, v.id, beforeJobId)
+                      }
                     />
                   ))
                 )}
@@ -563,6 +1456,113 @@ export default function PlanningPage() {
           )}
         </div>
       </div>
+      {acceptanceTarget ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="planning-acceptance-title"
+          onClick={cancelAcceptance}
+        >
+          <form
+            className="w-full max-w-lg rounded-lg border border-line bg-surface p-5 shadow-xl"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void confirmAcceptance();
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4">
+              <h2
+                id="planning-acceptance-title"
+                className="text-lg font-semibold text-ink"
+              >
+                {acceptanceTarget.jobs.length === 1
+                  ? "Accept job"
+                  : `Accept ${acceptanceTarget.jobs.length} jobs`}
+              </h2>
+              <p className="mt-1 text-sm text-ink-3">
+                {acceptanceTarget.jobs.length === 1
+                  ? acceptanceTarget.jobs[0].reference ??
+                    acceptanceTarget.jobs[0].id
+                  : "The ETA and acceptance note below will be applied to all pending jobs."}
+              </p>
+            </div>
+
+            <div className="grid gap-4">
+              <label className="grid gap-1 text-sm text-ink">
+                <span>Collection ETA *</span>
+                <input
+                  type="datetime-local"
+                  required
+                  value={acceptanceForm.collection_eta}
+                  onChange={(e) =>
+                    setAcceptanceForm((prev) => ({
+                      ...prev,
+                      collection_eta: e.target.value,
+                    }))
+                  }
+                  className="rounded-md border border-line bg-surface px-3 py-2 text-ink"
+                />
+              </label>
+
+              <label className="grid gap-1 text-sm text-ink">
+                <span>Delivery ETA</span>
+                <input
+                  type="datetime-local"
+                  value={acceptanceForm.delivery_eta}
+                  onChange={(e) =>
+                    setAcceptanceForm((prev) => ({
+                      ...prev,
+                      delivery_eta: e.target.value,
+                    }))
+                  }
+                  className="rounded-md border border-line bg-surface px-3 py-2 text-ink"
+                />
+              </label>
+
+              <label className="grid gap-1 text-sm text-ink">
+                <span>Acceptance note</span>
+                <textarea
+                  rows={3}
+                  value={acceptanceForm.acceptance_note}
+                  onChange={(e) =>
+                    setAcceptanceForm((prev) => ({
+                      ...prev,
+                      acceptance_note: e.target.value,
+                    }))
+                  }
+                  className="rounded-md border border-line bg-surface px-3 py-2 text-ink"
+                />
+              </label>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={accepting}
+                onClick={cancelAcceptance}
+                className="rounded-md border border-line bg-surface px-3 py-2 text-sm font-medium text-ink disabled:opacity-50"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="submit"
+                disabled={accepting}
+                className="rounded-md border border-line bg-surface-2 px-3 py-2 text-sm font-semibold text-ink disabled:opacity-50"
+              >
+                {accepting
+                  ? "Accepting..."
+                  : acceptanceTarget.jobs.length === 1
+                    ? "Accept job"
+                    : `Accept ${acceptanceTarget.jobs.length} jobs`}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
     </TenantGate>
   );
 }

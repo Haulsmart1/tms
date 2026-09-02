@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { isDriverJobForDate } from "../../../lib/driver/dashboardJobs";
 
 type Driver = {
   id: string;
@@ -31,6 +32,7 @@ type Job = {
   notes: string | null;
   pod_status: string | null;
   vehicle_id: string | null;
+  route_order: number | null;
 };
 
 type DriverResponse = {
@@ -82,10 +84,21 @@ export default function DriverDashboardPage() {
 
   const todaysJobs = useMemo(() => {
     if (!data) return [];
+
     const today = new Date().toISOString().slice(0, 10);
-    return data.jobs.filter(
-      (job) => (job.job_date || job.scheduled_date) === today
-    );
+
+    return data.jobs
+      .filter((job) => isDriverJobForDate(job, today))
+      .sort((a, b) => {
+        const aOrder = a.route_order ?? Number.MAX_SAFE_INTEGER;
+        const bOrder = b.route_order ?? Number.MAX_SAFE_INTEGER;
+
+        if (aOrder !== bOrder) {
+          return aOrder - bOrder;
+        }
+
+        return (a.reference ?? "").localeCompare(b.reference ?? "");
+      });
   }, [data]);
 
   if (loading) {
@@ -183,6 +196,14 @@ export default function DriverDashboardPage() {
                       <Info
                         label="POD"
                         value={job.pod_status || "Pending"}
+                      />
+                      <Info
+                        label="Drop"
+                        value={
+                          job.route_order === null
+                            ? "Unsequenced"
+                            : String(job.route_order)
+                        }
                       />
                     </div>
 

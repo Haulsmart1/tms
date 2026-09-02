@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import {
   geocodeQuery,
+  geocodeQueryVariants,
   normalizeUkPostcode,
   selectGeocodePosition,
+  selectUkPostcodePosition,
 } from "../../../../lib/tomtom/geocoding";
 import { geocodeUrl } from "../../../../lib/tomtom/api";
 import {
@@ -18,6 +20,8 @@ const MAX_STOPS = 100;
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TIMEOUT_MS = 5000;
+const UK_POSTCODE_API =
+  "https://api.postcodes.io/postcodes";
 
 function parseStopIds(body: unknown): string[] | null {
   if (typeof body !== "object" || body === null) {
@@ -50,10 +54,70 @@ function parseStopIds(body: unknown): string[] | null {
   );
 }
 
+type GeocodeCandidateDiagnostic = {
+  postalCode: string | null;
+  countryCode: string | null;
+  hasPosition: boolean;
+};
+
+function candidateDiagnostics(
+  json: unknown,
+): GeocodeCandidateDiagnostic[] {
+  if (
+    typeof json !== "object" ||
+    json === null ||
+    !Array.isArray(
+      (json as { results?: unknown }).results,
+    )
+  ) {
+    return [];
+  }
+
+  return (
+    json as { results: unknown[] }
+  ).results.slice(0, 5).map((raw) => {
+    if (
+      typeof raw !== "object" ||
+      raw === null
+    ) {
+      return {
+        postalCode: null,
+        countryCode: null,
+        hasPosition: false,
+      };
+    }
+
+    const candidate = raw as {
+      position?: unknown;
+      address?: {
+        postalCode?: unknown;
+        countryCode?: unknown;
+      };
+    };
+
+    return {
+      postalCode:
+        typeof candidate.address?.postalCode ===
+        "string"
+          ? candidate.address.postalCode
+          : null,
+      countryCode:
+        typeof candidate.address?.countryCode ===
+        "string"
+          ? candidate.address.countryCode
+          : null,
+      hasPosition:
+        typeof candidate.position === "object" &&
+        candidate.position !== null,
+    };
+  });
+}
+
 async function geocode(
   query: string,
   key: string,
   expectedPostcode: string | null,
+  allowOutwardPostcodeMatch = false,
 ) {
   const response = await fetch(
     geocodeUrl(query, key),
@@ -66,6 +130,7 @@ async function geocode(
     return {
       position: null,
       status: response.status,
+      candidates: [] as GeocodeCandidateDiagnostic[],
     };
   }
 
@@ -75,7 +140,45 @@ async function geocode(
     position: selectGeocodePosition(
       json,
       expectedPostcode,
+      allowOutwardPostcodeMatch,
     ),
+    status: response.status,
+    candidates:
+      candidateDiagnostics(json),
+  };
+}
+
+async function lookupUkPostcode(
+  expectedPostcode: string,
+) {
+  const response = await fetch(
+    `${UK_POSTCODE_API}/${encodeURIComponent(
+      expectedPostcode,
+    )}`,
+    {
+      signal:
+        AbortSignal.timeout(
+          TIMEOUT_MS,
+        ),
+    },
+  );
+
+  if (!response.ok) {
+    return {
+      position: null,
+      status: response.status,
+    };
+  }
+
+  const json =
+    await response.json();
+
+  return {
+    position:
+      selectUkPostcodePosition(
+        json,
+        expectedPostcode,
+      ),
     status: response.status,
   };
 }
@@ -218,7 +321,19 @@ export async function POST(request: Request) {
             query,
             key,
             expectedPostcode,
+            true,
           );
+
+        console.info(
+          "tomtom/geocode: full query result",
+          {
+            stopId: stop.id,
+            expectedPostcode,
+            status: result.status,
+            matched: Boolean(result.position),
+            candidates: result.candidates,
+          },
+        );
 
         if (
           result.status !== 200
@@ -232,13 +347,56 @@ export async function POST(request: Request) {
           continue;
         }
 
+        const addressQueries =
+          geocodeQueryVariants(stop);
+
+        for (
+          let index = 1;
+          index < addressQueries.length &&
+          !result.position;
+          index += 1
+        ) {
+          result =
+            await geocode(
+              addressQueries[index],
+              key,
+              expectedPostcode,
+              true,
+            );
+
+          console.info(
+            "tomtom/geocode: address retry result",
+            {
+              stopId: stop.id,
+              expectedPostcode,
+              variant: index + 1,
+              status: result.status,
+              matched: Boolean(
+                result.position,
+              ),
+              candidates:
+                result.candidates,
+            },
+          );
+
+          if (result.status !== 200) {
+            console.error(
+              "tomtom/geocode: upstream status",
+              stop.id,
+              result.status,
+            );
+
+            break;
+          }
+        }
+
         /*
-         * If a valid postcode was supplied but the full free-text query
-         * returned no candidate with that postcode, retry using the clean
-         * postcode alone. This is safer than accepting a plausible result
-         * hundreds of miles away.
+         * If the address-bearing queries still produced no valid result,
+         * retry using the clean postcode alone. Outward-code matching is
+         * deliberately disabled for this postcode-only fallback.
          */
         if (
+          result.status === 200 &&
           !result.position &&
           expectedPostcode
         ) {
@@ -248,10 +406,54 @@ export async function POST(request: Request) {
               key,
               expectedPostcode,
             );
+
+          console.info(
+            "tomtom/geocode: postcode retry result",
+            {
+              stopId: stop.id,
+              expectedPostcode,
+              status: result.status,
+              matched: Boolean(result.position),
+              candidates: result.candidates,
+            },
+          );
         }
 
-        const position =
+        let position =
           result.position;
+
+        /*
+         * TomTom sometimes resolves only the outward postcode district
+         * (for example CW5) even when the source contains a full postcode.
+         * Do not weaken TomTom matching. Instead, use an exact UK-postcode
+         * lookup as the final fallback and require that service to return
+         * the same normalized full postcode before coordinates are trusted.
+         */
+        if (
+          !position &&
+          expectedPostcode
+        ) {
+          const postcodeFallback =
+            await lookupUkPostcode(
+              expectedPostcode,
+            );
+
+          console.info(
+            "tomtom/geocode: UK postcode fallback result",
+            {
+              stopId: stop.id,
+              expectedPostcode,
+              status:
+                postcodeFallback.status,
+              matched: Boolean(
+                postcodeFallback.position,
+              ),
+            },
+          );
+
+          position =
+            postcodeFallback.position;
+        }
 
         if (!position) {
           continue;

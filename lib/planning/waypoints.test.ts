@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { isRoutable, jobRepresentativePoint, jobWaypoints, laneWaypoints, sortedStops } from "./waypoints";
+import {
+  isRoutable,
+  jobEntryPoint,
+  jobExitPoint,
+  jobRepresentativePoint,
+  jobWaypoints,
+  laneWaypoints,
+  sortedStops,
+} from "./waypoints";
 import type { PlanJob, PlanStop } from "./types";
 
 function stop(overrides: Partial<PlanStop>): PlanStop {
@@ -84,6 +92,57 @@ describe("laneWaypoints", () => {
     expect(laneWaypoints([j1, broken, j3])).toEqual([
       { lat: 1, lng: 1 },
       { lat: 3, lng: 3 },
+    ]);
+  });
+});
+
+
+describe("Smart Optimize entry and exit points", () => {
+  it("uses stop_order rather than array order", () => {
+    const job = {
+      id: "job-1",
+      tenant_id: "tenant-1",
+      reference: "JOB-1",
+      status: "planned",
+      collection_eta: null,
+      delivery_eta: null,
+      acceptance_note: null,
+      accepted_at: null,
+      accepted_by: null,
+      vehicle_id: "vehicle-1",
+      driver_id: null,
+      subcontractor_id: null,
+      route_order: 1,
+      customer_name: null,
+      stops: [
+        {
+          id: "delivery",
+          stop_order: 2,
+          type: "delivery",
+          address_line: "Delivery",
+          city: null,
+          postcode: "BB1 1BB",
+          lat: 53.2,
+          lng: -1.2,
+        },
+        {
+          id: "collection",
+          stop_order: 1,
+          type: "collection",
+          address_line: "Collection",
+          city: null,
+          postcode: "AA1 1AA",
+          lat: 53.1,
+          lng: -1.1,
+        },
+      ],
+    };
+
+    expect(jobEntryPoint(job)).toEqual({ lat: 53.1, lng: -1.1 });
+    expect(jobExitPoint(job)).toEqual({ lat: 53.2, lng: -1.2 });
+    expect(jobWaypoints(job)).toEqual([
+      { lat: 53.1, lng: -1.1 },
+      { lat: 53.2, lng: -1.2 },
     ]);
   });
 });

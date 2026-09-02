@@ -16,7 +16,7 @@ export async function GET() {
     const jobsQuery = admin
       .from("jobs")
       .select(
-        "id,reference,customer_reference,status,job_date,scheduled_date,priority,notes,pod_status,vehicle_id,completed_at",
+        "id,reference,customer_reference,status,job_date,scheduled_date,priority,notes,pod_status,vehicle_id,route_order,completed_at",
       )
       .eq("tenant_id", session.tenantId)
       .eq("driver_id", session.driverId)

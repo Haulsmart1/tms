@@ -10,11 +10,23 @@ type Props = {
   geocodeSettled: boolean;
   /** job id -> disclosure note for jobs displaced from an inactive vehicle. */
   displacedNotes: Record<string, string>;
+  selectedJobIds: Set<string>;
+  onToggleJob: (jobId: string, selected: boolean) => void;
+  onOpenJob: (jobId: string) => void;
+  onAcceptJob: (jobId: string) => void;
   onDropJob: (draggedJobId: string) => void;
 };
 
 export default function UnassignedPool({
-  jobs, subcontracted, geocodeSettled, displacedNotes, onDropJob,
+  jobs,
+  subcontracted,
+  geocodeSettled,
+  displacedNotes,
+  selectedJobIds,
+  onToggleJob,
+  onOpenJob,
+  onAcceptJob,
+  onDropJob,
 }: Props) {
   function handleDragOver(e: DragEvent) {
     e.preventDefault();
@@ -34,7 +46,14 @@ export default function UnassignedPool({
       onDrop={handleDrop}
       className="flex w-[240px] flex-none flex-col gap-2 rounded-lg border border-line bg-surface-2 p-3"
     >
-      <h3 className="text-sm font-semibold text-ink">Unassigned · {jobs.length}</h3>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-ink">
+          Unassigned · {jobs.length}
+        </h3>
+        <span className="text-xs text-ink-3">
+          {jobs.filter((job) => selectedJobIds.has(job.id)).length} selected
+        </span>
+      </div>
       {jobs.length === 0 ? (
         <p className="text-xs text-ink-3">Every job for this date is assigned.</p>
       ) : (
@@ -45,6 +64,10 @@ export default function UnassignedPool({
             sequence={null}
             geocodeSettled={geocodeSettled}
             note={displacedNotes[job.id]}
+            selected={selectedJobIds.has(job.id)}
+            onSelectedChange={(selected) => onToggleJob(job.id, selected)}
+            onOpen={onOpenJob}
+            onAccept={onAcceptJob}
           />
         ))
       )}

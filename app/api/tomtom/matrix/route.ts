@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { matrixBody, matrixUrl, parseMatrix } from "../../../../lib/tomtom/api";
+import {
+  matrixBody,
+  matrixBodyBetween,
+  matrixUrl,
+  parseMatrix,
+} from "../../../../lib/tomtom/api";
 import {
   authClient,
   isRateLimited,
@@ -18,8 +23,13 @@ export const dynamic = "force-dynamic";
    Like the routing endpoint, this spends the premium key on every call, so it
    is gated on being console staff rather than merely signed in. */
 
+const MAX_MATRIX_CELLS = 100;
 const MAX_JOBS = 10;
 const TIMEOUT_MS = 10000;
+
+function pointList(value: unknown) {
+  return parsePoints({ points: value });
+}
 
 export async function POST(request: Request) {
   try {
@@ -41,10 +51,30 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json().catch(() => null);
-    const points = parsePoints(body);
-    if (!points || points.length < 2 || points.length > MAX_JOBS) {
+
+    const legacyPoints = parsePoints(body);
+    const origins = legacyPoints ?? pointList(body?.origins);
+    const destinations = legacyPoints ?? pointList(body?.destinations);
+
+    if (!origins || !destinations) {
       return NextResponse.json(
-        { error: `points must be 2 to ${MAX_JOBS} lat/lng pairs.` },
+        { error: "Provide points, or valid origins and destinations." },
+        { status: 400 }
+      );
+    }
+
+    if (
+      origins.length < 2 ||
+      destinations.length < 2 ||
+      origins.length !== destinations.length ||
+      origins.length > MAX_JOBS ||
+      origins.length * destinations.length > MAX_MATRIX_CELLS
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            `Smart Optimize requires 2 to ${MAX_JOBS} matching origins and destinations.`,
+        },
         { status: 400 }
       );
     }
@@ -57,7 +87,11 @@ export async function POST(request: Request) {
     const response = await fetch(matrixUrl(key), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(matrixBody(points)),
+      body: JSON.stringify(
+        legacyPoints
+          ? matrixBody(legacyPoints)
+          : matrixBodyBetween(origins, destinations)
+      ),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (!response.ok) {
@@ -66,7 +100,11 @@ export async function POST(request: Request) {
         { status: 502 }
       );
     }
-    const travelSeconds = parseMatrix(await response.json(), points.length);
+    const travelSeconds = parseMatrix(
+      await response.json(),
+      origins.length,
+      destinations.length
+    );
     if (!travelSeconds) {
       return NextResponse.json({ error: "TomTom returned no matrix." }, { status: 502 });
     }

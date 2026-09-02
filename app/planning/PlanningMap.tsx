@@ -2,6 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import "@tomtom-international/web-sdk-maps/dist/maps.css";
+import {
+  pingLabel,
+  signalState,
+  type PositionReading,
+} from "../../lib/tracking/position";
 import type { LatLng, RouteResult } from "../../lib/planning/types";
 
 export type MapMarker = { position: LatLng; label: string };
@@ -11,6 +16,8 @@ type Props = {
   route: RouteResult | null;
   /** Non-null renders an overlay chip: route fetch failed, stops unroutable, etc. */
   notice: string | null;
+  reading: PositionReading | null;
+  now: Date;
 };
 
 /* THE PLANNING MAP MOUNT.
@@ -30,11 +37,18 @@ const HEIGHT = 380;
 const DEFAULT_CENTER: [number, number] = [-1.5, 53.0];
 const DEFAULT_ZOOM = 6;
 
-export default function PlanningMap({ markers, route, notice }: Props) {
+export default function PlanningMap({
+  markers,
+  route,
+  notice,
+  reading,
+  now,
+}: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const handleRef = useRef<{ tt: any; map: any } | null>(null);
   const markerObjsRef = useRef<any[]>([]);
   const [ready, setReady] = useState(false);
+  const vehicleSignal = signalState(reading, now);
 
   useEffect(() => {
     if (!MAP_KEY || !containerRef.current || handleRef.current) return;
@@ -79,6 +93,49 @@ export default function PlanningMap({ markers, route, notice }: Props) {
         .addTo(map);
     });
 
+    if (
+      reading &&
+      Number.isFinite(reading.lat) &&
+      Number.isFinite(reading.lng)
+    ) {
+      const el = document.createElement("div");
+      const live = vehicleSignal === "live";
+
+      // Match the Tracking page marker exactly. The Unicode escape keeps the
+      // source ASCII-safe through Windows PowerShell and still renders a truck.
+      el.textContent = "\u{1F69A}";
+      el.title = live
+        ? `Live vehicle position - ${pingLabel(reading, now)}`
+        : `Last known vehicle position - ${pingLabel(reading, now)}`;
+
+      el.style.cssText = [
+        "width:40px",
+        "height:40px",
+        "border-radius:50%",
+        "display:flex",
+        "align-items:center",
+        "justify-content:center",
+        "font-size:20px",
+        live ? "background:#16a34a" : "background:#d97706",
+        "border:3px solid white",
+        "box-shadow:0 2px 9px rgba(0,0,0,.5)",
+      ].join(";");
+
+      if (
+        reading.headingDeg !== null &&
+        Number.isFinite(reading.headingDeg)
+      ) {
+        el.style.transform =
+          `rotate(${reading.headingDeg}deg)`;
+      }
+
+      const vehicleMarker = new tt.Marker({ element: el })
+        .setLngLat([reading.lng, reading.lat])
+        .addTo(map);
+
+      markerObjsRef.current.push(vehicleMarker);
+    }
+
     if (map.getLayer("plan-route")) map.removeLayer("plan-route");
     if (map.getSource("plan-route")) map.removeSource("plan-route");
     if (route && route.points.length >= 2) {
@@ -104,9 +161,22 @@ export default function PlanningMap({ markers, route, notice }: Props) {
       });
     }
 
-    if (markers.length > 0) {
-      const lats = markers.map((m) => m.position.lat);
-      const lngs = markers.map((m) => m.position.lng);
+    const fitPoints = markers.map((marker) => marker.position);
+
+    if (
+      reading &&
+      Number.isFinite(reading.lat) &&
+      Number.isFinite(reading.lng)
+    ) {
+      fitPoints.push({
+        lat: reading.lat,
+        lng: reading.lng,
+      });
+    }
+
+    if (fitPoints.length > 0) {
+      const lats = fitPoints.map((point) => point.lat);
+      const lngs = fitPoints.map((point) => point.lng);
       map.fitBounds(
         [
           [Math.min(...lngs), Math.min(...lats)],
@@ -115,7 +185,7 @@ export default function PlanningMap({ markers, route, notice }: Props) {
         { padding: 48, maxZoom: 14, duration: 300 }
       );
     }
-  }, [markers, route, ready]);
+  }, [markers, route, reading, vehicleSignal, ready, now]);
 
   if (!MAP_KEY) {
     return (
@@ -137,6 +207,17 @@ export default function PlanningMap({ markers, route, notice }: Props) {
   return (
     <section aria-label="Route map" className="relative overflow-hidden rounded-lg border border-line shadow-sm">
       <div ref={containerRef} style={{ height: HEIGHT }} />
+
+      <div className="absolute left-2 top-2">
+        <span className="rounded-md border border-line bg-surface px-2.5 py-1 text-xs font-medium text-ink shadow-sm">
+          {vehicleSignal === "live"
+            ? `Live vehicle - ${pingLabel(reading, now)}`
+            : vehicleSignal === "stale"
+              ? `Last known vehicle - ${pingLabel(reading, now)}`
+              : "No vehicle GPS"}
+        </span>
+      </div>
+
       {notice ? (
         <p className="absolute bottom-2 left-2 rounded-md border border-line bg-surface px-2.5 py-1 text-xs text-ink-2 shadow-sm">
           {notice}

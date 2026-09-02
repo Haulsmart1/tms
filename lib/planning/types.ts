@@ -17,13 +17,35 @@ export type PlanStop = {
 
 export type PlanJob = {
   id: string;
+  tenant_id: string | null;
   reference: string | null;
   status: string | null;
+  collection_eta: string | null;
+  delivery_eta: string | null;
+  acceptance_note: string | null;
+  accepted_at: string | null;
+  accepted_by: string | null;
   vehicle_id: string | null;
   driver_id: string | null;
   subcontractor_id: string | null;
   route_order: number | null;
   customer_name: string | null;
+
+  /** Compliance classification facts. The Planning loader always supplies
+      these; optional keeps older pure-planning fixtures source-compatible. */
+  journey_scope?: "gb_domestic" | "uk_eu" | "aetr" | "international_other" | null;
+  origin_country_code?: string | null;
+  destination_country_code?: string | null;
+  compliance_regime_override?:
+    | "gb_domestic"
+    | "assimilated"
+    | "aetr"
+    | "international_light_goods"
+    | "exempt"
+    | "unknown"
+    | null;
+  compliance_override_reason?: string | null;
+
   stops: PlanStop[];
 };
 
