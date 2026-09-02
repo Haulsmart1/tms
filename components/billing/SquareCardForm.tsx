@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Button from "../Button";
+import Field from "../Field";
+import MessageBanner from "../MessageBanner";
 
 // Minimal typings for the Web Payments SDK surface we use.
 type SquareCard = {
@@ -38,9 +41,17 @@ const SDK_URL = APP_ID.startsWith("sandbox-")
 
 type Props = {
   onComplete: (response: Record<string, unknown>) => void;
+  /** Defaults to the first-time wording. Pass "Save new card" when replacing. */
+  submitLabel?: string;
+  /** When given, a Cancel button renders beside the submit. */
+  onCancel?: () => void;
 };
 
-export default function SquareCardForm({ onComplete }: Props) {
+export default function SquareCardForm({
+  onComplete,
+  submitLabel = "Save card and start subscription",
+  onCancel,
+}: Props) {
   const [ready, setReady] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -175,36 +186,48 @@ export default function SquareCardForm({ onComplete }: Props) {
 
   return (
     <div className="grid gap-3">
-      <label className="grid gap-1 text-sm text-ink">
-        Name on card
-        <input
-          type="text"
-          value={cardholderName}
-          onChange={(e) => setCardholderName(e.target.value)}
-          className="rounded-md border border-line bg-surface px-3 py-2 text-ink"
-          autoComplete="cc-name"
-        />
-      </label>
-
-      <div
-        id="square-card-container"
-        className="rounded-md border border-line bg-surface p-2"
+      <Field
+        id="cc-name"
+        label="Name on card"
+        type="text"
+        value={cardholderName}
+        onChange={(e) => setCardholderName(e.target.value)}
+        autoComplete="cc-name"
       />
 
-      {errorMessage ? (
-        <div className="rounded-md border border-danger px-3 py-2 text-sm text-danger">
-          {errorMessage}
-        </div>
-      ) : null}
+      {/* role="group" + aria-labelledby, not <label htmlFor>: the SDK injects
+          an iframe here, so there is no labelable element to point at. */}
+      <div className="grid gap-1.5" role="group" aria-labelledby="cc-details-label">
+        <span id="cc-details-label" className="text-sm font-medium text-ink-2">
+          Card details
+        </span>
+        {/* The Square SDK attaches its iframe by this selector (see init()
+            above), so the id is load-bearing. border-ink-3 matches Field's
+            input border for the reason documented in components/Field.tsx. */}
+        <div
+          id="square-card-container"
+          className="rounded-md border border-ink-3 bg-surface p-2"
+        />
+      </div>
 
-      <button
-        type="button"
-        onClick={submit}
-        disabled={!ready || submitting}
-        className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-50"
-      >
-        {submitting ? "Processing..." : "Save card and start subscription"}
-      </button>
+      <MessageBanner tone="danger">{errorMessage}</MessageBanner>
+
+      <div className="flex flex-wrap gap-2">
+        {/* Label is constant while submitting: Button documents that swapping
+            the children mid-submit shrinks the control. loading covers
+            aria-busy and the wait cursor; submit() already guards re-entry. */}
+        <Button onClick={submit} disabled={!ready} loading={submitting}>
+          {submitLabel}
+        </Button>
+        {/* Disabled, not hidden, while submitting. Button warns against
+            disabling the FOCUSED control; focus is on the submit button at
+            this point, so Cancel can be disabled without dropping focus. */}
+        {onCancel ? (
+          <Button variant="ghost" onClick={onCancel} disabled={submitting}>
+            Cancel
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -25,7 +25,14 @@ describe("isSkeletonReadyRoute", () => {
     expect(isSkeletonReadyRoute("/settings")).toBe(false);
   });
 
+  it("returns true for the billing settings page", () => {
+    expect(isSkeletonReadyRoute("/settings/billing")).toBe(true);
+    expect(isSkeletonReadyRoute("/settings/billing/")).toBe(true);
+  });
+
   it("lists exactly the routes converted so far, and nothing aspirational", () => {
-    expect([...SKELETON_READY_ROUTES].sort()).toEqual(["/dashboard", "/customers"].sort());
+    expect([...SKELETON_READY_ROUTES].sort()).toEqual(
+      ["/dashboard", "/customers", "/settings/billing"].sort()
+    );
   });
 });

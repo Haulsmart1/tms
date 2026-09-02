@@ -2,6 +2,9 @@ export type TenantRole = "staff" | "admin" | "super_admin";
 export type TenantStatus = "loading" | "ready" | "signed-out" | "no-tenant";
 export type TenantOption = { id: string; name: string };
 
+/* Adding a field here means updating tenantContextEquals in ./revalidate.ts.
+   That comparison decides whether a background revalidate is a no-op, so a
+   field it does not know about is a change that never reaches the UI. */
 export type TenantContextData = {
   status: TenantStatus;
   role: TenantRole;

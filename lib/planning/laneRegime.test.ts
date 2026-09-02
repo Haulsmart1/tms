@@ -25,8 +25,14 @@ function job(
 ): PlanJob {
   return {
     id,
+    tenant_id: "t1",
     reference: id,
     status: "planned",
+    collection_eta: null,
+    delivery_eta: null,
+    acceptance_note: null,
+    accepted_at: null,
+    accepted_by: null,
     vehicle_id: null,
     driver_id: null,
     subcontractor_id: null,

@@ -28,6 +28,12 @@ export function computeChargeAmounts(vehicleCount: number): ChargeAmounts {
   };
 }
 
+// Display formatting for integer pence. No thousands grouping: this matches
+// the helper it replaces on /settings/billing, and platform charges are small.
+export function formatPence(pence: number): string {
+  return `£${(pence / 100).toFixed(2)}`;
+}
+
 // Square's CreatePayment idempotency_key allows at most 45 characters, so the
 // key is compacted: UUID without dashes (32) + date without dashes (8) +
 // attempt, joined by underscores. One key per (company, cycle, attempt): a

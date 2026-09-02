@@ -8,7 +8,7 @@ const NOW = new Date("2026-08-14T12:00:00Z");
 function stop(over: Partial<TrackingStop> = {}): TrackingStop {
   return {
     id: "s1", stop_order: 1, type: "delivery", address_line: "1 Dock Rd",
-    city: "Hull", postcode: "HU3 4AB", lat: null, lng: null, planned_at: "2026-08-14T08:00:00Z",
+    city: "Hull", postcode: "HU3 4AB", planned_at: "2026-08-14T08:00:00Z",
     delivered_at: null, pod_status: "pending", recipient_name: null,
     pod_updated_at: null, pod_photo_url: null, pod_document_url: null,
     /* Required on TrackingStop, not optional: these come from a Supabase
