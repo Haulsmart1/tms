@@ -11,6 +11,7 @@ import {
 } from "../../lib/tenant/context";
 import {
   decideResolveMode, shouldRevalidate, applyRevalidation, preserveActiveTenant,
+  type ResolveMode,
 } from "../../lib/tenant/revalidate";
 import { applyTenantFilter } from "../../lib/tenant/filter";
 
@@ -50,7 +51,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const hasReadyRef = useRef(false);
   const lastResolvedAtRef = useRef<number | null>(null);
 
-  const resolve = useCallback(async (mode: "blocking" | "background") => {
+  const resolve = useCallback(async (mode: Exclude<ResolveMode, "skip">) => {
     const background = mode === "background";
     /* The one line that caused the bug. In background mode we leave `data`
        alone, so status never dips to "loading", so TenantGate never swaps the
@@ -70,8 +71,11 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       user = res.data.user;
     } catch (err) {
       console.warn("tenant resolve: getUser failed", { mode, err });
-      /* Could not check. Background keeps the last-good context; blocking stays
-         on the loading panel, which is what it did before this change. */
+      /* Could not check. Background keeps the last-good context. Blocking stays
+         on the loading panel, which is a deliberate change: it used to fall
+         through to the signed-out branch and redirect to /login, so a flaky
+         connection logged people out. The panel has no retry of its own, so a
+         first load that fails here needs a reload or a tab-out and back in. */
       if (!background) hasReadyRef.current = false;
       return;
     }

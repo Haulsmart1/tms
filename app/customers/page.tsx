@@ -200,8 +200,11 @@ export default function CustomersPage() {
   useEffect(() => {
     /* This page mounts during tenant resolution now that TenantGate passes
        through, and the x-tenant-id header would otherwise go out empty.
-       Returning before the timer is also what stops a token refresh, which
-       re-enters status "loading", from restarting the fetch. */
+
+       This guard used to double as protection against a tab-in re-entering
+       status "loading" and restarting the fetch. That no longer happens:
+       TenantProvider revalidates in the background instead. The guard is still
+       required for the initial resolve. */
     if (tenant.status !== "ready") return;
 
     const timer = window.setTimeout(() => {
