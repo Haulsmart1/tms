@@ -32,7 +32,13 @@ const LOADING: TenantContextData = {
 };
 
 export function TenantProvider({ children }: { children: ReactNode }) {
-  const supabase = createClient();
+  /* Pinned for the component lifetime with a lazy initialiser rather than
+     called on every render. `resolve` and the auth-subscription effect both
+     depend on this identity, so a client that changed per render would tear
+     down and re-establish the subscription on every render while setting
+     state. @supabase/ssr happens to cache a browser singleton today, but that
+     is its internal detail, not a contract to lean on. */
+  const supabase = useState(createClient)[0];
   const [data, setData] = useState<TenantContextData>(LOADING);
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -62,9 +68,11 @@ export function TenantProvider({ children }: { children: ReactNode }) {
          reaches the signed-out branch below. */
       if (res.error && isAuthRetryableFetchError(res.error)) throw res.error;
       user = res.data.user;
-    } catch {
+    } catch (err) {
+      console.warn("tenant resolve: getUser failed", { mode, err });
       /* Could not check. Background keeps the last-good context; blocking stays
          on the loading panel, which is what it did before this change. */
+      if (!background) hasReadyRef.current = false;
       return;
     }
 
@@ -84,7 +92,8 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       const res = await supabase.rpc("get_tenant_context");
       if (res.error) throw res.error;
       raw = res.data;
-    } catch {
+    } catch (err) {
+      console.warn("tenant resolve: get_tenant_context failed", { mode, err });
       if (background) return; // transient: keep the last-good context
       /* The context is no longer trustworthy, so the next auth event must be
          allowed to rebuild it rather than being judged a throttled background
