@@ -1058,7 +1058,7 @@ export default function JobsPage() {
                       selectFilteredForPlanning(filteredJobs)
                     }
                   >
-                    Select filtered
+                    Check all
                   </Button>
 
                   <Button
@@ -1083,7 +1083,7 @@ export default function JobsPage() {
                   >
                     {sendingToPlanning
                       ? "Sending..."
-                      : `Send selected to Planning (${selectedPlanningJobIds.size})`}
+                      : `Send to Planning (${selectedPlanningJobIds.size})`}
                   </Button>
 
                   <span className="text-xs text-ink-3">
