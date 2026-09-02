@@ -121,9 +121,11 @@ export default function PlanningPage() {
   const [saving, setSaving] = useState(false);
   const [optimizing, setOptimizing] = useState(false);
   const [acceptanceTarget, setAcceptanceTarget] = useState<{
-    id: string;
-    tenant_id: string;
-    reference: string | null;
+    jobs: {
+      id: string;
+      tenant_id: string;
+      reference: string | null;
+    }[];
   } | null>(null);
   const [acceptanceForm, setAcceptanceForm] = useState({
     collection_eta: "",
@@ -602,6 +604,57 @@ export default function PlanningPage() {
     });
   }
 
+  function openAcceptanceTargets(targetJobs: PlanJob[]) {
+    const pendingTargets = targetJobs.filter(
+      (job) => job.status === "pending_acceptance"
+    );
+
+    if (pendingTargets.length === 0) {
+      setMessage("There are no jobs awaiting acceptance.");
+      return;
+    }
+
+    if (pendingTargets.some((job) => !job.tenant_id)) {
+      setMessage(
+        "Cannot accept these jobs because tenant information is unavailable."
+      );
+      return;
+    }
+
+    const pendingJobs = pendingTargets.filter(
+      (job): job is PlanJob & { tenant_id: string } =>
+        typeof job.tenant_id === "string" && job.tenant_id.length > 0
+    );
+
+    if (pendingJobs.length !== pendingTargets.length) {
+      setMessage(
+        "Cannot accept these jobs because tenant information is unavailable."
+      );
+      return;
+    }
+
+    const tenantIds = new Set(pendingJobs.map((job) => job.tenant_id));
+
+    if (tenantIds.size !== 1) {
+      setMessage("Cannot accept jobs belonging to different tenants together.");
+      return;
+    }
+
+    setMessage("");
+    setAcceptanceTarget({
+      jobs: pendingJobs.map((job) => ({
+        id: job.id,
+        tenant_id: job.tenant_id,
+        reference: job.reference,
+      })),
+    });
+    setAcceptanceForm({
+      collection_eta: "",
+      delivery_eta: "",
+      acceptance_note: "",
+    });
+  }
+
   function openAcceptance(jobId: string) {
     const job = jobById.get(jobId);
 
@@ -610,22 +663,13 @@ export default function PlanningPage() {
       return;
     }
 
-    if (!job.tenant_id) {
-      setMessage("Cannot accept this job because its tenant is unavailable.");
-      return;
-    }
+    openAcceptanceTargets([job]);
+  }
 
-    setMessage("");
-    setAcceptanceTarget({
-      id: job.id,
-      tenant_id: job.tenant_id,
-      reference: job.reference,
-    });
-    setAcceptanceForm({
-      collection_eta: "",
-      delivery_eta: "",
-      acceptance_note: "",
-    });
+  function openAcceptAllPending() {
+    openAcceptanceTargets(
+      jobs.filter((job) => job.status === "pending_acceptance")
+    );
   }
 
   function cancelAcceptance() {
@@ -678,6 +722,31 @@ export default function PlanningPage() {
       }
     }
 
+    const targets = acceptanceTarget.jobs;
+
+    if (targets.length === 0) {
+      setMessage("There are no jobs awaiting acceptance.");
+      setAcceptanceTarget(null);
+      return;
+    }
+
+    const tenantIds = new Set(targets.map((target) => target.tenant_id));
+
+    if (tenantIds.size !== 1) {
+      setMessage("Cannot accept jobs belonging to different tenants together.");
+      return;
+    }
+
+    const tenantId = targets[0].tenant_id;
+    const targetIds = Array.from(
+      new Set(targets.map((target) => target.id))
+    );
+
+    if (targetIds.length !== targets.length) {
+      setMessage("Acceptance stopped because duplicate jobs were selected.");
+      return;
+    }
+
     setAccepting(true);
 
     try {
@@ -702,7 +771,7 @@ export default function PlanningPage() {
         acceptanceForm.acceptance_note.trim() || null;
 
       const {
-        data: acceptedJob,
+        data: acceptedJobs,
         error: acceptanceError,
       } = await supabase
         .from("jobs")
@@ -714,11 +783,10 @@ export default function PlanningPage() {
           delivery_eta: deliveryEta,
           acceptance_note: acceptanceNote,
         })
-        .eq("id", acceptanceTarget.id)
-        .eq("tenant_id", acceptanceTarget.tenant_id)
+        .in("id", targetIds)
+        .eq("tenant_id", tenantId)
         .eq("status", "pending_acceptance")
-        .select("id")
-        .maybeSingle();
+        .select("id");
 
       if (acceptanceError) {
         setMessage(
@@ -727,47 +795,27 @@ export default function PlanningPage() {
         return;
       }
 
-      if (!acceptedJob) {
-        const {
-          data: currentJob,
-          error: currentJobError,
-        } = await supabase
-          .from("jobs")
-          .select(
-            "status, collection_eta, delivery_eta, acceptance_note, accepted_at, accepted_by"
-          )
-          .eq("id", acceptanceTarget.id)
-          .eq("tenant_id", acceptanceTarget.tenant_id)
-          .maybeSingle();
+      const acceptedIds = new Set(
+        (acceptedJobs ?? []).map((job) => job.id)
+      );
 
-        if (!currentJobError && currentJob) {
-          setJobs((prev) =>
-            prev.map((job) =>
-              job.id === acceptanceTarget.id
-                ? {
-                    ...job,
-                    status: currentJob.status,
-                    collection_eta: currentJob.collection_eta,
-                    delivery_eta: currentJob.delivery_eta,
-                    acceptance_note: currentJob.acceptance_note,
-                    accepted_at: currentJob.accepted_at,
-                    accepted_by: currentJob.accepted_by,
-                  }
-                : job
-            )
-          );
-        }
+      if (acceptedIds.size !== targetIds.length) {
+        const failure =
+          acceptedIds.size === 0
+            ? "These jobs have already been accepted or are no longer awaiting acceptance."
+            : `${acceptedIds.size} of ${targetIds.length} jobs were accepted. The board has been reloaded because another job changed.`;
 
-        setMessage(
-          "This job has already been accepted or is no longer awaiting acceptance."
-        );
         setAcceptanceTarget(null);
+
+        const seq = ++loadSeq.current;
+        await loadData(() => loadSeq.current !== seq);
+        setMessage(failure);
         return;
       }
 
       setJobs((prev) =>
         prev.map((job) =>
-          job.id === acceptanceTarget.id
+          acceptedIds.has(job.id)
             ? {
                 ...job,
                 status: "planned",
@@ -782,7 +830,9 @@ export default function PlanningPage() {
       );
 
       setMessage(
-        `Job ${acceptanceTarget.reference ?? acceptanceTarget.id} accepted.`
+        targetIds.length === 1
+          ? `Job ${targets[0].reference ?? targets[0].id} accepted.`
+          : `${targetIds.length} jobs accepted.`
       );
 
       setAcceptanceTarget(null);
@@ -1252,6 +1302,20 @@ export default function PlanningPage() {
               Send selected to vehicle
             </Button>
 
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={openAcceptAllPending}
+              disabled={
+                accepting ||
+                jobs.every((job) => job.status !== "pending_acceptance")
+              }
+            >
+              Accept all pending ({
+                jobs.filter((job) => job.status === "pending_acceptance").length
+              })
+            </Button>
+
             <span className="hidden h-7 w-px bg-line sm:block" aria-hidden />
 
             <Button
@@ -1388,10 +1452,15 @@ export default function PlanningPage() {
                 id="planning-acceptance-title"
                 className="text-lg font-semibold text-ink"
               >
-                Accept job
+                {acceptanceTarget.jobs.length === 1
+                  ? "Accept job"
+                  : `Accept ${acceptanceTarget.jobs.length} jobs`}
               </h2>
               <p className="mt-1 text-sm text-ink-3">
-                {acceptanceTarget.reference ?? acceptanceTarget.id}
+                {acceptanceTarget.jobs.length === 1
+                  ? acceptanceTarget.jobs[0].reference ??
+                    acceptanceTarget.jobs[0].id
+                  : "The ETA and acceptance note below will be applied to all pending jobs."}
               </p>
             </div>
 
@@ -1458,7 +1527,11 @@ export default function PlanningPage() {
                 disabled={accepting}
                 className="rounded-md border border-line bg-surface-2 px-3 py-2 text-sm font-semibold text-ink disabled:opacity-50"
               >
-                {accepting ? "Accepting..." : "Accept job"}
+                {accepting
+                  ? "Accepting..."
+                  : acceptanceTarget.jobs.length === 1
+                    ? "Accept job"
+                    : `Accept ${acceptanceTarget.jobs.length} jobs`}
               </button>
             </div>
           </form>
