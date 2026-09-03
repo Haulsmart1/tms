@@ -88,7 +88,17 @@ export default function VehiclesPage() {
   /* Its own hasData, not the grid's. ONE FLAG PER REGION, not per page:
      shouldShowSkeleton short-circuits on hasData, so borrowing the grid's flag
      would let a tenant that has vehicles but no fleet policies see "no policy
-     is configured" while that query is still in flight. */
+     is configured" while that query is still in flight.
+
+     THREE THINGS TRAVEL TOGETHER, per region: the flag, aria-busy on the
+     region's container, and exactly ONE sr-only role="status" line inside it.
+     A page with three regions that copies only the flag announces one of them.
+
+     A REGION IS SOMETHING THE USER CAN SEE. Form controls are excluded: the
+     fleet-policy <select> below maps the same fleetPolicies array and renders
+     an empty option list while loading, and that is fine, because a select's
+     options are not visible until it is opened. Same reasoning that leaves
+     /settings/portal-invites skeleton-free. */
   const showFleetPolicySkeleton = shouldShowSkeleton({
     tenantStatus: tenant.status,
     fetching: loading,
@@ -529,105 +539,113 @@ export default function VehiclesPage() {
                 ) : null}
               </div>
 
-              {fleetPolicies.length > 0 ? (
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {fleetPolicies.map((policy) => {
-                    const policyCompliance = getCompliance(policy.expiry_date);
-                    const linkedCount = vehicles.filter(
-                      (vehicle) =>
-                        vehicle.fleet_insurance_policy_id === policy.id
-                    ).length;
+              <div aria-busy={showFleetPolicySkeleton}>
+                {showFleetPolicySkeleton ? (
+                  <span className="sr-only" role="status">
+                    Loading fleet insurance policies
+                  </span>
+                ) : null}
 
-                    return (
-                      <article
-                        key={policy.id}
-                        className="rounded-lg border border-line bg-surface-2 p-3"
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <div>
-                            <strong className="block text-ink">
-                              {policy.provider}
-                            </strong>
-                            <span className="font-mono text-sm text-ink-2">
-                              {policy.policy_number}
-                            </span>
+                {fleetPolicies.length > 0 ? (
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    {fleetPolicies.map((policy) => {
+                      const policyCompliance = getCompliance(policy.expiry_date);
+                      const linkedCount = vehicles.filter(
+                        (vehicle) =>
+                          vehicle.fleet_insurance_policy_id === policy.id
+                      ).length;
+
+                      return (
+                        <article
+                          key={policy.id}
+                          className="rounded-lg border border-line bg-surface-2 p-3"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div>
+                              <strong className="block text-ink">
+                                {policy.provider}
+                              </strong>
+                              <span className="font-mono text-sm text-ink-2">
+                                {policy.policy_number}
+                              </span>
+                            </div>
+
+                            <ComplianceBadge result={policyCompliance} />
                           </div>
 
-                          <ComplianceBadge result={policyCompliance} />
-                        </div>
+                          <div className="my-3 grid gap-2">
+                            <div className="text-sm">
+                              <span className="text-kicker uppercase text-ink-3">Start</span>{" "}
+                              <strong className="block font-mono text-ink">
+                                {policy.start_date
+                                  ? formatDateGB(policy.start_date)
+                                  : "Not set"}
+                              </strong>
+                            </div>
+                            <div className="text-sm">
+                              <span className="text-kicker uppercase text-ink-3">Expiry</span>{" "}
+                              <strong className="block font-mono text-ink">
+                                {formatDateGB(policy.expiry_date)}
+                              </strong>
+                            </div>
+                            <div className="text-sm">
+                              <span className="text-kicker uppercase text-ink-3">Auto renew</span>{" "}
+                              <strong className="block text-ink">
+                                {policy.auto_renew ? "Yes" : "No"}
+                              </strong>
+                            </div>
+                            <div className="text-sm">
+                              <span className="text-kicker uppercase text-ink-3">Renewal warning</span>{" "}
+                              <strong className="block font-mono text-ink">
+                                {policy.renewal_notice_days} days
+                              </strong>
+                            </div>
+                            <div className="text-sm">
+                              <span className="text-kicker uppercase text-ink-3">Vehicles covered</span>{" "}
+                              <strong className="block font-mono text-ink">{linkedCount}</strong>
+                            </div>
+                          </div>
 
-                        <div className="my-3 grid gap-2">
-                          <div className="text-sm">
-                            <span className="text-kicker uppercase text-ink-3">Start</span>{" "}
-                            <strong className="block font-mono text-ink">
-                              {policy.start_date
-                                ? formatDateGB(policy.start_date)
-                                : "Not set"}
-                            </strong>
-                          </div>
-                          <div className="text-sm">
-                            <span className="text-kicker uppercase text-ink-3">Expiry</span>{" "}
-                            <strong className="block font-mono text-ink">
-                              {formatDateGB(policy.expiry_date)}
-                            </strong>
-                          </div>
-                          <div className="text-sm">
-                            <span className="text-kicker uppercase text-ink-3">Auto renew</span>{" "}
-                            <strong className="block text-ink">
-                              {policy.auto_renew ? "Yes" : "No"}
-                            </strong>
-                          </div>
-                          <div className="text-sm">
-                            <span className="text-kicker uppercase text-ink-3">Renewal warning</span>{" "}
-                            <strong className="block font-mono text-ink">
-                              {policy.renewal_notice_days} days
-                            </strong>
-                          </div>
-                          <div className="text-sm">
-                            <span className="text-kicker uppercase text-ink-3">Vehicles covered</span>{" "}
-                            <strong className="block font-mono text-ink">{linkedCount}</strong>
-                          </div>
-                        </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              type="button"
+                              onClick={() => startEditFleetPolicy(policy)}
+                            >
+                              Edit Policy
+                            </Button>
 
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            type="button"
-                            onClick={() => startEditFleetPolicy(policy)}
-                          >
-                            Edit Policy
-                          </Button>
-
-                          <Button
-                            variant="danger"
-                            size="sm"
-                            type="button"
-                            onClick={() => void deactivateFleetPolicy(policy)}
-                          >
-                            Deactivate
-                          </Button>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              ) : showFleetPolicySkeleton ? (
-                /* Not the warning banner: while the query is in flight "no
-                   policy is configured" is a guess, and it is the exact false
-                   empty state step 3 of the skeletonReadyRoutes checklist
-                   exists to prevent. */
-                <div className="rounded-lg border border-line bg-surface-2 p-3">
-                  <Skeleton display="inline-block" w="12ch" h="0.875rem" />
-                  <div className="mt-2">
-                    <Skeleton display="inline-block" w="18ch" h="0.75rem" />
+                            <Button
+                              variant="danger"
+                              size="sm"
+                              type="button"
+                              onClick={() => void deactivateFleetPolicy(policy)}
+                            >
+                              Deactivate
+                            </Button>
+                          </div>
+                        </article>
+                      );
+                    })}
                   </div>
-                </div>
-              ) : (
-                <div className="rounded-lg border border-warning-border bg-warning-tint p-3 text-sm text-warning-strong">
-                  No active fleet insurance policy is configured yet.
-                </div>
-              )}
+                ) : showFleetPolicySkeleton ? (
+                  /* Not the warning banner: while the query is in flight "no
+                     policy is configured" is a guess, and it is the exact false
+                     empty state step 3 of the skeletonReadyRoutes checklist
+                     exists to prevent. */
+                  <div className="rounded-lg border border-line bg-surface-2 p-3">
+                    <Skeleton display="inline-block" w="12ch" h="0.875rem" />
+                    <div className="mt-2">
+                      <Skeleton display="inline-block" w="18ch" h="0.75rem" />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-warning-border bg-warning-tint p-3 text-sm text-warning-strong">
+                    No active fleet insurance policy is configured yet.
+                  </div>
+                )}
+              </div>
 
               <form
                 onSubmit={saveFleetPolicy}
@@ -947,36 +965,43 @@ export default function VehiclesPage() {
             </p>
           ) : null}
 
-          <div className="grid gap-4" aria-busy={showSkeleton}>
-            {showSkeleton ? (
-              <span className="sr-only" role="status">Loading vehicles</span>
-            ) : null}
+          {/* ONE grid container shared by the skeleton and the real cards, and
+              not rendered at all when there is neither, matching
+              /subcontractors. Two containers would let these classes drift
+              apart and the layout jump on arrival. */}
+          {showSkeleton || vehicles.length > 0 ? (
+            <div className="grid gap-4" aria-busy={showSkeleton}>
+              {/* One announcement for the region, not one per bar. */}
+              {showSkeleton ? (
+                <span className="sr-only" role="status">Loading vehicles</span>
+              ) : null}
 
-            {showSkeleton
-              ? Array.from({ length: SKELETON_CARDS }, (_, index) => (
-                  <VehicleCard
-                    key={`skeleton-${index}`}
-                    vehicle={PLACEHOLDER_VEHICLE}
-                    policy={null}
-                    isAdmin={isAdmin}
-                    loading
-                    onEdit={() => {}}
-                    onDelete={() => {}}
-                    onToggle={() => {}}
-                  />
-                ))
-              : vehicles.map((vehicle) => (
-                  <VehicleCard
-                    key={vehicle.id}
-                    vehicle={vehicle}
-                    policy={getFleetPolicy(vehicle) ?? null}
-                    isAdmin={isAdmin}
-                    onEdit={startEdit}
-                    onDelete={(id) => void deleteVehicle(id)}
-                    onToggle={(id, active) => void toggleVehicle(id, active)}
-                  />
-                ))}
-          </div>
+              {showSkeleton
+                ? Array.from({ length: SKELETON_CARDS }, (_, index) => (
+                    <VehicleCard
+                      key={`skeleton-${index}`}
+                      vehicle={PLACEHOLDER_VEHICLE}
+                      policy={null}
+                      isAdmin={isAdmin}
+                      loading
+                      onEdit={() => {}}
+                      onDelete={() => {}}
+                      onToggle={() => {}}
+                    />
+                  ))
+                : vehicles.map((vehicle) => (
+                    <VehicleCard
+                      key={vehicle.id}
+                      vehicle={vehicle}
+                      policy={getFleetPolicy(vehicle) ?? null}
+                      isAdmin={isAdmin}
+                      onEdit={startEdit}
+                      onDelete={(id) => void deleteVehicle(id)}
+                      onToggle={(id, active) => void toggleVehicle(id, active)}
+                    />
+                  ))}
+            </div>
+          ) : null}
         </main>
       </div>
     </TenantGate>

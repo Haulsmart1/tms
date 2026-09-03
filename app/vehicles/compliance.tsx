@@ -9,15 +9,20 @@ import {
 } from "../../lib/compliance/expiry";
 import type { FleetInsurancePolicy, Vehicle } from "./types";
 
-/* The vehicle-specific half of compliance display. What sits here and why:
+/* The vehicle-specific half of compliance display.
 
-   - vehicleCardStyle is used by BOTH page.tsx and VehicleCard.tsx, so it
-     cannot live in the card without the page importing the card's module for
-     a style helper.
-   - ComplianceItem, insuranceExpiryOf and vehicleCardCompliance are used only
-     by the card today. They live here because they are vehicle compliance
-     rather than card layout, not because a second caller requires it. Nothing
-     stops a future reader moving them into the card.
+   EVERY export here is used by VehicleCard.tsx and by nothing else. page.tsx
+   imports none of them: it lost its last import from this module when the
+   badge moved to components/ComplianceBadge.tsx and the date formatter to
+   lib/format/date.ts.
+
+   So this module exists to mirror app/subcontractors/compliance.tsx, where the
+   same split IS load-bearing: there, page.tsx imports subcontractorCardStyle
+   directly, so the helper cannot live in the card without the page importing
+   the card's module for a style. Keeping the two features structurally
+   parallel is the reason this file survives; four more pages are queued on
+   this shape. Folding it into VehicleCard.tsx would be perfectly reasonable
+   if that parallel ever stops being the reason, but do it knowingly.
 
    Deliberately NOT shared with app/subcontractors/compliance.tsx: the two
    cardStyle helpers genuinely differ (p-4 and bg-surface shadow-sm here, p-3

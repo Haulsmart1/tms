@@ -1,9 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { formatDateGB } from "./date";
 
-/* These pin the behaviour the nine app-level copies already had. They are not
-   a specification of what the formatter ought to do; changing any of them is a
-   change to what every converted page renders. */
+/* These pin the behaviour that app/vehicles and app/subcontractors already
+   had, and ONLY those two. The six copies still under app/ are variants, not
+   near-copies (see the module header: app/pod parses as UTC, app/drivers has
+   no NaN guard, app/invoices also formats date-times), so nothing here says
+   anything about what migrating one of those would render.
+
+   They are not a specification of what the formatter ought to do; changing any
+   of them is a change to what the two converted pages render. */
 describe("formatDateGB", () => {
   it("formats a YYYY-MM-DD date as en-GB day-first", () => {
     expect(formatDateGB("2026-10-01")).toBe("01/10/2026");

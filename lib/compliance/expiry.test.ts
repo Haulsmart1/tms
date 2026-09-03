@@ -184,7 +184,7 @@ describe("mostUrgent", () => {
 
   it("returns the worst member of a mixed list, object and all", () => {
     /* Assert the whole object, not just .level. SubcontractorCard hands this
-       return value straight to StatusBadge, which renders result.label, so
+       return value straight to ComplianceBadge, which renders result.label, so
        returning the right level on the wrong object is a visible defect. */
     expect(mostUrgent([ok, amber, red])).toEqual(red);
   });

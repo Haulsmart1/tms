@@ -1,7 +1,25 @@
-/* The en-GB display formatter for a YYYY-MM-DD column. Nine near-copies of it
-   exist under app/; this is the one place it should live from now on. Two of
-   those copies (app/vehicles, app/subcontractors) now import it. Collapsing
-   the remaining seven is a separate job.
+/* The en-GB display formatter for a YYYY-MM-DD column, extracted from the two
+   identical copies in app/vehicles and app/subcontractors, which now import it.
+
+   DO NOT MECHANICALLY SWAP THE SIX REMAINING app/ COPIES FOR THIS. They are
+   variants, not near-copies, and each one needs a behavioural diff first:
+
+     - app/pod/page.tsx parses with a bare `new Date(value)`, a UTC parse, so
+       west of Greenwich it renders the previous day. Swapping it in FIXES that
+       and therefore CHANGES rendered output.
+     - app/drivers/page.tsx has no NaN guard, so malformed input renders
+       "Invalid Date" where this returns the input unchanged.
+     - app/invoices/page.tsx branches on `value.includes("T")` and formats
+       date-times; this returns those unchanged.
+     - The null fallbacks diverge three ways: "Not set", an em dash, and a
+       mojibake em dash in invoices.
+
+   Nothing would stop such a swap at compile time where the local copy also
+   took a plain string, which is why this warning is here rather than in a
+   plan. Note also that this signature is NON-NULLABLE, where six of the eight
+   copies accept `string | null | undefined` and fold the null case in: both
+   migrated call sites guard before calling, and a call site that does not will
+   at least fail to compile.
 
    NOT lib/time.ts, which is about operator calendar days and IANA timezones.
    This does no timezone work at all: it renders a date the database already
