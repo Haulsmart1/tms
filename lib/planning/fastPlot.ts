@@ -272,15 +272,111 @@ function finiteCost(value: unknown): number {
 const FAST_PLOT_MATRIX_CHUNK = 10;
 const FAST_PLOT_BEAM_WIDTH = 96;
 
+/**
+ * V5 operational-routing preferences.
+ *
+ * Clusters are deliberately soft preferences rather than precedence rules.
+ * 35 km is large enough to treat a metropolitan/local working area as one
+ * routing region without merging widely separated Scottish cities.
+ */
+const FAST_PLOT_CLUSTER_RADIUS_KM = 35;
+const FAST_PLOT_CLUSTER_REENTRY_SECONDS = 3 * 60 * 60;
+const FAST_PLOT_EARLY_CLUSTER_EXIT_SECONDS = 2 * 60 * 60;
+
 type FastPlotCostTable = Map<string, Map<string, number>>;
+type FastPlotClusterMap = Map<string, number>;
 
 type FastPlotSearchState = {
   route: FastPlotVisit[];
   visited: Set<string>;
   progress: Map<string, number>;
   cost: number;
+  operationalPenalty: number;
   score: number;
+  currentCluster: number | null;
+  exitedClusters: Set<number>;
 };
+
+function degreesToRadians(value: number): number {
+  return value * Math.PI / 180;
+}
+
+function haversineKm(left: LatLng, right: LatLng): number {
+  const earthRadiusKm = 6371;
+  const lat1 = degreesToRadians(left.lat);
+  const lat2 = degreesToRadians(right.lat);
+  const deltaLat = degreesToRadians(right.lat - left.lat);
+  const deltaLng = degreesToRadians(right.lng - left.lng);
+
+  const sinLat = Math.sin(deltaLat / 2);
+  const sinLng = Math.sin(deltaLng / 2);
+  const a =
+    sinLat * sinLat +
+    Math.cos(lat1) * Math.cos(lat2) * sinLng * sinLng;
+
+  return 2 * earthRadiusKm * Math.asin(
+    Math.min(1, Math.sqrt(a))
+  );
+}
+
+/**
+ * Build deterministic connected geographic areas.
+ *
+ * If A is near B and B is near C, all three belong to one operating area.
+ * Cluster membership never changes job precedence or visit eligibility.
+ */
+function buildFastPlotClusters(
+  visits: FastPlotVisit[]
+): FastPlotClusterMap {
+  const clusters: FastPlotClusterMap = new Map();
+  const adjacency = new Map<string, string[]>();
+
+  for (const visit of visits) {
+    adjacency.set(visit.key, []);
+  }
+
+  for (let leftIndex = 0; leftIndex < visits.length; leftIndex++) {
+    for (
+      let rightIndex = leftIndex + 1;
+      rightIndex < visits.length;
+      rightIndex++
+    ) {
+      const left = visits[leftIndex];
+      const right = visits[rightIndex];
+
+      if (
+        haversineKm(left.point, right.point) <=
+        FAST_PLOT_CLUSTER_RADIUS_KM
+      ) {
+        adjacency.get(left.key)?.push(right.key);
+        adjacency.get(right.key)?.push(left.key);
+      }
+    }
+  }
+
+  let clusterId = 0;
+
+  for (const visit of visits) {
+    if (clusters.has(visit.key)) continue;
+
+    const queue = [visit.key];
+    clusters.set(visit.key, clusterId);
+
+    for (let cursor = 0; cursor < queue.length; cursor++) {
+      const key = queue[cursor];
+
+      for (const neighbor of adjacency.get(key) ?? []) {
+        if (clusters.has(neighbor)) continue;
+        clusters.set(neighbor, clusterId);
+        queue.push(neighbor);
+      }
+    }
+
+    clusterId++;
+  }
+
+  return clusters;
+}
 
 function tableCost(
   table: FastPlotCostTable,
@@ -474,7 +570,8 @@ function expandSearchState(
   state: FastPlotSearchState,
   visits: FastPlotVisit[],
   counts: Map<string, number>,
-  table: FastPlotCostTable
+  table: FastPlotCostTable,
+  clusters: FastPlotClusterMap
 ): FastPlotSearchState[] {
   const remaining = remainingVisitsForState(
     visits,
@@ -510,13 +607,43 @@ function expandSearchState(
       (visit) => !visited.has(visit.key)
     );
 
+    const candidateCluster = clusters.get(candidate.key) ?? null;
+    const exitedClusters = new Set(state.exitedClusters);
+    let operationalPenalty = state.operationalPenalty;
+
+    if (
+      state.currentCluster !== null &&
+      candidateCluster !== null &&
+      state.currentCluster !== candidateCluster
+    ) {
+      const hasEligibleWorkInCurrentCluster = eligible.some(
+        (visit) =>
+          visit.key !== candidate.key &&
+          clusters.get(visit.key) === state.currentCluster
+      );
+
+      if (hasEligibleWorkInCurrentCluster) {
+        operationalPenalty += FAST_PLOT_EARLY_CLUSTER_EXIT_SECONDS;
+      }
+
+      exitedClusters.add(state.currentCluster);
+
+      if (exitedClusters.has(candidateCluster)) {
+        operationalPenalty += FAST_PLOT_CLUSTER_REENTRY_SECONDS;
+      }
+    }
+
     expanded.push({
       route,
       visited,
       progress,
       cost,
+      operationalPenalty,
+      currentCluster: candidateCluster,
+      exitedClusters,
       score:
         cost +
+        operationalPenalty +
         remainingCostLowerBound(
           candidate,
           after,
@@ -540,12 +667,17 @@ async function beamSearchFastPlotOrder(
   counts: Map<string, number>,
   table: FastPlotCostTable
 ): Promise<LatLng[] | null> {
+  const clusters = buildFastPlotClusters(visits);
+
   let beam: FastPlotSearchState[] = [{
     route: [],
     visited: new Set<string>(),
     progress: new Map<string, number>(),
     cost: 0,
+    operationalPenalty: 0,
     score: 0,
+    currentCluster: null,
+    exitedClusters: new Set<number>(),
   }];
 
   for (let depth = 0; depth < visits.length; depth++) {
@@ -557,7 +689,8 @@ async function beamSearchFastPlotOrder(
           state,
           visits,
           counts,
-          table
+          table,
+          clusters
         )
       );
     }
@@ -572,6 +705,15 @@ async function beamSearchFastPlotOrder(
   const complete = beam
     .filter((state) => state.route.length === visits.length)
     .sort((left, right) => {
+      const leftOperational =
+        left.cost + left.operationalPenalty;
+      const rightOperational =
+        right.cost + right.operationalPenalty;
+
+      if (leftOperational !== rightOperational) {
+        return leftOperational - rightOperational;
+      }
+
       if (left.cost !== right.cost) {
         return left.cost - right.cost;
       }
@@ -590,12 +732,14 @@ async function beamSearchFastPlotOrder(
 
 /** Build a low-cost physical route while enforcing every job's stop_order.
 
-    V4 preloads a bounded TomTom physical-stop cost graph, then performs a
-    bounded beam search across legal complete routes. This retains V3's
-    precedence guarantees while avoiding irreversible nearest-next choices.
+    V5 preloads the bounded TomTom physical-stop cost graph and performs
+    beam search across legal complete routes. Geographic operating areas are
+    soft scoring preferences: the search discourages leaving currently available
+    work behind and strongly discourages returning to an area after leaving it,
+    without weakening stop precedence.
 
     TomTom remains advisory: malformed/unavailable matrices fall back to the
-    deterministic precedence-safe V3 sequence. */
+    deterministic precedence-safe sequence. */
 export async function optimizeFastPlotOrder(
   jobs: PlanJob[],
   loadCosts: FastPlotCostLoader

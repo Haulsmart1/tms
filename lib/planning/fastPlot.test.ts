@@ -65,7 +65,7 @@ const costLoader = vi.fn(async (
   destinations.map((destination) => secondsBetween(origin, destination))
 ));
 
-describe("Fast Plot V4", () => {
+describe("Fast Plot V5", () => {
   it("merges one shared delivery into one physical visit", () => {
     const heywood = { lat: 53.59, lng: -2.22 };
     const jobs = [
@@ -359,7 +359,7 @@ describe("Fast Plot V4", () => {
     ]);
   });
 
-  it("keeps every V4 TomTom matrix request within 100 cells", async () => {
+  it("keeps every V5 TomTom matrix request within 100 cells", async () => {
     const jobs = Array.from({ length: 14 }, (_, index) =>
       job(`beam-${index}`, [
         stop(
@@ -393,7 +393,7 @@ describe("Fast Plot V4", () => {
     }
   });
 
-  it("produces deterministic V4 ordering when route costs tie", async () => {
+  it("produces deterministic V5 ordering when route costs tie", async () => {
     const jobs = [
       job("a", [
         stop("a-c", 1, "collection", 1, 1),
@@ -421,6 +421,154 @@ describe("Fast Plot V4", () => {
     const second = await optimizeFastPlotOrder(jobs, loader);
 
     expect(second).toEqual(first);
+  });
+
+
+  it("avoids leaving and later re-entering a geographic work area", async () => {
+    const jobs = [
+      job("area-a", [
+        stop("area-a-c", 1, "collection", 55.95, -3.19),
+        stop("area-a-d", 2, "delivery", 53.59, -2.22),
+      ]),
+      job("area-b", [
+        stop("area-b-c", 1, "collection", 55.98, -3.10),
+        stop("area-b-d", 2, "delivery", 53.59, -2.22),
+      ]),
+      job("west", [
+        stop("west-c", 1, "collection", 55.86, -4.25),
+        stop("west-d", 2, "delivery", 55.86, -4.25),
+      ]),
+    ];
+
+    const costs = new Map<string, number>([
+      ["55.95,-3.19>55.86,-4.25", 10],
+      ["55.86,-4.25>55.98,-3.1", 10],
+      ["55.95,-3.19>55.98,-3.1", 100],
+      ["55.98,-3.1>55.86,-4.25", 100],
+    ]);
+
+    const loader = vi.fn(async (
+      origins: LatLng[],
+      destinations: LatLng[]
+    ) => origins.map((origin) =>
+      destinations.map((destination) => {
+        if (
+          origin.lat === destination.lat &&
+          origin.lng === destination.lng
+        ) {
+          return 0;
+        }
+
+        return costs.get(
+          `${origin.lat},${origin.lng}>${destination.lat},${destination.lng}`
+        ) ?? secondsBetween(origin, destination);
+      })
+    ));
+
+    const route = await optimizeFastPlotOrder(jobs, loader);
+    const firstArea = route.findIndex(
+      (point) => point.lat === 55.95
+    );
+    const secondArea = route.findIndex(
+      (point) => point.lat === 55.98
+    );
+    const west = route.findIndex(
+      (point) => point.lat === 55.86
+    );
+
+    expect(firstArea).toBeGreaterThanOrEqual(0);
+    expect(secondArea).toBeGreaterThanOrEqual(0);
+    expect(west).toBeGreaterThanOrEqual(0);
+
+    expect(Math.abs(firstArea - secondArea)).toBe(1);
+
+    const areaMin = Math.min(firstArea, secondArea);
+    const areaMax = Math.max(firstArea, secondArea);
+
+    expect(
+      west < areaMin || west > areaMax
+    ).toBe(true);
+  });
+
+  it("keeps nearby legal work together before leaving its cluster", async () => {
+    const jobs = [
+      job("east-one", [
+        stop("east-one-c", 1, "collection", 55.95, -3.19),
+        stop("shared", 2, "delivery", 53.59, -2.22),
+      ]),
+      job("east-two", [
+        stop("east-two-c", 1, "collection", 55.96, -3.05),
+        stop("shared", 2, "delivery", 53.59, -2.22),
+      ]),
+      job("far", [
+        stop("far-c", 1, "collection", 56.46, -2.97),
+        stop("shared", 2, "delivery", 53.59, -2.22),
+      ]),
+    ];
+
+    const route = await optimizeFastPlotOrder(jobs, costLoader);
+
+    const eastOne = route.findIndex(
+      (point) => point.lat === 55.95
+    );
+    const eastTwo = route.findIndex(
+      (point) => point.lat === 55.96
+    );
+    const far = route.findIndex(
+      (point) => point.lat === 56.46
+    );
+
+    expect(Math.abs(eastOne - eastTwo)).toBe(1);
+
+    const eastMin = Math.min(eastOne, eastTwo);
+    const eastMax = Math.max(eastOne, eastTwo);
+
+    expect(
+      far < eastMin || far > eastMax
+    ).toBe(true);
+  });
+
+  it("never breaks stop precedence to avoid an area re-entry", async () => {
+    const jobs = [
+      job("precedence", [
+        stop("first", 1, "collection", 55.95, -3.19),
+        stop("middle", 2, "other", 55.86, -4.25),
+        stop("last", 3, "delivery", 55.98, -3.10),
+      ]),
+    ];
+
+    const route = await optimizeFastPlotOrder(jobs, costLoader);
+
+    expect(route).toEqual([
+      { lat: 55.95, lng: -3.19 },
+      { lat: 55.86, lng: -4.25 },
+      { lat: 55.98, lng: -3.10 },
+    ]);
+  });
+
+  it("keeps small local work routable without artificial direction rules", async () => {
+    const jobs = [
+      job("local-a", [
+        stop("local-a-c", 1, "collection", 55.95, -3.19),
+        stop("shared", 2, "delivery", 53.59, -2.22),
+      ]),
+      job("local-b", [
+        stop("local-b-c", 1, "collection", 55.96, -3.15),
+        stop("shared", 2, "delivery", 53.59, -2.22),
+      ]),
+      job("local-c", [
+        stop("local-c-c", 1, "collection", 55.94, -3.12),
+        stop("shared", 2, "delivery", 53.59, -2.22),
+      ]),
+    ];
+
+    const route = await optimizeFastPlotOrder(jobs, costLoader);
+
+    expect(route).toHaveLength(4);
+    expect(route.at(-1)).toEqual({
+      lat: 53.59,
+      lng: -2.22,
+    });
   });
 
 });
