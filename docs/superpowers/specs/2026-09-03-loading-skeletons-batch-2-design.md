@@ -458,3 +458,46 @@ commit deleting that file, `TenantGate`'s loading panel, and unwinding both cons
 
 The seven legacy inline-styled pages remain out of the project entirely, as batch 1 recorded:
 they cannot consume `ds` tokens and want converting to the design system first.
+
+## Found along the way: a DST off-by-one in `getCompliance`
+
+RECORDED 2026-09-03. Found while writing the first tests this function has ever had, during
+Task 4a. Deliberately NOT fixed on this branch; Ethan's call, for the reason in "Why it was not
+fixed here" below.
+
+`lib/compliance/expiry.ts` normalises `today` to local midnight and parses the expiry date as
+local midnight, then takes a millisecond delta and `Math.ceil`s it into days. When the two dates
+straddle a British Summer Time transition, that interval is a whole number of days plus or minus
+an hour, and the ceiling turns the extra hour into an extra day.
+
+Reproduced with the system clock frozen at 2026-09-03 (BST). The clocks go back on 2026-10-25:
+
+| expiry | calendar days away | `getCompliance().days` |
+| --- | --- | --- |
+| 2026-10-25 (transition day) | 52 | 52, correct |
+| 2026-10-26 (day after) | 53 | **54** |
+| 2026-12-25 | 113 | **114** |
+
+**Effect on the product.** Every expiry past the last Sunday in October reads one day further
+away than it is, until the clocks go forward again. Because the thresholds are distance-based,
+that means an operator licence, insurance policy or MOT crosses into its amber or red warning
+band **one day late** across the autumn transition, and presumably one day early across the
+spring one. It errs toward optimism in autumn, which is the worse direction for a compliance
+product: the warning a user relies on arrives after the day it should have.
+
+The blast radius is roughly a month either side of each transition for the 30-day threshold, and
+a week either side for the 7-day one. Outside those windows both dates sit in the same DST
+regime and the arithmetic is correct, which is why this has never been noticed.
+
+**Why it was not fixed here.** This branch is about loading states, and its manual pass is a
+signed-in look at skeletons, not at compliance dates. A change to when expiry warnings fire is
+exactly the kind of thing that gets waved through when it arrives inside an unrelated diff, and
+it wants its own verification against real fleet data. It is also now cheap to fix at any time,
+which it was not before: the function has 16 tests around it as of `06fb1a8`.
+
+**Shape of the fix, when someone takes it.** Compare calendar days rather than millisecond
+deltas. `lib/time.ts` already holds operator-day machinery and may be the right tool rather than
+a second implementation. Whoever does it should add cases spanning both transitions in both
+directions, since a fix that corrects autumn and breaks spring would pass every test in
+`lib/compliance/expiry.test.ts` as it stands: every case there sits inside BST on purpose, and
+the file says so.
