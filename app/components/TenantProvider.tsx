@@ -157,14 +157,21 @@ export function TenantProvider({ children }: { children: ReactNode }) {
 
   const writeTenantId = computeWriteTenantId(data.role, data.homeTenantId, activeTenantId);
 
-  /* Built as two branches rather than one object with an optional field: an
-     optional filterByTenant would type-check at every call site and defeat the
-     union. Each branch gets its variant from its own shape, so filterByTenant
-     must stay in the ready branch and never move into `base`: a spread bypasses
-     excess-property checking, so an unconditional one type-checks silently and
-     hands every unresolved context a filter, which is the bug this type exists
-     to catch. (Writing `status: data.status` here would compile, since the
-     condition narrows the property, but the literal says the intent.) */
+  /* Built as two branches rather than one object with an optional field. An
+     optional `filterByTenant?` on the shared type is the one edit here that
+     would silently undo the union, because it type-checks at every call site
+     without anyone narrowing first.
+
+     Two things in this block look load-bearing and are not. Both were checked
+     against tsc, recorded here so nobody re-derives them:
+       - `status: data.status` compiles in place of the literal, because the
+         condition narrows the property access. The literal is intent, not
+         necessity.
+       - Hoisting filterByTenant into `base` also compiles, and still refuses
+         every unnarrowed call site, because the TYPE is what guards. It only
+         leaves a live filter on unresolved contexts at runtime, which is
+         untidy rather than dangerous.
+     The guard is the type, not the shape of this expression. */
   const base = {
     role: data.role,
     userEmail,

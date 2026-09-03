@@ -33,12 +33,13 @@ The seventeen remaining routes split on that line, not on page shape:
 
 `/settings/portal-invites` appears in neither of batch 1's batch lists. It was missed.
 
-**Correction 2: the discriminated union is a three-page break, not fifteen.** Batch 1's spec
+**Correction 2: the discriminated union is a seven-page break, not fifteen.** Batch 1's spec
 deferred making `TenantContextValue` a union on `status`, estimating "roughly 15 pages". The
-real figure is three page files that call `filterByTenant` outside this batch, once the union is
-scoped to that field alone (see Section A). The spec also said the union is "best done alongside
-batch 1 or 2, while those pages are already being edited". At a fifth of the estimated cost, and
-with the recommended window still open, it is in scope here.
+real figure is seven page files that call `filterByTenant`, once the union is scoped to that
+field alone (see Section A). Three of the seven are pages this batch converts anyway. The spec
+also said the union is "best done alongside batch 1 or 2, while those pages are already being
+edited", which turns out to be the load-bearing reason: nearly half the cost is absorbed by
+pages already open on the bench.
 
 ## Scope
 
@@ -49,8 +50,9 @@ In scope:
 - `/subcontractors`, `/vehicles`, `/settings/users`, `/settings/licences`,
   `/settings/portal-invites`.
 - `TenantContextValue` becomes a minimal discriminated union on `status`.
-- The three pages outside this batch that the union breaks gain a guard line each, and no
-  skeletons.
+- The four pages outside this batch that the union breaks (`/jobs`, `/planning`, `/tracking`
+  and `/dashboard`) gain a guard each, and no skeletons. The other three are converted here
+  anyway.
 - Two "no tenant selected" states, on the two pages that need a concrete tenant id.
 
 Out of scope:
@@ -77,6 +79,7 @@ type TenantContextBase = {
   tenants: TenantOption[];
   activeTenantId: string | null;
   setActiveTenantId: (id: string | null) => void;
+  writeTenantId: string | null;
 };
 
 export type ReadyTenantContext = TenantContextBase & {
@@ -107,7 +110,9 @@ The two fields do not carry equal risk, so gating both was never the point.
 `filterByTenant` fails **silently**. With an unresolved tenant, `applyTenantFilter` returns the
 query unmodified (`lib/tenant/filter.ts:6`), so the read succeeds and comes back wrongly scoped.
 Nothing throws and nothing is null. That invisibility is why `/dashboard` issued unscoped
-queries on every cold load until batch 1 found it by reading the code.
+queries on every cold load through the whole of batch 1, which believed it had fixed them: the
+guard it added sits in the effect while the queries sit in a nested `load()`, so the narrowing
+never reached them. Only compiling the union revealed it.
 
 `writeTenantId` is already fail-safe **by value**. While loading, `role` is the default `"staff"`
 and `homeTenantId` is null, so `computeWriteTenantId` returns null (`lib/tenant/context.ts:61`),
@@ -118,7 +123,8 @@ So the union gates the field whose failure is invisible, and leaves alone the fi
 is already caught at every site. Gating `writeTenantId` too is recorded as a follow-up for the
 batch that converts `/invoices`, when that file is open for other reasons.
 
-The break is therefore three pages, not six.
+The break is therefore seven pages. See "What it costs" below for why that is more than the
+three this spec first claimed.
 
 ### Why minimal rather than full
 
@@ -132,14 +138,37 @@ opening lines, to guard against a bug nobody has hit. The fabricated `role` is w
 is not worth fixing here, disguised as a skeletons batch.
 
 An opt-in `isTenantReady()` predicate was also rejected. An optional guard is the honour-system
-convention batch 1 already has, with better ergonomics. It would not have caught the `/dashboard`
-bug that batch 1 found, because nothing would have forced anyone to call it.
+convention batch 1 already has, with better ergonomics. It would not have caught anything: on
+`/dashboard` the guard was already written, in good faith, by someone who knew the rule and
+documented it. It was simply in the wrong function. A predicate makes a guard easier to write,
+and every one of the bugs this union found was a guard that had already been written.
 
 ### What it costs
 
-Three pages outside this batch call `filterByTenant` without a status narrowing: `/jobs`
-(5 calls), `/planning` (4) and `/tracking` (1). In all three every call sits inside a single
-loader, so each page gains one guard at the top of that loader:
+CORRECTED 2026-09-03, when the union was first compiled. This section previously said three
+pages. The true figure is **seven**, and the error is worth recording because it was an error
+of reasoning rather than of counting.
+
+Four of the seven are outside this batch: `/jobs`, `/planning`, `/tracking` and `/dashboard`.
+Three more are inside it
+(`/subcontractors`, `/vehicles`, `/settings/licences`): they were excluded on the grounds that
+they get guards anyway as part of their own conversion, which is true but irrelevant. The union
+lands before those conversions, and typecheck is all-or-nothing, so their guards have to move
+forward into the same change as the union. The plan's task ordering was wrong, not its count.
+
+The seventh is `/dashboard`, and it is the interesting one. Batch 1 converted that page and
+recorded its guard as done. The guard is real, but it sits in the effect while the queries live
+in a nested `async function load()`, so the narrowing never reached them. The page batch 1 held
+up as the fixed example was still querying with an unresolved tenant, and only the union
+revealed it. This is the strongest available argument for the union over the honour-system
+convention it replaces: the convention was followed, reviewed, documented, and still wrong.
+
+Seven pages, by guard shape:
+
+**Loader guards (seven pages, eight functions).** `/jobs`, `/planning` (two separate loaders,
+see below), `/tracking`, `/subcontractors`, `/vehicles`, `/settings/licences` and `/dashboard`.
+Each gains one guard as the first statement of the function that queries, not of the effect that
+calls it:
 
 ```ts
 if (tenant.status !== "ready") return;
@@ -147,12 +176,42 @@ if (tenant.status !== "ready") return;
 
 with `tenant.status` added to the effect's dependency array.
 
+Two of those loader guards were not in the first enumeration either, and both are the same
+pattern again. `/planning` has a **second** nested loader, `loadPositions()` in the positions
+poller effect, with the identical effect-guards-but-nested-function-queries gap. That makes
+three independent instances of this exact bug shape found in one afternoon: `/dashboard`,
+`/planning`'s poller, and the original set. The pattern is not an oddity of one page, it is what
+happens whenever a guard is written in an effect and the queries live in a function the effect
+calls. That is the case the union exists to catch, and a reviewer reading for it by eye missed
+it three times.
+
+**Save-handler guards (five call sites).** `/subcontractors` has three `filterByTenant` calls in
+user-initiated save handlers rather than loaders, and `/vehicles` has two (`saveFleetPolicy` and
+`deactivateFleetPolicy`). A bare early return there would silently swallow a save, which is
+worse than the bug being fixed.
+
+These take the shape the same files already use for the same class of precondition, three lines
+away in some cases:
+
+```ts
+if (tenant.status !== "ready") {
+  setMessage("Still loading. Try again in a moment.");
+  return;
+}
+```
+
+placed at the top of the handler beside the existing `if (!tenant.writeTenantId) { setMessage(...) }`
+checks, and before any `setSaving(true)`, so no save flag is left stuck on. After this batch
+these branches are defensive rather than reachable, since the buttons that trigger them are
+disabled while loading.
+
 Two things about this are worth being precise about.
 
 It is a **bug fix, not insurance**. Per the correction recorded in batch 1's spec, `TenantGate`
 is an element inside each page's own JSX rather than a wrapper around the component, so it has
-never stopped a page's effects from firing during tenant resolution. All three of these pages are
-issuing queries with an unresolved tenant today. The guard stops that.
+never stopped a page's effects from firing during tenant resolution. All seven of these pages
+are issuing queries with an unresolved tenant today, `/dashboard` included despite batch 1
+believing otherwise. The guard stops that.
 
 It does **not** make these pages skeleton-ready. They gain step 2 of the four-step checklist in
 `lib/nav/skeletonReadyRoutes.ts` and nothing else. They stay off the allowlist, `TenantGate`
@@ -168,9 +227,15 @@ round trip or a null crash, not cross-tenant data.
 
 `npm run typecheck` is the whole verification, and it is exhaustive for this class of error by
 construction: a page that reaches `filterByTenant` without narrowing cannot compile. The
-sequence is: clean before, failing on exactly those three pages after the type change, clean
-again after the three guards. If the middle step names a fourth file, the count in this spec was
-wrong and the plan needs revisiting rather than the extra file quietly fixing.
+sequence is: clean before, failing on exactly those seven pages after the type change, clean
+again after the guards. If the middle step names an eighth file, the count in this spec was
+wrong again and the plan needs revisiting rather than the extra file quietly fixing.
+
+The error shapes are not uniform, which is worth knowing before reading the output: most are
+`TS2339 Property 'filterByTenant' does not exist`, but `/planning:469` and `/tracking:255` pass
+`tenant` whole into a helper typed `TenantFilter` and so fail as `TS2345`. `/dashboard` also
+emits cascading `TS7006` implicit-any errors in `.map`/`.reduce` callbacks, which clear on their
+own once its guard resolves the query types.
 
 ## Section B: the four card pages
 
@@ -330,8 +395,8 @@ rather than leaving three conditions to be kept consistent by hand.
 - The two Playwright specs in `tests/`, checked before and after as batch 1 did. Neither
   `/pod` nor `/tracking` is in this batch, so pass-through should not reach them, but
   `tests/tracking-layout.spec.mjs:134` and `tests/pod-layout.spec.mjs:106` both assert against
-  the `TenantGate` panel, and `/tracking` is one of the three pages gaining a guard. Verify
-  rather than assume.
+  the `TenantGate` panel, and `/tracking` is one of the pages gaining a guard. Verify rather
+  than assume.
 
 Components are not unit tested in this repo, so the four cards ride on typecheck plus a
 signed-in manual pass. That pass must cover, at minimum: each of the five pages on a cold load;
@@ -375,8 +440,8 @@ Changed:
 - `lib/tenant/context.test.ts`
 - `app/subcontractors/page.tsx`, `app/vehicles/page.tsx`, `app/settings/users/page.tsx`,
   `app/settings/licences/page.tsx`, `app/settings/portal-invites/page.tsx`
-- Guard line only, no skeletons: `app/jobs/page.tsx`, `app/planning/page.tsx`,
-  `app/tracking/page.tsx`
+- Guard only, no skeletons: `app/jobs/page.tsx`, `app/planning/page.tsx`,
+  `app/tracking/page.tsx`, `app/dashboard/page.tsx`
 
 ## What is left after this
 

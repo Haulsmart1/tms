@@ -210,20 +210,37 @@ Replace the `const value: TenantContextValue = { ... };` block at lines 172-181 
 - [ ] **Step 7: Run typecheck and confirm it fails on exactly three files**
 
 Run: `npm run typecheck`
-Expected: FAIL, with errors only in `app/jobs/page.tsx`, `app/planning/page.tsx` and `app/tracking/page.tsx`, all of the form "Property 'filterByTenant' does not exist on type 'TenantContextValue'".
+Expected: FAIL, with errors in exactly these seven files: `app/dashboard/page.tsx`, `app/jobs/page.tsx`, `app/planning/page.tsx`, `app/subcontractors/page.tsx`, `app/settings/licences/page.tsx`, `app/tracking/page.tsx`, `app/vehicles/page.tsx`.
 
-This is the verification described in the spec. **If a fourth file appears, stop.** The spec's count was wrong and the plan needs revisiting; do not silently fix the extra file. Report which file and what it does.
+**If an eighth file appears, stop and report it.** Do not silently fix the extra file.
+
+The error shapes are not uniform. Most are `TS2339 Property 'filterByTenant' does not exist`, but `/planning:469` and `/tracking:255` pass `tenant` whole into a helper typed `TenantFilter` and fail as `TS2345`; a guard before the call narrows those too. `/dashboard` also emits cascading `TS7006` implicit-any errors that clear once its guard lands.
 
 ---
 
-## Task 2: Guard the three pages the union breaks
+## Task 2: Guard the seven pages the union breaks
+
+CORRECTED 2026-09-03, after Task 1 was first compiled. This task originally named three pages.
+The real figure is seven. Two reasons, both recorded in the spec:
+
+- `/subcontractors`, `/vehicles` and `/settings/licences` were excluded because Tasks 3, 4 and 6
+  guard them anyway. True, but the union lands here and typecheck is all-or-nothing, so their
+  loader guards move forward into this task. Tasks 3, 4 and 6 then skip their guard step.
+- `/dashboard` was excluded because batch 1 recorded it as fixed. Its guard is real but sits in
+  the effect, while its queries sit in a nested `async function load()`, so the narrowing never
+  reached them. The page batch 1 held up as the good example was still querying unscoped. This
+  is the best evidence available that the union earns its place.
 
 **Files:**
 - Modify: `app/jobs/page.tsx:88`
 - Modify: `app/planning/page.tsx:190`
 - Modify: `app/tracking/page.tsx:164`
+- Modify: `app/dashboard/page.tsx` (inside `async function load()`, around line 67)
+- Modify: `app/subcontractors/page.tsx` (loader at 190, plus three save handlers)
+- Modify: `app/vehicles/page.tsx` (loader at 107, plus one save handler)
+- Modify: `app/settings/licences/page.tsx` (loader at 67)
 
-These three pages get a guard and **nothing else**. They gain no skeletons and they do **not** go on the allowlist; `TenantGate` keeps blocking on them and they keep their existing loading text. Adding them to the allowlist here would produce exactly the failure the allowlist's rule 3 warns about.
+None of these seven pages gets anything else. They gain no skeletons and they do **not** go on the allowlist; `TenantGate` keeps blocking on them and they keep their existing loading text. Adding them to the allowlist here would produce exactly the failure the allowlist's rule 3 warns about.
 
 The guard is a bug fix, not insurance. `TenantGate` sits inside each page's JSX rather than wrapping the component, so it has never stopped these effects from firing. All three query with an unresolved tenant today.
 
@@ -283,20 +300,87 @@ to:
   }, [tenant.status, tenant.activeTenantId, reloadToken]);
 ```
 
+Place the guard BEFORE `if (inFlight) return;`, so an unresolved tenant never marks a load in
+flight.
+
+- [ ] **Step 3a: Guard `/dashboard`**
+
+The guard at line 63 stays where it is: it also stops a token refresh flashing a skeleton over a
+populated page, which is a separate job and its comment says so. Add a second one as the first
+statement inside `async function load()` (around line 67, above `setState("loading")`):
+
+```ts
+      /* The effect above already returned for this case. Repeated here because
+         a narrowing does not cross a function boundary: batch 1's guard sat in
+         the effect while these queries sit in here, so it never reached them
+         and this page kept querying unscoped. */
+      if (tenant.status !== "ready") return;
+```
+
+Expect roughly seven `TS7006` implicit-any errors on this page to disappear on their own once
+this lands. They were cascade: with `filterByTenant` unresolved, the query results degraded to
+`any` in the `.map`/`.reduce` callbacks. If any survive, report them rather than annotating them.
+
+- [ ] **Step 3b: Guard the three loaders inside this batch**
+
+These are lifted forward from Tasks 3, 4 and 6, unchanged. Add to each loader, as its first
+statement, before any `setLoading(true)`:
+
+```ts
+    if (tenant.status !== "ready") return;
+```
+
+- `app/subcontractors/page.tsx`, in `loadData` (line 190, above `setLoading(true)`). Also add
+  `tenant.status` to the effect's dependency array at line 240:
+  `}, [loadData, tenant.status, tenant.activeTenantId]);`
+- `app/vehicles/page.tsx`, in `loadVehicles` (line 107, above `setLoading(true)`). Also change
+  the effect deps at line 153 from `[tenant.activeTenantId]` to
+  `[tenant.status, tenant.activeTenantId]`.
+- `app/settings/licences/page.tsx`, in `loadData` (line 67, above `setLoading(true)`). Also
+  change the effect deps at line 132 from `[tenant.activeTenantId]` to
+  `[tenant.status, tenant.activeTenantId]`. **This file is indented with four spaces**; match it.
+
+- [ ] **Step 3c: Guard the four save handlers**
+
+Four `filterByTenant` calls sit in user-initiated save handlers rather than loaders:
+`app/subcontractors/page.tsx` around lines 431, 497 and 565, and `app/vehicles/page.tsx` around
+line 297. A bare `return` there would silently swallow a user's save, which is worse than the bug
+being fixed.
+
+Use the shape these same files already use for the same class of precondition, in some cases
+three lines away:
+
+```ts
+    if (tenant.status !== "ready") {
+      setMessage("Still loading. Try again in a moment.");
+      return;
+    }
+```
+
+Place it at the **top of the handler function**, next to the existing
+`if (!tenant.writeTenantId) { setMessage(...); return; }` check where there is one, and always
+**before** any `setSaving(true)` / `setEmployeeSaving(true)` / `setVehicleSaving(true)`, so no
+save flag is left stuck on.
+
+Do not put it at the `filterByTenant` call site: these handlers do work before that point, and a
+guard halfway down reads as an afterthought rather than a precondition.
+
 - [ ] **Step 4: Verify**
 
 Run: `npm run typecheck && npm test`
-Expected: typecheck clean, tests pass with the same count as the baseline plus the three new cases from Task 1.
+Expected: typecheck clean, and `npm test` reporting 590 tests in 52 files (baseline 587 plus the three new cases from Task 1).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add lib/tenant/context.ts lib/tenant/context.test.ts app/components/TenantProvider.tsx app/jobs/page.tsx app/planning/page.tsx app/tracking/page.tsx
+git add lib/tenant/context.ts lib/tenant/context.test.ts app/components/TenantProvider.tsx app/jobs/page.tsx app/planning/page.tsx app/tracking/page.tsx app/dashboard/page.tsx app/subcontractors/page.tsx app/vehicles/page.tsx app/settings/licences/page.tsx
 git commit -m "feat(tenant): gate filterByTenant behind a ready-status union
 
 Querying before the tenant resolves now fails to compile instead of
-silently returning an unscoped query. Fixes the three pages that were
-doing exactly that: /jobs, /planning and /tracking.
+silently returning an unscoped query. Fixes the seven pages that were
+doing exactly that, /dashboard included: batch 1 guarded its effect but
+its queries live in a nested load(), so the narrowing never reached
+them and the page it recorded as fixed was still querying unscoped.
 
 writeTenantId stays on both variants: it is already null while loading
 and every call site checks it, so gating it would enforce a test the
@@ -483,19 +567,18 @@ const PLACEHOLDER_SUBCONTRACTOR = {
 } as unknown as Subcontractor;
 ```
 
-- [ ] **Step 5: Guard the loader**
+- [ ] **Step 5: Confirm the guard is already in place**
 
-`loadData` at line 190 begins with `setLoading(true);`. Insert above it:
+Task 2 added this page's loader guard and effect dependency, along with three save-handler
+guards. Nothing to do here. Confirm with:
 
-```ts
-    if (tenant.status !== "ready") return;
+```bash
+grep -n "tenant.status" app/subcontractors/page.tsx
 ```
 
-and add `tenant.status` to the effect's dependency array at line 240:
-
-```tsx
-  }, [loadData, tenant.status, tenant.activeTenantId]);
-```
+Expected: four guards (one in `loadData`, three in save handlers) plus `tenant.status` in the
+effect's dependency array. If any is missing, stop and report rather than adding it yourself:
+Task 2 is committed, and a gap there means its verification passed when it should not have.
 
 - [ ] **Step 6: Render the skeletons**
 
@@ -789,15 +872,11 @@ export default function VehicleCard({
 
 The last button's label is a real trade-off: its text depends on data. "Deactivate" is used as the loading label because it is the wider of the two, so the button does not grow on arrival. Note it in the commit.
 
-- [ ] **Step 3: Guard the loader and derive the flag**
+- [ ] **Step 3: Derive the flag (the guard is already in place)**
 
-In `app/vehicles/page.tsx`, `loadVehicles` at line 107 begins with `setLoading(true);`. Insert above it:
-
-```ts
-    if (tenant.status !== "ready") return;
-```
-
-Change the effect deps at line 153 from `[tenant.activeTenantId]` to `[tenant.status, tenant.activeTenantId]`.
+Task 2 added this page's loader guard, its effect dependency and one save-handler guard. Confirm
+with `grep -n "tenant.status" app/vehicles/page.tsx` (expect two guards plus the effect dep) and
+stop and report if any is missing rather than adding it yourself.
 
 Add next to the other hooks:
 
@@ -1289,15 +1368,11 @@ function Cell({
 
 Export `VehicleLicence` (and the `Vehicle` type it references) from `page.tsx` and import them here.
 
-- [ ] **Step 2: Guard the loader and derive the flag**
+- [ ] **Step 2: Derive the flag (the guard is already in place)**
 
-`loadData` at line 67 opens with `setLoading(true);`. Insert above it:
-
-```ts
-        if (tenant.status !== "ready") return;
-```
-
-Change the effect deps at line 132 from `[tenant.activeTenantId]` to `[tenant.status, tenant.activeTenantId]`.
+Task 2 added this page's loader guard and effect dependency. Confirm with
+`grep -n "tenant.status" app/settings/licences/page.tsx` and stop and report if it is missing
+rather than adding it yourself.
 
 Add next to the other hooks:
 
@@ -1549,7 +1624,8 @@ Nothing here can be automated, and per `CLAUDE.md` there are no component tests.
 
 ## Notes for whoever runs this
 
-- **Do not add `/jobs`, `/planning` or `/tracking` to the allowlist.** They get a guard only. This is the single easiest mistake to make in this plan.
+- **Do not add `/jobs`, `/planning`, `/tracking` or `/dashboard` to the allowlist** as part of Task 2. `/jobs`, `/planning` and `/tracking` get a guard only. `/dashboard` is already on the list from batch 1 and stays exactly as it is. This is the single easiest mistake to make in this plan.
+- **Tasks 3, 4 and 6 no longer add their own loader guard or effect deps.** Task 2 does that for them. Their remaining steps are unchanged.
 - **Do not reformat `app/settings/licences/page.tsx`.** Four-space indent, matched deliberately.
 - **If Task 1's typecheck names a fourth broken file, stop and report.** The spec's count was measured; a fourth file means something changed and the plan should be revisited rather than patched.
 - **Placeholder counts (6, 4, 4, 3) are guesses** about data that has not arrived, as is the two-pill flag row in `CustomerCard`. This is the recorded ceiling of pixel-faithful skeletons, not an oversight.
