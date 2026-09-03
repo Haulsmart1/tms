@@ -565,3 +565,40 @@ while the function ranks on a three-value enum alone. It wants deciding before i
 so the current behaviour is written down and a change to it has to be deliberate. The
 order-independence test alongside it was also renamed, because it only holds when every input has
 a distinct level and its old name claimed otherwise.
+
+## Found along the way: the fabricated `role` causes layout shift, batch-wide
+
+RECORDED 2026-09-03, during Task 5 (`/settings/users`). Not fixed; see below.
+
+The "Why minimal rather than full" section above defers making `role` part of the discriminated
+union, describing the `"staff"` default during loading as "a real if unexercised lie". It is now
+exercised, and it produces the exact symptom this project exists to remove.
+
+`/settings/users` derives `canInvite` from `tenant.role`. While the context resolves, `role` is
+the fabricated `"staff"`, so:
+
+- The whole "Invite User" form is hidden during the loading frame and pops in once status reaches
+  `ready`, for the admins who are the page's main audience.
+- The skeleton cards render **no Edit button**, because `canInvite` is false. Every card then
+  grows by a button when the real data lands.
+
+The second is a layout shift caused by the skeleton itself, which is worse than the "Loading
+users..." string it replaced: that string at least did not pretend to be the finished layout.
+
+**This is not local to one page.** Any converted page whose controls gate on role has it. It
+will recur on every page in batches 3 and beyond, and it is invisible to every test in the repo,
+because no test renders a component.
+
+**Why it is not fixed here.** Every available fix is a guess about a viewer whose role is not yet
+known. Rendering the button means it vanishes for a staff viewer; hiding it means it appears for
+an admin. Both are shifts, differing only in who sees them and how often. The batch's own
+principle, that fixed-size controls render real while loading, assumes the control is known to
+exist, and here it is not.
+
+The real fix is the deferred one: make `role` unavailable rather than fabricated until the
+context resolves, so a page cannot silently branch on a guess. That is the full union, and it
+restructures the opening lines of every page, which is why it was deferred and why it should not
+be smuggled into a skeletons batch.
+
+**It is on the manual-pass checklist** rather than decided from the code, because how bad it
+looks decides how urgent it is, and that can only be seen signed in.
