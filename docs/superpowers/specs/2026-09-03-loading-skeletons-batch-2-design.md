@@ -292,8 +292,13 @@ than restyling it.
 
 ### `/settings/users` (403 lines)
 
-New: `app/settings/users/UserCard.tsx`. No `types.ts`: `TenantUser` is already a named type at
-the top of the file and is not needed anywhere else.
+New: `app/settings/users/UserCard.tsx` and `app/settings/users/types.ts`.
+
+BUILT 2026-09-03: this section originally said "no `types.ts`", on the grounds that `TenantUser`
+was already a named type at the top of `page.tsx` and was needed nowhere else. That was wrong for
+the same cycle-avoidance reason as the `compliance.tsx` files: the page imports the card, so the
+card cannot import a type from the page without a circular edge. `TenantUser` moved verbatim into
+`app/settings/users/types.ts`.
 
 | Band | Loading treatment |
 | --- | --- |
@@ -365,6 +370,27 @@ it, a skeleton on these two pages is ambiguous. `loading` would be true in a cas
 is ever going to arrive, so the placeholder would pulse forever. The state has to be
 distinguishable before the skeleton can be correct.
 
+**BUILT 2026-09-03: this rule lives in `lib/loading/tenantDataView.ts`, not in either page.**
+It was written inline in `/settings/users` first and promoted immediately, for two reasons.
+Vitest covers `lib/` only, and the ordering below IS the substance of the fix: left in a page
+component, a future edit could swap two `if`s, compile, pass everything, and reintroduce the bug
+silently. And `/settings/portal-invites` needs the identical rule, so an inline copy there would
+have been a second implementation of one rule.
+
+`tenantDataView` also carries a fifth state the inline version lacked: `"error"`. Both loaders'
+catch blocks clear the row array, so a failed read fell through to `"empty"` and rendered
+"No users found for this tenant." directly under the error banner. That is the same false
+statement this section exists to remove, one branch over. `"error"` sits after
+`"no-tenant-selected"` (a stale failure must not outrank the prompt to pick a tenant) and before
+`"fetching"` (a retry in flight must not mask the failure the user is still looking at). The
+`"error"` branch renders nothing: the page already shows the failure in its `message` banner, so
+the branch exists only to suppress the empty card.
+
+`tenantDataView` is the same underlying rule as `lib/loading/skeletonVisibility.ts`, expressed
+for a five-way branch rather than a boolean. They are deliberately NOT composed, because
+composing hides the ordering. Each module's header points at the other; they must change
+together.
+
 **The order of the two checks is the whole difficulty.** `tenant.activeTenantId` is null in two
 completely different situations: while the tenant context is still resolving, and when a
 resolved admin is deliberately on "All tenants". Both pages today test only for null and so
@@ -430,8 +456,9 @@ New:
 
 - `app/subcontractors/types.ts`, `app/subcontractors/SubcontractorCard.tsx`
 - `app/vehicles/types.ts`, `app/vehicles/VehicleCard.tsx`
-- `app/settings/users/UserCard.tsx`
+- `app/settings/users/UserCard.tsx`, `app/settings/users/types.ts`
 - `app/settings/licences/LicenceCard.tsx`
+- `lib/loading/tenantDataView.ts`, `lib/loading/tenantDataView.test.ts` (see Section C)
 
 Changed:
 

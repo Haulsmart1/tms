@@ -5,7 +5,7 @@ import type { FormEvent } from "react";
 import { useTenant } from "../../components/TenantProvider";
 import TenantGate from "../../components/TenantGate";
 import Button from "../../../components/Button";
-import { usersView } from "../../../lib/loading/usersView";
+import { tenantDataView } from "../../../lib/loading/tenantDataView";
 import UserCard from "./UserCard";
 import type { TenantUser } from "./types";
 
@@ -27,6 +27,9 @@ export default function UsersPage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [inviting, setInviting] = useState(false);
+  /* Separate from `message`, which also carries invite and save results.
+     Only a failed READ may suppress the empty state. */
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editFullName, setEditFullName] = useState("");
@@ -41,11 +44,13 @@ export default function UsersPage() {
       // A resolved admin on "All tenants". Nothing is coming, and the view
       // says so rather than claiming the tenant has no users.
       setUsers([]);
+      setLoadFailed(false);
       setLoading(false);
       return;
     }
 
     setLoading(true);
+    setLoadFailed(false);
 
     try {
       const response = await fetch(
@@ -67,6 +72,7 @@ export default function UsersPage() {
       setUsers(body.users ?? []);
     } catch (error) {
       setUsers([]);
+      setLoadFailed(true);
       setMessage(
         error instanceof Error ? error.message : "Unable to load tenant users."
       );
@@ -79,11 +85,12 @@ export default function UsersPage() {
     void loadUsers();
   }, [loadUsers]);
 
-  const view = usersView({
+  const view = tenantDataView({
     tenantStatus: tenant.status,
     activeTenantId: tenant.activeTenantId,
     fetching: loading,
-    users,
+    hasData: users.length > 0,
+    failed: loadFailed,
   });
 
   async function inviteUser(event: FormEvent<HTMLFormElement>) {
@@ -288,17 +295,8 @@ export default function UsersPage() {
                   user={PLACEHOLDER_USER}
                   loading
                   canInvite={canInvite}
-                  isEditing={false}
-                  editFullName=""
-                  setEditFullName={() => {}}
-                  editPhone=""
-                  setEditPhone={() => {}}
-                  editRole="staff"
-                  setEditRole={() => {}}
-                  savingUser={false}
+                  edit={null}
                   onBeginEdit={() => {}}
-                  onCancelEdit={() => {}}
-                  onSave={() => {}}
                 />
               ))
             ) : view === "no-tenant-selected" ? (
@@ -306,6 +304,12 @@ export default function UsersPage() {
                 Users are managed one tenant at a time. Pick a tenant from the
                 selector in the header to see and invite its users.
               </div>
+            ) : view === "error" ? (
+              /* Deliberately nothing. The failure is already on screen in the
+                 `message` banner above; a second copy here would be noise.
+                 The point of the branch is to suppress the empty card, which
+                 would otherwise call a failed read an empty tenant. */
+              null
             ) : view === "empty" ? (
               <div className="rounded-lg border border-line bg-surface p-4 text-sm text-ink-3 shadow-sm">
                 No users found for this tenant.
@@ -316,19 +320,22 @@ export default function UsersPage() {
                   key={user.membership_id}
                   user={user}
                   canInvite={canInvite}
-                  isEditing={
-                    Boolean(user.user_id) && editingUserId === user.user_id
+                  edit={
+                    user.user_id && editingUserId === user.user_id
+                      ? {
+                          fullName: editFullName,
+                          setFullName: setEditFullName,
+                          phone: editPhone,
+                          setPhone: setEditPhone,
+                          role: editRole,
+                          setRole: setEditRole,
+                          saving: savingUser,
+                          onSave: () => void saveUser(user.user_id!),
+                          onCancel: cancelEdit,
+                        }
+                      : null
                   }
-                  editFullName={editFullName}
-                  setEditFullName={setEditFullName}
-                  editPhone={editPhone}
-                  setEditPhone={setEditPhone}
-                  editRole={editRole}
-                  setEditRole={setEditRole}
-                  savingUser={savingUser}
                   onBeginEdit={beginEdit}
-                  onCancelEdit={cancelEdit}
-                  onSave={(userId) => void saveUser(userId)}
                 />
               ))
             )}

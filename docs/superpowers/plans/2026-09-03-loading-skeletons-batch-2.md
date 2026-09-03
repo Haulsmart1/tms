@@ -1167,63 +1167,84 @@ Claude-Session: https://claude.ai/code/session_017BL5k8UCJHsvLKiXWQDfRJ"
 
 ## Task 5: `/settings/users`
 
-**Files:**
-- Create: `app/settings/users/UserCard.tsx`
+**Files (AS BUILT 2026-09-03):**
+- Create: `app/settings/users/UserCard.tsx`, `app/settings/users/types.ts`
+- Create: `lib/loading/tenantDataView.ts`, `lib/loading/tenantDataView.test.ts`
 - Modify: `app/settings/users/page.tsx`
 - Modify: `lib/nav/skeletonReadyRoutes.ts`, `lib/nav/skeletonReadyRoutes.test.ts`
 
 This page fetches `/api/settings/users/invite`, not Supabase, so the union does not touch it. It still needs a `tenant.status` guard, for the ordering reason below.
 
-No `types.ts`: `TenantUser` is already a named type at the top of the file and is not needed anywhere else.
+~~No `types.ts`: `TenantUser` is already a named type at the top of the file and is not needed anywhere else.~~ SUPERSEDED: `app/settings/users/types.ts` was created after all, because the page imports the card, so the card cannot import a type from the page without a circular edge. Same reason as the `compliance.tsx` files. See Step 3.
 
-- [ ] **Step 1: Derive one state value, not three booleans**
+- [x] **Step 1: Derive one state value, not three booleans**
 
 This is the crux of the task. `tenant.activeTenantId` is null in two unrelated situations: while the tenant context resolves, and when a resolved admin is deliberately on "All tenants". The page currently tests only for null (line 41) and so cannot tell them apart, which is why it renders "No users found for this tenant." as the first thing a company admin sees.
 
-Testing null first would flash "pick a tenant" on every cold load. The order is fixed:
+Testing null first would flash "pick a tenant" on every cold load. The order is fixed.
 
-Add to `app/settings/users/page.tsx`, next to the other hooks:
+**AS BUILT 2026-09-03, superseding the inline `usersView` this step originally specified.** The
+rule was promoted to `lib/loading/tenantDataView.ts` rather than written inline in `page.tsx`.
+Vitest covers `lib/` only, and the ordering is the substance of the fix: inline, a future edit
+could swap two `if`s, compile, pass everything, and reintroduce the bug silently. Task 6
+(`/settings/portal-invites`) needs the identical rule, so **do not write a second `invitesView`;
+call `tenantDataView`.**
+
+It also carries a fifth state the inline sketch lacked, `"error"`, because both loaders' catch
+blocks clear the rows and so fell through to `"empty"`, rendering "No users found for this
+tenant." under the error banner.
 
 ```ts
-/* One derived value rather than three independent booleans, because the four
-   states are mutually exclusive BY ORDER and three booleans would let a future
-   edit put them in the wrong one.
+export type TenantDataView =
+  | "loading"
+  | "no-tenant-selected"
+  | "error"
+  | "empty"
+  | "list";
 
-   The order matters and is not arbitrary. activeTenantId is null both while the
-   context resolves AND when a resolved admin sits on "All tenants", so testing
-   null before status would show "pick a tenant" for a frame on every cold load:
-   a worse flash than the one this project exists to remove. */
-type UsersView = "loading" | "no-tenant-selected" | "empty" | "list";
-
-function usersView({
+export function tenantDataView({
   tenantStatus,
   activeTenantId,
   fetching,
-  users,
+  hasData,
+  failed,
 }: {
   tenantStatus: TenantStatus;
   activeTenantId: string | null;
   fetching: boolean;
-  users: TenantUser[];
-}): UsersView {
-  if (users.length > 0) return "list";           // never skeleton over content
+  hasData: boolean;
+  failed: boolean;
+}): TenantDataView {
+  if (hasData) return "list";                    // never skeleton over content
   if (tenantStatus !== "ready") return "loading";
   if (!activeTenantId) return "no-tenant-selected";
+  if (failed) return "error";                    // do NOT claim empty after a failed read
   if (fetching) return "loading";
   return "empty";
 }
 ```
 
-Import `TenantStatus` from `../../../lib/tenant/context`. Then in the component:
+`hasData: boolean` rather than the row array, matching the `hasData` parameter of the sibling
+module `lib/loading/skeletonVisibility.ts`. The two express one rule, for a five-way branch and
+for a boolean respectively; they are deliberately not composed, because composing hides the
+ordering, and each header points at the other.
+
+In the component:
 
 ```ts
-  const view = usersView({
+  const view = tenantDataView({
     tenantStatus: tenant.status,
     activeTenantId: tenant.activeTenantId,
     fetching: loading,
-    users,
+    hasData: users.length > 0,
+    failed: loadFailed,
   });
 ```
+
+`loadFailed` is a `useState<boolean>` set true in `loadUsers`' catch and cleared at the top of
+each load. It is separate from `message`, which also carries invite and save results: only a
+failed READ may suppress the empty state. The `"error"` branch renders nothing, since the
+failure is already on screen in the `message` banner; it exists only to suppress the empty card.
 
 - [ ] **Step 2: Guard the loader**
 
@@ -1248,6 +1269,14 @@ Change the callback deps at line 75 from `[tenant.activeTenantId]` to `[tenant.s
 Create `app/settings/users/UserCard.tsx`. Move the `<article>` at `page.tsx:281-386` across, adding the loading branches. The inline edit form inside the card is reachable only via the Edit button, which is disabled while loading, so it needs no loading state; move it across unchanged.
 
 First create `app/settings/users/types.ts` by moving the `TenantUser` type out of `page.tsx` with `export` added, and import it back into `page.tsx`. This deviates from the spec's file list, for the same cycle-avoidance reason as the `compliance.tsx` files: the page imports the card, so the card cannot import a type from the page without a circular edge.
+
+**AS BUILT 2026-09-03:** the card takes a nullable `edit: UserEdit | null` object rather than six
+separate edit-state props plus an `isEditing` flag: `edit !== null` IS `isEditing`, so the two
+cannot disagree, and the skeleton call site is `<UserCard user={PLACEHOLDER_USER} loading
+canInvite={canInvite} edit={null} onBeginEdit={() => {}} />` rather than ten placeholder props.
+The form stays inside the card rather than becoming a `UserEditForm`: it is part of the card's
+layout, and splitting it would add a file without removing the threading. **Task 6 should follow
+this shape.**
 
 ```tsx
 import Badge from "../../../components/Badge";

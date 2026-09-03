@@ -3,23 +3,28 @@ import Badge from "../../../components/Badge";
 import Skeleton from "../../../components/Skeleton";
 import type { TenantUser } from "./types";
 
+type UserEdit = {
+  fullName: string;
+  setFullName: (value: string) => void;
+  phone: string;
+  setPhone: (value: string) => void;
+  role: string;
+  setRole: (value: string) => void;
+  saving: boolean;
+  onSave: () => void;
+  onCancel: () => void;
+};
+
 type Props = {
   user: TenantUser;
   loading?: boolean;
   canInvite: boolean;
-  isEditing: boolean;
-  /* The edit form lives inside the card, so its state comes in as props
-     rather than being duplicated here. All of it stays owned by the page. */
-  editFullName: string;
-  setEditFullName: (value: string) => void;
-  editPhone: string;
-  setEditPhone: (value: string) => void;
-  editRole: string;
-  setEditRole: (value: string) => void;
-  savingUser: boolean;
+  /** null means not editing. Replaces a separate isEditing flag, which could
+   *  disagree with these values. The edit form lives inside the card because
+   *  it is part of the card's layout, but every value in it stays owned by
+   *  the page. */
+  edit: UserEdit | null;
   onBeginEdit: (user: TenantUser) => void;
-  onCancelEdit: () => void;
-  onSave: (userId: string) => void;
 };
 
 /* ONE layout definition for both states, per the batch 1 decision. A separate
@@ -32,18 +37,10 @@ export default function UserCard({
   user,
   loading = false,
   canInvite,
-  isEditing,
-  editFullName,
-  setEditFullName,
-  editPhone,
-  setEditPhone,
-  editRole,
-  setEditRole,
-  savingUser,
+  edit,
   onBeginEdit,
-  onCancelEdit,
-  onSave,
 }: Props) {
+  const isEditing = edit !== null;
   return (
     <article
       className="rounded-lg border border-line bg-surface-2 p-3"
@@ -101,7 +98,7 @@ export default function UserCard({
               variant="secondary"
               size="sm"
               disabled={loading}
-              onClick={() => (isEditing ? onCancelEdit() : onBeginEdit(user))}
+              onClick={() => (edit ? edit.onCancel() : onBeginEdit(user))}
             >
               {isEditing ? "Cancel" : "Edit"}
             </Button>
@@ -110,15 +107,15 @@ export default function UserCard({
       </div>
 
       {/* Reachable only through the Edit button, which is disabled while
-          loading, so isEditing is always false then and this needs no
+          loading, so `edit` is always null then and this needs no
           loading state of its own. */}
-      {isEditing && user.user_id ? (
+      {edit && user.user_id ? (
         <div className="mt-3 grid items-end gap-3 border-t border-line pt-3 sm:grid-cols-2">
           <label className="grid gap-1.5">
             <span className="text-sm font-medium text-ink-2">Full name</span>
             <input
-              value={editFullName}
-              onChange={(event) => setEditFullName(event.target.value)}
+              value={edit.fullName}
+              onChange={(event) => edit.setFullName(event.target.value)}
               className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
               placeholder="Full name"
             />
@@ -127,8 +124,8 @@ export default function UserCard({
           <label className="grid gap-1.5">
             <span className="text-sm font-medium text-ink-2">Phone</span>
             <input
-              value={editPhone}
-              onChange={(event) => setEditPhone(event.target.value)}
+              value={edit.phone}
+              onChange={(event) => edit.setPhone(event.target.value)}
               className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
               placeholder="Phone number"
             />
@@ -137,8 +134,8 @@ export default function UserCard({
           <label className="grid gap-1.5">
             <span className="text-sm font-medium text-ink-2">Tenant role</span>
             <select
-              value={editRole}
-              onChange={(event) => setEditRole(event.target.value)}
+              value={edit.role}
+              onChange={(event) => edit.setRole(event.target.value)}
               className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
             >
               <option value="staff">Staff</option>
@@ -150,10 +147,10 @@ export default function UserCard({
           <div>
             <Button
               type="button"
-              disabled={savingUser}
-              onClick={() => onSave(user.user_id!)}
+              disabled={edit.saving}
+              onClick={edit.onSave}
             >
-              {savingUser ? "Saving..." : "Save Changes"}
+              {edit.saving ? "Saving..." : "Save Changes"}
             </Button>
           </div>
         </div>
