@@ -7,49 +7,19 @@ import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
 import Badge from "../../components/Badge";
 import Button from "../../components/Button";
-import Card from "../../components/Card";
 import MessageBanner from "../../components/MessageBanner";
-import { cn } from "../../lib/cn";
+import Skeleton from "../../components/Skeleton";
+import { getCompliance } from "../../lib/compliance/expiry";
+import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
+import VehicleCard from "./VehicleCard";
+import { StatusBadge, formatDate } from "./compliance";
+import type { FleetInsurancePolicy, Vehicle } from "./types";
 
-type Vehicle = {
-  id: string;
-  tenant_id: string;
-  registration: string;
-  vehicle_type: string | null;
-  make: string | null;
-  model: string | null;
-  active: boolean | null;
-  created_at?: string;
-  mot_expiry: string | null;
-  tax_expiry: string | null;
-  insurance_type: "individual" | "fleet" | null;
-  insurance_provider: string | null;
-  insurance_policy_number: string | null;
-  insurance_start_date: string | null;
-  insurance_expiry: string | null;
-  fleet_insurance_policy_id: string | null;
-};
+/* Four, because these cards are full width in a single-column grid, so four
+   is roughly one screen. A guess about data that has not arrived. */
+const SKELETON_CARDS = 4;
 
-type FleetInsurancePolicy = {
-  id: string;
-  tenant_id: string;
-  provider: string;
-  policy_number: string;
-  start_date: string | null;
-  expiry_date: string;
-  auto_renew: boolean;
-  renewal_notice_days: number;
-  active: boolean;
-  notes: string | null;
-};
-
-type ComplianceLevel = "ok" | "amber" | "red";
-
-type ComplianceResult = {
-  level: ComplianceLevel;
-  label: string;
-  days: number | null;
-};
+const PLACEHOLDER_VEHICLE = { id: "" } as Vehicle;
 
 const inputClasses =
   "h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3";
@@ -103,6 +73,12 @@ export default function VehiclesPage() {
   );
 
   const [form, setForm] = useState(EMPTY_FORM);
+
+  const showSkeleton = shouldShowSkeleton({
+    tenantStatus: tenant.status,
+    fetching: loading,
+    hasData: vehicles.length > 0,
+  });
 
   async function loadVehicles() {
     if (tenant.status !== "ready") return;
@@ -496,22 +472,6 @@ export default function VehiclesPage() {
     );
   }
 
-  function getInsuranceExpiry(vehicle: Vehicle) {
-    if (vehicle.insurance_type === "fleet") {
-      return getFleetPolicy(vehicle)?.expiry_date ?? null;
-    }
-
-    return vehicle.insurance_expiry;
-  }
-
-  function getVehicleCardCompliance(vehicle: Vehicle): ComplianceResult {
-    const mot = getCompliance(vehicle.mot_expiry);
-    const tax = getCompliance(vehicle.tax_expiry);
-    const insurance = getCompliance(getInsuranceExpiry(vehicle));
-
-    return mostUrgent([mot, tax, insurance]);
-  }
-
   return (
     <TenantGate>
       <div className="ds min-h-screen bg-canvas font-sans text-ink">
@@ -634,6 +594,17 @@ export default function VehiclesPage() {
                       </article>
                     );
                   })}
+                </div>
+              ) : showSkeleton ? (
+                /* Not the warning banner: while the query is in flight "no
+                   policy is configured" is a guess, and it is the exact false
+                   empty state step 3 of the skeletonReadyRoutes checklist
+                   exists to prevent. */
+                <div className="rounded-lg border border-line bg-surface-2 p-3">
+                  <Skeleton display="inline-block" w="12ch" h="0.875rem" />
+                  <div className="mt-2">
+                    <Skeleton display="inline-block" w="18ch" h="0.75rem" />
+                  </div>
                 </div>
               ) : (
                 <div className="rounded-lg border border-warning-border bg-warning-tint p-3 text-sm text-warning-strong">
@@ -953,110 +924,35 @@ export default function VehiclesPage() {
 
           <MessageBanner tone="neutral">{message}</MessageBanner>
 
-          {loading ? <Card className="mb-4">Loading vehicles...</Card> : null}
+          <div className="grid gap-4" aria-busy={showSkeleton}>
+            {showSkeleton ? (
+              <span className="sr-only" role="status">Loading vehicles</span>
+            ) : null}
 
-          <div className="grid gap-4">
-            {vehicles.map((vehicle) => {
-              const cardCompliance = getVehicleCardCompliance(vehicle);
-              const mot = getCompliance(vehicle.mot_expiry);
-              const tax = getCompliance(vehicle.tax_expiry);
-              const policy = getFleetPolicy(vehicle);
-              const insuranceExpiry = getInsuranceExpiry(vehicle);
-              const insurance = getCompliance(insuranceExpiry);
-
-              return (
-                <div
-                  key={vehicle.id}
-                  className={cn(
-                    vehicleCardStyle(cardCompliance.level),
-                    !vehicle.active && "opacity-70"
-                  )}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <h3 className="m-0 font-mono text-md font-semibold text-ink">
-                        {vehicle.registration}
-                      </h3>
-
-                      <div className="text-sm text-ink-2">
-                        {vehicle.vehicle_type || "No type"} •{" "}
-                        {vehicle.make || "-"} {vehicle.model || ""}
-                      </div>
-                    </div>
-
-                    <StatusBadge result={cardCompliance} />
-                  </div>
-
-                  <div className="my-3 grid gap-2 sm:grid-cols-3">
-                    <ComplianceItem
-                      label="MOT"
-                      expiry={vehicle.mot_expiry}
-                      result={mot}
-                    />
-
-                    <ComplianceItem
-                      label="Tax"
-                      expiry={vehicle.tax_expiry}
-                      result={tax}
-                    />
-
-                    <ComplianceItem
-                      label="Insurance"
-                      expiry={insuranceExpiry}
-                      result={insurance}
-                      extra={
-                        vehicle.insurance_type === "fleet"
-                          ? policy
-                            ? `Fleet • ${policy.provider}${
-                                policy.auto_renew ? " • Auto renew" : ""
-                              }`
-                            : "Fleet policy not selected"
-                          : vehicle.insurance_provider || "Individual policy"
-                      }
-                    />
-                  </div>
-
-                  <div className="text-sm text-ink-2">
-                    Status: {vehicle.active ? "Active" : "Inactive"}
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {isAdmin ? (
-                      <>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          type="button"
-                          onClick={() => startEdit(vehicle)}
-                        >
-                          Edit
-                        </Button>
-
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          type="button"
-                          onClick={() => void deleteVehicle(vehicle.id)}
-                        >
-                          Delete
-                        </Button>
-                      </>
-                    ) : null}
-
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      type="button"
-                      onClick={() =>
-                        void toggleVehicle(vehicle.id, vehicle.active)
-                      }
-                    >
-                      {vehicle.active ? "Deactivate" : "Activate"}
-                    </Button>
-                  </div>
-                </div>
-              );
-            })}
+            {showSkeleton
+              ? Array.from({ length: SKELETON_CARDS }, (_, index) => (
+                  <VehicleCard
+                    key={`skeleton-${index}`}
+                    vehicle={PLACEHOLDER_VEHICLE}
+                    policy={null}
+                    isAdmin={isAdmin}
+                    loading
+                    onEdit={() => {}}
+                    onDelete={() => {}}
+                    onToggle={() => {}}
+                  />
+                ))
+              : vehicles.map((vehicle) => (
+                  <VehicleCard
+                    key={vehicle.id}
+                    vehicle={vehicle}
+                    policy={getFleetPolicy(vehicle) ?? null}
+                    isAdmin={isAdmin}
+                    onEdit={startEdit}
+                    onDelete={(id) => void deleteVehicle(id)}
+                    onToggle={(id, active) => void toggleVehicle(id, active)}
+                  />
+                ))}
           </div>
         </main>
       </div>
@@ -1100,139 +996,4 @@ function ComplianceLegend() {
       <Badge tone="danger">7 days / expired</Badge>
     </div>
   );
-}
-
-function ComplianceItem({
-  label,
-  expiry,
-  result,
-  extra,
-}: {
-  label: string;
-  expiry: string | null;
-  result: ComplianceResult;
-  extra?: string;
-}) {
-  return (
-    <div className="rounded-md border border-line bg-surface p-2.5">
-      <span className="block text-kicker uppercase text-ink-3">{label}</span>
-
-      <div className="font-mono text-sm font-semibold text-ink">
-        {expiry ? formatDate(expiry) : "Not set"}
-      </div>
-
-      {extra ? <div className="text-xs text-ink-3">{extra}</div> : null}
-
-      <div className="mt-2">
-        <StatusBadge result={result} small />
-      </div>
-    </div>
-  );
-}
-
-function StatusBadge({
-  result,
-}: {
-  result: ComplianceResult;
-  /** Accepted for call-site compatibility; Badge has a single size. */
-  small?: boolean;
-}) {
-  return (
-    <Badge
-      tone={
-        result.level === "red"
-          ? "danger"
-          : result.level === "amber"
-            ? "warning"
-            : "success"
-      }
-    >
-      {result.label}
-    </Badge>
-  );
-}
-
-function getCompliance(expiry: string | null): ComplianceResult {
-  if (!expiry) {
-    return {
-      level: "amber",
-      label: "DATE NEEDED",
-      days: null,
-    };
-  }
-
-  const today = startOfToday();
-  const expiryDate = new Date(`${expiry}T00:00:00`);
-  const diffMs = expiryDate.getTime() - today.getTime();
-  const days = Math.ceil(diffMs / 86_400_000);
-
-  if (days < 0) {
-    return {
-      level: "red",
-      label: `EXPIRED ${Math.abs(days)}d`,
-      days,
-    };
-  }
-
-  if (days <= 7) {
-    return {
-      level: "red",
-      label: days === 0 ? "EXPIRES TODAY" : `NEEDS ATTENTION • ${days}d`,
-      days,
-    };
-  }
-
-  if (days <= 30) {
-    return {
-      level: "amber",
-      label: `EXPIRING SOON • ${days}d`,
-      days,
-    };
-  }
-
-  return {
-    level: "ok",
-    label: `VALID • ${days}d`,
-    days,
-  };
-}
-
-function mostUrgent(results: ComplianceResult[]): ComplianceResult {
-  const rank: Record<ComplianceLevel, number> = {
-    ok: 0,
-    amber: 1,
-    red: 2,
-  };
-
-  return results.reduce((current, next) =>
-    rank[next.level] > rank[current.level] ? next : current
-  );
-}
-
-function startOfToday() {
-  const date = new Date();
-  date.setHours(0, 0, 0, 0);
-  return date;
-}
-
-function formatDate(value: string) {
-  const date = new Date(`${value}T00:00:00`);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleDateString("en-GB");
-}
-
-function vehicleCardStyle(level: ComplianceLevel): string {
-  if (level === "red") {
-    return "rounded-lg border-2 border-danger bg-danger-tint p-4";
-  }
-
-  if (level === "amber") {
-    return "rounded-lg border-2 border-warning bg-warning-tint p-4";
-  }
-
-  return "rounded-lg border border-line bg-surface p-4 shadow-sm";
 }
