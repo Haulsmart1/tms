@@ -63,17 +63,28 @@ export async function POST(request: Request) {
       );
     }
 
-    if (
-      origins.length < 2 ||
-      destinations.length < 2 ||
-      origins.length !== destinations.length ||
-      origins.length > MAX_JOBS ||
+    if (legacyPoints) {
+      if (
+        origins.length < 2 ||
+        origins.length > MAX_JOBS
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              `Smart Optimize requires 2 to ${MAX_JOBS} matching origins and destinations.`,
+          },
+          { status: 400 }
+        );
+      }
+    } else if (
+      origins.length < 1 ||
+      destinations.length < 1 ||
       origins.length * destinations.length > MAX_MATRIX_CELLS
     ) {
       return NextResponse.json(
         {
           error:
-            `Smart Optimize requires 2 to ${MAX_JOBS} matching origins and destinations.`,
+            `Matrix requests require at least one origin and destination and at most ${MAX_MATRIX_CELLS} cells.`,
         },
         { status: 400 }
       );

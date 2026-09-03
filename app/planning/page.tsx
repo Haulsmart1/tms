@@ -17,14 +17,13 @@ import {
 } from "../../lib/planning/boardActions";
 import { formatDistance, formatDuration } from "../../lib/planning/format";
 import {
-  fastPlotOptimizationMode, fastPlotPhases,
-  fastPlotWaypointsFromPhases, isRoutable, jobEntryPoint, jobExitPoint,
-  jobRepresentativePoint, reorderFastPlotPhase,
+  isRoutable,
+  jobEntryPoint,
+  jobExitPoint,
+  jobRepresentativePoint,
 } from "../../lib/planning/waypoints";
-import {
-  bestOrder,
-  bestOrderWithAnchor,
-} from "../../lib/planning/optimize";
+import { optimizeFastPlotOrder } from "../../lib/planning/fastPlot";
+import { bestOrder } from "../../lib/planning/optimize";
 import { sanitizeTravelSeconds } from "../../lib/planning/matrix";
 import type { PlanJob, RouteResult } from "../../lib/planning/types";
 import { createSupabasePositionSource } from "../../lib/tracking/supabasePositions";
@@ -529,16 +528,22 @@ export default function PlanningPage() {
 
   useEffect(() => {
     if (!selectedVehicleId || !geocodeSettled) return;
-    const phases = fastPlotPhases(selectedLaneJobs);
-    const points = fastPlotWaypointsFromPhases(phases);
-    if (points.length < 2) {
+    const routableJobs = selectedLaneJobs.filter(isRoutable);
+    const physicalPointCount = new Set(
+      routableJobs.flatMap((job) =>
+        job.stops
+          .filter((stop) => stop.lat !== null && stop.lng !== null)
+          .map((stop) => `${stop.lat},${stop.lng}`)
+      )
+    ).size;
+    if (physicalPointCount < 2) {
       setRoutes((prev) => {
         const next = { ...prev };
         delete next[selectedVehicleId];
         return next;
       });
       setMapNotice(
-        selectedLaneJobs.length > 0 && points.length < 2
+        selectedLaneJobs.length > 0 && physicalPointCount < 2
           ? "Not enough mappable stops to draw a route."
           : null
       );
@@ -547,14 +552,15 @@ export default function PlanningPage() {
     let cancelled = false;
     (async () => {
       try {
-        async function matrixOrder(
-          matrixPoints: typeof phases.collections,
-          anchorIndex?: number,
-          anchor?: "start" | "end"
-        ) {
-          // Matrix v2 is capped at 100 cells, so square requests are limited
-          // to 10 routing points including any fixed endpoint anchor.
-          if (matrixPoints.length < 2 || matrixPoints.length > 10) {
+        async function loadFastPlotCosts(
+          origins: { lat: number; lng: number }[],
+          destinations: { lat: number; lng: number }[]
+        ): Promise<number[][] | null> {
+          if (
+            origins.length < 1 ||
+            destinations.length < 1 ||
+            origins.length * destinations.length > 100
+          ) {
             return null;
           }
 
@@ -562,119 +568,54 @@ export default function PlanningPage() {
             const matrixResponse = await fetch("/api/tomtom/matrix", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ points: matrixPoints }),
+              body: JSON.stringify({ origins, destinations }),
             });
 
             if (!matrixResponse.ok) return null;
 
-            const matrix = sanitizeTravelSeconds(
-              (await matrixResponse.json())?.travelSeconds,
-              matrixPoints.length
+            const body = await matrixResponse.json();
+            const raw = body?.travelSeconds;
+
+            if (
+              !Array.isArray(raw) ||
+              raw.length !== origins.length ||
+              raw.some(
+                (row: unknown) =>
+                  !Array.isArray(row) ||
+                  row.length !== destinations.length
+              )
+            ) {
+              return null;
+            }
+
+            return raw.map((row: unknown[]) =>
+              row.map((value) =>
+                typeof value === "number" &&
+                !Number.isNaN(value) &&
+                value >= 0
+                  ? value
+                  : Number.POSITIVE_INFINITY
+              )
             );
-
-            if (!matrix) return null;
-
-            return anchorIndex === undefined || anchor === undefined
-              ? bestOrder(matrix)
-              : bestOrderWithAnchor(matrix, anchorIndex, anchor);
           } catch {
-            // Matrix failure must not prevent Fast Plot from drawing the
-            // original safe collection-then-delivery sequence.
             return null;
           }
         }
 
-        let collections = phases.collections;
-        let deliveries = phases.deliveries;
-
-        const optimizationMode = fastPlotOptimizationMode(
-          phases.collections.length,
-          phases.deliveries.length
+        const routePoints = await optimizeFastPlotOrder(
+          selectedLaneJobs,
+          loadFastPlotCosts
         );
+        if (cancelled) return;
 
-        // Many collections -> one shared delivery. The shared delivery stays
-        // the semantic anchor even when 10+1 points exceed the matrix limit.
-        if (optimizationMode === "anchored-delivery") {
-          if (phases.collections.length <= 9) {
-            const matrixPoints = [
-              ...phases.collections,
-              phases.deliveries[0],
-            ];
-
-            const order = await matrixOrder(
-              matrixPoints,
-              matrixPoints.length - 1,
-              "end"
-            );
-            if (cancelled) return;
-
-            if (order) {
-              collections = reorderFastPlotPhase(
-                phases.collections,
-                order.slice(0, -1)
-              );
-            }
-          }
-          // 10+ movable collections preserve lane order rather than using an
-          // incomplete unanchored optimization.
-        } else {
-          const order = await matrixOrder(phases.collections);
-          if (cancelled) return;
-
-          if (order) {
-            collections = reorderFastPlotPhase(
-              phases.collections,
-              order
-            );
-          }
+        if (routePoints.length < 2 || routePoints.length > 50) {
+          setMapNotice(
+            routePoints.length > 50
+              ? "Fast Plot supports up to 50 unique mappable stops."
+              : "Not enough mappable stops to draw a route."
+          );
+          return;
         }
-
-        // One shared collection -> many deliveries. The shared collection
-        // remains the semantic anchor even when 1+10 exceeds the matrix limit.
-        if (optimizationMode === "anchored-collection") {
-          if (phases.deliveries.length <= 9) {
-            const matrixPoints = [
-              phases.collections[0],
-              ...phases.deliveries,
-            ];
-
-            const order = await matrixOrder(
-              matrixPoints,
-              0,
-              "start"
-            );
-            if (cancelled) return;
-
-            if (order) {
-              const deliveryOrder = order
-                .slice(1)
-                .map((index) => index - 1);
-
-              deliveries = reorderFastPlotPhase(
-                phases.deliveries,
-                deliveryOrder
-              );
-            }
-          }
-          // 10+ movable deliveries preserve lane order rather than using an
-          // incomplete unanchored optimization.
-        } else {
-          const order = await matrixOrder(phases.deliveries);
-          if (cancelled) return;
-
-          if (order) {
-            deliveries = reorderFastPlotPhase(
-              phases.deliveries,
-              order
-            );
-          }
-        }
-
-        const routePoints = fastPlotWaypointsFromPhases({
-          collections,
-          deliveries,
-          other: phases.other,
-        });
 
         const response = await fetch("/api/tomtom/route", {
           method: "POST",
