@@ -12,7 +12,9 @@ import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
 import SubcontractorCard from "./SubcontractorCard";
 import InfoField from "../../components/InfoField";
 import { getCompliance, mostUrgent } from "../../lib/compliance/expiry";
-import { StatusBadge, subcontractorCardStyle } from "./compliance";
+import ComplianceBadge from "../../components/ComplianceBadge";
+import { formatDateGB } from "../../lib/format/date";
+import { subcontractorCardStyle } from "./compliance";
 import type {
   Employee,
   Subcontractor,
@@ -25,16 +27,11 @@ import type {
    Recorded in the spec rather than papered over. */
 const SKELETON_CARDS = 6;
 
-const PLACEHOLDER_SUBCONTRACTOR = {
-  id: "",
-  name: "",
-  subcontractor_type: "fleet",
-  contact_name: null,
-  email: null,
-  phone: null,
-  operator_licence_number: null,
-  payment_terms_days: null,
-} as Subcontractor;
+/* One field, because no field is read while loading: every read in the card
+   sits behind the `loading` branch. A fuller object would be a second copy of
+   "which fields the card reads", drifting silently the first time the card
+   reads one more. */
+const PLACEHOLDER_SUBCONTRACTOR = { id: "skeleton" } as Subcontractor;
 
 const EMPTY_FORM = {
   name: "",
@@ -1267,7 +1264,7 @@ export default function SubcontractorsPage() {
                             </div>
                           </div>
 
-                          <StatusBadge result={compliance} />
+                          <ComplianceBadge result={compliance} />
                         </div>
 
                         <div className="my-2 grid grid-cols-2 gap-2">
@@ -1275,7 +1272,7 @@ export default function SubcontractorsPage() {
                             label="MOT"
                             value={
                               vehicle.mot_expiry
-                                ? formatDate(vehicle.mot_expiry)
+                                ? formatDateGB(vehicle.mot_expiry)
                                 : "Not set"
                             }
                           />
@@ -1283,7 +1280,7 @@ export default function SubcontractorsPage() {
                             label="Tax"
                             value={
                               vehicle.tax_expiry
-                                ? formatDate(vehicle.tax_expiry)
+                                ? formatDateGB(vehicle.tax_expiry)
                                 : "Not set"
                             }
                           />
@@ -1291,7 +1288,7 @@ export default function SubcontractorsPage() {
                             label="Insurance"
                             value={
                               vehicle.insurance_expiry
-                                ? formatDate(vehicle.insurance_expiry)
+                                ? formatDateGB(vehicle.insurance_expiry)
                                 : "Not set"
                             }
                           />
@@ -1458,7 +1455,3 @@ function CheckboxField({
   );
 }
 
-function formatDate(value: string) {
-  const date = new Date(`${value}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-GB");
-}

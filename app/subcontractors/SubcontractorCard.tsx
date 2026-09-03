@@ -2,7 +2,8 @@ import Button from "../../components/Button";
 import Skeleton from "../../components/Skeleton";
 import InfoField from "../../components/InfoField";
 import { getCompliance, mostUrgent } from "../../lib/compliance/expiry";
-import { StatusBadge, subcontractorCardStyle } from "./compliance";
+import ComplianceBadge from "../../components/ComplianceBadge";
+import { subcontractorCardStyle } from "./compliance";
 import type { Subcontractor } from "./types";
 
 type Props = {
@@ -68,7 +69,7 @@ export default function SubcontractorCard({
         {loading || !compliance ? (
           <Skeleton w="4.5rem" h="1.375rem" pill />
         ) : (
-          <StatusBadge result={compliance} />
+          <ComplianceBadge result={compliance} />
         )}
       </div>
 

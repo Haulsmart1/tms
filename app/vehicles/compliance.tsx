@@ -1,5 +1,6 @@
-import Badge from "../../components/Badge";
+import ComplianceBadge from "../../components/ComplianceBadge";
 import Skeleton from "../../components/Skeleton";
+import { formatDateGB } from "../../lib/format/date";
 import {
   getCompliance,
   mostUrgent,
@@ -8,18 +9,24 @@ import {
 } from "../../lib/compliance/expiry";
 import type { FleetInsurancePolicy, Vehicle } from "./types";
 
-/* The vehicle-specific presentation of a compliance result: the badge, the
-   card's border/tint, and the MOT/Tax/Insurance cell. Both page.tsx and
-   VehicleCard.tsx use them, so they live here rather than in the card, which
-   would make the page and the card import each other.
+/* The vehicle-specific half of compliance display. What sits here and why:
 
-   Deliberately NOT shared with app/subcontractors/compliance.tsx, which looks
-   similar and is not: vehicleCardStyle uses p-4 and bg-surface shadow-sm where
-   the subcontractor one uses p-3 and bg-surface-2, and this StatusBadge still
-   carries a vestigial `small` prop its call sites pass.
+   - vehicleCardStyle is used by BOTH page.tsx and VehicleCard.tsx, so it
+     cannot live in the card without the page importing the card's module for
+     a style helper.
+   - ComplianceItem, insuranceExpiryOf and vehicleCardCompliance are used only
+     by the card today. They live here because they are vehicle compliance
+     rather than card layout, not because a second caller requires it. Nothing
+     stops a future reader moving them into the card.
 
-   The logic that produces a ComplianceResult lives in lib/compliance/expiry.ts,
-   where it can be unit tested. */
+   Deliberately NOT shared with app/subcontractors/compliance.tsx: the two
+   cardStyle helpers genuinely differ (p-4 and bg-surface shadow-sm here, p-3
+   and bg-surface-2 there). The badge that WAS duplicated between them is now
+   components/ComplianceBadge.tsx.
+
+   The logic that produces a ComplianceResult lives in lib/compliance/expiry.ts
+   and the date formatter in lib/format/date.ts, both of which vitest reaches
+   and this file does not. */
 
 /** The expiry that actually governs this vehicle's insurance: a fleet vehicle
  *  inherits the policy's date, an individually insured one carries its own.
@@ -45,16 +52,6 @@ export function vehicleCardCompliance(
   ]);
 }
 
-export function formatDate(value: string) {
-  const date = new Date(`${value}T00:00:00`);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleDateString("en-GB");
-}
-
 export function ComplianceItem({
   label,
   expiry,
@@ -77,7 +74,7 @@ export function ComplianceItem({
         {loading ? (
           <Skeleton display="inline-block" w="9ch" h="0.875rem" />
         ) : expiry ? (
-          formatDate(expiry)
+          formatDateGB(expiry)
         ) : (
           "Not set"
         )}
@@ -95,32 +92,10 @@ export function ComplianceItem({
         {loading || !result ? (
           <Skeleton w="3.5rem" h="1.25rem" pill />
         ) : (
-          <StatusBadge result={result} small />
+          <ComplianceBadge result={result} />
         )}
       </div>
     </div>
-  );
-}
-
-export function StatusBadge({
-  result,
-}: {
-  result: ComplianceResult;
-  /** Accepted for call-site compatibility; Badge has a single size. */
-  small?: boolean;
-}) {
-  return (
-    <Badge
-      tone={
-        result.level === "red"
-          ? "danger"
-          : result.level === "amber"
-            ? "warning"
-            : "success"
-      }
-    >
-      {result.label}
-    </Badge>
   );
 }
 

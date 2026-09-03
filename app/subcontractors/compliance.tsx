@@ -1,29 +1,18 @@
-import Badge from "../../components/Badge";
-import type { ComplianceLevel, ComplianceResult } from "../../lib/compliance/expiry";
+import type { ComplianceLevel } from "../../lib/compliance/expiry";
 
-/* The subcontractor-specific presentation of a compliance result: the badge
-   and the card's border/tint. Both page.tsx and SubcontractorCard.tsx use
-   them, so they live here rather than in the card, which would make the page
-   and the card import each other.
+/* The subcontractor-specific presentation of a compliance result: the card's
+   border and tint. Both page.tsx and SubcontractorCard.tsx use it, so it lives
+   here rather than in the card, which would make the page and the card import
+   each other.
 
-   The logic that produces a ComplianceResult now lives in
-   lib/compliance/expiry.ts, where it can be unit tested. */
+   The badge that used to sit beside it was byte-identical to the one in
+   app/vehicles/compliance.tsx and is now components/ComplianceBadge.tsx. This
+   helper deliberately stays: it differs from vehicleCardStyle (p-3 and
+   bg-surface-2 here, p-4 and bg-surface shadow-sm there) and that difference
+   is real.
 
-export function StatusBadge({ result }: { result: ComplianceResult }) {
-  return (
-    <Badge
-      tone={
-        result.level === "red"
-          ? "danger"
-          : result.level === "amber"
-            ? "warning"
-            : "success"
-      }
-    >
-      {result.label}
-    </Badge>
-  );
-}
+   The logic that produces a ComplianceResult lives in lib/compliance/expiry.ts,
+   where it can be unit tested. */
 
 export function subcontractorCardStyle(level: ComplianceLevel): string {
   if (level === "red") {

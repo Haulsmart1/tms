@@ -12,14 +12,19 @@ import Skeleton from "../../components/Skeleton";
 import { getCompliance } from "../../lib/compliance/expiry";
 import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
 import VehicleCard from "./VehicleCard";
-import { StatusBadge, formatDate } from "./compliance";
+import ComplianceBadge from "../../components/ComplianceBadge";
+import { formatDateGB } from "../../lib/format/date";
 import type { FleetInsurancePolicy, Vehicle } from "./types";
 
 /* Four, because these cards are full width in a single-column grid, so four
    is roughly one screen. A guess about data that has not arrived. */
 const SKELETON_CARDS = 4;
 
-const PLACEHOLDER_VEHICLE = { id: "" } as Vehicle;
+/* One field, because no field is read while loading: every read in the card
+   sits behind the `loading` branch. A fuller object would be a second copy of
+   "which fields the card reads", drifting silently the first time the card
+   reads one more. */
+const PLACEHOLDER_VEHICLE = { id: "skeleton" } as Vehicle;
 
 const inputClasses =
   "h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3";
@@ -79,6 +84,18 @@ export default function VehiclesPage() {
     fetching: loading,
     hasData: vehicles.length > 0,
   });
+
+  /* Its own hasData, not the grid's. ONE FLAG PER REGION, not per page:
+     shouldShowSkeleton short-circuits on hasData, so borrowing the grid's flag
+     would let a tenant that has vehicles but no fleet policies see "no policy
+     is configured" while that query is still in flight. */
+  const showFleetPolicySkeleton = shouldShowSkeleton({
+    tenantStatus: tenant.status,
+    fetching: loading,
+    hasData: fleetPolicies.length > 0,
+  });
+
+  const showEmpty = !showSkeleton && vehicles.length === 0;
 
   async function loadVehicles() {
     if (tenant.status !== "ready") return;
@@ -536,7 +553,7 @@ export default function VehiclesPage() {
                             </span>
                           </div>
 
-                          <StatusBadge result={policyCompliance} small />
+                          <ComplianceBadge result={policyCompliance} />
                         </div>
 
                         <div className="my-3 grid gap-2">
@@ -544,14 +561,14 @@ export default function VehiclesPage() {
                             <span className="text-kicker uppercase text-ink-3">Start</span>{" "}
                             <strong className="block font-mono text-ink">
                               {policy.start_date
-                                ? formatDate(policy.start_date)
+                                ? formatDateGB(policy.start_date)
                                 : "Not set"}
                             </strong>
                           </div>
                           <div className="text-sm">
                             <span className="text-kicker uppercase text-ink-3">Expiry</span>{" "}
                             <strong className="block font-mono text-ink">
-                              {formatDate(policy.expiry_date)}
+                              {formatDateGB(policy.expiry_date)}
                             </strong>
                           </div>
                           <div className="text-sm">
@@ -595,7 +612,7 @@ export default function VehiclesPage() {
                     );
                   })}
                 </div>
-              ) : showSkeleton ? (
+              ) : showFleetPolicySkeleton ? (
                 /* Not the warning banner: while the query is in flight "no
                    policy is configured" is a guess, and it is the exact false
                    empty state step 3 of the skeletonReadyRoutes checklist
@@ -853,7 +870,7 @@ export default function VehiclesPage() {
                       {fleetPolicies.map((policy) => (
                         <option key={policy.id} value={policy.id}>
                           {policy.provider} • {policy.policy_number} • expires{" "}
-                          {formatDate(policy.expiry_date)}
+                          {formatDateGB(policy.expiry_date)}
                           {policy.auto_renew ? " • auto renew" : ""}
                         </option>
                       ))}
@@ -923,6 +940,12 @@ export default function VehiclesPage() {
           ) : null}
 
           <MessageBanner tone="neutral">{message}</MessageBanner>
+
+          {showEmpty ? (
+            <p className="py-10 text-center text-sm text-ink-3">
+              No vehicles found.
+            </p>
+          ) : null}
 
           <div className="grid gap-4" aria-busy={showSkeleton}>
             {showSkeleton ? (

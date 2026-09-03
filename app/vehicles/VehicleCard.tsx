@@ -2,9 +2,9 @@ import Button from "../../components/Button";
 import Skeleton from "../../components/Skeleton";
 import { cn } from "../../lib/cn";
 import { getCompliance } from "../../lib/compliance/expiry";
+import ComplianceBadge from "../../components/ComplianceBadge";
 import {
   ComplianceItem,
-  StatusBadge,
   insuranceExpiryOf,
   vehicleCardCompliance,
   vehicleCardStyle,
@@ -52,7 +52,7 @@ export default function VehicleCard({
   const insurance = loading ? null : getCompliance(insuranceExpiry);
 
   return (
-    <div
+    <article
       /* While loading there is no compliance level, so the card takes the calm
          "ok" border rather than flashing an alarm border the data may not
          justify, and it is not dimmed as inactive before we know that it is. */
@@ -87,7 +87,7 @@ export default function VehicleCard({
         {loading || !cardCompliance ? (
           <Skeleton w="4.5rem" h="1.375rem" pill />
         ) : (
-          <StatusBadge result={cardCompliance} />
+          <ComplianceBadge result={cardCompliance} />
         )}
       </div>
 
@@ -111,14 +111,19 @@ export default function VehicleCard({
           expiry={insuranceExpiry}
           result={insurance}
           loading={loading}
+          /* Behind the loading check so it is obvious that nothing is read
+             off the placeholder: ComplianceItem discards this while loading
+             anyway, but the expression used to be evaluated first. */
           extra={
-            vehicle.insurance_type === "fleet"
-              ? policy
-                ? `Fleet • ${policy.provider}${
-                    policy.auto_renew ? " • Auto renew" : ""
-                  }`
-                : "Fleet policy not selected"
-              : vehicle.insurance_provider || "Individual policy"
+            loading
+              ? undefined
+              : vehicle.insurance_type === "fleet"
+                ? policy
+                  ? `Fleet • ${policy.provider}${
+                      policy.auto_renew ? " • Auto renew" : ""
+                    }`
+                  : "Fleet policy not selected"
+                : vehicle.insurance_provider || "Individual policy"
           }
         />
       </div>
@@ -175,6 +180,6 @@ export default function VehicleCard({
           {loading || vehicle.active ? "Deactivate" : "Activate"}
         </Button>
       </div>
-    </div>
+    </article>
   );
 }
