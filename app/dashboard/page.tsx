@@ -65,6 +65,12 @@ export default function DashboardPage() {
     let cancelled = false;
 
     async function load() {
+      /* The effect above already returned for this case. Repeated here because
+         a narrowing does not cross a function boundary: batch 1's guard sat in
+         the effect while these queries sit in here, so it never reached them
+         and this page kept querying unscoped. */
+      if (tenant.status !== "ready") return;
+
       setState("loading");
       const today = todayIso();
 

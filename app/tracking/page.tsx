@@ -162,6 +162,7 @@ export default function TrackingPage() {
     let inFlight = false;
 
     async function load(showSkeleton: boolean) {
+      if (tenant.status !== "ready") return;
       if (inFlight) return;
       inFlight = true;
 
@@ -294,7 +295,7 @@ export default function TrackingPage() {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [tenant.activeTenantId, reloadToken]);
+  }, [tenant.status, tenant.activeTenantId, reloadToken]);
 
   /* One `now` per load, injected into every pure function, so the rail order,
      the phase badge and the staleness pill cannot disagree by milliseconds

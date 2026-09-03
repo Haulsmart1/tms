@@ -86,6 +86,11 @@ export default function JobsPage() {
   });
 
   async function loadData() {
+    /* Inside loadData, not in the effect below: TypeScript does not carry a
+       narrowing across a function boundary, so a guard at the call site leaves
+       this body unnarrowed and filterByTenant still will not compile. */
+    if (tenant.status !== "ready") return;
+
     setMessage("");
     const jobsQuery = supabase.from("jobs").select(`
         id, tenant_id, reference, status, scheduled_date, planning_date, customer_id, vehicle_id, driver_id,
@@ -120,7 +125,7 @@ export default function JobsPage() {
     setSubcontractors(subcontractorData || []);
   }
 
-  useEffect(() => { loadData(); }, [tenant.activeTenantId]);
+  useEffect(() => { loadData(); }, [tenant.status, tenant.activeTenantId]);
 
   useEffect(() => {
     if (jobs.length === 0) {

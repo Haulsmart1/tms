@@ -188,6 +188,8 @@ export default function SubcontractorsPage() {
   ) ?? null;
 
   const loadData = useCallback(async () => {
+    if (tenant.status !== "ready") return;
+
     setLoading(true);
     setMessage("");
 
@@ -237,7 +239,7 @@ export default function SubcontractorsPage() {
 
   useEffect(() => {
     void loadData();
-  }, [loadData, tenant.activeTenantId]);
+  }, [loadData, tenant.status, tenant.activeTenantId]);
 
   function resetSubcontractorForm() {
     setEditingId(null);
@@ -365,6 +367,11 @@ export default function SubcontractorsPage() {
       return;
     }
 
+    if (tenant.status !== "ready") {
+      setMessage("Still loading. Try again in a moment.");
+      return;
+    }
+
     if (!editingId && !tenant.writeTenantId) {
       setMessage("Pick a specific tenant before creating a subcontractor.");
       return;
@@ -468,6 +475,11 @@ export default function SubcontractorsPage() {
       return;
     }
 
+    if (tenant.status !== "ready") {
+      setMessage("Still loading. Try again in a moment.");
+      return;
+    }
+
     if (!tenant.writeTenantId) {
       setMessage("Pick a specific tenant before creating an employee.");
       return;
@@ -534,6 +546,11 @@ export default function SubcontractorsPage() {
 
     if (!vehicleForm.registration.trim()) {
       setMessage("Vehicle registration is required.");
+      return;
+    }
+
+    if (tenant.status !== "ready") {
+      setMessage("Still loading. Try again in a moment.");
       return;
     }
 

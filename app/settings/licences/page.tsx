@@ -65,6 +65,8 @@ export default function VehicleLicencesPage() {
     const [notes, setNotes] = useState("");
 
     async function loadData() {
+        if (tenant.status !== "ready") return;
+
         setLoading(true);
         setMessage("");
 
@@ -129,7 +131,7 @@ export default function VehicleLicencesPage() {
 
     useEffect(() => {
         loadData();
-    }, [tenant.activeTenantId]);
+    }, [tenant.status, tenant.activeTenantId]);
 
     function resetForm() {
         setVehicleId("");

@@ -7,24 +7,14 @@ import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { createClient } from "../../lib/supabase/browser";
 import {
   parseTenantContext, pickInitialActiveTenant, computeWriteTenantId, tenantStorageKey,
-  type TenantContextData, type TenantOption, type TenantRole, type TenantStatus,
+  type TenantContextData, type TenantContextValue, type TenantOption, type TenantRole,
+  type TenantStatus,
 } from "../../lib/tenant/context";
 import {
   decideResolveMode, shouldRevalidate, applyRevalidation, preserveActiveTenant,
   type ResolveMode,
 } from "../../lib/tenant/revalidate";
 import { applyTenantFilter } from "../../lib/tenant/filter";
-
-type TenantContextValue = {
-  status: TenantStatus;
-  role: TenantRole;
-  userEmail: string | null;
-  tenants: TenantOption[];
-  activeTenantId: string | null;
-  setActiveTenantId: (id: string | null) => void;
-  writeTenantId: string | null;
-  filterByTenant: <Q>(query: Q) => Q;
-};
 
 const TenantContext = createContext<TenantContextValue | null>(null);
 
@@ -168,16 +158,26 @@ export function TenantProvider({ children }: { children: ReactNode }) {
 
   const writeTenantId = computeWriteTenantId(data.role, data.homeTenantId, activeTenantId);
 
-  const value: TenantContextValue = {
-    status: data.status,
+  /* Built as two branches rather than one object with an optional field: an
+     optional filterByTenant would type-check at every call site and defeat the
+     union. The `data.status === "ready"` test is what narrows the result. */
+  const base = {
     role: data.role,
     userEmail,
     tenants: data.tenants,
     activeTenantId,
     setActiveTenantId,
     writeTenantId,
-    filterByTenant: (query) => applyTenantFilter(query, activeTenantId),
   };
+
+  const value: TenantContextValue =
+    data.status === "ready"
+      ? {
+          ...base,
+          status: "ready",
+          filterByTenant: (query) => applyTenantFilter(query, activeTenantId),
+        }
+      : { ...base, status: data.status };
 
   return <TenantContext.Provider value={value}>{children}</TenantContext.Provider>;
 }

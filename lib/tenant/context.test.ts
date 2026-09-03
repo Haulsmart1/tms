@@ -4,6 +4,8 @@ import {
   pickInitialActiveTenant,
   computeWriteTenantId,
   tenantStorageKey,
+  type ReadyTenantContext,
+  type UnresolvedTenantContext,
 } from "./context";
 
 const T = (id: string, name: string) => ({ id, name });
@@ -69,5 +71,43 @@ describe("tenantStorageKey", () => {
   it("is namespaced per user", () => {
     expect(tenantStorageKey("u1")).toBe("tms.activeTenant.u1");
     expect(tenantStorageKey("u1")).not.toBe(tenantStorageKey("u2"));
+  });
+});
+
+/* These assertions are enforced by `npm run typecheck`, NOT by vitest, which
+   strips types without checking them. The @ts-expect-error lines are the real
+   test: if filterByTenant ever reappears on the unresolved variant, the
+   directive becomes unused and tsc fails with "Unused '@ts-expect-error'".
+   The runtime expects below only stop vitest reporting an empty test. */
+describe("TenantContextValue as a discriminated union", () => {
+  const base = {
+    role: "admin" as const,
+    userEmail: "a@b.co",
+    tenants: [T("t1", "Depot A")],
+    activeTenantId: "t1",
+    setActiveTenantId: () => {},
+    writeTenantId: "t1",
+  };
+
+  it("exposes filterByTenant on the ready variant", () => {
+    const ready: ReadyTenantContext = {
+      ...base,
+      status: "ready",
+      filterByTenant: (query) => query,
+    };
+    expect(typeof ready.filterByTenant).toBe("function");
+  });
+
+  it("does not expose filterByTenant while the tenant is unresolved", () => {
+    const unresolved: UnresolvedTenantContext = { ...base, status: "loading" };
+    // @ts-expect-error filterByTenant is the whole point of the union: an
+    // unresolved tenant must not be able to build a query at all.
+    void unresolved.filterByTenant;
+    expect(unresolved.status).toBe("loading");
+  });
+
+  it("keeps writeTenantId on both variants, since it is already null while loading", () => {
+    const unresolved: UnresolvedTenantContext = { ...base, status: "loading" };
+    expect(unresolved.writeTenantId).toBe("t1");
   });
 });

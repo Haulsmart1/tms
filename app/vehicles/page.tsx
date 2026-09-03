@@ -105,6 +105,8 @@ export default function VehiclesPage() {
   const [form, setForm] = useState(EMPTY_FORM);
 
   async function loadVehicles() {
+    if (tenant.status !== "ready") return;
+
     setLoading(true);
 
     const [vehicleResult, policyResult] = await Promise.all([
@@ -150,7 +152,7 @@ export default function VehiclesPage() {
   useEffect(() => {
     void loadVehicles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenant.activeTenantId]);
+  }, [tenant.status, tenant.activeTenantId]);
 
   function resetFleetPolicyForm() {
     setEditingFleetPolicyId(null);
@@ -195,6 +197,11 @@ export default function VehiclesPage() {
 
     if (!fleetPolicyForm.expiry_date) {
       setMessage("Fleet insurance expiry date is required.");
+      return;
+    }
+
+    if (tenant.status !== "ready") {
+      setMessage("Still loading. Try again in a moment.");
       return;
     }
 
@@ -274,6 +281,11 @@ export default function VehiclesPage() {
   async function deactivateFleetPolicy(policy: FleetInsurancePolicy) {
     if (!isAdmin) {
       setMessage("Only an admin can manage fleet insurance.");
+      return;
+    }
+
+    if (tenant.status !== "ready") {
+      setMessage("Still loading. Try again in a moment.");
       return;
     }
 
