@@ -960,9 +960,10 @@ type Props = {
 };
 
 export default function VehicleCard({
-  vehicle, cardCompliance, mot, tax, insurance, insuranceExpiry, policy,
-  isAdmin, loading = false, onEdit, onDelete, onToggle,
+  vehicle, policy, isAdmin, loading = false, onEdit, onDelete, onToggle,
 }: Props) {
+  // The five derivations from the REVISED block above go here, each behind
+  // `loading`. They are not repeated; that block is the source of truth.
   return (
     <div
       className={cn(
