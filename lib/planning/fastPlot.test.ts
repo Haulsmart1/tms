@@ -65,7 +65,7 @@ const costLoader = vi.fn(async (
   destinations.map((destination) => secondsBetween(origin, destination))
 ));
 
-describe("Fast Plot V3", () => {
+describe("Fast Plot V4", () => {
   it("merges one shared delivery into one physical visit", () => {
     const heywood = { lat: 53.59, lng: -2.22 };
     const jobs = [
@@ -172,7 +172,7 @@ describe("Fast Plot V3", () => {
     expect(route.filter((point) => point.lat === 0)).toHaveLength(1);
   });
 
-  it("supports more than ten physical locations with 1 x N matrices", async () => {
+  it("supports more than ten physical locations with bounded matrices", async () => {
     const jobs = Array.from({ length: 14 }, (_, index) =>
       job(`job-${index}`, [
         stop(`c-${index}`, 1, "collection", 50 + index / 10, -3),
@@ -307,4 +307,120 @@ describe("Fast Plot V3", () => {
 
     expect(JSON.stringify(jobs)).toBe(before);
   });
+
+  it("looks ahead past a nearest-next greedy trap", async () => {
+    const jobs = [
+      job("a", [
+        stop("a-c", 1, "collection", 1, 0),
+        stop("a-d", 2, "delivery", 4, 0),
+      ]),
+      job("b", [
+        stop("b-c", 1, "collection", 2, 0),
+        stop("b-d", 2, "delivery", 3, 0),
+      ]),
+    ];
+
+    const costs = new Map<string, number>([
+      ["1,0>2,0", 1],
+      ["1,0>4,0", 1],
+      ["2,0>3,0", 1],
+      ["2,0>4,0", 100],
+      ["3,0>4,0", 100],
+      ["3,0>1,0", 100],
+      ["4,0>2,0", 1],
+      ["4,0>3,0", 1],
+    ]);
+
+    const loader = vi.fn(async (
+      origins: LatLng[],
+      destinations: LatLng[]
+    ) => origins.map((origin) =>
+      destinations.map((destination) => {
+        if (
+          origin.lat === destination.lat &&
+          origin.lng === destination.lng
+        ) {
+          return 0;
+        }
+
+        return costs.get(
+          `${origin.lat},${origin.lng}>${destination.lat},${destination.lng}`
+        ) ?? 50;
+      })
+    ));
+
+    const route = await optimizeFastPlotOrder(jobs, loader);
+
+    expect(route).toEqual([
+      { lat: 1, lng: 0 },
+      { lat: 4, lng: 0 },
+      { lat: 2, lng: 0 },
+      { lat: 3, lng: 0 },
+    ]);
+  });
+
+  it("keeps every V4 TomTom matrix request within 100 cells", async () => {
+    const jobs = Array.from({ length: 14 }, (_, index) =>
+      job(`beam-${index}`, [
+        stop(
+          `beam-c-${index}`,
+          1,
+          "collection",
+          50 + index / 10,
+          -3
+        ),
+        stop("beam-shared", 2, "delivery", 53.59, -2.22),
+      ])
+    );
+
+    const loader = vi.fn(async (
+      origins: LatLng[],
+      destinations: LatLng[]
+    ) => origins.map((origin) =>
+      destinations.map((destination) =>
+        secondsBetween(origin, destination)
+      )
+    ));
+
+    const route = await optimizeFastPlotOrder(jobs, loader);
+
+    expect(route).toHaveLength(15);
+
+    for (const [origins, destinations] of loader.mock.calls) {
+      expect(
+        origins.length * destinations.length
+      ).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it("produces deterministic V4 ordering when route costs tie", async () => {
+    const jobs = [
+      job("a", [
+        stop("a-c", 1, "collection", 1, 1),
+        stop("a-d", 2, "delivery", 3, 3),
+      ]),
+      job("b", [
+        stop("b-c", 1, "collection", 2, 2),
+        stop("b-d", 2, "delivery", 4, 4),
+      ]),
+    ];
+
+    const loader = vi.fn(async (
+      origins: LatLng[],
+      destinations: LatLng[]
+    ) => origins.map((origin) =>
+      destinations.map((destination) =>
+        origin.lat === destination.lat &&
+        origin.lng === destination.lng
+          ? 0
+          : 1
+      )
+    ));
+
+    const first = await optimizeFastPlotOrder(jobs, loader);
+    const second = await optimizeFastPlotOrder(jobs, loader);
+
+    expect(second).toEqual(first);
+  });
+
 });

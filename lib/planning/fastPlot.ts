@@ -269,48 +269,91 @@ function finiteCost(value: unknown): number {
     : Number.POSITIVE_INFINITY;
 }
 
-async function chooseFirstVisit(
-  candidates: FastPlotVisit[],
+const FAST_PLOT_MATRIX_CHUNK = 10;
+const FAST_PLOT_BEAM_WIDTH = 96;
+
+type FastPlotCostTable = Map<string, Map<string, number>>;
+
+type FastPlotSearchState = {
+  route: FastPlotVisit[];
+  visited: Set<string>;
+  progress: Map<string, number>;
+  cost: number;
+  score: number;
+};
+
+function tableCost(
+  table: FastPlotCostTable,
+  from: FastPlotVisit,
+  to: FastPlotVisit
+): number {
+  if (from.key === to.key) return 0;
+
+  return (
+    table.get(from.key)?.get(to.key) ??
+    Number.POSITIVE_INFINITY
+  );
+}
+
+async function loadFastPlotCostTable(
+  visits: FastPlotVisit[],
   loadCosts: FastPlotCostLoader
-): Promise<FastPlotVisit> {
-  if (candidates.length <= 1) return candidates[0];
+): Promise<FastPlotCostTable | null> {
+  const table: FastPlotCostTable = new Map();
 
-  // Score every legal starting point against every other legal point.
-  // 10 x 10 chunks keep each TomTom matrix within the 100-cell contract.
-  const scores = new Map<string, number>();
-
-  for (const candidate of candidates) {
-    scores.set(candidate.key, Number.POSITIVE_INFINITY);
+  for (const visit of visits) {
+    table.set(visit.key, new Map([[visit.key, 0]]));
   }
 
   for (
     let originOffset = 0;
-    originOffset < candidates.length;
-    originOffset += 10
+    originOffset < visits.length;
+    originOffset += FAST_PLOT_MATRIX_CHUNK
   ) {
-    const origins = candidates.slice(originOffset, originOffset + 10);
+    const origins = visits.slice(
+      originOffset,
+      originOffset + FAST_PLOT_MATRIX_CHUNK
+    );
 
     for (
       let destinationOffset = 0;
-      destinationOffset < candidates.length;
-      destinationOffset += 10
+      destinationOffset < visits.length;
+      destinationOffset += FAST_PLOT_MATRIX_CHUNK
     ) {
-      const destinations = candidates.slice(
+      const destinations = visits.slice(
         destinationOffset,
-        destinationOffset + 10
+        destinationOffset + FAST_PLOT_MATRIX_CHUNK
       );
 
-      const matrix = await loadCosts(
-        origins.map((visit) => visit.point),
-        destinations.map((visit) => visit.point)
-      );
+      let matrix: number[][] | null;
 
-      if (!matrix) continue;
+      try {
+        matrix = await loadCosts(
+          origins.map((visit) => visit.point),
+          destinations.map((visit) => visit.point)
+        );
+      } catch {
+        return null;
+      }
+
+      if (
+        !matrix ||
+        matrix.length !== origins.length
+      ) {
+        return null;
+      }
 
       for (let originIndex = 0; originIndex < origins.length; originIndex++) {
+        const row = matrix[originIndex];
+
+        if (!row || row.length !== destinations.length) {
+          return null;
+        }
+
         const origin = origins[originIndex];
-        let score =
-          scores.get(origin.key) ?? Number.POSITIVE_INFINITY;
+        const originCosts = table.get(origin.key);
+
+        if (!originCosts) return null;
 
         for (
           let destinationIndex = 0;
@@ -319,70 +362,240 @@ async function chooseFirstVisit(
         ) {
           const destination = destinations[destinationIndex];
 
-          if (destination.key === origin.key) continue;
+          if (origin.key === destination.key) {
+            originCosts.set(destination.key, 0);
+            continue;
+          }
 
-          score = Math.min(
-            score,
-            finiteCost(matrix[originIndex]?.[destinationIndex])
-          );
+          const cost = finiteCost(row[destinationIndex]);
+
+          if (!Number.isFinite(cost)) {
+            return null;
+          }
+
+          originCosts.set(destination.key, cost);
         }
-
-        scores.set(origin.key, score);
       }
     }
   }
 
-  let best = candidates[0];
-  let bestScore =
-    scores.get(best.key) ?? Number.POSITIVE_INFINITY;
-
-  for (const candidate of candidates.slice(1)) {
-    const score =
-      scores.get(candidate.key) ?? Number.POSITIVE_INFINITY;
-
-    if (score < bestScore) {
-      best = candidate;
-      bestScore = score;
-    }
-  }
-
-  return best;
+  return table;
 }
 
-async function chooseNearestVisit(
-  current: FastPlotVisit,
-  candidates: FastPlotVisit[],
-  loadCosts: FastPlotCostLoader
-): Promise<FastPlotVisit | null> {
-  let best: FastPlotVisit | null = null;
-  let bestCost = Number.POSITIVE_INFINITY;
+function cloneProgress(
+  progress: Map<string, number>
+): Map<string, number> {
+  return new Map(progress);
+}
 
-  // 1 x 100 is the largest useful request under Matrix v2's 100-cell cap.
-  for (let offset = 0; offset < candidates.length; offset += 100) {
-    const chunk = candidates.slice(offset, offset + 100);
-    const matrix = await loadCosts(
-      [current.point],
-      chunk.map((visit) => visit.point)
+function remainingVisitsForState(
+  visits: FastPlotVisit[],
+  visited: Set<string>
+): FastPlotVisit[] {
+  return visits.filter((visit) => !visited.has(visit.key));
+}
+
+/** Relaxed remaining-route lower bound used only to rank beam states.
+
+    It deliberately ignores precedence. Every unfinished path needs an edge
+    from its current point and all but one remaining visit need an outgoing
+    edge. Allowing duplicate destinations makes this optimistic rather than
+    accidentally excluding a potentially good legal route. */
+function remainingCostLowerBound(
+  current: FastPlotVisit | null,
+  remaining: FastPlotVisit[],
+  table: FastPlotCostTable
+): number {
+  if (!current || remaining.length === 0) return 0;
+
+  let currentMinimum = Number.POSITIVE_INFINITY;
+
+  for (const candidate of remaining) {
+    currentMinimum = Math.min(
+      currentMinimum,
+      tableCost(table, current, candidate)
     );
-
-    if (!matrix || !matrix[0]) continue;
-
-    for (let index = 0; index < chunk.length; index++) {
-      const cost = finiteCost(matrix[0][index]);
-      if (cost < bestCost) {
-        best = chunk[index];
-        bestCost = cost;
-      }
-    }
   }
 
-  return best;
+  if (!Number.isFinite(currentMinimum)) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  if (remaining.length === 1) {
+    return currentMinimum;
+  }
+
+  const outgoingMinimums: number[] = [];
+
+  for (const from of remaining) {
+    let minimum = Number.POSITIVE_INFINITY;
+
+    for (const to of remaining) {
+      if (from.key === to.key) continue;
+      minimum = Math.min(minimum, tableCost(table, from, to));
+    }
+
+    if (!Number.isFinite(minimum)) {
+      minimum = 0;
+    }
+
+    outgoingMinimums.push(minimum);
+  }
+
+  const total = outgoingMinimums.reduce(
+    (sum, value) => sum + value,
+    0
+  );
+  const largest = Math.max(...outgoingMinimums);
+
+  return currentMinimum + total - largest;
+}
+
+function stateRouteKey(state: FastPlotSearchState): string {
+  return state.route.map((visit) => visit.key).join("|");
+}
+
+function compareSearchStates(
+  left: FastPlotSearchState,
+  right: FastPlotSearchState
+): number {
+  if (left.score !== right.score) {
+    return left.score - right.score;
+  }
+
+  if (left.cost !== right.cost) {
+    return left.cost - right.cost;
+  }
+
+  return stateRouteKey(left).localeCompare(stateRouteKey(right));
+}
+
+function expandSearchState(
+  state: FastPlotSearchState,
+  visits: FastPlotVisit[],
+  counts: Map<string, number>,
+  table: FastPlotCostTable
+): FastPlotSearchState[] {
+  const remaining = remainingVisitsForState(
+    visits,
+    state.visited
+  );
+
+  const eligible = eligibleVisits(
+    remaining,
+    state.progress
+  );
+
+  if (eligible.length === 0) return [];
+
+  const current = state.route.at(-1) ?? null;
+  const expanded: FastPlotSearchState[] = [];
+
+  for (const candidate of eligible) {
+    const edgeCost = current
+      ? tableCost(table, current, candidate)
+      : 0;
+
+    if (!Number.isFinite(edgeCost)) continue;
+
+    const progress = cloneProgress(state.progress);
+    applyVisit(candidate, progress, counts);
+
+    const visited = new Set(state.visited);
+    visited.add(candidate.key);
+
+    const route = [...state.route, candidate];
+    const cost = state.cost + edgeCost;
+    const after = visits.filter(
+      (visit) => !visited.has(visit.key)
+    );
+
+    expanded.push({
+      route,
+      visited,
+      progress,
+      cost,
+      score:
+        cost +
+        remainingCostLowerBound(
+          candidate,
+          after,
+          table
+        ),
+    });
+  }
+
+  return expanded;
+}
+
+function bestBeamStates(
+  states: FastPlotSearchState[]
+): FastPlotSearchState[] {
+  states.sort(compareSearchStates);
+  return states.slice(0, FAST_PLOT_BEAM_WIDTH);
+}
+
+async function beamSearchFastPlotOrder(
+  visits: FastPlotVisit[],
+  counts: Map<string, number>,
+  table: FastPlotCostTable
+): Promise<LatLng[] | null> {
+  let beam: FastPlotSearchState[] = [{
+    route: [],
+    visited: new Set<string>(),
+    progress: new Map<string, number>(),
+    cost: 0,
+    score: 0,
+  }];
+
+  for (let depth = 0; depth < visits.length; depth++) {
+    const next: FastPlotSearchState[] = [];
+
+    for (const state of beam) {
+      next.push(
+        ...expandSearchState(
+          state,
+          visits,
+          counts,
+          table
+        )
+      );
+    }
+
+    if (next.length === 0) {
+      return null;
+    }
+
+    beam = bestBeamStates(next);
+  }
+
+  const complete = beam
+    .filter((state) => state.route.length === visits.length)
+    .sort((left, right) => {
+      if (left.cost !== right.cost) {
+        return left.cost - right.cost;
+      }
+
+      return stateRouteKey(left).localeCompare(
+        stateRouteKey(right)
+      );
+    });
+
+  const best = complete[0];
+
+  if (!best) return null;
+
+  return best.route.map((visit) => visit.point);
 }
 
 /** Build a low-cost physical route while enforcing every job's stop_order.
 
-    TomTom is advisory: malformed/unavailable matrices fall back to the first
-    legal visit, so Fast Plot always retains a deterministic safe sequence. */
+    V4 preloads a bounded TomTom physical-stop cost graph, then performs a
+    bounded beam search across legal complete routes. This retains V3's
+    precedence guarantees while avoiding irreversible nearest-next choices.
+
+    TomTom remains advisory: malformed/unavailable matrices fall back to the
+    deterministic precedence-safe V3 sequence. */
 export async function optimizeFastPlotOrder(
   jobs: PlanJob[],
   loadCosts: FastPlotCostLoader
@@ -395,39 +608,26 @@ export async function optimizeFastPlotOrder(
   }
 
   const visits = buildFastPlotVisits(jobs);
-  if (visits.length <= 1) return visits.map((visit) => visit.point);
 
-  const counts = jobStopCounts(jobs);
-  const progress = new Map<string, number>();
-  const result: LatLng[] = [];
-  let remaining = visits.slice();
-  let current: FastPlotVisit | null = null;
-
-  while (remaining.length > 0) {
-    const eligible = eligibleVisits(remaining, progress);
-    if (eligible.length === 0) {
-      return fallbackFastPlotOrder(jobs);
-    }
-
-    let chosen: FastPlotVisit;
-
-    try {
-      if (!current) {
-        chosen = await chooseFirstVisit(eligible, loadCosts);
-      } else {
-        chosen =
-          (await chooseNearestVisit(current, eligible, loadCosts)) ??
-          eligible[0];
-      }
-    } catch {
-      chosen = eligible[0];
-    }
-
-    result.push(chosen.point);
-    applyVisit(chosen, progress, counts);
-    remaining = removeVisit(remaining, chosen.key);
-    current = chosen;
+  if (visits.length <= 1) {
+    return visits.map((visit) => visit.point);
   }
 
-  return result;
+  const counts = jobStopCounts(jobs);
+  const table = await loadFastPlotCostTable(
+    visits,
+    loadCosts
+  );
+
+  if (!table) {
+    return fallbackFastPlotOrder(jobs);
+  }
+
+  const optimized = await beamSearchFastPlotOrder(
+    visits,
+    counts,
+    table
+  );
+
+  return optimized ?? fallbackFastPlotOrder(jobs);
 }
