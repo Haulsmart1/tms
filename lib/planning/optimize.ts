@@ -35,6 +35,86 @@ export function bestOrder(matrix: number[][]): number[] {
   return twoOpt(nearestNeighbour(matrix), matrix);
 }
 
+/** Find the cheapest open path while pinning one endpoint.
+
+    Fast Plot uses this when many collections share one delivery, or many
+    deliveries share one collection. The matrix includes the anchor itself.
+
+    With at most 10 matrix points there are at most 9 movable points. Searching
+    9! permutations is bounded and keeps the anchor semantics exact. */
+export function bestOrderWithAnchor(
+  matrix: number[][],
+  anchorIndex: number,
+  anchor: "start" | "end"
+): number[] {
+  const n = matrix.length;
+
+  if (
+    n === 0 ||
+    !Number.isInteger(anchorIndex) ||
+    anchorIndex < 0 ||
+    anchorIndex >= n
+  ) {
+    return [];
+  }
+
+  if (n === 1) return [anchorIndex];
+
+  const movable = Array.from(
+    { length: n },
+    (_, index) => index
+  ).filter((index) => index !== anchorIndex);
+
+  let best =
+    anchor === "start"
+      ? [anchorIndex, ...movable]
+      : [...movable, anchorIndex];
+
+  let bestCost = pathSeconds(best, matrix);
+  const current: number[] = [];
+  const used = new Array(movable.length).fill(false);
+
+  function walk(cost: number) {
+    if (cost >= bestCost) return;
+
+    if (current.length === movable.length) {
+      const candidate =
+        anchor === "start"
+          ? [anchorIndex, ...current]
+          : [...current, anchorIndex];
+
+      const total = pathSeconds(candidate, matrix);
+      if (total < bestCost) {
+        best = candidate;
+        bestCost = total;
+      }
+      return;
+    }
+
+    for (let i = 0; i < movable.length; i++) {
+      if (used[i]) continue;
+
+      const next = movable[i];
+      let hop = 0;
+
+      if (current.length > 0) {
+        hop = matrix[current[current.length - 1]][next];
+      } else if (anchor === "start") {
+        hop = matrix[anchorIndex][next];
+      }
+
+      used[i] = true;
+      current.push(next);
+      walk(cost + hop);
+      current.pop();
+      used[i] = false;
+    }
+  }
+
+  walk(0);
+  return best;
+}
+
 function exhaustive(matrix: number[][]): number[] {
   const n = matrix.length;
   let best = Array.from({ length: n }, (_, i) => i);

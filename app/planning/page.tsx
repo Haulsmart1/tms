@@ -17,9 +17,14 @@ import {
 } from "../../lib/planning/boardActions";
 import { formatDistance, formatDuration } from "../../lib/planning/format";
 import {
-  isRoutable, jobEntryPoint, jobExitPoint, jobRepresentativePoint, laneWaypoints,
+  fastPlotOptimizationMode, fastPlotPhases,
+  fastPlotWaypointsFromPhases, isRoutable, jobEntryPoint, jobExitPoint,
+  jobRepresentativePoint, reorderFastPlotPhase,
 } from "../../lib/planning/waypoints";
-import { bestOrder } from "../../lib/planning/optimize";
+import {
+  bestOrder,
+  bestOrderWithAnchor,
+} from "../../lib/planning/optimize";
 import { sanitizeTravelSeconds } from "../../lib/planning/matrix";
 import type { PlanJob, RouteResult } from "../../lib/planning/types";
 import { createSupabasePositionSource } from "../../lib/tracking/supabasePositions";
@@ -524,7 +529,8 @@ export default function PlanningPage() {
 
   useEffect(() => {
     if (!selectedVehicleId || !geocodeSettled) return;
-    const points = laneWaypoints(selectedLaneJobs);
+    const phases = fastPlotPhases(selectedLaneJobs);
+    const points = fastPlotWaypointsFromPhases(phases);
     if (points.length < 2) {
       setRoutes((prev) => {
         const next = { ...prev };
@@ -541,10 +547,139 @@ export default function PlanningPage() {
     let cancelled = false;
     (async () => {
       try {
+        async function matrixOrder(
+          matrixPoints: typeof phases.collections,
+          anchorIndex?: number,
+          anchor?: "start" | "end"
+        ) {
+          // Matrix v2 is capped at 100 cells, so square requests are limited
+          // to 10 routing points including any fixed endpoint anchor.
+          if (matrixPoints.length < 2 || matrixPoints.length > 10) {
+            return null;
+          }
+
+          try {
+            const matrixResponse = await fetch("/api/tomtom/matrix", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ points: matrixPoints }),
+            });
+
+            if (!matrixResponse.ok) return null;
+
+            const matrix = sanitizeTravelSeconds(
+              (await matrixResponse.json())?.travelSeconds,
+              matrixPoints.length
+            );
+
+            if (!matrix) return null;
+
+            return anchorIndex === undefined || anchor === undefined
+              ? bestOrder(matrix)
+              : bestOrderWithAnchor(matrix, anchorIndex, anchor);
+          } catch {
+            // Matrix failure must not prevent Fast Plot from drawing the
+            // original safe collection-then-delivery sequence.
+            return null;
+          }
+        }
+
+        let collections = phases.collections;
+        let deliveries = phases.deliveries;
+
+        const optimizationMode = fastPlotOptimizationMode(
+          phases.collections.length,
+          phases.deliveries.length
+        );
+
+        // Many collections -> one shared delivery. The shared delivery stays
+        // the semantic anchor even when 10+1 points exceed the matrix limit.
+        if (optimizationMode === "anchored-delivery") {
+          if (phases.collections.length <= 9) {
+            const matrixPoints = [
+              ...phases.collections,
+              phases.deliveries[0],
+            ];
+
+            const order = await matrixOrder(
+              matrixPoints,
+              matrixPoints.length - 1,
+              "end"
+            );
+            if (cancelled) return;
+
+            if (order) {
+              collections = reorderFastPlotPhase(
+                phases.collections,
+                order.slice(0, -1)
+              );
+            }
+          }
+          // 10+ movable collections preserve lane order rather than using an
+          // incomplete unanchored optimization.
+        } else {
+          const order = await matrixOrder(phases.collections);
+          if (cancelled) return;
+
+          if (order) {
+            collections = reorderFastPlotPhase(
+              phases.collections,
+              order
+            );
+          }
+        }
+
+        // One shared collection -> many deliveries. The shared collection
+        // remains the semantic anchor even when 1+10 exceeds the matrix limit.
+        if (optimizationMode === "anchored-collection") {
+          if (phases.deliveries.length <= 9) {
+            const matrixPoints = [
+              phases.collections[0],
+              ...phases.deliveries,
+            ];
+
+            const order = await matrixOrder(
+              matrixPoints,
+              0,
+              "start"
+            );
+            if (cancelled) return;
+
+            if (order) {
+              const deliveryOrder = order
+                .slice(1)
+                .map((index) => index - 1);
+
+              deliveries = reorderFastPlotPhase(
+                phases.deliveries,
+                deliveryOrder
+              );
+            }
+          }
+          // 10+ movable deliveries preserve lane order rather than using an
+          // incomplete unanchored optimization.
+        } else {
+          const order = await matrixOrder(phases.deliveries);
+          if (cancelled) return;
+
+          if (order) {
+            deliveries = reorderFastPlotPhase(
+              phases.deliveries,
+              order
+            );
+          }
+        }
+
+        const routePoints = fastPlotWaypointsFromPhases({
+          collections,
+          deliveries,
+          other: phases.other,
+        });
+
         const response = await fetch("/api/tomtom/route", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ points }),
+          body: JSON.stringify({ points: routePoints }),
         });
         if (cancelled) return;
         if (!response.ok) {
@@ -1375,8 +1510,9 @@ export default function PlanningPage() {
 
             <span className="basis-full text-xs text-ink-3">
               Drop order: drag cards between positions or use Up / Down.
-              Smart Optimize uses each job's final stop to next job's first stop;
-              Save plan persists vehicle, driver and drop order.
+              Fast Plot maps unique collections first, then unique deliveries,
+              and TomTom optimizes up to 10 matrix points with shared endpoints anchored. Smart Optimize changes
+              job order; Save plan persists vehicle, driver and drop order.
             </span>
           </section>
 

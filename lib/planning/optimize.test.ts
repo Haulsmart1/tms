@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { bestOrder, pathSeconds } from "./optimize";
+import {
+  bestOrder,
+  bestOrderWithAnchor,
+  pathSeconds,
+} from "./optimize";
 
 describe("pathSeconds", () => {
   it("sums consecutive hops", () => {
@@ -82,5 +86,37 @@ describe("bestOrder", () => {
     );
     const order = bestOrder(m);
     expect([...order].sort((a, b) => a - b)).toEqual(Array.from({ length: n }, (_, i) => i));
+  });
+});
+
+describe("bestOrderWithAnchor", () => {
+  it("pins a shared delivery last and prices the final delivery hop", () => {
+    const matrix = [
+      [0, 1, 1],
+      [1, 0, 100],
+      [100, 1, 0],
+    ];
+
+    expect(bestOrderWithAnchor(matrix, 2, "end")).toEqual([1, 0, 2]);
+  });
+
+  it("pins a shared collection first and prices the first delivery hop", () => {
+    const matrix = [
+      [0, 100, 1],
+      [1, 0, 1],
+      [1, 2, 0],
+    ];
+
+    expect(bestOrderWithAnchor(matrix, 0, "start")).toEqual([0, 2, 1]);
+  });
+
+  it("returns the anchor for a one-point matrix", () => {
+    expect(bestOrderWithAnchor([[0]], 0, "start")).toEqual([0]);
+    expect(bestOrderWithAnchor([[0]], 0, "end")).toEqual([0]);
+  });
+
+  it("rejects an invalid anchor index", () => {
+    expect(bestOrderWithAnchor([[0]], 1, "start")).toEqual([]);
+    expect(bestOrderWithAnchor([[0]], -1, "end")).toEqual([]);
   });
 });

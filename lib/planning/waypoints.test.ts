@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  fastPlotOptimizationMode,
+  fastPlotPhases,
+  fastPlotWaypoints,
+  fastPlotWaypointsFromPhases,
   isRoutable,
   jobEntryPoint,
   jobExitPoint,
   jobRepresentativePoint,
+  reorderFastPlotPhase,
   jobWaypoints,
   laneWaypoints,
   sortedStops,
@@ -146,5 +151,363 @@ describe("Smart Optimize entry and exit points", () => {
       { lat: 53.1, lng: -1.1 },
       { lat: 53.2, lng: -1.2 },
     ]);
+  });
+});
+
+describe("fastPlotWaypoints", () => {
+  it("plots multiple collections once before one shared delivery", () => {
+    const sharedDelivery = {
+      lat: 53.592,
+      lng: -2.219,
+    };
+
+    const jobs = [
+      job(
+        [
+          stop({
+            id: "c1",
+            stop_order: 1,
+            type: "collection",
+            lat: 55.953,
+            lng: -3.189,
+          }),
+          stop({
+            id: "d1",
+            stop_order: 2,
+            type: "delivery",
+            ...sharedDelivery,
+          }),
+        ],
+        { id: "j1" }
+      ),
+      job(
+        [
+          stop({
+            id: "c2",
+            stop_order: 1,
+            type: "collection",
+            lat: 56.071,
+            lng: -3.452,
+          }),
+          stop({
+            id: "d2",
+            stop_order: 2,
+            type: "delivery",
+            ...sharedDelivery,
+          }),
+        ],
+        { id: "j2" }
+      ),
+      job(
+        [
+          stop({
+            id: "c3",
+            stop_order: 1,
+            type: "collection",
+            lat: 55.990,
+            lng: -3.398,
+          }),
+          stop({
+            id: "d3",
+            stop_order: 2,
+            type: "delivery",
+            ...sharedDelivery,
+          }),
+        ],
+        { id: "j3" }
+      ),
+    ];
+
+    expect(fastPlotWaypoints(jobs)).toEqual([
+      { lat: 55.953, lng: -3.189 },
+      { lat: 56.071, lng: -3.452 },
+      { lat: 55.990, lng: -3.398 },
+      sharedDelivery,
+    ]);
+  });
+
+  it("plots one shared collection once before multiple deliveries", () => {
+    const sharedCollection = {
+      lat: 53.592,
+      lng: -2.219,
+    };
+
+    const jobs = [
+      job(
+        [
+          stop({
+            id: "c1",
+            stop_order: 1,
+            type: "collection",
+            ...sharedCollection,
+          }),
+          stop({
+            id: "d1",
+            stop_order: 2,
+            type: "delivery",
+            lat: 55.953,
+            lng: -3.189,
+          }),
+        ],
+        { id: "j1" }
+      ),
+      job(
+        [
+          stop({
+            id: "c2",
+            stop_order: 1,
+            type: "collection",
+            ...sharedCollection,
+          }),
+          stop({
+            id: "d2",
+            stop_order: 2,
+            type: "delivery",
+            lat: 56.071,
+            lng: -3.452,
+          }),
+        ],
+        { id: "j2" }
+      ),
+    ];
+
+    expect(fastPlotWaypoints(jobs)).toEqual([
+      sharedCollection,
+      { lat: 55.953, lng: -3.189 },
+      { lat: 56.071, lng: -3.452 },
+    ]);
+  });
+
+  it("deduplicates coordinates across the complete fast plot", () => {
+    const jobs = [
+      job(
+        [
+          stop({
+            id: "c1",
+            type: "collection",
+            stop_order: 1,
+            lat: 53.8,
+            lng: -1.55,
+          }),
+          stop({
+            id: "d1",
+            type: "delivery",
+            stop_order: 2,
+            lat: 54.0,
+            lng: -2.0,
+          }),
+        ],
+        { id: "j1" }
+      ),
+      job(
+        [
+          stop({
+            id: "c2",
+            type: "collection",
+            stop_order: 1,
+            lat: 53.8,
+            lng: -1.55,
+          }),
+          stop({
+            id: "d2",
+            type: "delivery",
+            stop_order: 2,
+            lat: 54.0,
+            lng: -2.0,
+          }),
+        ],
+        { id: "j2" }
+      ),
+    ];
+
+    expect(fastPlotWaypoints(jobs)).toEqual([
+      { lat: 53.8, lng: -1.55 },
+      { lat: 54.0, lng: -2.0 },
+    ]);
+  });
+
+  it("keeps mappable stops from partially geocoded jobs", () => {
+    const j = job([
+      stop({
+        id: "c1",
+        type: "collection",
+        stop_order: 1,
+        lat: 53.8,
+        lng: -1.55,
+      }),
+      stop({
+        id: "d1",
+        type: "delivery",
+        stop_order: 2,
+        lat: null,
+        lng: null,
+      }),
+    ]);
+
+    expect(fastPlotWaypoints([j])).toEqual([
+      { lat: 53.8, lng: -1.55 },
+    ]);
+  });
+
+  it("does not mutate job or stop order", () => {
+    const first = stop({
+      id: "delivery",
+      type: "delivery",
+      stop_order: 2,
+      lat: 54.0,
+      lng: -2.0,
+    });
+    const second = stop({
+      id: "collection",
+      type: "collection",
+      stop_order: 1,
+      lat: 53.8,
+      lng: -1.55,
+    });
+    const j = job([first, second]);
+
+    fastPlotWaypoints([j]);
+
+    expect(j.stops.map((item) => item.id)).toEqual([
+      "delivery",
+      "collection",
+    ]);
+  });
+});
+
+describe("Fast Plot phase optimization safety", () => {
+  it("builds unique collection and delivery phases independently", () => {
+    const j1 = job(
+      [
+        stop({
+          id: "c1",
+          type: "collection",
+          stop_order: 1,
+          lat: 53.8,
+          lng: -1.55,
+        }),
+        stop({
+          id: "d1",
+          type: "delivery",
+          stop_order: 2,
+          lat: 54.0,
+          lng: -2.0,
+        }),
+      ],
+      { id: "j1" }
+    );
+
+    const j2 = job(
+      [
+        stop({
+          id: "c2",
+          type: "collection",
+          stop_order: 1,
+          lat: 53.8,
+          lng: -1.55,
+        }),
+        stop({
+          id: "d2",
+          type: "delivery",
+          stop_order: 2,
+          lat: 55.0,
+          lng: -3.0,
+        }),
+      ],
+      { id: "j2" }
+    );
+
+    expect(fastPlotPhases([j1, j2])).toEqual({
+      collections: [{ lat: 53.8, lng: -1.55 }],
+      deliveries: [
+        { lat: 54.0, lng: -2.0 },
+        { lat: 55.0, lng: -3.0 },
+      ],
+      other: [],
+    });
+  });
+
+  it("reorders one phase using a complete optimizer permutation", () => {
+    const points = [
+      { lat: 1, lng: 1 },
+      { lat: 2, lng: 2 },
+      { lat: 3, lng: 3 },
+    ];
+
+    expect(reorderFastPlotPhase(points, [2, 0, 1])).toEqual([
+      { lat: 3, lng: 3 },
+      { lat: 1, lng: 1 },
+      { lat: 2, lng: 2 },
+    ]);
+  });
+
+  it("falls back when an optimizer drops or duplicates a point", () => {
+    const points = [
+      { lat: 1, lng: 1 },
+      { lat: 2, lng: 2 },
+      { lat: 3, lng: 3 },
+    ];
+
+    expect(reorderFastPlotPhase(points, [0, 1])).toEqual(points);
+    expect(reorderFastPlotPhase(points, [0, 1, 1])).toEqual(points);
+    expect(reorderFastPlotPhase(points, [0, 1, 9])).toEqual(points);
+  });
+
+  it("keeps collection phase before delivery phase after optimization", () => {
+    const result = fastPlotWaypointsFromPhases({
+      collections: [
+        { lat: 2, lng: 2 },
+        { lat: 1, lng: 1 },
+      ],
+      deliveries: [
+        { lat: 4, lng: 4 },
+        { lat: 3, lng: 3 },
+      ],
+      other: [],
+    });
+
+    expect(result).toEqual([
+      { lat: 2, lng: 2 },
+      { lat: 1, lng: 1 },
+      { lat: 4, lng: 4 },
+      { lat: 3, lng: 3 },
+    ]);
+  });
+
+  it("deduplicates a shared coordinate across phase boundaries", () => {
+    expect(
+      fastPlotWaypointsFromPhases({
+        collections: [
+          { lat: 1, lng: 1 },
+          { lat: 2, lng: 2 },
+        ],
+        deliveries: [
+          { lat: 2, lng: 2 },
+          { lat: 3, lng: 3 },
+        ],
+        other: [],
+      })
+    ).toEqual([
+      { lat: 1, lng: 1 },
+      { lat: 2, lng: 2 },
+      { lat: 3, lng: 3 },
+    ]);
+  });
+});
+
+describe("Fast Plot anchored matrix boundary", () => {
+  it("keeps shared-delivery semantics at both 9 and 10 movable collections", () => {
+    expect(fastPlotOptimizationMode(9, 1)).toBe("anchored-delivery");
+    expect(fastPlotOptimizationMode(10, 1)).toBe("anchored-delivery");
+  });
+
+  it("keeps shared-collection semantics at both 9 and 10 movable deliveries", () => {
+    expect(fastPlotOptimizationMode(1, 9)).toBe("anchored-collection");
+    expect(fastPlotOptimizationMode(1, 10)).toBe("anchored-collection");
+  });
+
+  it("uses independent optimization for genuinely mixed phases", () => {
+    expect(fastPlotOptimizationMode(2, 2)).toBe("independent");
+    expect(fastPlotOptimizationMode(10, 10)).toBe("independent");
   });
 });
