@@ -682,7 +682,127 @@ Claude-Session: https://claude.ai/code/session_017BL5k8UCJHsvLKiXWQDfRJ"
 
 ---
 
-## Task 4: `/vehicles`
+## Task 4a: share the compliance helpers, and test them
+
+ADDED 2026-09-03, from the Task 3 code review. Not in the original plan.
+
+Task 3 extracted `getCompliance`, `mostUrgent`, `ComplianceLevel` and `ComplianceResult` into
+`app/subcontractors/compliance.tsx`. `/vehicles` holds a duplicate of all four, and Task 4b would
+otherwise extract a second copy. The review verified the two implementations are equivalent:
+same thresholds (0, 7, 30), same labels, same shapes, differing only in `startOfToday()` versus
+an inlined `new Date()` with `setHours(0,0,0,0)`, which produce the same value.
+
+**The reason to move them is not DRY.** It is that `vitest.config.ts` covers `lib/**` only, so
+nothing under `app/` can have a unit test. This is date-boundary arithmetic with no test anywhere
+in the repo. Moving it to `lib/` is what makes a test possible, and the test is the point.
+
+`vitest.config.ts` pins `TZ=Europe/London` deliberately, and `CLAUDE.md` warns not to "fix" a
+timezone-sensitive failure by changing it. This code is exactly that class, so the test must
+exercise the day boundary rather than only the middle of a day.
+
+What must NOT move: `subcontractorCardStyle` and `vehicleCardStyle` genuinely differ
+(`p-3`/`bg-surface-2` versus `p-4`/`bg-surface shadow-sm`), and each page's `StatusBadge` differs
+(vehicles' carries a vestigial `small` prop). Those stay per-page.
+
+**Files:**
+- Create: `lib/compliance/expiry.ts`, `lib/compliance/expiry.test.ts`
+- Create: `components/InfoField.tsx`
+- Modify: `app/subcontractors/compliance.tsx`, `app/subcontractors/SubcontractorCard.tsx`,
+  `app/subcontractors/types.ts`, `app/subcontractors/page.tsx`
+
+- [ ] **Step 1: Move the four to `lib/compliance/expiry.ts`**
+
+Move `ComplianceLevel`, `ComplianceResult`, `getCompliance` and `mostUrgent` out of
+`app/subcontractors/compliance.tsx` and `app/subcontractors/types.ts` into a new
+`lib/compliance/expiry.ts`. Move them verbatim; do not retype. Keep the `mostUrgent` empty-list
+throw that Task 3 added.
+
+The file is pure logic with no JSX, so it is `.ts` not `.tsx`.
+
+- [ ] **Step 2: Write the test that could not exist before**
+
+Create `lib/compliance/expiry.test.ts`. This is the whole justification for the move, so it must
+actually exercise the boundaries rather than smoke-test the happy path. Cover, with `vi.setSystemTime`
+so the cases are deterministic:
+
+```ts
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getCompliance, mostUrgent } from "./expiry";
+
+/* Frozen so "today" cannot drift under the test. Europe/London is pinned in
+   vitest.config.ts on purpose (see CLAUDE.md): these are day-boundary
+   comparisons, and a UTC runner would let an off-by-one pass unnoticed. */
+beforeEach(() => vi.setSystemTime(new Date("2026-09-03T12:00:00")));
+afterEach(() => vi.useRealTimers());
+```
+
+Required cases, each asserting the `level` and that the `label` is not misleading:
+
+- A null expiry. Document what it returns; Task 3 established it is `amber`, and the card relies
+  on that being true, so pin it.
+- Expiry in the past (expired).
+- Expiry exactly today. State in a comment which side of the boundary this falls and why that is
+  the intended reading for a licence or an insurance policy.
+- Expiry tomorrow, at 7 days, at 8 days, at 30 days, at 31 days. The 7 and 30 cases are the
+  threshold edges: assert both the boundary day and the day either side, since an off-by-one here
+  is exactly the bug a test like this exists to catch.
+- `mostUrgent` returning the worst of a mixed list, in both argument orders, so the result does
+  not depend on ordering.
+- `mostUrgent` throwing on an empty list.
+
+If any assertion surprises you (a boundary that is not where you expected), do NOT change the
+implementation to match the test. Report it: this code ships today and a boundary change is a
+behaviour change, not a fix.
+
+- [ ] **Step 3: Promote `Info` to `components/InfoField.tsx`**
+
+The Task 3 review flagged `Info` as a passenger in `compliance.tsx`: four exports are one topic
+and `Info` is a generic label/value cell that landed there only because it also needed to escape
+`page.tsx`. It is also a near-copy of the private `Info` inside `app/customers/CustomerCard.tsx`.
+
+Move it to `components/InfoField.tsx`, exported as `InfoField`, keeping its `loading` prop and
+the `display="inline-block"` comment verbatim (that comment records real pixel arithmetic).
+
+Do NOT touch `app/customers/CustomerCard.tsx`. Collapsing its private copy is a change to a
+shipped, signed-off page for no functional gain, and it belongs in whatever batch next has that
+file open. Leave a one-line note in `InfoField.tsx` saying a third near-copy lives there.
+
+- [ ] **Step 4: Update the importers and delete what is now empty**
+
+Point `app/subcontractors/compliance.tsx`, `SubcontractorCard.tsx`, `types.ts` and `page.tsx` at
+the new homes. If `compliance.tsx` is left holding only `StatusBadge` and `subcontractorCardStyle`,
+that is fine and correct; update its header comment so it describes what it actually contains now,
+and drop the "Info is a passenger" note, which will no longer be true.
+
+- [ ] **Step 5: Verify**
+
+Run: `npm run typecheck && npm test`
+
+Expected: typecheck clean. Test count RISES from 590 by however many cases you wrote in Step 2;
+report the new number. This is the one task in the batch that should change the count.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add lib/compliance components/InfoField.tsx app/subcontractors
+git commit -m "refactor(compliance): move expiry logic to lib/ and test it
+
+The two copies of getCompliance/mostUrgent (subcontractors and vehicles)
+were equivalent, but the reason to move them is not DRY: vitest covers
+lib/ only, so nothing under app/ can be tested. This is date-boundary
+arithmetic that shipped with no test anywhere in the repo, and the day
+0/7/30 edges now have one.
+
+Info moves to components/InfoField, having been a passenger in a module
+about compliance.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_017BL5k8UCJHsvLKiXWQDfRJ"
+```
+
+---
+
+## Task 4b: `/vehicles`
 
 **Files:**
 - Create: `app/vehicles/types.ts`, `app/vehicles/compliance.tsx`, `app/vehicles/VehicleCard.tsx`
@@ -693,7 +813,25 @@ This page has a real bug to fix on the way past. At line 944 the loading notice 
 
 - [ ] **Step 1: Extract types and helpers**
 
-Same moves as Task 3, steps 1 and 2. Create `app/vehicles/types.ts` by moving `Vehicle`, `FleetInsurancePolicy`, `ComplianceLevel` (line 46) and `ComplianceResult` (line 48) out of `page.tsx` with `export` added. Create `app/vehicles/compliance.tsx` by moving `getCompliance`, `getVehicleCardCompliance`, `vehicleCardStyle`, `StatusBadge` and `ComplianceItem` out, with `export` added. Import both back into `page.tsx`.
+Task 4a already moved `ComplianceLevel`, `ComplianceResult`, `getCompliance` and `mostUrgent` to
+`lib/compliance/expiry.ts`. **Do not create a second copy of any of them.** `/vehicles` currently
+holds its own duplicates (around lines 46, 48, 1155-1198, plus a `startOfToday()` helper); DELETE
+those and import from `lib/compliance/expiry` instead.
+
+Confirm before deleting that the vehicles implementation really is equivalent to the shared one.
+The Task 3 review found they match on thresholds (0, 7, 30), labels and shapes, differing only in
+`startOfToday()` versus an inlined `new Date()` with `setHours(0,0,0,0)`. Verify that yourself; if
+they differ in any way that changes a result, STOP and report rather than deleting.
+
+Then create `app/vehicles/types.ts` by moving `Vehicle` and `FleetInsurancePolicy` out of
+`page.tsx` with `export` added, and `app/vehicles/compliance.tsx` by moving `getVehicleCardCompliance`,
+`vehicleCardStyle`, `StatusBadge` and `ComplianceItem` out, with `export` added. These four are
+genuinely vehicle-specific and must NOT be shared: `vehicleCardStyle` differs from the
+subcontractors one (`p-4`/`bg-surface shadow-sm` versus `p-3`/`bg-surface-2`), and this
+`StatusBadge` carries a vestigial `small` prop. Import both back into `page.tsx`.
+
+Use `InfoField` from `components/InfoField.tsx` (Task 4a) anywhere this page wants a label/value
+cell, rather than writing a third copy.
 
 `ComplianceItem` gains a `loading` prop and its value becomes a skeleton, the same widening `Info` took:
 
