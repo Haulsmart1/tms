@@ -38,7 +38,7 @@ const PLACEHOLDER_SUBCONTRACTOR = {
   phone: null,
   operator_licence_number: null,
   payment_terms_days: null,
-} as unknown as Subcontractor;
+} as Subcontractor;
 
 const EMPTY_FORM = {
   name: "",
@@ -137,6 +137,8 @@ export default function SubcontractorsPage() {
     fetching: loading,
     hasData: subcontractors.length > 0,
   });
+
+  const showEmpty = !showSkeleton && subcontractors.length === 0;
 
   const selectedSubcontractor = subcontractors.find(
     (item) => item.id === selectedSubcontractorId
@@ -915,12 +917,16 @@ export default function SubcontractorsPage() {
               </div>
             </div>
 
-            {showSkeleton ? null : subcontractors.length === 0 ? (
+            {showEmpty ? (
               <p className="py-10 text-center text-sm text-ink-3">
                 No subcontractors found.
               </p>
             ) : null}
 
+            {/* ONE grid container shared by the skeleton and the real cards,
+                deliberately: two containers would let these breakpoint classes
+                drift apart and the layout jump on arrival. That is why this is
+                a sibling conditional rather than a third arm of the chain. */}
             {showSkeleton || subcontractors.length > 0 ? (
               <div
                 className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3"
@@ -937,7 +943,6 @@ export default function SubcontractorsPage() {
                       <SubcontractorCard
                         key={`skeleton-${index}`}
                         subcontractor={PLACEHOLDER_SUBCONTRACTOR}
-                        compliance={null}
                         loading
                         onEdit={() => {}}
                         onManage={() => {}}
@@ -947,13 +952,6 @@ export default function SubcontractorsPage() {
                       <SubcontractorCard
                         key={subcontractor.id}
                         subcontractor={subcontractor}
-                        compliance={mostUrgent([
-                          getCompliance(subcontractor.goods_in_transit_expiry),
-                          getCompliance(subcontractor.public_liability_expiry),
-                          getCompliance(subcontractor.employers_liability_expiry),
-                          getCompliance(subcontractor.motor_insurance_expiry),
-                          getCompliance(subcontractor.waste_carrier_expiry),
-                        ])}
                         onEdit={(item) => {
                           setSelectedSubcontractorId(item.id);
                           startEdit(item);
@@ -1463,7 +1461,6 @@ function CheckboxField({
     </label>
   );
 }
-
 
 function formatDate(value: string) {
   const date = new Date(`${value}T00:00:00`);

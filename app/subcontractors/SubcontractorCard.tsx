@@ -1,12 +1,16 @@
 import Button from "../../components/Button";
 import Skeleton from "../../components/Skeleton";
-import { Info, StatusBadge, subcontractorCardStyle } from "./compliance";
-import type { ComplianceResult, Subcontractor } from "./types";
+import {
+  getCompliance,
+  Info,
+  mostUrgent,
+  StatusBadge,
+  subcontractorCardStyle,
+} from "./compliance";
+import type { Subcontractor } from "./types";
 
 type Props = {
   subcontractor: Subcontractor;
-  /** Null while loading, since it is derived from data that has not arrived. */
-  compliance: ComplianceResult | null;
   loading?: boolean;
   onEdit: (subcontractor: Subcontractor) => void;
   onManage: (id: string) => void;
@@ -20,11 +24,27 @@ type Props = {
    buttons render for real. */
 export default function SubcontractorCard({
   subcontractor,
-  compliance,
   loading = false,
   onEdit,
   onManage,
 }: Props) {
+  /* Derived here rather than passed in. As a prop alongside `loading` it was
+     four states, two of them nonsense, and the border and the badge disagreed
+     about which one to believe.
+
+     Behind the loading branch on purpose: every placeholder expiry is null and
+     getCompliance(null) is amber, so deriving unconditionally would put an
+     amber alarm border on every skeleton card. */
+  const compliance = loading
+    ? null
+    : mostUrgent([
+        getCompliance(subcontractor.goods_in_transit_expiry),
+        getCompliance(subcontractor.public_liability_expiry),
+        getCompliance(subcontractor.employers_liability_expiry),
+        getCompliance(subcontractor.motor_insurance_expiry),
+        getCompliance(subcontractor.waste_carrier_expiry),
+      ]);
+
   return (
     <article
       /* While loading there is no compliance level, so the card takes the

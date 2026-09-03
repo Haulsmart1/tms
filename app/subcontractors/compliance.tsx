@@ -6,7 +6,12 @@ import type { ComplianceLevel, ComplianceResult } from "./types";
 /* Moved verbatim out of page.tsx (bar Info's widened value prop and its new
    loading prop). These live in their own module rather than in the card
    because page.tsx uses each of them outside the card too, so putting them in
-   the card would make page.tsx and the card import each other. */
+   the card would make page.tsx and the card import each other.
+
+   Info is a passenger here: it is a generic label/value cell, not a compliance
+   concern, and it lives in this file only because it had to escape page.tsx
+   too. It belongs in a shared components/InfoField once a second page wants
+   it, which /vehicles will. */
 
 export function Info({
   label,
@@ -77,6 +82,14 @@ export function getCompliance(expiry: string | null): ComplianceResult {
 }
 
 export function mostUrgent(results: ComplianceResult[]): ComplianceResult {
+  /* An empty list has no most-urgent member, so there is no honest value to
+     return. This was safe while the function was page-local and every caller
+     passed a fixed five, but it is a module API now: say so explicitly rather
+     than letting reduce throw an opaque TypeError. */
+  if (results.length === 0) {
+    throw new Error("mostUrgent requires at least one compliance result");
+  }
+
   const rank: Record<ComplianceLevel, number> = {
     ok: 0,
     amber: 1,
