@@ -1,7 +1,14 @@
 import type { ReactNode } from "react";
 import Skeleton from "./Skeleton";
 
-/* A generic label/value cell. It was a passenger in app/subcontractors's
+/* Renders correctly ONLY inside a `.ds` wrapper. Preflight is disabled, so the
+   text-kicker, text-ink-2 and text-ink tokens below resolve through the scoped
+   reset in app/globals.css; outside `.ds` they do not apply.
+
+   A read-only display cell, NOT components/Field.tsx, which is an editable
+   input control with a label.
+
+   A generic label/value cell. It was a passenger in app/subcontractors's
    compliance module, which is about compliance and nothing else; it lives here
    now that /vehicles wants it too.
 

@@ -501,3 +501,67 @@ a second implementation. Whoever does it should add cases spanning both transiti
 directions, since a fix that corrects autumn and breaks spring would pass every test in
 `lib/compliance/expiry.test.ts` as it stands: every case there sits inside BST on purpose, and
 the file says so.
+
+## Found along the way: `getCompliance` fails open on an unparseable date
+
+RECORDED 2026-09-03. Surfaced by code review of Task 4a. Pre-existing, not introduced by this
+batch, and deliberately NOT fixed here for the same reason as the DST bug above.
+
+An expiry string `Date` cannot parse produces `NaN`, and every comparison against `NaN` is false,
+so the value falls through `days < 0`, `days <= 7` and `days <= 30` alike and reaches the final
+return:
+
+| input | result |
+| --- | --- |
+| `getCompliance("not-a-date")` | `{ level: "ok", label: "VALID • NaNd", days: NaN }` |
+| `getCompliance("2026-09-03T00:00:00+00:00")` | `{ level: "ok", label: "VALID • NaNd", days: NaN }` |
+
+**Effect on the product.** Unreadable data renders a green VALID badge. That is the wrong
+direction for a compliance product, which should treat unknown paperwork as at least amber, the
+way a null expiry already does. `days: NaN` also satisfies the declared `number | null`, so the
+type gives no protection and no caller catches it.
+
+**Why it is not reachable today.** All five subcontractor expiry columns and the three vehicle
+ones are Postgres `date`, which Supabase serves as a bare `YYYY-MM-DD`. Nothing in the app ever
+hands this function anything else.
+
+**What would make it reachable.** Migrating any one of those columns to `timestamptz` would start
+sending the second form in the table, and every card on the page would turn green. A CSV import
+or a hand-edited row would do it too.
+
+**Pinned, not fixed.** Two cases in `lib/compliance/expiry.test.ts` assert the current output
+exactly, including the literal `"VALID • NaNd"` label, so a refactor cannot change this quietly.
+Whoever fixes it should decide the destination band deliberately: amber alongside `DATE NEEDED`
+is the obvious candidate, and `lib/planning/compliance.ts` already has a `normaliseDate` regex
+that extracts the date portion from a timestamp, which would handle the second form properly
+rather than merely failing safe.
+
+## Found along the way: `mostUrgent` shows the first red, not the worst
+
+RECORDED 2026-09-03. Surfaced by code review of Task 4a. Pre-existing, not introduced by this
+batch, and NOT changed here because it is a product decision rather than a defect.
+
+`mostUrgent` ranks by `level` only, and `reduce` keeps the incumbent on a tie, so `days` never
+breaks one. Which of two equally-ranked results comes back is therefore decided by array order:
+
+```
+mostUrgent([expired3d, expired185d]).label  ->  "EXPIRED 3d"
+mostUrgent([expired185d, expired3d]).label  ->  "EXPIRED 185d"
+```
+
+**Effect on the product.** `SubcontractorCard` passes the returned object straight to
+`StatusBadge`, which renders `result.label`, so this is visible text and not merely an internal
+level. A subcontractor whose motor insurance lapsed 185 days ago and whose goods-in-transit
+lapsed 3 days ago shows **"EXPIRED 3d"**, because the card lists goods-in-transit first. The card
+understates its worst breach, and the ordering that decides it is an incidental property of the
+array literal in the caller.
+
+**Why it was not changed.** What a single badge should say when several documents have lapsed is
+a question about the product, not about this function. Worst-by-days is the obvious answer but
+not the only one: worst-by-document-importance is defensible too, and neither is expressible
+while the function ranks on a three-value enum alone. It wants deciding before it is coded.
+
+**Pinned, not fixed.** `lib/compliance/expiry.test.ts` asserts both argument orders explicitly,
+so the current behaviour is written down and a change to it has to be deliberate. The
+order-independence test alongside it was also renamed, because it only holds when every input has
+a distinct level and its old name claimed otherwise.
