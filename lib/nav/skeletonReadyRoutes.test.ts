@@ -32,7 +32,7 @@ describe("isSkeletonReadyRoute", () => {
 
   it("lists exactly the routes converted so far, and nothing aspirational", () => {
     expect([...SKELETON_READY_ROUTES].sort()).toEqual(
-      ["/dashboard", "/customers", "/settings/billing"].sort()
+      ["/dashboard", "/customers", "/settings/billing", "/subcontractors"].sort()
     );
   });
 });
