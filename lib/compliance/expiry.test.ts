@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getCompliance, mostUrgent } from "./expiry";
+import type { ComplianceResult } from "./expiry";
 
 /* Frozen so "today" cannot drift under the test. Europe/London is pinned in
    vitest.config.ts on purpose (see CLAUDE.md): these are day-boundary
@@ -118,9 +119,27 @@ describe("getCompliance", () => {
 });
 
 describe("mostUrgent", () => {
-  const ok = getCompliance("2026-12-25");
-  const amber = getCompliance("2026-10-03");
-  const red = getCompliance("2026-09-04");
+  /* Literals, not getCompliance() calls. Anything in a describe body runs at
+     collection time, BEFORE beforeEach installs the fake timers, so fixtures
+     built by calling getCompliance here would be computed against the real
+     clock and would start failing on a date in the near future.
+
+     Literals also keep these tests about mostUrgent alone: it only ever reads
+     .level, so coupling them to getCompliance's output bought nothing.
+
+     The values are the ones the boundary cases above assert, so they stay
+     honest about what getCompliance actually produces. */
+  const ok: ComplianceResult = { level: "ok", days: 31, label: "VALID • 31d" };
+  const amber: ComplianceResult = {
+    level: "amber",
+    days: 30,
+    label: "EXPIRING SOON • 30d",
+  };
+  const red: ComplianceResult = {
+    level: "red",
+    days: 1,
+    label: "NEEDS ATTENTION • 1d",
+  };
 
   it("returns the worst level in a mixed list", () => {
     expect(mostUrgent([ok, amber, red]).level).toBe("red");
