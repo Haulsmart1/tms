@@ -43,6 +43,7 @@ export const SKELETON_READY_ROUTES: readonly string[] = [
   "/dashboard",               // app/dashboard/page.tsx
   "/customers",               // app/customers/page.tsx
   "/settings/billing",        // app/settings/billing/page.tsx
+  "/settings/users",          // app/settings/users/page.tsx
   "/subcontractors",          // app/subcontractors/page.tsx
   "/vehicles",                // app/vehicles/page.tsx
 ];

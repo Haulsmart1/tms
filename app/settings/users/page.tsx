@@ -5,20 +5,17 @@ import type { FormEvent } from "react";
 import { useTenant } from "../../components/TenantProvider";
 import TenantGate from "../../components/TenantGate";
 import Button from "../../../components/Button";
-import Badge from "../../../components/Badge";
+import { usersView } from "../../../lib/loading/usersView";
+import UserCard from "./UserCard";
+import type { TenantUser } from "./types";
 
-type TenantUser = {
-  membership_id: string;
-  user_id: string | null;
-  tenant_id: string;
-  role: string;
-  membership_created_at: string | null;
-  email: string | null;
-  full_name: string | null;
-  phone: string | null;
-  company_id: string | null;
-  role_id: string | null;
-};
+const SKELETON_CARDS = 4;
+
+/* One field, because no field is read while loading: every read in the card
+   sits behind the `loading` branch. A fuller object would be a second copy of
+   "which fields the card reads", drifting silently the first time the card
+   reads one more. */
+const PLACEHOLDER_USER = { membership_id: "skeleton" } as TenantUser;
 
 export default function UsersPage() {
   const tenant = useTenant();
@@ -38,7 +35,11 @@ export default function UsersPage() {
   const [savingUser, setSavingUser] = useState(false);
 
   const loadUsers = useCallback(async () => {
+    if (tenant.status !== "ready") return;   // stay in the loading view
+
     if (!tenant.activeTenantId) {
+      // A resolved admin on "All tenants". Nothing is coming, and the view
+      // says so rather than claiming the tenant has no users.
       setUsers([]);
       setLoading(false);
       return;
@@ -72,11 +73,18 @@ export default function UsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [tenant.activeTenantId]);
+  }, [tenant.status, tenant.activeTenantId]);
 
   useEffect(() => {
     void loadUsers();
   }, [loadUsers]);
+
+  const view = usersView({
+    tenantStatus: tenant.status,
+    activeTenantId: tenant.activeTenantId,
+    fetching: loading,
+    users,
+  });
 
   async function inviteUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -268,136 +276,65 @@ export default function UsersPage() {
             </div>
           ) : null}
 
-          <div className="grid gap-3">
-            {loading ? (
+          <div className="grid gap-3" aria-busy={view === "loading"}>
+            {view === "loading" ? (
+              <span className="sr-only" role="status">Loading users</span>
+            ) : null}
+
+            {view === "loading" ? (
+              Array.from({ length: SKELETON_CARDS }, (_, index) => (
+                <UserCard
+                  key={`skeleton-${index}`}
+                  user={PLACEHOLDER_USER}
+                  loading
+                  canInvite={canInvite}
+                  isEditing={false}
+                  editFullName=""
+                  setEditFullName={() => {}}
+                  editPhone=""
+                  setEditPhone={() => {}}
+                  editRole="staff"
+                  setEditRole={() => {}}
+                  savingUser={false}
+                  onBeginEdit={() => {}}
+                  onCancelEdit={() => {}}
+                  onSave={() => {}}
+                />
+              ))
+            ) : view === "no-tenant-selected" ? (
               <div className="rounded-lg border border-line bg-surface p-4 text-sm text-ink-3 shadow-sm">
-                Loading users...
+                Users are managed one tenant at a time. Pick a tenant from the
+                selector in the header to see and invite its users.
               </div>
-            ) : users.length === 0 ? (
+            ) : view === "empty" ? (
               <div className="rounded-lg border border-line bg-surface p-4 text-sm text-ink-3 shadow-sm">
                 No users found for this tenant.
               </div>
             ) : (
-              users.map((user) => {
-                const isEditing =
-                  Boolean(user.user_id) &&
-                  editingUserId === user.user_id;
-
-                return (
-                  <article
-                    key={user.membership_id}
-                    className="rounded-lg border border-line bg-surface-2 p-3"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <strong className="break-words text-md font-semibold text-ink">
-                          {user.full_name || user.email || "TMS User"}
-                        </strong>
-
-                        {user.email ? (
-                          <div className="mt-1 break-words text-sm text-ink-3">
-                            {user.email}
-                          </div>
-                        ) : null}
-
-                        {user.phone ? (
-                          <div className="mt-1 break-words text-sm text-ink-3">
-                            {user.phone}
-                          </div>
-                        ) : null}
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge tone="info">{formatRole(user.role)}</Badge>
-
-                        {canInvite && user.user_id ? (
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            onClick={() =>
-                              isEditing
-                                ? cancelEdit()
-                                : beginEdit(user)
-                            }
-                          >
-                            {isEditing ? "Cancel" : "Edit"}
-                          </Button>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    {isEditing && user.user_id ? (
-                      <div className="mt-3 grid items-end gap-3 border-t border-line pt-3 sm:grid-cols-2">
-                        <label className="grid gap-1.5">
-                          <span className="text-sm font-medium text-ink-2">
-                            Full name
-                          </span>
-                          <input
-                            value={editFullName}
-                            onChange={(event) =>
-                              setEditFullName(event.target.value)
-                            }
-                            className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
-                            placeholder="Full name"
-                          />
-                        </label>
-
-                        <label className="grid gap-1.5">
-                          <span className="text-sm font-medium text-ink-2">
-                            Phone
-                          </span>
-                          <input
-                            value={editPhone}
-                            onChange={(event) =>
-                              setEditPhone(event.target.value)
-                            }
-                            className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
-                            placeholder="Phone number"
-                          />
-                        </label>
-
-                        <label className="grid gap-1.5">
-                          <span className="text-sm font-medium text-ink-2">
-                            Tenant role
-                          </span>
-                          <select
-                            value={editRole}
-                            onChange={(event) =>
-                              setEditRole(event.target.value)
-                            }
-                            className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
-                          >
-                            <option value="staff">Staff</option>
-                            <option value="driver">Driver</option>
-                            <option value="admin">Admin</option>
-                          </select>
-                        </label>
-
-                        <div>
-                          <Button
-                            type="button"
-                            disabled={savingUser}
-                            onClick={() => void saveUser(user.user_id!)}
-                          >
-                            {savingUser ? "Saving..." : "Save Changes"}
-                          </Button>
-                        </div>
-                      </div>
-                    ) : null}
-                  </article>
-                );
-              })
+              users.map((user) => (
+                <UserCard
+                  key={user.membership_id}
+                  user={user}
+                  canInvite={canInvite}
+                  isEditing={
+                    Boolean(user.user_id) && editingUserId === user.user_id
+                  }
+                  editFullName={editFullName}
+                  setEditFullName={setEditFullName}
+                  editPhone={editPhone}
+                  setEditPhone={setEditPhone}
+                  editRole={editRole}
+                  setEditRole={setEditRole}
+                  savingUser={savingUser}
+                  onBeginEdit={beginEdit}
+                  onCancelEdit={cancelEdit}
+                  onSave={(userId) => void saveUser(userId)}
+                />
+              ))
             )}
           </div>
         </main>
       </div>
     </TenantGate>
   );
-}
-
-function formatRole(role: string) {
-  return role
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
