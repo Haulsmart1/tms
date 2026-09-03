@@ -10,13 +10,9 @@ import Button from "../../components/Button";
 import MessageBanner from "../../components/MessageBanner";
 import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
 import SubcontractorCard from "./SubcontractorCard";
-import {
-  getCompliance,
-  Info,
-  mostUrgent,
-  StatusBadge,
-  subcontractorCardStyle,
-} from "./compliance";
+import InfoField from "../../components/InfoField";
+import { getCompliance, mostUrgent } from "../../lib/compliance/expiry";
+import { StatusBadge, subcontractorCardStyle } from "./compliance";
 import type {
   Employee,
   Subcontractor,
@@ -1107,13 +1103,13 @@ export default function SubcontractorsPage() {
                       </div>
 
                       <div className="my-2 grid grid-cols-2 gap-2">
-                        <Info label="Email" value={employee.email} />
-                        <Info label="Phone" value={employee.phone} />
-                        <Info
+                        <InfoField label="Email" value={employee.email} />
+                        <InfoField label="Phone" value={employee.phone} />
+                        <InfoField
                           label="Owner"
                           value={employee.owner ? "Yes" : "No"}
                         />
-                        <Info
+                        <InfoField
                           label="Directly Employed"
                           value={employee.directly_employed ? "Yes" : "No"}
                         />
@@ -1275,7 +1271,7 @@ export default function SubcontractorsPage() {
                         </div>
 
                         <div className="my-2 grid grid-cols-2 gap-2">
-                          <Info
+                          <InfoField
                             label="MOT"
                             value={
                               vehicle.mot_expiry
@@ -1283,7 +1279,7 @@ export default function SubcontractorsPage() {
                                 : "Not set"
                             }
                           />
-                          <Info
+                          <InfoField
                             label="Tax"
                             value={
                               vehicle.tax_expiry
@@ -1291,7 +1287,7 @@ export default function SubcontractorsPage() {
                                 : "Not set"
                             }
                           />
-                          <Info
+                          <InfoField
                             label="Insurance"
                             value={
                               vehicle.insurance_expiry
@@ -1299,7 +1295,7 @@ export default function SubcontractorsPage() {
                                 : "Not set"
                             }
                           />
-                          <Info
+                          <InfoField
                             label="VOR"
                             value={vehicle.vor ? "Yes" : "No"}
                           />

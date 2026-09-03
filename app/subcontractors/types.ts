@@ -73,11 +73,3 @@ export type SubcontractorVehicle = {
   vor: boolean;
   notes: string | null;
 };
-
-export type ComplianceLevel = "ok" | "amber" | "red";
-
-export type ComplianceResult = {
-  level: ComplianceLevel;
-  label: string;
-  days: number | null;
-};

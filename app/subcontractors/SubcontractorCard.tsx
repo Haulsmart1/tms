@@ -1,12 +1,8 @@
 import Button from "../../components/Button";
 import Skeleton from "../../components/Skeleton";
-import {
-  getCompliance,
-  Info,
-  mostUrgent,
-  StatusBadge,
-  subcontractorCardStyle,
-} from "./compliance";
+import InfoField from "../../components/InfoField";
+import { getCompliance, mostUrgent } from "../../lib/compliance/expiry";
+import { StatusBadge, subcontractorCardStyle } from "./compliance";
 import type { Subcontractor } from "./types";
 
 type Props = {
@@ -77,18 +73,18 @@ export default function SubcontractorCard({
       </div>
 
       <div className="my-2 grid grid-cols-2 gap-2">
-        <Info
+        <InfoField
           label="Contact"
           loading={loading}
           value={subcontractor.contact_name || subcontractor.email}
         />
-        <Info label="Phone" loading={loading} value={subcontractor.phone} />
-        <Info
+        <InfoField label="Phone" loading={loading} value={subcontractor.phone} />
+        <InfoField
           label="Operator Licence"
           loading={loading}
           value={subcontractor.operator_licence_number}
         />
-        <Info
+        <InfoField
           label="Terms"
           loading={loading}
           value={`${subcontractor.payment_terms_days ?? 30} days`}
