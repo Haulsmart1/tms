@@ -188,9 +188,7 @@ export default function PlanningPage() {
   const dirty = pendingUpdatesJson !== baselineDiff;
 
   async function loadData(isCancelled: () => boolean) {
-    /* The effect below already checks this before calling. Repeated here
-       because a narrowing does not cross a function boundary, so without it
-       filterByTenant is unavailable in this body. */
+    // Guard lives here, not in the effect: see TenantContextValue in lib/tenant/context.ts
     if (tenant.status !== "ready") return;
 
     setLoading(true);

@@ -24,7 +24,6 @@ export type TenantOption = { id: string; name: string };
    every call site null-checks before writing), so gating it would compile-enforce a
    check the code already performs, at a cost of ~45 edits across three large files. */
 type TenantContextBase = {
-  status: TenantStatus;
   role: TenantRole;
   userEmail: string | null;
   tenants: TenantOption[];
@@ -39,7 +38,7 @@ export type ReadyTenantContext = TenantContextBase & {
 };
 
 export type UnresolvedTenantContext = TenantContextBase & {
-  status: "loading" | "signed-out" | "no-tenant";
+  status: Exclude<TenantStatus, "ready">;
 };
 
 export type TenantContextValue = ReadyTenantContext | UnresolvedTenantContext;

@@ -106,8 +106,16 @@ describe("TenantContextValue as a discriminated union", () => {
     expect(unresolved.status).toBe("loading");
   });
 
-  it("keeps writeTenantId on both variants, since it is already null while loading", () => {
-    const unresolved: UnresolvedTenantContext = { ...base, status: "loading" };
-    expect(unresolved.writeTenantId).toBe("t1");
+  it("keeps writeTenantId on both variants, and it is already null while loading", () => {
+    /* The whole case for not gating writeTenantId is that it is fail-safe by
+       value. So build the fixture the way the provider does, from
+       computeWriteTenantId with the loading defaults, rather than asserting
+       against a hand-written value the provider could never produce. */
+    const unresolved: UnresolvedTenantContext = {
+      ...base,
+      status: "loading",
+      writeTenantId: computeWriteTenantId("staff", null, null),
+    };
+    expect(unresolved.writeTenantId).toBeNull();
   });
 });

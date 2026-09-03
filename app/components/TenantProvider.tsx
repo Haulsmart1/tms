@@ -7,8 +7,7 @@ import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { createClient } from "../../lib/supabase/browser";
 import {
   parseTenantContext, pickInitialActiveTenant, computeWriteTenantId, tenantStorageKey,
-  type TenantContextData, type TenantContextValue, type TenantOption, type TenantRole,
-  type TenantStatus,
+  type TenantContextData, type TenantContextValue,
 } from "../../lib/tenant/context";
 import {
   decideResolveMode, shouldRevalidate, applyRevalidation, preserveActiveTenant,
@@ -160,7 +159,12 @@ export function TenantProvider({ children }: { children: ReactNode }) {
 
   /* Built as two branches rather than one object with an optional field: an
      optional filterByTenant would type-check at every call site and defeat the
-     union. The `data.status === "ready"` test is what narrows the result. */
+     union. Each branch gets its variant from its own shape, so filterByTenant
+     must stay in the ready branch and never move into `base`: a spread bypasses
+     excess-property checking, so an unconditional one type-checks silently and
+     hands every unresolved context a filter, which is the bug this type exists
+     to catch. (Writing `status: data.status` here would compile, since the
+     condition narrows the property, but the literal says the intent.) */
   const base = {
     role: data.role,
     userEmail,

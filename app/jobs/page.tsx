@@ -86,9 +86,7 @@ export default function JobsPage() {
   });
 
   async function loadData() {
-    /* Inside loadData, not in the effect below: TypeScript does not carry a
-       narrowing across a function boundary, so a guard at the call site leaves
-       this body unnarrowed and filterByTenant still will not compile. */
+    // Guard lives here, not in the effect: see TenantContextValue in lib/tenant/context.ts
     if (tenant.status !== "ready") return;
 
     setMessage("");
