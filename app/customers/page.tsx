@@ -145,6 +145,10 @@ export default function CustomersPage() {
   // Distinct from `loading`: this stays true across refetches, so a token
   // refresh cannot flash a skeleton over the cards already on screen.
   const [hasLoaded, setHasLoaded] = useState(false);
+  // The tenant the cards on screen were loaded FOR. Set only on a successful
+  // load, so a switch to a different tenant is not masked by hasLoaded, which
+  // (deliberately) never resets. See lib/loading/skeletonVisibility.ts.
+  const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -187,6 +191,7 @@ export default function CustomersPage() {
       }
 
       setCustomers(body.customers ?? []);
+      setDataTenantId(tenant.activeTenantId);
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "Unable to load customers"
@@ -195,7 +200,7 @@ export default function CustomersPage() {
       setLoading(false);
       setHasLoaded(true);
     }
-  }, [headers, search]);
+  }, [headers, search, tenant.activeTenantId]);
 
   useEffect(() => {
     /* This page mounts during tenant resolution now that TenantGate passes
@@ -218,6 +223,8 @@ export default function CustomersPage() {
     tenantStatus: tenant.status,
     fetching: loading,
     hasData: hasLoaded,
+    activeTenantId: tenant.activeTenantId,
+    dataTenantId,
   });
 
   function updateForm<K extends keyof CustomerForm>(

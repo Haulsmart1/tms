@@ -12,6 +12,7 @@ describe("tenantDataView", () => {
         activeTenantId: null,
         fetching: false,
         hasData: false,
+        dataTenantId: undefined,
         failed: false,
       })
     ).toBe("loading");
@@ -24,6 +25,7 @@ describe("tenantDataView", () => {
         activeTenantId: "t1",
         fetching: false,
         hasData: false,
+        dataTenantId: undefined,
         failed: false,
       })
     ).toBe("loading");
@@ -38,6 +40,7 @@ describe("tenantDataView", () => {
         activeTenantId: null,
         fetching: false,
         hasData: false,
+        dataTenantId: undefined,
         failed: false,
       })
     ).toBe("no-tenant-selected");
@@ -54,6 +57,7 @@ describe("tenantDataView", () => {
         activeTenantId: null,
         fetching: true,
         hasData: false,
+        dataTenantId: undefined,
         failed: false,
       })
     ).toBe("no-tenant-selected");
@@ -68,6 +72,7 @@ describe("tenantDataView", () => {
         activeTenantId: "t1",
         fetching: false,
         hasData: false,
+        dataTenantId: undefined,
         failed: true,
       })
     ).toBe("error");
@@ -82,6 +87,7 @@ describe("tenantDataView", () => {
         activeTenantId: "t1",
         fetching: true,
         hasData: false,
+        dataTenantId: undefined,
         failed: true,
       })
     ).toBe("error");
@@ -96,6 +102,7 @@ describe("tenantDataView", () => {
         activeTenantId: null,
         fetching: false,
         hasData: false,
+        dataTenantId: undefined,
         failed: true,
       })
     ).toBe("no-tenant-selected");
@@ -108,6 +115,7 @@ describe("tenantDataView", () => {
         activeTenantId: "t1",
         fetching: true,
         hasData: false,
+        dataTenantId: undefined,
         failed: false,
       })
     ).toBe("loading");
@@ -120,18 +128,20 @@ describe("tenantDataView", () => {
         activeTenantId: "t1",
         fetching: false,
         hasData: false,
+        dataTenantId: undefined,
         failed: false,
       })
     ).toBe("empty");
   });
 
-  it("returns list whenever there is data", () => {
+  it("returns list whenever there is data for the currently selected tenant", () => {
     expect(
       tenantDataView({
         tenantStatus: "ready",
         activeTenantId: "t1",
         fetching: false,
         hasData: true,
+        dataTenantId: "t1",
         failed: false,
       })
     ).toBe("list");
@@ -139,17 +149,73 @@ describe("tenantDataView", () => {
 
   /* Same short circuit as shouldShowSkeleton: TenantProvider.resolve() resets
      status to "loading" on every auth event, including a routine token
-     refresh, and a populated list must not flash back to a skeleton. */
-  it("keeps the list on screen when the tenant status re-enters loading", () => {
+     refresh, and a populated list must not flash back to a skeleton. THE
+     TOKEN-REFRESH PROTECTION: same tenant (here, "All tenants" on both
+     sides), status dips to "loading", the list must still not be replaced. */
+  it("keeps the list on screen when the tenant status re-enters loading (token refresh)", () => {
     expect(
       tenantDataView({
         tenantStatus: "loading",
         activeTenantId: null,
         fetching: true,
         hasData: true,
+        dataTenantId: null,
         failed: false,
       })
     ).toBe("list");
+  });
+
+  /* THE REGRESSION THIS FIXES. Switching the active tenant leaves the
+     previous tenant's rows in hasData, but they no longer belong to the
+     tenant now selected, so this must NOT return "list" — it falls through
+     to loading/fetching like any other stale region. */
+  it("does not return list when the on-screen data belongs to a different tenant than the one now selected", () => {
+    expect(
+      tenantDataView({
+        tenantStatus: "ready",
+        activeTenantId: "t2",
+        fetching: true,
+        hasData: true,
+        dataTenantId: "t1",
+        failed: false,
+      })
+    ).toBe("loading");
+  });
+
+  /* An admin on "All tenants" who reloads must not see a "pick a tenant" or
+     loading state over content that is already correctly scoped to "All
+     tenants": null on both sides is a match. */
+  it("treats a null dataTenantId as a match against a null activeTenantId (All tenants)", () => {
+    expect(
+      tenantDataView({
+        tenantStatus: "ready",
+        activeTenantId: null,
+        fetching: false,
+        hasData: true,
+        dataTenantId: null,
+        failed: false,
+      })
+    ).toBe("list");
+  });
+
+  /* THE CASE THE THREE-VALUED TYPE EXISTS FOR. dataTenantId: undefined means
+     "never loaded" and must not be treated as equal to activeTenantId: null
+     ("All tenants") — otherwise a never-loaded page on "All tenants" would
+     skip straight past its own loading/prompt state. hasData is true here so
+     the comparison is what decides the outcome, not the hasData check
+     itself; if the type ever collapsed to two values this would wrongly
+     return "list". */
+  it("does not treat an undefined (never loaded) dataTenantId as a match against a null activeTenantId", () => {
+    expect(
+      tenantDataView({
+        tenantStatus: "ready",
+        activeTenantId: null,
+        fetching: false,
+        hasData: true,
+        dataTenantId: undefined,
+        failed: false,
+      })
+    ).toBe("no-tenant-selected");
   });
 
   /* Defensive: TenantGate renders its own panel for "no-tenant", so this input
@@ -162,6 +228,7 @@ describe("tenantDataView", () => {
         activeTenantId: null,
         fetching: false,
         hasData: false,
+        dataTenantId: undefined,
         failed: false,
       })
     ).toBe("loading");

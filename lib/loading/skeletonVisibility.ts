@@ -7,6 +7,11 @@ type Args = {
   fetching: boolean;
   /** Whether this region has already rendered real content at least once. */
   hasData: boolean;
+  /** From useTenant().activeTenantId. Null legitimately means "All tenants". */
+  activeTenantId: string | null;
+  /** The tenant the on-screen content was loaded FOR. `undefined` before any
+   *  load has completed, which is deliberately distinct from `null`. */
+  dataTenantId: string | null | undefined;
 };
 
 /* The single rule for whether a loading region shows its skeleton.
@@ -28,9 +33,26 @@ type Args = {
    real, whose layout classes then drift apart.
 
    FORM CONTROLS ARE EXCLUDED. A <select>'s options are not visible until it
-   is opened, so a list that feeds only a <select> needs no flag. */
-export function shouldShowSkeleton({ tenantStatus, fetching, hasData }: Args): boolean {
-  // Never flash a skeleton over content that is already on screen.
-  if (hasData) return false;
+   is opened, so a list that feeds only a <select> needs no flag.
+
+   CONTENT IS "ALREADY ON SCREEN" ONLY FOR THE TENANT IT WAS LOADED FOR. The
+   hasData short circuit above predates the tenant selector's activeTenantId
+   comparison: without it, switching tenants left hasData true (the previous
+   tenant's rows were still rendered) and the skeleton never showed, so the
+   page kept displaying the previous tenant's data under the new tenant's
+   selection until the new fetch landed. dataTenantId is three-valued
+   (string | null | undefined) because `undefined` ("never loaded") must not
+   equal `null` ("All tenants"): collapsing them would show stale content for
+   a page that has never queried anything. */
+export function shouldShowSkeleton({
+  tenantStatus,
+  fetching,
+  hasData,
+  activeTenantId,
+  dataTenantId,
+}: Args): boolean {
+  // Never flash a skeleton over content that is already on screen for the
+  // tenant currently selected.
+  if (hasData && dataTenantId === activeTenantId) return false;
   return tenantStatus !== "ready" || fetching;
 }

@@ -9,6 +9,10 @@ type Args = {
   fetching: boolean;
   /** Whether this region has already rendered real content at least once. */
   hasData: boolean;
+  /** The tenant the on-screen content was loaded FOR. `undefined` before any
+   *  load has completed, which is deliberately distinct from `null`
+   *  ("All tenants"). */
+  dataTenantId: string | null | undefined;
   /** Whether the last completed read for this region threw. */
   failed: boolean;
 };
@@ -34,6 +38,13 @@ type Args = {
    composed, because composing hides the ordering, and the ordering is the
    substance here.
 
+   hasData ALSO REQUIRES dataTenantId === activeTenantId. Content counts as
+   "already on screen" only if it belongs to the tenant currently selected:
+   otherwise switching tenants left the previous tenant's rows on screen
+   (hasData true) reported as "list" under the new tenant's selection.
+   dataTenantId is three-valued so a never-loaded region (`undefined`) is not
+   mistaken for a match against "All tenants" (`null`).
+
    It lives in lib/ rather than beside a page because vitest covers lib/ only.
    See tenantDataView.test.ts. */
 export type TenantDataView =
@@ -48,9 +59,10 @@ export function tenantDataView({
   activeTenantId,
   fetching,
   hasData,
+  dataTenantId,
   failed,
 }: Args): TenantDataView {
-  if (hasData) return "list";                    // never skeleton over content
+  if (hasData && dataTenantId === activeTenantId) return "list"; // never skeleton over content for the selected tenant
   if (tenantStatus !== "ready") return "loading";
   if (!activeTenantId) return "no-tenant-selected";
   if (failed) return "error";                    // do NOT claim empty after a failed read

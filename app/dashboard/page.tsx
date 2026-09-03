@@ -46,6 +46,10 @@ export default function DashboardPage() {
   const [todayJobs, setTodayJobs] = useState<TodayJobRow[]>([]);
   const [attention, setAttention] = useState<AttentionItem[]>([]);
   const [revenue, setRevenue] = useState<RevenueDay[]>([]);
+  // The tenant the KPIs/rows on screen were loaded FOR. Set only when the
+  // load below reaches "ready", never on "error". See
+  // lib/loading/skeletonVisibility.ts.
+  const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
 
   useEffect(() => {
     /* This guard fixes an existing bug rather than preventing a new one.
@@ -190,6 +194,7 @@ export default function DashboardPage() {
         ),
       );
 
+      setDataTenantId(tenant.activeTenantId);
       setState("ready");
     }
 
@@ -216,6 +221,8 @@ export default function DashboardPage() {
     tenantStatus: tenant.status,
     fetching: state === "loading",
     hasData: state === "ready",
+    activeTenantId: tenant.activeTenantId,
+    dataTenantId,
   });
 
   return (

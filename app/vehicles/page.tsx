@@ -78,11 +78,14 @@ export default function VehiclesPage() {
   );
 
   const [form, setForm] = useState(EMPTY_FORM);
+  const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
 
   const showSkeleton = shouldShowSkeleton({
     tenantStatus: tenant.status,
     fetching: loading,
     hasData: vehicles.length > 0,
+    activeTenantId: tenant.activeTenantId,
+    dataTenantId,
   });
 
   /* Its own hasData, not the grid's. ONE FLAG PER REGION, not per page:
@@ -103,6 +106,8 @@ export default function VehiclesPage() {
     tenantStatus: tenant.status,
     fetching: loading,
     hasData: fleetPolicies.length > 0,
+    activeTenantId: tenant.activeTenantId,
+    dataTenantId,
   });
 
   const showEmpty = !showSkeleton && vehicles.length === 0;
@@ -132,6 +137,7 @@ export default function VehiclesPage() {
       setVehicles([]);
     } else {
       setVehicles((vehicleResult.data as Vehicle[]) || []);
+      setDataTenantId(tenant.activeTenantId);
     }
 
     if (policyResult.error) {
@@ -147,6 +153,7 @@ export default function VehiclesPage() {
           (policy) => policy.active
         )
       );
+      setDataTenantId(tenant.activeTenantId);
     }
 
     setLoading(false);

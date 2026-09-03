@@ -124,11 +124,14 @@ export default function SubcontractorsPage() {
   const [saving, setSaving] = useState(false);
   const [employeeSaving, setEmployeeSaving] = useState(false);
   const [vehicleSaving, setVehicleSaving] = useState(false);
+  const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
 
   const showSkeleton = shouldShowSkeleton({
     tenantStatus: tenant.status,
     fetching: loading,
     hasData: subcontractors.length > 0,
+    activeTenantId: tenant.activeTenantId,
+    dataTenantId,
   });
 
   const showEmpty = !showSkeleton && subcontractors.length === 0;
@@ -161,6 +164,7 @@ export default function SubcontractorsPage() {
     } else {
       const rows = (subsResult.data as Subcontractor[]) || [];
       setSubcontractors(rows);
+      setDataTenantId(tenant.activeTenantId);
       if (!selectedSubcontractorId && rows.length > 0) {
         setSelectedSubcontractorId(rows[0].id);
       }

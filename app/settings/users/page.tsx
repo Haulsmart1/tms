@@ -30,6 +30,7 @@ export default function UsersPage() {
   /* Separate from `message`, which also carries invite and save results.
      Only a failed READ may suppress the empty state. */
   const [loadFailed, setLoadFailed] = useState(false);
+  const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
 
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editFullName, setEditFullName] = useState("");
@@ -70,6 +71,7 @@ export default function UsersPage() {
       }
 
       setUsers(body.users ?? []);
+      setDataTenantId(tenant.activeTenantId);
     } catch (error) {
       setUsers([]);
       setLoadFailed(true);
@@ -90,6 +92,7 @@ export default function UsersPage() {
     activeTenantId: tenant.activeTenantId,
     fetching: loading,
     hasData: users.length > 0,
+    dataTenantId,
     failed: loadFailed,
   });
 

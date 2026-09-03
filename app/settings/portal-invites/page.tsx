@@ -60,6 +60,7 @@ export default function PortalInvitesPage() {
   /* Separate from `message`, which also carries invite results. Only a failed
      READ may keep the controls disabled. */
   const [loadFailed, setLoadFailed] = useState(false);
+  const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
 
   const loadData = useCallback(async () => {
     if (tenant.status !== "ready") return;   // stay in the loading view
@@ -92,6 +93,7 @@ export default function PortalInvitesPage() {
       }
 
       setData(body);
+      setDataTenantId(tenant.activeTenantId);
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : "Unable to load invite data."
@@ -122,6 +124,7 @@ export default function PortalInvitesPage() {
     activeTenantId: tenant.activeTenantId,
     fetching: loading,
     hasData: data.drivers.length > 0 || data.subcontractors.length > 0,
+    dataTenantId,
     failed: loadFailed,
   });
 

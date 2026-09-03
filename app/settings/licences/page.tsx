@@ -54,6 +54,7 @@ export default function VehicleLicencesPage() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState("");
+    const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
 
     const [vehicleId, setVehicleId] = useState("");
     const [licenceType, setLicenceType] = useState("");
@@ -124,6 +125,9 @@ export default function VehicleLicencesPage() {
 
         setVehicles(vehicleData ?? []);
         setLicences(normalizedLicences);
+        if (!licenceError) {
+            setDataTenantId(tenant.activeTenantId);
+        }
         setLoading(false);
     }
 
@@ -255,6 +259,8 @@ export default function VehicleLicencesPage() {
         tenantStatus: tenant.status,
         fetching: loading,
         hasData: licences.length > 0,
+        activeTenantId: tenant.activeTenantId,
+        dataTenantId,
     });
 
     const showEmpty = !showSkeleton && licences.length === 0;
