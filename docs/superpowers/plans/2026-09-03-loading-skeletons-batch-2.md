@@ -1669,124 +1669,77 @@ Claude-Session: https://claude.ai/code/session_017BL5k8UCJHsvLKiXWQDfRJ"
 - Modify: `app/settings/portal-invites/page.tsx`
 - Modify: `lib/nav/skeletonReadyRoutes.ts`, `lib/nav/skeletonReadyRoutes.test.ts`
 
-**No skeletons on this page, and no new component.** That is deliberate and it is not an exception to the recipe, it is the recipe. The page is four `<select>` dropdowns, and a select is a fixed-size control whose options are not visible until it is opened, so it carries no data on screen. Batch 1's "only data-bearing leaves become skeletons" rule covers this exactly, and it is the same reasoning that leaves `CustomerCard`'s buttons rendering real-but-disabled. Do not add `Skeleton` to this file.
+**AS BUILT 2026-09-03, superseding the page-local `invitesView` this task originally specified.**
+The ordering rule now lives in `lib/loading/tenantDataView.ts` (promoted during Task 5), so this
+page calls it rather than becoming a third implementation of the same five `if`s. Two further
+changes to the original text: the page also gained a `loadFailed` flag, matching
+`/settings/users`, so a failed read does not present itself as a resolved-and-empty form; and the
+`view !== "ready"` test the original sketch used became a named `controlsEnabled` derivation,
+because `tenantDataView`'s `"list"`/`"empty"` split has no meaning on a page with no list.
 
-Today the page has no loading flag at all: `loadData` (line 59) populates the selects from one fetch, and until it returns they render with no options, silently stating that no drivers, subcontractors or employees exist.
+**No skeletons on this page, and no new component.** That is deliberate and it is not an exception to the recipe, it is the recipe. The page is four `<select>` dropdowns, and a select is a fixed-size control whose options are not visible until it is opened, so it carries no data on screen. Batch 1's "only data-bearing leaves become skeletons" rule covers this exactly, and it is the same reasoning that leaves `CustomerCard`'s buttons rendering real-but-disabled. Do not add `Skeleton` to this file. The reasoning is written into the page as a comment above the `view` derivation, so a future reader auditing the allowlist does not read the absent `Skeleton` as an oversight.
 
-- [ ] **Step 1: Add the missing loading flag and the view**
+Before this task the page had no loading flag at all: `loadData` populated the selects from one fetch, and until it returned they rendered with no options, silently stating that no drivers, subcontractors or employees exist. Separately, an admin on "All tenants" (the default for admins) hit an early return and got empty dropdowns forever with nothing explaining why.
 
-Add to the component, next to the existing state:
+- [x] **Step 1: Add the missing loading and failure flags**
 
 ```ts
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
 ```
 
-Add above the component, mirroring Task 5 (same ordering rule, same reason: `activeTenantId` is null both while resolving and on "All tenants"):
+- [x] **Step 2: Consume the shared view, and collapse list/empty**
 
 ```ts
-type InvitesView = "loading" | "no-tenant-selected" | "ready";
-
-function invitesView({
-  tenantStatus,
-  activeTenantId,
-  fetching,
-}: {
-  tenantStatus: TenantStatus;
-  activeTenantId: string | null;
-  fetching: boolean;
-}): InvitesView {
-  if (tenantStatus !== "ready") return "loading";
-  if (!activeTenantId) return "no-tenant-selected";
-  if (fetching) return "loading";
-  return "ready";
-}
-```
-
-There is no `hasData` short circuit here, unlike the card pages: nothing on this page is replaced by a skeleton, so a re-resolve disables the controls briefly rather than blanking content. Disabling a control the user may be mid-way through is still worth avoiding, so the form keeps its own `busy` flag as it does today.
-
-In the component:
-
-```ts
-  const view = invitesView({
+  const view = tenantDataView({
     tenantStatus: tenant.status,
     activeTenantId: tenant.activeTenantId,
     fetching: loading,
+    hasData: data.drivers.length > 0 || data.subcontractors.length > 0,
+    failed: loadFailed,
   });
+
+  const controlsEnabled = view === "list" || view === "empty";
 ```
 
-- [ ] **Step 2: Guard the loader and set the flag**
+`hasData` is the drivers/subcontractors pair because those two are what the fetch fills the
+selects from; `employees` is filtered client-side off a chosen subcontractor, so it is empty in
+plenty of legitimately-loaded states and would make a poor witness that the read landed.
 
-Replace `loadData`'s opening at line 60 (`if (!tenant.activeTenantId) return;`) with:
+Unlike the card pages, `hasData` here does not protect content from being replaced by a skeleton
+(there is none); it protects the controls from being disabled again on a re-resolve while the
+user is looking at populated dropdowns. The form keeps its own `busy` flag for submissions.
 
-```ts
-    if (tenant.status !== "ready") return;
+- [x] **Step 3: Guard the loader and set the flags**
 
-    if (!tenant.activeTenantId) {
-      setLoading(false);
-      return;
-    }
+`loadData`'s opening `if (!tenant.activeTenantId) return;` became a `tenant.status` guard first,
+then a null-tenant branch that clears `loading`, matching `/settings/users`. The fetch is wrapped
+in `try`/`catch`/`finally`: the `catch` is new (a network rejection was previously unhandled), and
+the `finally` matters because the `!response.ok` branch returns early and would otherwise leave
+the controls disabled forever. Callback deps became `[tenant.status, tenant.activeTenantId]`.
 
-    setLoading(true);
-```
+- [x] **Step 4: Disable the controls, and add the two explanatory states**
 
-and ensure every exit path from `loadData` clears it, including the error branch. Wrap the fetch in `try`/`finally`:
+`disabled={!controlsEnabled}` on all four `<select>` elements (combined with the existing
+`!subcontractorId` on the employee select) and on both submit `<Button>`s (combined with their
+existing `busy || !<id>`).
 
-```ts
-    try {
-      const response = await fetch(
-        `/api/settings/portal-invites?tenantId=${encodeURIComponent(tenant.activeTenantId)}`,
-        { cache: "no-store" },
-      );
-      const body = await response.json();
-      if (!response.ok) {
-        setMessage(body.error || "Unable to load invite data.");
-        return;
-      }
-      setData(body);
-    } finally {
-      setLoading(false);
-    }
-```
+Above the form: the `no-tenant-selected` notice naming the header tenant selector, and an
+`sr-only role="status"` "Loading invite options" line. `view === "error"` renders nothing extra by
+design, since the failure is already in the `MessageBanner`; a comment in the JSX says so, so the
+branch does not read as unfinished.
 
-Without the `finally`, the error branch's early `return` would leave the controls disabled forever. Change the callback deps at line 77 from `[tenant.activeTenantId]` to `[tenant.status, tenant.activeTenantId]`.
+- [x] **Step 5: Allowlist, verify, commit**
 
-- [ ] **Step 3: Disable the controls, and add the no-tenant state**
-
-Add `disabled={view !== "ready"}` to each of the four `<select>` elements and to the submit `<Button>`s (keep any existing `disabled={busy}` by combining: `disabled={busy || view !== "ready"}`).
-
-Above the form, render the state:
-
-```tsx
-      {view === "no-tenant-selected" ? (
-        <div className="mb-4 rounded-lg border border-line bg-surface p-4 text-sm text-ink-3 shadow-sm">
-          Portal invites are sent one tenant at a time. Pick a tenant from the
-          selector in the header to invite its drivers and subcontractors.
-        </div>
-      ) : null}
-
-      {view === "loading" ? (
-        <span className="sr-only" role="status">Loading invite options</span>
-      ) : null}
-```
-
-- [ ] **Step 4: Allowlist, verify, commit**
-
-Add `"/settings/portal-invites", // app/settings/portal-invites/page.tsx` to `SKELETON_READY_ROUTES` and to the test's expected array.
+Added `"/settings/portal-invites", // app/settings/portal-invites/page.tsx` to
+`SKELETON_READY_ROUTES` and to the expected array of the existing "lists exactly the routes
+converted so far" case. No new test case, so the count is unchanged.
 
 Run: `npm run typecheck && npm test`
-Expected: both clean.
+Expected: both clean, test count unchanged by this task.
 
 ```bash
-git add app/settings/portal-invites lib/nav/skeletonReadyRoutes.ts lib/nav/skeletonReadyRoutes.test.ts
-git commit -m "feat(settings/portal-invites): add the missing loading state
-
-The page had no loading flag: its four selects rendered empty while the
-fetch was in flight, silently claiming no drivers or subcontractors
-exist. Selects now render real and disabled, and admins on 'All tenants'
-get a real explanation instead of empty dropdowns.
-
-Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_017BL5k8UCJHsvLKiXWQDfRJ"
+git add app/settings/portal-invites lib/nav/skeletonReadyRoutes.ts lib/nav/skeletonReadyRoutes.test.ts docs/superpowers/plans/2026-09-03-loading-skeletons-batch-2.md
 ```
 
 ---

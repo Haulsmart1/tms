@@ -6,6 +6,7 @@ import TenantGate from "../../components/TenantGate";
 import MessageBanner from "../../../components/MessageBanner";
 import Card from "../../../components/Card";
 import Button from "../../../components/Button";
+import { tenantDataView } from "../../../lib/loading/tenantDataView";
 
 type Driver = {
   id: string;
@@ -55,30 +56,80 @@ export default function PortalInvitesPage() {
   const [role, setRole] = useState("subcontractor_admin");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  /* Separate from `message`, which also carries invite results. Only a failed
+     READ may keep the controls disabled. */
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const loadData = useCallback(async () => {
-    if (!tenant.activeTenantId) return;
+    if (tenant.status !== "ready") return;   // stay in the loading view
 
-    const response = await fetch(
-      `/api/settings/portal-invites?tenantId=${encodeURIComponent(
-        tenant.activeTenantId
-      )}`,
-      { cache: "no-store" }
-    );
-
-    const body = await response.json();
-
-    if (!response.ok) {
-      setMessage(body.error || "Unable to load invite data.");
+    if (!tenant.activeTenantId) {
+      // A resolved admin on "All tenants". Nothing is coming, and the view
+      // says so rather than leaving silently empty dropdowns on screen.
+      setLoadFailed(false);
+      setLoading(false);
       return;
     }
 
-    setData(body);
-  }, [tenant.activeTenantId]);
+    setLoading(true);
+    setLoadFailed(false);
+
+    try {
+      const response = await fetch(
+        `/api/settings/portal-invites?tenantId=${encodeURIComponent(
+          tenant.activeTenantId
+        )}`,
+        { cache: "no-store" }
+      );
+
+      const body = await response.json();
+
+      if (!response.ok) {
+        setMessage(body.error || "Unable to load invite data.");
+        setLoadFailed(true);
+        return;
+      }
+
+      setData(body);
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Unable to load invite data."
+      );
+      setLoadFailed(true);
+    } finally {
+      // Every exit path, or the error branch's early `return` above would
+      // leave the controls disabled forever.
+      setLoading(false);
+    }
+  }, [tenant.status, tenant.activeTenantId]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  /* NO SKELETONS ON THIS PAGE, DELIBERATELY. This route is on
+     SKELETON_READY_ROUTES, and its checklist step 3 ("every region that reads
+     data renders a skeleton") is satisfied by exclusion, not by omission: the
+     only regions here that read data are <select> options, and a select is a
+     fixed-size control whose options are invisible until it is opened, so it
+     carries no data on screen to grey out. Same rule that leaves CustomerCard's
+     buttons rendering real-but-disabled. What this page does instead is disable
+     the controls until the fetch resolves, so they cannot be submitted while
+     they are still, wrongly, empty. */
+  const view = tenantDataView({
+    tenantStatus: tenant.status,
+    activeTenantId: tenant.activeTenantId,
+    fetching: loading,
+    hasData: data.drivers.length > 0 || data.subcontractors.length > 0,
+    failed: loadFailed,
+  });
+
+  /* This page has no list, so tenantDataView's list/empty distinction
+     collapses: both mean resolved, not failed, not mid-fetch, so the form is
+     usable. A tenant with genuinely no drivers still gets working controls,
+     just with nothing in them, which is the honest rendering of that state. */
+  const controlsEnabled = view === "list" || view === "empty";
 
   const eligibleEmployees = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -134,6 +185,24 @@ export default function PortalInvitesPage() {
 
           <MessageBanner tone="neutral">{message}</MessageBanner>
 
+          {view === "no-tenant-selected" ? (
+            <div className="mb-4 rounded-lg border border-line bg-surface p-4 text-sm text-ink-3 shadow-sm">
+              Portal invites are sent one tenant at a time. Pick a tenant from
+              the selector in the header to invite its drivers and
+              subcontractors.
+            </div>
+          ) : null}
+
+          {view === "loading" ? (
+            <span className="sr-only" role="status">Loading invite options</span>
+          ) : null}
+
+          {/* view === "error" renders nothing extra, deliberately: the failure
+              is already on screen in the MessageBanner above, and a second copy
+              would be noise. The branch's job is done by controlsEnabled, which
+              is false for "error" and so keeps the still-empty selects
+              unusable. */}
+
           {!canManage ? (
             <Card>Only tenant admins can manage invites.</Card>
           ) : (
@@ -145,6 +214,7 @@ export default function PortalInvitesPage() {
                   className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink mb-3"
                   value={driverId}
                   onChange={(e) => setDriverId(e.target.value)}
+                  disabled={!controlsEnabled}
                 >
                   <option value="">Choose driver</option>
                   {data.drivers
@@ -163,7 +233,7 @@ export default function PortalInvitesPage() {
                 </select>
 
                 <Button
-                  disabled={busy || !driverId}
+                  disabled={busy || !controlsEnabled || !driverId}
                   onClick={() =>
                     void send({
                       type: "driver",
@@ -187,6 +257,7 @@ export default function PortalInvitesPage() {
                       setSubcontractorId(e.target.value);
                       setEmployeeId("");
                     }}
+                    disabled={!controlsEnabled}
                   >
                     <option value="">Choose subcontractor</option>
                     {data.subcontractors.map((sub) => (
@@ -200,7 +271,7 @@ export default function PortalInvitesPage() {
                     className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                     value={employeeId}
                     onChange={(e) => setEmployeeId(e.target.value)}
-                    disabled={!subcontractorId}
+                    disabled={!controlsEnabled || !subcontractorId}
                   >
                     <option value="">Choose directly-employed person</option>
                     {eligibleEmployees.map((employee) => (
@@ -220,6 +291,7 @@ export default function PortalInvitesPage() {
                     className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                     value={role}
                     onChange={(e) => setRole(e.target.value)}
+                    disabled={!controlsEnabled}
                   >
                     <option value="subcontractor_admin">Subcontractor Admin</option>
                     <option value="dispatcher">Dispatcher</option>
@@ -229,7 +301,7 @@ export default function PortalInvitesPage() {
                 </div>
 
                 <Button
-                  disabled={busy || !employeeId}
+                  disabled={busy || !controlsEnabled || !employeeId}
                   onClick={() =>
                     void send({
                       type: "subcontractor",
