@@ -1488,8 +1488,11 @@ Claude-Session: https://claude.ai/code/session_017BL5k8UCJHsvLKiXWQDfRJ"
 
 ## Task 6: `/settings/licences`
 
-**Files:**
+**Files (AS BUILT 2026-09-03):**
 - Create: `app/settings/licences/LicenceCard.tsx`
+- Create: `app/settings/licences/types.ts` — NOT in the original list, which said to export the
+  types from `page.tsx`. Same reason as Task 5: the page imports the card, so the card cannot
+  import a type from the page without a circular edge. Matches all three sibling `types.ts` files.
 - Modify: `app/settings/licences/page.tsx`
 - Modify: `lib/nav/skeletonReadyRoutes.ts`, `lib/nav/skeletonReadyRoutes.test.ts`
 
@@ -1644,7 +1647,7 @@ Replace the branch at `page.tsx:328-386`:
             </div>
 ```
 
-Note the page has no empty state today (an empty `licences` array simply renders an empty grid). Leave that as it is: adding one is a separate change and this batch is already carrying two.
+~~Note the page has no empty state today (an empty `licences` array simply renders an empty grid). Leave that as it is: adding one is a separate change and this batch is already carrying two.~~ **SUPERSEDED (AS BUILT 2026-09-03):** an empty state WAS added, `No licences found.`, matching `/subcontractors` and `/vehicles` verbatim. Leaving it out was the more dangerous option once the route is allowlisted: checklist step 3 in `lib/nav/skeletonReadyRoutes.ts` exists because a listed route renders its body during tenant resolution, and an empty grid with no copy is a silent version of the same false claim. It is gated `!showSkeleton && licences.length === 0`, so it can only appear once the query has resolved.
 
 - [ ] **Step 4: Allowlist, verify, commit**
 

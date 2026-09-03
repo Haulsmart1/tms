@@ -12,9 +12,13 @@ import Skeleton from "./Skeleton";
    compliance module, which is about compliance and nothing else; it lives here
    now that /vehicles wants it too.
 
-   Note a third near-copy is private to app/customers/CustomerCard.tsx.
-   Collapsing it is a change to a shipped, signed-off page for no functional
-   gain, so it is deliberately left where it is. */
+   FIVE near-copies remain private to their pages, and this list is the only
+   record of them: app/customers/CustomerCard.tsx, app/drivers/page.tsx,
+   app/invoices/page.tsx, app/maintenance/page.tsx and app/assets/page.tsx.
+   A sixth, `Cell` in app/settings/licences/LicenceCard.tsx, differs on
+   purpose: see the comment above it. Collapsing any of them is a change to a
+   shipped, signed-off page for no functional gain, so they are deliberately
+   left where they are. Add to this list if you write another. */
 
 export default function InfoField({
   label,

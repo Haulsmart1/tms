@@ -14,9 +14,9 @@ type Props = {
    skeleton component mirroring these class names drifts the first time anyone
    edits the real card, and no test in this repo would catch it.
 
-   Only data-bearing leaves become skeletons. The heading's five cells are the
-   only values here; the labels, the structure and both buttons render for
-   real, the buttons merely disabled.
+   Only data-bearing leaves become skeletons. The heading and the five cells
+   are the only values here; the labels, the structure and both buttons render
+   for real, the buttons merely disabled.
 
    Four-space indent, matching page.tsx rather than the rest of the app. */
 export default function LicenceCard({ licence, loading = false, onToggle, onDelete }: Props) {
@@ -30,10 +30,25 @@ export default function LicenceCard({ licence, loading = false, onToggle, onDele
                 <Cell
                     label="Vehicle"
                     loading={loading}
+                    /* Behind the loading check, not merely optional-chained. A
+                       `value` prop is evaluated eagerly, BEFORE Cell looks at
+                       `loading`, so every expression here runs three times per
+                       frame against PLACEHOLDER_LICENCE, which is
+                       `{ id: "skeleton" }` and has no `vehicles`. Optional
+                       chaining alone happens to survive that; the first
+                       .toUpperCase(), .split() or non-optional access added
+                       below would crash the loading state, and nothing under
+                       lib/ can test for it. Same reason as VehicleCard's
+                       `extra` prop. Keep any new derived cell on this side of
+                       the check. */
                     value={
-                        licence.vehicles?.registration ||
-                        [licence.vehicles?.make, licence.vehicles?.model].filter(Boolean).join(" ") ||
-                        licence.vehicle_id
+                        loading
+                            ? null
+                            : licence.vehicles?.registration ||
+                              [licence.vehicles?.make, licence.vehicles?.model]
+                                  .filter(Boolean)
+                                  .join(" ") ||
+                              licence.vehicle_id
                     }
                 />
                 <Cell label="Issue Date" loading={loading} mono value={licence.issue_date || "-"} />
@@ -62,12 +77,16 @@ export default function LicenceCard({ licence, loading = false, onToggle, onDele
 }
 
 /* Local rather than components/InfoField, which is the shared version of this
-   cell. Three things differ and all three are visible: this page's label is
-   text-ink-3 where InfoField's is text-ink-2, two of the five values are
-   font-mono dates, and InfoField substitutes an em dash for a falsy value
-   where this page has always shown "-". Widening InfoField to cover them
-   would put two variant props on it for one caller and restyle two shipped,
-   signed-off pages to match this one. */
+   cell. Two things differ and both are visible: this page's label is
+   text-ink-3 where InfoField's is text-ink-2, and two of the five values are
+   font-mono dates. (A third difference, InfoField's em-dash fallback for a
+   falsy value against this page's "-", is NOT one: every caller here
+   substitutes before the value reaches the cell, so that fallback would never
+   fire.) So it is two optional props, mono and a label tone, and growing
+   InfoField by them is reasonable. It is not done HERE because changing that
+   shared label token restyles two shipped, signed-off pages, which does not
+   belong in a loading-skeletons batch. Recorded as a follow-up; if you are
+   here to do it, delete this and the five copies InfoField's header lists. */
 function Cell({
     label,
     value,
@@ -85,7 +104,7 @@ function Cell({
             <strong className={mono ? "block font-mono text-ink" : "block text-ink"}>
                 {/* inline-block keeps this block <strong>'s line box at text
                     height, so the cell does not shrink while loading. */}
-                {loading ? <Skeleton display="inline-block" w="75%" h="0.875rem" /> : value}
+                {loading ? <Skeleton display="inline-block" w="80%" h="0.875rem" /> : value}
             </strong>
         </div>
     );

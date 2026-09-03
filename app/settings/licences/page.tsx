@@ -10,7 +10,7 @@ import Skeleton from "../../../components/Skeleton";
 import Stat from "../../../components/Stat";
 import LicenceCard from "./LicenceCard";
 import { shouldShowSkeleton } from "../../../lib/loading/skeletonVisibility";
-import type { Vehicle, VehicleLicence } from "./types";
+import type { LicenceVehicle, VehicleLicence } from "./types";
 
 const PRICE_PER_LICENSED_VEHICLE = 10;
 
@@ -18,12 +18,20 @@ const PRICE_PER_LICENSED_VEHICLE = 10;
    taller than a vehicle card. A guess about data that has not arrived. */
 const SKELETON_CARDS = 3;
 
-/* One field, because no field is read while loading: every read in the card
-   sits behind the `loading` branch. A fuller object would be a second copy of
-   "which fields the card reads", drifting silently the first time the card
-   reads one more. */
+/* One field, and the card is written so that no field is read while loading:
+   the cell values it would evaluate eagerly are behind an explicit `loading`
+   check in LicenceCard, and everything else is inside a `loading` branch. A
+   fuller object would be a second copy of "which fields the card reads",
+   drifting silently the first time the card reads one more. THE GUARANTEE
+   LIVES IN THE CARD, NOT HERE: see the note above LicenceCard's Vehicle cell
+   before adding a field that this object does not have. */
 const PLACEHOLDER_LICENCE = { id: "skeleton" } as VehicleLicence;
 
+/* The raw PostgREST shape, deliberately NOT in types.ts. PostgREST returns an
+   embedded join as an array even for a to-one relationship, so this exists
+   only to be normalised into VehicleLicence by loadData below. types.ts holds
+   the normalised UI contract the card consumes; this is a query detail and
+   nothing outside this file should ever see it. */
 type VehicleLicenceRow = {
     id: string;
     tenant_id: string;
@@ -34,14 +42,14 @@ type VehicleLicenceRow = {
     active: boolean | null;
     notes: string | null;
     created_at: string;
-    vehicles?: Vehicle[] | null;
+    vehicles?: LicenceVehicle[] | null;
 };
 
 export default function VehicleLicencesPage() {
     const supabase = createClient();
     const tenant = useTenant();
 
-    const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+    const [vehicles, setVehicles] = useState<LicenceVehicle[]>([]);
     const [licences, setLicences] = useState<VehicleLicence[]>([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -209,7 +217,7 @@ export default function VehicleLicencesPage() {
         await loadData();
     }
 
-    function vehicleLabel(vehicle: Vehicle) {
+    function vehicleLabel(vehicle: LicenceVehicle) {
         const parts = [
             vehicle.registration || "No registration",
             vehicle.vehicle_type || null,
@@ -232,15 +240,17 @@ export default function VehicleLicencesPage() {
 
     const monthlyTotal = billableVehicleCount * PRICE_PER_LICENSED_VEHICLE;
 
-    /* ONE flag, because the two regions it drives - the Stat row and the card
-       grid - both read `licences` and nothing else. The vehicles list loaded
-       alongside it feeds only the add-licence form's <select>, whose options
-       are not visible until the select is opened, so it needs no flag of its
-       own.
+    /* ONE flag, because the two containers it drives - the Stat row and the
+       card grid - both read `licences` and nothing else, which makes them one
+       region separated by the add form. The vehicles list loaded alongside
+       feeds only that form's <select>, whose options are not visible until it
+       is opened, so it needs no flag of its own.
 
-       aria-busy and exactly ONE sr-only role="status" line travel with the
-       flag; the announcement sits on the grid, which is the region the old
-       "Loading..." card stood in for. */
+       Each container carries its own aria-busy; exactly ONE sr-only
+       role="status" line travels with the flag, and it sits on the grid, which
+       is the region the old "Loading..." card stood in for. Both rules are
+       stated in full above shouldShowSkeleton in
+       lib/loading/skeletonVisibility.ts. */
     const showSkeleton = shouldShowSkeleton({
         tenantStatus: tenant.status,
         fetching: loading,
