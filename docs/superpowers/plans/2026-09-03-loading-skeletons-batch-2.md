@@ -888,7 +888,53 @@ export function ComplianceItem({
 
 `formatDate` stays in `page.tsx` if it is used elsewhere there; move it into `compliance.tsx` and import it back if not. Check with `grep -c formatDate app/vehicles/page.tsx` before deciding.
 
-Because `result` is now nullable, drop the `mot!` / `tax!` / `insurance!` non-null assertions shown in the card below and pass the values straight through.
+**REVISED 2026-09-03, from the Task 3 code review.** This task originally passed five computed
+values into the card (`cardCompliance`, `mot`, `tax`, `insurance`, `insuranceExpiry`). The Task 3
+review showed why that is wrong: a computed-compliance prop sitting alongside `loading` creates
+states that cannot both be true, and the card's own consumers then disagree about which signal to
+believe. `SubcontractorCard` now derives its compliance internally, and this card must match.
+
+All five derive from `(vehicle, policy)`. Only `policy` needs page state, because `getFleetPolicy`
+closes over `fleetPolicies`. So move these two out of `page.tsx` into `compliance.tsx` as pure
+functions taking the policy explicitly:
+
+```ts
+export function insuranceExpiryOf(
+  vehicle: Vehicle,
+  policy: FleetInsurancePolicy | null,
+): string | null {
+  if (vehicle.insurance_type === "fleet") return policy?.expiry_date ?? null;
+  return vehicle.insurance_expiry;
+}
+
+export function vehicleCardCompliance(
+  vehicle: Vehicle,
+  policy: FleetInsurancePolicy | null,
+): ComplianceResult {
+  return mostUrgent([
+    getCompliance(vehicle.mot_expiry),
+    getCompliance(vehicle.tax_expiry),
+    getCompliance(insuranceExpiryOf(vehicle, policy)),
+  ]);
+}
+```
+
+`page.tsx` keeps `getFleetPolicy`, which needs its state, and passes the result in.
+
+**The derivation must sit behind the `loading` branch**, exactly as `SubcontractorCard` does and
+for the same reason: every placeholder expiry is null, `getCompliance(null)` returns **amber**, so
+deriving unconditionally would paint an amber alarm border and three amber badges on every
+skeleton card. Guard it:
+
+```tsx
+  const cardCompliance = loading ? null : vehicleCardCompliance(vehicle, policy);
+  const insuranceExpiry = loading ? null : insuranceExpiryOf(vehicle, policy);
+  const mot = loading ? null : getCompliance(vehicle.mot_expiry);
+  const tax = loading ? null : getCompliance(vehicle.tax_expiry);
+  const insurance = loading ? null : getCompliance(insuranceExpiry);
+```
+
+Because `result` is nullable, there are no `mot!` / `tax!` / `insurance!` assertions to write.
 
 - [ ] **Step 2: Write the card**
 
@@ -903,11 +949,8 @@ import type { ComplianceResult, FleetInsurancePolicy, Vehicle } from "./types";
 
 type Props = {
   vehicle: Vehicle;
-  cardCompliance: ComplianceResult | null;
-  mot: ComplianceResult | null;
-  tax: ComplianceResult | null;
-  insurance: ComplianceResult | null;
-  insuranceExpiry: string | null;
+  /** The only value that cannot be derived here: it needs the page's
+   *  fleetPolicies state. Null when this vehicle is not on a fleet policy. */
   policy: FleetInsurancePolicy | null;
   isAdmin: boolean;
   loading?: boolean;
