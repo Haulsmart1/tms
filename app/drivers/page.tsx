@@ -36,6 +36,8 @@ type Driver = {
   emergency_contact_name: string | null;
   emergency_contact_phone: string | null;
   depot: string | null;
+  planning_profile: "day" | "tramper";
+  normal_start_time: string | null;
   notes: string | null;
 
   licence_issue_date: string | null;
@@ -151,6 +153,8 @@ type DriverForm = {
   city: string;
   postcode: string;
   depot: string;
+  planning_profile: "day" | "tramper";
+  normal_start_time: string;
 
   emergency_contact_name: string;
   emergency_contact_phone: string;
@@ -214,6 +218,8 @@ const EMPTY_FORM: DriverForm = {
   city: "",
   postcode: "",
   depot: "",
+  planning_profile: "day",
+  normal_start_time: "",
 
   emergency_contact_name: "",
   emergency_contact_phone: "",
@@ -486,6 +492,8 @@ export default function DriversPage() {
       city: driver.city ?? "",
       postcode: driver.postcode ?? "",
       depot: driver.depot ?? "",
+      planning_profile: driver.planning_profile ?? "day",
+      normal_start_time: driver.normal_start_time ?? "",
 
       emergency_contact_name: driver.emergency_contact_name ?? "",
       emergency_contact_phone: driver.emergency_contact_phone ?? "",
@@ -569,6 +577,8 @@ export default function DriversPage() {
         city: form.city.trim() || null,
         postcode: form.postcode.trim().toUpperCase() || null,
         depot: form.depot.trim() || null,
+        planning_profile: form.planning_profile,
+        normal_start_time: form.normal_start_time || null,
 
         emergency_contact_name:
           form.emergency_contact_name.trim() || null,
@@ -1183,6 +1193,30 @@ export default function DriversPage() {
                 label="Depot / Base"
                 value={form.depot}
                 onChange={(value) => updateForm("depot", value)}
+              />
+
+              <SelectField
+                label="Planning Profile"
+                value={form.planning_profile}
+                onChange={(value) =>
+                  updateForm(
+                    "planning_profile",
+                    value as DriverForm["planning_profile"]
+                  )
+                }
+                options={[
+                  ["day", "Day Driver"],
+                  ["tramper", "Tramper"],
+                ]}
+              />
+
+              <TextField
+                label="Normal Start Time"
+                value={form.normal_start_time}
+                onChange={(value) =>
+                  updateForm("normal_start_time", value)
+                }
+                type="time"
               />
 
               <SelectField
