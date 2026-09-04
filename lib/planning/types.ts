@@ -3,6 +3,16 @@
    optimize and saveDiff can all import them without importing each other,
    the same layout lib/tracking/types.ts uses. */
 
+export type PlanJobItem = {
+  id: string;
+  sku: string | null;
+  description: string | null;
+  quantity: number;
+  serial_numbers: string[] | null;
+  external_reference: string | null;
+  notes: string | null;
+};
+
 export type PlanStop = {
   id: string;
   stop_order: number;
@@ -47,6 +57,9 @@ export type PlanJob = {
   compliance_override_reason?: string | null;
 
   stops: PlanStop[];
+
+  /** Serialized box/item data used by Planning bulk label printing. */
+  items?: PlanJobItem[];
 };
 
 export type LatLng = { lat: number; lng: number };

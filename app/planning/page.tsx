@@ -214,7 +214,11 @@ export default function PlanningPage() {
         journey_scope, origin_country_code, destination_country_code,
         compliance_regime_override, compliance_override_reason,
         customers ( name ),
-        job_stops ( id, stop_order, type, address_line, city, postcode, lat, lng )
+        job_stops ( id, stop_order, type, address_line, city, postcode, lat, lng ),
+        job_items (
+          id, sku, description, quantity, serial_numbers,
+          external_reference, notes
+        )
       `)
       .or(
         `planning_date.eq.${date},and(planning_date.is.null,scheduled_date.eq.${date})`
@@ -298,6 +302,15 @@ export default function PlanningPage() {
         id: s.id, stop_order: s.stop_order, type: s.type,
         address_line: s.address_line, city: s.city, postcode: s.postcode,
         lat: s.lat, lng: s.lng,
+      })),
+      items: (row.job_items ?? []).map((item: any) => ({
+        id: item.id,
+        sku: item.sku,
+        description: item.description,
+        quantity: item.quantity,
+        serial_numbers: item.serial_numbers,
+        external_reference: item.external_reference,
+        notes: item.notes,
       })),
     }));
 

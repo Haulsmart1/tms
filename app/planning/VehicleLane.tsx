@@ -2,6 +2,7 @@
 
 import type { DragEvent } from "react";
 import PlanJobCard, { JOB_ID_MIME } from "./PlanJobCard";
+import VehicleLabelPrinter from "./VehicleLabelPrinter";
 import type { PlanJob } from "../../lib/planning/types";
 import type { PlanningCompliance } from "../../lib/planning/compliance";
 import {
@@ -82,9 +83,18 @@ export default function VehicleLane({
             mixed drivers
           </span>
         ) : null}
-        <span className="ml-auto text-xs text-ink-3">
-          {summary ?? `${jobs.length} ${jobs.length === 1 ? "job" : "jobs"}`}
-        </span>
+        <div
+          className="ml-auto flex items-center gap-2"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <VehicleLabelPrinter
+            vehicleRegistration={vehicle.registration}
+            jobs={jobs}
+          />
+          <span className="text-xs text-ink-3">
+            {summary ?? `${jobs.length} ${jobs.length === 1 ? "job" : "jobs"}`}
+          </span>
+        </div>
       </header>
 
       <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
