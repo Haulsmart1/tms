@@ -99,8 +99,9 @@ function PageFrame({ children }: { children: ReactNode }) {
               Billing
             </h1>
             <p className="m-0 text-sm text-ink-3">
-              £10 per active licensed vehicle per month, plus VAT, charged to
-              your card on your billing date.
+              From £10 per active licensed vehicle per week, plus VAT, with
+              volume rates for larger fleets. Charged to your card every 4
+              weeks.
             </p>
           </header>
           {children}
@@ -285,7 +286,7 @@ export default function BillingSettingsPage() {
             sub="company-wide, counted on each billing date"
           />
           <Stat
-            label="Monthly total"
+            label="4-weekly total"
             value={
               showSkeleton ? (
                 <Skeleton display="inline-block" w="6ch" h="1.25rem" />
@@ -298,7 +299,7 @@ export default function BillingSettingsPage() {
             sub={
               showSkeleton || loadError?.licences
                 ? undefined
-                : `${formatPence(amounts.netPence)} + ${formatPence(amounts.vatPence)} VAT`
+                : `${formatPence(amounts.netPence)} + ${formatPence(amounts.vatPence)} VAT · ${formatPence(amounts.blendedWeeklyPence)}/vehicle/week`
             }
           />
           <Stat
