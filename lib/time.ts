@@ -34,7 +34,13 @@ export function operatorDayInTimeZone(now: Date, timeZone: string): string {
 /* THE ONE DEFINITION OF THE OPERATOR'S CALENDAR DAY.
 
    Existing callers retain the operator-wide default. Compliance callers that
-   have loaded company_profiles.timezone should use operatorDayInTimeZone. */
+   have loaded company_profiles.timezone should use operatorDayInTimeZone.
+
+   That describes tacho/CPC compliance. It does NOT describe lib/compliance/,
+   which is subcontractor and vehicle document expiry: that module deliberately
+   does not use this machinery yet, and does its own local-midnight arithmetic.
+   The consequences, and why it was left alone, are in
+   docs/superpowers/specs/2026-09-03-loading-skeletons-batch-2-design.md. */
 export function operatorDay(now: Date): string {
   return operatorDayInTimeZone(now, OPERATOR_TIME_ZONE);
 }

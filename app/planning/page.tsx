@@ -192,6 +192,9 @@ export default function PlanningPage() {
   const dirty = pendingUpdatesJson !== baselineDiff;
 
   async function loadData(isCancelled: () => boolean) {
+    // Guard lives here, not in the effect: see TenantContextValue in lib/tenant/context.ts
+    if (tenant.status !== "ready") return;
+
     setLoading(true);
     setMessage("");
     setGeocodeSettled(false);
@@ -476,6 +479,10 @@ export default function PlanningPage() {
     let inFlight = false;
 
     async function loadPositions() {
+      /* Same reason as loadData above: the effect already returned for this
+         case, but the narrowing does not reach into this function. Before the
+         inFlight latch, so an unresolved tenant never marks a load in flight. */
+      if (tenant.status !== "ready") return;
       if (inFlight) return;
       inFlight = true;
 

@@ -43,6 +43,11 @@ export const SKELETON_READY_ROUTES: readonly string[] = [
   "/dashboard",               // app/dashboard/page.tsx
   "/customers",               // app/customers/page.tsx
   "/settings/billing",        // app/settings/billing/page.tsx
+  "/settings/licences",       // app/settings/licences/page.tsx
+  "/settings/portal-invites", // app/settings/portal-invites/page.tsx
+  "/settings/users",          // app/settings/users/page.tsx
+  "/subcontractors",          // app/subcontractors/page.tsx
+  "/vehicles",                // app/vehicles/page.tsx
 ];
 
 export function isSkeletonReadyRoute(pathname: string): boolean {

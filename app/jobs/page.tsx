@@ -88,6 +88,9 @@ export default function JobsPage() {
   });
 
   async function loadData() {
+    // Guard lives here, not in the effect: see TenantContextValue in lib/tenant/context.ts
+    if (tenant.status !== "ready") return;
+
     setMessage("");
     const jobsQuery = supabase.from("jobs").select(`
         id, tenant_id, reference, status, scheduled_date, planning_date, customer_id, vehicle_id, driver_id,
@@ -123,7 +126,7 @@ export default function JobsPage() {
     setSubcontractors(subcontractorData || []);
   }
 
-  useEffect(() => { loadData(); }, [tenant.activeTenantId]);
+  useEffect(() => { loadData(); }, [tenant.status, tenant.activeTenantId]);
 
   useEffect(() => {
     if (jobs.length === 0) {

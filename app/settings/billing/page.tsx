@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createClient } from "../../../lib/supabase/browser";
 import { useTenant } from "../../components/TenantProvider";
 import TenantGate from "../../components/TenantGate";
@@ -119,9 +119,23 @@ export default function BillingSettingsPage() {
   const [vehicleCount, setVehicleCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [hasLoaded, setHasLoaded] = useState(false);
+  // The tenant selected when the figures on screen were loaded. Set only when
+  // the try block below completes without throwing, never in the catch
+  // branch, matching the "do not set on failure" rule in
+  // lib/loading/skeletonVisibility.ts.
+  const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
   const [showCardForm, setShowCardForm] = useState(false);
   const [notice, setNotice] = useState<{ text: string; tone: "success" | "warning" } | null>(null);
   const [loadError, setLoadError] = useState<LoadError | null>(null);
+
+  /* `load` is memoized on [supabase] only, deliberately: this data is
+     company-wide (see the filterByTenant comment below) and must NOT refetch
+     on a tenant switch. Reading tenant.activeTenantId through a ref, rather
+     than adding it to load's deps, records which tenant was active when a
+     load completed without also making load's identity (and therefore the
+     effect that calls it) depend on activeTenantId. */
+  const activeTenantIdRef = useRef(tenant.activeTenantId);
+  activeTenantIdRef.current = tenant.activeTenantId;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -156,6 +170,7 @@ export default function BillingSettingsPage() {
       setVehicleCount(
         new Set((licencesRes.data ?? []).map((l) => l.vehicle_id)).size
       );
+      setDataTenantId(activeTenantIdRef.current);
     } catch (error) {
       /* A thrown client error, as opposed to a returned .error. Without this
          branch the finally below would flip hasLoaded and the page would
@@ -186,6 +201,8 @@ export default function BillingSettingsPage() {
     tenantStatus: tenant.status,
     fetching: loading,
     hasData: hasLoaded,
+    activeTenantId: tenant.activeTenantId,
+    dataTenantId,
   });
 
   /* Role gates apply only once status is ready. Before that, role is the

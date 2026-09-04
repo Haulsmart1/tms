@@ -5,35 +5,33 @@ import { createClient } from "../../../lib/supabase/browser";
 import { useTenant } from "../../components/TenantProvider";
 import TenantGate from "../../components/TenantGate";
 import MessageBanner from "../../../components/MessageBanner";
-import Card from "../../../components/Card";
 import Button from "../../../components/Button";
+import Skeleton from "../../../components/Skeleton";
 import Stat from "../../../components/Stat";
+import LicenceCard from "./LicenceCard";
+import { shouldShowSkeleton } from "../../../lib/loading/skeletonVisibility";
+import type { LicenceVehicle, VehicleLicence } from "./types";
 
 const PRICE_PER_LICENSED_VEHICLE = 10;
 
-type Vehicle = {
-    id: string;
-    tenant_id: string;
-    registration: string | null;
-    vehicle_type: string | null;
-    make: string | null;
-    model: string | null;
-    active: boolean | null;
-};
+/* Three, because these cards are full width in a single-column grid and are
+   taller than a vehicle card. A guess about data that has not arrived. */
+const SKELETON_CARDS = 3;
 
-type VehicleLicence = {
-    id: string;
-    tenant_id: string;
-    vehicle_id: string;
-    licence_type: string;
-    issue_date: string | null;
-    expiry_date: string | null;
-    active: boolean | null;
-    notes: string | null;
-    created_at: string;
-    vehicles?: Vehicle | null;
-};
+/* One field, and the card is written so that no field is read while loading:
+   the cell values it would evaluate eagerly are behind an explicit `loading`
+   check in LicenceCard, and everything else is inside a `loading` branch. A
+   fuller object would be a second copy of "which fields the card reads",
+   drifting silently the first time the card reads one more. THE GUARANTEE
+   LIVES IN THE CARD, NOT HERE: see the note above LicenceCard's Vehicle cell
+   before adding a field that this object does not have. */
+const PLACEHOLDER_LICENCE = { id: "skeleton" } as VehicleLicence;
 
+/* The raw PostgREST shape, deliberately NOT in types.ts. PostgREST returns an
+   embedded join as an array even for a to-one relationship, so this exists
+   only to be normalised into VehicleLicence by loadData below. types.ts holds
+   the normalised UI contract the card consumes; this is a query detail and
+   nothing outside this file should ever see it. */
 type VehicleLicenceRow = {
     id: string;
     tenant_id: string;
@@ -44,18 +42,19 @@ type VehicleLicenceRow = {
     active: boolean | null;
     notes: string | null;
     created_at: string;
-    vehicles?: Vehicle[] | null;
+    vehicles?: LicenceVehicle[] | null;
 };
 
 export default function VehicleLicencesPage() {
     const supabase = createClient();
     const tenant = useTenant();
 
-    const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+    const [vehicles, setVehicles] = useState<LicenceVehicle[]>([]);
     const [licences, setLicences] = useState<VehicleLicence[]>([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState("");
+    const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
 
     const [vehicleId, setVehicleId] = useState("");
     const [licenceType, setLicenceType] = useState("");
@@ -65,6 +64,8 @@ export default function VehicleLicencesPage() {
     const [notes, setNotes] = useState("");
 
     async function loadData() {
+        if (tenant.status !== "ready") return;
+
         setLoading(true);
         setMessage("");
 
@@ -124,12 +125,15 @@ export default function VehicleLicencesPage() {
 
         setVehicles(vehicleData ?? []);
         setLicences(normalizedLicences);
+        if (!licenceError) {
+            setDataTenantId(tenant.activeTenantId);
+        }
         setLoading(false);
     }
 
     useEffect(() => {
         loadData();
-    }, [tenant.activeTenantId]);
+    }, [tenant.status, tenant.activeTenantId]);
 
     function resetForm() {
         setVehicleId("");
@@ -217,7 +221,7 @@ export default function VehicleLicencesPage() {
         await loadData();
     }
 
-    function vehicleLabel(vehicle: Vehicle) {
+    function vehicleLabel(vehicle: LicenceVehicle) {
         const parts = [
             vehicle.registration || "No registration",
             vehicle.vehicle_type || null,
@@ -240,6 +244,27 @@ export default function VehicleLicencesPage() {
 
     const monthlyTotal = billableVehicleCount * PRICE_PER_LICENSED_VEHICLE;
 
+    /* ONE flag, because the two containers it drives - the Stat row and the
+       card grid - both read `licences` and nothing else, which makes them one
+       region separated by the add form. The vehicles list loaded alongside
+       feeds only that form's <select>, whose options are not visible until it
+       is opened, so it needs no flag of its own.
+
+       Each container carries its own aria-busy; exactly ONE sr-only
+       role="status" line travels with the flag, and it sits on the grid, which
+       is the region the old "Loading..." card stood in for. Both rules are
+       stated in full above shouldShowSkeleton in
+       lib/loading/skeletonVisibility.ts. */
+    const showSkeleton = shouldShowSkeleton({
+        tenantStatus: tenant.status,
+        fetching: loading,
+        hasData: licences.length > 0,
+        activeTenantId: tenant.activeTenantId,
+        dataTenantId,
+    });
+
+    const showEmpty = !showSkeleton && licences.length === 0;
+
     return (
         <TenantGate>
         <div className="ds min-h-screen bg-canvas font-sans text-ink">
@@ -252,9 +277,31 @@ export default function VehicleLicencesPage() {
                 </p>
             </header>
 
-            <div className="mb-4 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
-                <Stat label="Licensed Vehicles" value={String(billableVehicleCount)} />
-                <Stat label="Monthly Charge" value={`£${monthlyTotal}`} />
+            {/* These two tiles are derived from `licences`, so they are part of
+                the same loading region as the grid below and must not state a
+                count of zero as fact while the query is in flight. The third
+                is the fixed price and is never a skeleton. */}
+            <div className="mb-4 grid grid-cols-2 gap-2.5 lg:grid-cols-4" aria-busy={showSkeleton}>
+                <Stat
+                    label="Licensed Vehicles"
+                    value={
+                        showSkeleton ? (
+                            <Skeleton display="inline-block" w="2.5ch" h="1.25rem" />
+                        ) : (
+                            String(billableVehicleCount)
+                        )
+                    }
+                />
+                <Stat
+                    label="Monthly Charge"
+                    value={
+                        showSkeleton ? (
+                            <Skeleton display="inline-block" w="5ch" h="1.25rem" />
+                        ) : (
+                            `£${monthlyTotal}`
+                        )
+                    }
+                />
                 <Stat label="Billing Rule" value="£10" sub="per licensed vehicle" />
             </div>
 
@@ -325,64 +372,44 @@ export default function VehicleLicencesPage() {
 
             <MessageBanner tone="neutral">{message}</MessageBanner>
 
-            {loading ? (
-                <Card>Loading...</Card>
-            ) : (
-                <div className="grid gap-3">
-                    {licences.map((licence) => (
-                        <article key={licence.id} className="rounded-lg border border-line bg-surface p-4 shadow-sm">
-                            <h3 className="m-0 mb-2 text-md font-semibold text-ink">{licence.licence_type}</h3>
+            {showEmpty ? (
+                <p className="py-10 text-center text-sm text-ink-3">
+                    No licences found.
+                </p>
+            ) : null}
 
-                            <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                                <div className="text-sm">
-                                    <span className="text-kicker uppercase text-ink-3">Vehicle</span>{" "}
-                                    <strong className="block text-ink">
-                                        {licence.vehicles?.registration ||
-                                            [licence.vehicles?.make, licence.vehicles?.model].filter(Boolean).join(" ") ||
-                                            licence.vehicle_id}
-                                    </strong>
-                                </div>
+            {/* ONE grid container shared by the skeleton and the real cards, and
+                not rendered at all when there is neither, matching /vehicles and
+                /subcontractors. Two containers would let these classes drift
+                apart and the layout jump on arrival. */}
+            {showSkeleton || licences.length > 0 ? (
+                <div className="grid gap-3" aria-busy={showSkeleton}>
+                    {/* One announcement for the region, not one per bar. Replaces
+                        what the old "Loading..." card gave free. */}
+                    {showSkeleton ? (
+                        <span className="sr-only" role="status">Loading licences</span>
+                    ) : null}
 
-                                <div className="text-sm">
-                                    <span className="text-kicker uppercase text-ink-3">Issue Date</span>{" "}
-                                    <strong className="block font-mono text-ink">{licence.issue_date || "-"}</strong>
-                                </div>
-
-                                <div className="text-sm">
-                                    <span className="text-kicker uppercase text-ink-3">Expiry Date</span>{" "}
-                                    <strong className="block font-mono text-ink">{licence.expiry_date || "-"}</strong>
-                                </div>
-
-                                <div className="text-sm">
-                                    <span className="text-kicker uppercase text-ink-3">Billing Status</span>{" "}
-                                    <strong className="block text-ink">{licence.active ? "Active" : "Inactive"}</strong>
-                                </div>
-
-                                <div className="text-sm">
-                                    <span className="text-kicker uppercase text-ink-3">Notes</span>{" "}
-                                    <strong className="block text-ink">{licence.notes || "-"}</strong>
-                                </div>
-                            </div>
-
-                            <div className="flex flex-wrap gap-2">
-                                <Button
-                                    variant="secondary"
-                                    onClick={() => toggleLicence(licence.id, licence.active)}
-                                >
-                                    {licence.active ? "Deactivate" : "Activate"}
-                                </Button>
-
-                                <Button
-                                    variant="danger"
-                                    onClick={() => deleteLicence(licence.id)}
-                                >
-                                    Delete
-                                </Button>
-                            </div>
-                        </article>
-                    ))}
+                    {showSkeleton
+                        ? Array.from({ length: SKELETON_CARDS }, (_, index) => (
+                            <LicenceCard
+                                key={`skeleton-${index}`}
+                                licence={PLACEHOLDER_LICENCE}
+                                loading
+                                onToggle={() => {}}
+                                onDelete={() => {}}
+                            />
+                        ))
+                        : licences.map((licence) => (
+                            <LicenceCard
+                                key={licence.id}
+                                licence={licence}
+                                onToggle={(id, active) => void toggleLicence(id, active)}
+                                onDelete={(id) => void deleteLicence(id)}
+                            />
+                        ))}
                 </div>
-            )}
+            ) : null}
         </main>
         </div>
         </TenantGate>

@@ -7,49 +7,24 @@ import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
 import Badge from "../../components/Badge";
 import Button from "../../components/Button";
-import Card from "../../components/Card";
 import MessageBanner from "../../components/MessageBanner";
-import { cn } from "../../lib/cn";
+import Skeleton from "../../components/Skeleton";
+import { getCompliance } from "../../lib/compliance/expiry";
+import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
+import VehicleCard from "./VehicleCard";
+import ComplianceBadge from "../../components/ComplianceBadge";
+import { formatDateGB } from "../../lib/format/date";
+import type { FleetInsurancePolicy, Vehicle } from "./types";
 
-type Vehicle = {
-  id: string;
-  tenant_id: string;
-  registration: string;
-  vehicle_type: string | null;
-  make: string | null;
-  model: string | null;
-  active: boolean | null;
-  created_at?: string;
-  mot_expiry: string | null;
-  tax_expiry: string | null;
-  insurance_type: "individual" | "fleet" | null;
-  insurance_provider: string | null;
-  insurance_policy_number: string | null;
-  insurance_start_date: string | null;
-  insurance_expiry: string | null;
-  fleet_insurance_policy_id: string | null;
-};
+/* Four, because these cards are full width in a single-column grid, so four
+   is roughly one screen. A guess about data that has not arrived. */
+const SKELETON_CARDS = 4;
 
-type FleetInsurancePolicy = {
-  id: string;
-  tenant_id: string;
-  provider: string;
-  policy_number: string;
-  start_date: string | null;
-  expiry_date: string;
-  auto_renew: boolean;
-  renewal_notice_days: number;
-  active: boolean;
-  notes: string | null;
-};
-
-type ComplianceLevel = "ok" | "amber" | "red";
-
-type ComplianceResult = {
-  level: ComplianceLevel;
-  label: string;
-  days: number | null;
-};
+/* One field, because no field is read while loading: every read in the card
+   sits behind the `loading` branch. A fuller object would be a second copy of
+   "which fields the card reads", drifting silently the first time the card
+   reads one more. */
+const PLACEHOLDER_VEHICLE = { id: "skeleton" } as Vehicle;
 
 const inputClasses =
   "h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3";
@@ -103,8 +78,43 @@ export default function VehiclesPage() {
   );
 
   const [form, setForm] = useState(EMPTY_FORM);
+  const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
+
+  const showSkeleton = shouldShowSkeleton({
+    tenantStatus: tenant.status,
+    fetching: loading,
+    hasData: vehicles.length > 0,
+    activeTenantId: tenant.activeTenantId,
+    dataTenantId,
+  });
+
+  /* Its own hasData, not the grid's. ONE FLAG PER REGION, not per page:
+     shouldShowSkeleton short-circuits on hasData, so borrowing the grid's flag
+     would let a tenant that has vehicles but no fleet policies see "no policy
+     is configured" while that query is still in flight.
+
+     THREE THINGS TRAVEL TOGETHER, per region: the flag, aria-busy on the
+     region's container, and exactly ONE sr-only role="status" line inside it.
+     A page with three regions that copies only the flag announces one of them.
+
+     A REGION IS SOMETHING THE USER CAN SEE. Form controls are excluded: the
+     fleet-policy <select> below maps the same fleetPolicies array and renders
+     an empty option list while loading, and that is fine, because a select's
+     options are not visible until it is opened. Same reasoning that leaves
+     /settings/portal-invites skeleton-free. */
+  const showFleetPolicySkeleton = shouldShowSkeleton({
+    tenantStatus: tenant.status,
+    fetching: loading,
+    hasData: fleetPolicies.length > 0,
+    activeTenantId: tenant.activeTenantId,
+    dataTenantId,
+  });
+
+  const showEmpty = !showSkeleton && vehicles.length === 0;
 
   async function loadVehicles() {
+    if (tenant.status !== "ready") return;
+
     setLoading(true);
 
     const [vehicleResult, policyResult] = await Promise.all([
@@ -127,6 +137,7 @@ export default function VehiclesPage() {
       setVehicles([]);
     } else {
       setVehicles((vehicleResult.data as Vehicle[]) || []);
+      setDataTenantId(tenant.activeTenantId);
     }
 
     if (policyResult.error) {
@@ -142,6 +153,7 @@ export default function VehiclesPage() {
           (policy) => policy.active
         )
       );
+      setDataTenantId(tenant.activeTenantId);
     }
 
     setLoading(false);
@@ -150,7 +162,7 @@ export default function VehiclesPage() {
   useEffect(() => {
     void loadVehicles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenant.activeTenantId]);
+  }, [tenant.status, tenant.activeTenantId]);
 
   function resetFleetPolicyForm() {
     setEditingFleetPolicyId(null);
@@ -195,6 +207,11 @@ export default function VehiclesPage() {
 
     if (!fleetPolicyForm.expiry_date) {
       setMessage("Fleet insurance expiry date is required.");
+      return;
+    }
+
+    if (tenant.status !== "ready") {
+      setMessage("Still loading. Try again in a moment.");
       return;
     }
 
@@ -274,6 +291,11 @@ export default function VehiclesPage() {
   async function deactivateFleetPolicy(policy: FleetInsurancePolicy) {
     if (!isAdmin) {
       setMessage("Only an admin can manage fleet insurance.");
+      return;
+    }
+
+    if (tenant.status !== "ready") {
+      setMessage("Still loading. Try again in a moment.");
       return;
     }
 
@@ -484,22 +506,6 @@ export default function VehiclesPage() {
     );
   }
 
-  function getInsuranceExpiry(vehicle: Vehicle) {
-    if (vehicle.insurance_type === "fleet") {
-      return getFleetPolicy(vehicle)?.expiry_date ?? null;
-    }
-
-    return vehicle.insurance_expiry;
-  }
-
-  function getVehicleCardCompliance(vehicle: Vehicle): ComplianceResult {
-    const mot = getCompliance(vehicle.mot_expiry);
-    const tax = getCompliance(vehicle.tax_expiry);
-    const insurance = getCompliance(getInsuranceExpiry(vehicle));
-
-    return mostUrgent([mot, tax, insurance]);
-  }
-
   return (
     <TenantGate>
       <div className="ds min-h-screen bg-canvas font-sans text-ink">
@@ -540,94 +546,113 @@ export default function VehiclesPage() {
                 ) : null}
               </div>
 
-              {fleetPolicies.length > 0 ? (
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {fleetPolicies.map((policy) => {
-                    const policyCompliance = getCompliance(policy.expiry_date);
-                    const linkedCount = vehicles.filter(
-                      (vehicle) =>
-                        vehicle.fleet_insurance_policy_id === policy.id
-                    ).length;
+              <div aria-busy={showFleetPolicySkeleton}>
+                {showFleetPolicySkeleton ? (
+                  <span className="sr-only" role="status">
+                    Loading fleet insurance policies
+                  </span>
+                ) : null}
 
-                    return (
-                      <article
-                        key={policy.id}
-                        className="rounded-lg border border-line bg-surface-2 p-3"
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <div>
-                            <strong className="block text-ink">
-                              {policy.provider}
-                            </strong>
-                            <span className="font-mono text-sm text-ink-2">
-                              {policy.policy_number}
-                            </span>
+                {fleetPolicies.length > 0 ? (
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    {fleetPolicies.map((policy) => {
+                      const policyCompliance = getCompliance(policy.expiry_date);
+                      const linkedCount = vehicles.filter(
+                        (vehicle) =>
+                          vehicle.fleet_insurance_policy_id === policy.id
+                      ).length;
+
+                      return (
+                        <article
+                          key={policy.id}
+                          className="rounded-lg border border-line bg-surface-2 p-3"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div>
+                              <strong className="block text-ink">
+                                {policy.provider}
+                              </strong>
+                              <span className="font-mono text-sm text-ink-2">
+                                {policy.policy_number}
+                              </span>
+                            </div>
+
+                            <ComplianceBadge result={policyCompliance} />
                           </div>
 
-                          <StatusBadge result={policyCompliance} small />
-                        </div>
+                          <div className="my-3 grid gap-2">
+                            <div className="text-sm">
+                              <span className="text-kicker uppercase text-ink-3">Start</span>{" "}
+                              <strong className="block font-mono text-ink">
+                                {policy.start_date
+                                  ? formatDateGB(policy.start_date)
+                                  : "Not set"}
+                              </strong>
+                            </div>
+                            <div className="text-sm">
+                              <span className="text-kicker uppercase text-ink-3">Expiry</span>{" "}
+                              <strong className="block font-mono text-ink">
+                                {formatDateGB(policy.expiry_date)}
+                              </strong>
+                            </div>
+                            <div className="text-sm">
+                              <span className="text-kicker uppercase text-ink-3">Auto renew</span>{" "}
+                              <strong className="block text-ink">
+                                {policy.auto_renew ? "Yes" : "No"}
+                              </strong>
+                            </div>
+                            <div className="text-sm">
+                              <span className="text-kicker uppercase text-ink-3">Renewal warning</span>{" "}
+                              <strong className="block font-mono text-ink">
+                                {policy.renewal_notice_days} days
+                              </strong>
+                            </div>
+                            <div className="text-sm">
+                              <span className="text-kicker uppercase text-ink-3">Vehicles covered</span>{" "}
+                              <strong className="block font-mono text-ink">{linkedCount}</strong>
+                            </div>
+                          </div>
 
-                        <div className="my-3 grid gap-2">
-                          <div className="text-sm">
-                            <span className="text-kicker uppercase text-ink-3">Start</span>{" "}
-                            <strong className="block font-mono text-ink">
-                              {policy.start_date
-                                ? formatDate(policy.start_date)
-                                : "Not set"}
-                            </strong>
-                          </div>
-                          <div className="text-sm">
-                            <span className="text-kicker uppercase text-ink-3">Expiry</span>{" "}
-                            <strong className="block font-mono text-ink">
-                              {formatDate(policy.expiry_date)}
-                            </strong>
-                          </div>
-                          <div className="text-sm">
-                            <span className="text-kicker uppercase text-ink-3">Auto renew</span>{" "}
-                            <strong className="block text-ink">
-                              {policy.auto_renew ? "Yes" : "No"}
-                            </strong>
-                          </div>
-                          <div className="text-sm">
-                            <span className="text-kicker uppercase text-ink-3">Renewal warning</span>{" "}
-                            <strong className="block font-mono text-ink">
-                              {policy.renewal_notice_days} days
-                            </strong>
-                          </div>
-                          <div className="text-sm">
-                            <span className="text-kicker uppercase text-ink-3">Vehicles covered</span>{" "}
-                            <strong className="block font-mono text-ink">{linkedCount}</strong>
-                          </div>
-                        </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              type="button"
+                              onClick={() => startEditFleetPolicy(policy)}
+                            >
+                              Edit Policy
+                            </Button>
 
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            type="button"
-                            onClick={() => startEditFleetPolicy(policy)}
-                          >
-                            Edit Policy
-                          </Button>
-
-                          <Button
-                            variant="danger"
-                            size="sm"
-                            type="button"
-                            onClick={() => void deactivateFleetPolicy(policy)}
-                          >
-                            Deactivate
-                          </Button>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="rounded-lg border border-warning-border bg-warning-tint p-3 text-sm text-warning-strong">
-                  No active fleet insurance policy is configured yet.
-                </div>
-              )}
+                            <Button
+                              variant="danger"
+                              size="sm"
+                              type="button"
+                              onClick={() => void deactivateFleetPolicy(policy)}
+                            >
+                              Deactivate
+                            </Button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : showFleetPolicySkeleton ? (
+                  /* Not the warning banner: while the query is in flight "no
+                     policy is configured" is a guess, and it is the exact false
+                     empty state step 3 of the skeletonReadyRoutes checklist
+                     exists to prevent. */
+                  <div className="rounded-lg border border-line bg-surface-2 p-3">
+                    <Skeleton display="inline-block" w="12ch" h="0.875rem" />
+                    <div className="mt-2">
+                      <Skeleton display="inline-block" w="18ch" h="0.75rem" />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-warning-border bg-warning-tint p-3 text-sm text-warning-strong">
+                    No active fleet insurance policy is configured yet.
+                  </div>
+                )}
+              </div>
 
               <form
                 onSubmit={saveFleetPolicy}
@@ -870,7 +895,7 @@ export default function VehiclesPage() {
                       {fleetPolicies.map((policy) => (
                         <option key={policy.id} value={policy.id}>
                           {policy.provider} • {policy.policy_number} • expires{" "}
-                          {formatDate(policy.expiry_date)}
+                          {formatDateGB(policy.expiry_date)}
                           {policy.auto_renew ? " • auto renew" : ""}
                         </option>
                       ))}
@@ -941,111 +966,49 @@ export default function VehiclesPage() {
 
           <MessageBanner tone="neutral">{message}</MessageBanner>
 
-          {loading ? <Card className="mb-4">Loading vehicles...</Card> : null}
+          {showEmpty ? (
+            <p className="py-10 text-center text-sm text-ink-3">
+              No vehicles found.
+            </p>
+          ) : null}
 
-          <div className="grid gap-4">
-            {vehicles.map((vehicle) => {
-              const cardCompliance = getVehicleCardCompliance(vehicle);
-              const mot = getCompliance(vehicle.mot_expiry);
-              const tax = getCompliance(vehicle.tax_expiry);
-              const policy = getFleetPolicy(vehicle);
-              const insuranceExpiry = getInsuranceExpiry(vehicle);
-              const insurance = getCompliance(insuranceExpiry);
+          {/* ONE grid container shared by the skeleton and the real cards, and
+              not rendered at all when there is neither, matching
+              /subcontractors. Two containers would let these classes drift
+              apart and the layout jump on arrival. */}
+          {showSkeleton || vehicles.length > 0 ? (
+            <div className="grid gap-4" aria-busy={showSkeleton}>
+              {/* One announcement for the region, not one per bar. */}
+              {showSkeleton ? (
+                <span className="sr-only" role="status">Loading vehicles</span>
+              ) : null}
 
-              return (
-                <div
-                  key={vehicle.id}
-                  className={cn(
-                    vehicleCardStyle(cardCompliance.level),
-                    !vehicle.active && "opacity-70"
-                  )}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <h3 className="m-0 font-mono text-md font-semibold text-ink">
-                        {vehicle.registration}
-                      </h3>
-
-                      <div className="text-sm text-ink-2">
-                        {vehicle.vehicle_type || "No type"} •{" "}
-                        {vehicle.make || "-"} {vehicle.model || ""}
-                      </div>
-                    </div>
-
-                    <StatusBadge result={cardCompliance} />
-                  </div>
-
-                  <div className="my-3 grid gap-2 sm:grid-cols-3">
-                    <ComplianceItem
-                      label="MOT"
-                      expiry={vehicle.mot_expiry}
-                      result={mot}
+              {showSkeleton
+                ? Array.from({ length: SKELETON_CARDS }, (_, index) => (
+                    <VehicleCard
+                      key={`skeleton-${index}`}
+                      vehicle={PLACEHOLDER_VEHICLE}
+                      policy={null}
+                      isAdmin={isAdmin}
+                      loading
+                      onEdit={() => {}}
+                      onDelete={() => {}}
+                      onToggle={() => {}}
                     />
-
-                    <ComplianceItem
-                      label="Tax"
-                      expiry={vehicle.tax_expiry}
-                      result={tax}
+                  ))
+                : vehicles.map((vehicle) => (
+                    <VehicleCard
+                      key={vehicle.id}
+                      vehicle={vehicle}
+                      policy={getFleetPolicy(vehicle) ?? null}
+                      isAdmin={isAdmin}
+                      onEdit={startEdit}
+                      onDelete={(id) => void deleteVehicle(id)}
+                      onToggle={(id, active) => void toggleVehicle(id, active)}
                     />
-
-                    <ComplianceItem
-                      label="Insurance"
-                      expiry={insuranceExpiry}
-                      result={insurance}
-                      extra={
-                        vehicle.insurance_type === "fleet"
-                          ? policy
-                            ? `Fleet • ${policy.provider}${
-                                policy.auto_renew ? " • Auto renew" : ""
-                              }`
-                            : "Fleet policy not selected"
-                          : vehicle.insurance_provider || "Individual policy"
-                      }
-                    />
-                  </div>
-
-                  <div className="text-sm text-ink-2">
-                    Status: {vehicle.active ? "Active" : "Inactive"}
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {isAdmin ? (
-                      <>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          type="button"
-                          onClick={() => startEdit(vehicle)}
-                        >
-                          Edit
-                        </Button>
-
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          type="button"
-                          onClick={() => void deleteVehicle(vehicle.id)}
-                        >
-                          Delete
-                        </Button>
-                      </>
-                    ) : null}
-
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      type="button"
-                      onClick={() =>
-                        void toggleVehicle(vehicle.id, vehicle.active)
-                      }
-                    >
-                      {vehicle.active ? "Deactivate" : "Activate"}
-                    </Button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                  ))}
+            </div>
+          ) : null}
         </main>
       </div>
     </TenantGate>
@@ -1088,139 +1051,4 @@ function ComplianceLegend() {
       <Badge tone="danger">7 days / expired</Badge>
     </div>
   );
-}
-
-function ComplianceItem({
-  label,
-  expiry,
-  result,
-  extra,
-}: {
-  label: string;
-  expiry: string | null;
-  result: ComplianceResult;
-  extra?: string;
-}) {
-  return (
-    <div className="rounded-md border border-line bg-surface p-2.5">
-      <span className="block text-kicker uppercase text-ink-3">{label}</span>
-
-      <div className="font-mono text-sm font-semibold text-ink">
-        {expiry ? formatDate(expiry) : "Not set"}
-      </div>
-
-      {extra ? <div className="text-xs text-ink-3">{extra}</div> : null}
-
-      <div className="mt-2">
-        <StatusBadge result={result} small />
-      </div>
-    </div>
-  );
-}
-
-function StatusBadge({
-  result,
-}: {
-  result: ComplianceResult;
-  /** Accepted for call-site compatibility; Badge has a single size. */
-  small?: boolean;
-}) {
-  return (
-    <Badge
-      tone={
-        result.level === "red"
-          ? "danger"
-          : result.level === "amber"
-            ? "warning"
-            : "success"
-      }
-    >
-      {result.label}
-    </Badge>
-  );
-}
-
-function getCompliance(expiry: string | null): ComplianceResult {
-  if (!expiry) {
-    return {
-      level: "amber",
-      label: "DATE NEEDED",
-      days: null,
-    };
-  }
-
-  const today = startOfToday();
-  const expiryDate = new Date(`${expiry}T00:00:00`);
-  const diffMs = expiryDate.getTime() - today.getTime();
-  const days = Math.ceil(diffMs / 86_400_000);
-
-  if (days < 0) {
-    return {
-      level: "red",
-      label: `EXPIRED ${Math.abs(days)}d`,
-      days,
-    };
-  }
-
-  if (days <= 7) {
-    return {
-      level: "red",
-      label: days === 0 ? "EXPIRES TODAY" : `NEEDS ATTENTION • ${days}d`,
-      days,
-    };
-  }
-
-  if (days <= 30) {
-    return {
-      level: "amber",
-      label: `EXPIRING SOON • ${days}d`,
-      days,
-    };
-  }
-
-  return {
-    level: "ok",
-    label: `VALID • ${days}d`,
-    days,
-  };
-}
-
-function mostUrgent(results: ComplianceResult[]): ComplianceResult {
-  const rank: Record<ComplianceLevel, number> = {
-    ok: 0,
-    amber: 1,
-    red: 2,
-  };
-
-  return results.reduce((current, next) =>
-    rank[next.level] > rank[current.level] ? next : current
-  );
-}
-
-function startOfToday() {
-  const date = new Date();
-  date.setHours(0, 0, 0, 0);
-  return date;
-}
-
-function formatDate(value: string) {
-  const date = new Date(`${value}T00:00:00`);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleDateString("en-GB");
-}
-
-function vehicleCardStyle(level: ComplianceLevel): string {
-  if (level === "red") {
-    return "rounded-lg border-2 border-danger bg-danger-tint p-4";
-  }
-
-  if (level === "amber") {
-    return "rounded-lg border-2 border-warning bg-warning-tint p-4";
-  }
-
-  return "rounded-lg border border-line bg-surface p-4 shadow-sm";
 }

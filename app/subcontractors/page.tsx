@@ -8,88 +8,30 @@ import TenantGate from "../components/TenantGate";
 import Badge from "../../components/Badge";
 import Button from "../../components/Button";
 import MessageBanner from "../../components/MessageBanner";
+import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
+import SubcontractorCard from "./SubcontractorCard";
+import InfoField from "../../components/InfoField";
+import { getCompliance, mostUrgent } from "../../lib/compliance/expiry";
+import ComplianceBadge from "../../components/ComplianceBadge";
+import { formatDateGB } from "../../lib/format/date";
+import { subcontractorCardStyle } from "./compliance";
+import type {
+  Employee,
+  Subcontractor,
+  SubcontractorVehicle,
+} from "./types";
 
-type Subcontractor = {
-  id: string;
-  tenant_id: string;
-  name: string;
-  subcontractor_type: "owner_driver" | "fleet" | null;
-  legal_name: string | null;
-  trading_name: string | null;
-  company_number: string | null;
-  vat_number: string | null;
-  operator_licence_number: string | null;
-  goods_in_transit_insurer: string | null;
-  goods_in_transit_policy_number: string | null;
-  goods_in_transit_expiry: string | null;
-  public_liability_insurer: string | null;
-  public_liability_policy_number: string | null;
-  public_liability_expiry: string | null;
-  employers_liability_insurer: string | null;
-  employers_liability_policy_number: string | null;
-  employers_liability_expiry: string | null;
-  motor_insurance_insurer: string | null;
-  motor_insurance_policy_number: string | null;
-  motor_insurance_expiry: string | null;
-  adr_capable: boolean;
-  waste_carrier_licence: string | null;
-  waste_carrier_expiry: string | null;
-  payment_terms_days: number | null;
-  default_rate: number | null;
-  rate_type: string | null;
-  fuel_surcharge_percent: number | null;
-  waiting_time_rate_per_hour: number | null;
-  cancellation_charge: number | null;
-  accounts_email: string | null;
-  contact_name: string | null;
-  phone: string | null;
-  email: string | null;
-  emergency_contact_name: string | null;
-  emergency_contact_phone: string | null;
-  address: string | null;
-  location: string | null;
-  notes: string | null;
-  active: boolean;
-};
+/* Six, because the grid is md:grid-cols-2 xl:grid-cols-3, so six fills whole
+   rows at every breakpoint instead of leaving a ragged last row. The count is
+   a guess about data that has not arrived; the grid will reflow on arrival.
+   Recorded in the spec rather than papered over. */
+const SKELETON_CARDS = 6;
 
-type Employee = {
-  id: string;
-  subcontractor_id: string;
-  full_name: string;
-  email: string | null;
-  phone: string | null;
-  job_title: string | null;
-  employment_type: string | null;
-  directly_employed: boolean;
-  employment_start_date: string | null;
-  employment_end_date: string | null;
-  active: boolean;
-  owner: boolean;
-  notes: string | null;
-};
-
-type SubcontractorVehicle = {
-  id: string;
-  subcontractor_id: string;
-  registration: string;
-  vehicle_type: string | null;
-  make: string | null;
-  model: string | null;
-  active: boolean;
-  mot_expiry: string | null;
-  tax_expiry: string | null;
-  insurance_expiry: string | null;
-  vor: boolean;
-  notes: string | null;
-};
-
-type ComplianceLevel = "ok" | "amber" | "red";
-
-type ComplianceResult = {
-  level: ComplianceLevel;
-  label: string;
-  days: number | null;
-};
+/* One field, because no field is read while loading: every read in the card
+   sits behind the `loading` branch. A fuller object would be a second copy of
+   "which fields the card reads", drifting silently the first time the card
+   reads one more. */
+const PLACEHOLDER_SUBCONTRACTOR = { id: "skeleton" } as Subcontractor;
 
 const EMPTY_FORM = {
   name: "",
@@ -182,12 +124,25 @@ export default function SubcontractorsPage() {
   const [saving, setSaving] = useState(false);
   const [employeeSaving, setEmployeeSaving] = useState(false);
   const [vehicleSaving, setVehicleSaving] = useState(false);
+  const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
+
+  const showSkeleton = shouldShowSkeleton({
+    tenantStatus: tenant.status,
+    fetching: loading,
+    hasData: subcontractors.length > 0,
+    activeTenantId: tenant.activeTenantId,
+    dataTenantId,
+  });
+
+  const showEmpty = !showSkeleton && subcontractors.length === 0;
 
   const selectedSubcontractor = subcontractors.find(
     (item) => item.id === selectedSubcontractorId
   ) ?? null;
 
   const loadData = useCallback(async () => {
+    if (tenant.status !== "ready") return;
+
     setLoading(true);
     setMessage("");
 
@@ -209,6 +164,7 @@ export default function SubcontractorsPage() {
     } else {
       const rows = (subsResult.data as Subcontractor[]) || [];
       setSubcontractors(rows);
+      setDataTenantId(tenant.activeTenantId);
       if (!selectedSubcontractorId && rows.length > 0) {
         setSelectedSubcontractorId(rows[0].id);
       }
@@ -237,7 +193,7 @@ export default function SubcontractorsPage() {
 
   useEffect(() => {
     void loadData();
-  }, [loadData, tenant.activeTenantId]);
+  }, [loadData, tenant.status, tenant.activeTenantId]);
 
   function resetSubcontractorForm() {
     setEditingId(null);
@@ -365,6 +321,11 @@ export default function SubcontractorsPage() {
       return;
     }
 
+    if (tenant.status !== "ready") {
+      setMessage("Still loading. Try again in a moment.");
+      return;
+    }
+
     if (!editingId && !tenant.writeTenantId) {
       setMessage("Pick a specific tenant before creating a subcontractor.");
       return;
@@ -468,6 +429,11 @@ export default function SubcontractorsPage() {
       return;
     }
 
+    if (tenant.status !== "ready") {
+      setMessage("Still loading. Try again in a moment.");
+      return;
+    }
+
     if (!tenant.writeTenantId) {
       setMessage("Pick a specific tenant before creating an employee.");
       return;
@@ -534,6 +500,11 @@ export default function SubcontractorsPage() {
 
     if (!vehicleForm.registration.trim()) {
       setMessage("Vehicle registration is required.");
+      return;
+    }
+
+    if (tenant.status !== "ready") {
+      setMessage("Still loading. Try again in a moment.");
       return;
     }
 
@@ -943,89 +914,50 @@ export default function SubcontractorsPage() {
               </div>
             </div>
 
-            {loading ? (
-              <p className="py-10 text-center text-sm text-ink-3">
-                Loading subcontractors...
-              </p>
-            ) : subcontractors.length === 0 ? (
+            {showEmpty ? (
               <p className="py-10 text-center text-sm text-ink-3">
                 No subcontractors found.
               </p>
-            ) : (
-              <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {subcontractors.map((subcontractor) => {
-                  const compliance = mostUrgent([
-                    getCompliance(subcontractor.goods_in_transit_expiry),
-                    getCompliance(subcontractor.public_liability_expiry),
-                    getCompliance(subcontractor.employers_liability_expiry),
-                    getCompliance(subcontractor.motor_insurance_expiry),
-                    getCompliance(subcontractor.waste_carrier_expiry),
-                  ]);
+            ) : null}
 
-                  return (
-                    <article
-                      key={subcontractor.id}
-                      className={subcontractorCardStyle(compliance.level)}
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div>
-                          <h3 className="m-0 text-md font-semibold text-ink">
-                            {subcontractor.name}
-                          </h3>
-                          <span className="text-sm text-ink-2">
-                            {subcontractor.subcontractor_type === "owner_driver"
-                              ? "Owner Driver"
-                              : "Fleet Subcontractor"}
-                          </span>
-                        </div>
-                        <StatusBadge result={compliance} />
-                      </div>
+            {/* ONE grid container shared by the skeleton and the real cards,
+                deliberately: two containers would let these breakpoint classes
+                drift apart and the layout jump on arrival. That is why this is
+                a sibling conditional rather than a third arm of the chain. */}
+            {showSkeleton || subcontractors.length > 0 ? (
+              <div
+                className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3"
+                aria-busy={showSkeleton}
+              >
+                {/* One announcement for the region, not one per bar. Replaces
+                    what the old "Loading subcontractors..." text gave free. */}
+                {showSkeleton ? (
+                  <span className="sr-only" role="status">Loading subcontractors</span>
+                ) : null}
 
-                      <div className="my-2 grid grid-cols-2 gap-2">
-                        <Info
-                          label="Contact"
-                          value={subcontractor.contact_name || subcontractor.email}
-                        />
-                        <Info label="Phone" value={subcontractor.phone} />
-                        <Info
-                          label="Operator Licence"
-                          value={subcontractor.operator_licence_number}
-                        />
-                        <Info
-                          label="Terms"
-                          value={`${subcontractor.payment_terms_days ?? 30} days`}
-                        />
-                      </div>
-
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          type="button"
-                          onClick={() => {
-                            setSelectedSubcontractorId(subcontractor.id);
-                            startEdit(subcontractor);
-                          }}
-                        >
-                          Edit
-                        </Button>
-
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          type="button"
-                          onClick={() =>
-                            setSelectedSubcontractorId(subcontractor.id)
-                          }
-                        >
-                          Manage
-                        </Button>
-                      </div>
-                    </article>
-                  );
-                })}
+                {showSkeleton
+                  ? Array.from({ length: SKELETON_CARDS }, (_, index) => (
+                      <SubcontractorCard
+                        key={`skeleton-${index}`}
+                        subcontractor={PLACEHOLDER_SUBCONTRACTOR}
+                        loading
+                        onEdit={() => {}}
+                        onManage={() => {}}
+                      />
+                    ))
+                  : subcontractors.map((subcontractor) => (
+                      <SubcontractorCard
+                        key={subcontractor.id}
+                        subcontractor={subcontractor}
+                        onEdit={(item) => {
+                          setSelectedSubcontractorId(item.id);
+                          startEdit(item);
+                        }}
+                        onManage={setSelectedSubcontractorId}
+                      />
+                    ))}
               </div>
-            )}
+            ) : null}
           </section>
 
           {selectedSubcontractor ? (
@@ -1172,13 +1104,13 @@ export default function SubcontractorsPage() {
                       </div>
 
                       <div className="my-2 grid grid-cols-2 gap-2">
-                        <Info label="Email" value={employee.email} />
-                        <Info label="Phone" value={employee.phone} />
-                        <Info
+                        <InfoField label="Email" value={employee.email} />
+                        <InfoField label="Phone" value={employee.phone} />
+                        <InfoField
                           label="Owner"
                           value={employee.owner ? "Yes" : "No"}
                         />
-                        <Info
+                        <InfoField
                           label="Directly Employed"
                           value={employee.directly_employed ? "Yes" : "No"}
                         />
@@ -1336,35 +1268,35 @@ export default function SubcontractorsPage() {
                             </div>
                           </div>
 
-                          <StatusBadge result={compliance} />
+                          <ComplianceBadge result={compliance} />
                         </div>
 
                         <div className="my-2 grid grid-cols-2 gap-2">
-                          <Info
+                          <InfoField
                             label="MOT"
                             value={
                               vehicle.mot_expiry
-                                ? formatDate(vehicle.mot_expiry)
+                                ? formatDateGB(vehicle.mot_expiry)
                                 : "Not set"
                             }
                           />
-                          <Info
+                          <InfoField
                             label="Tax"
                             value={
                               vehicle.tax_expiry
-                                ? formatDate(vehicle.tax_expiry)
+                                ? formatDateGB(vehicle.tax_expiry)
                                 : "Not set"
                             }
                           />
-                          <Info
+                          <InfoField
                             label="Insurance"
                             value={
                               vehicle.insurance_expiry
-                                ? formatDate(vehicle.insurance_expiry)
+                                ? formatDateGB(vehicle.insurance_expiry)
                                 : "Not set"
                             }
                           />
-                          <Info
+                          <InfoField
                             label="VOR"
                             value={vehicle.vor ? "Yes" : "No"}
                           />
@@ -1527,108 +1459,3 @@ function CheckboxField({
   );
 }
 
-function Info({
-  label,
-  value,
-}: {
-  label: string;
-  value: string | null | undefined;
-}) {
-  return (
-    <div className="text-sm">
-      <span className="text-kicker uppercase text-ink-2">{label}</span>{" "}
-      <strong className="block text-ink">{value || "—"}</strong>
-    </div>
-  );
-}
-
-function getCompliance(expiry: string | null): ComplianceResult {
-  if (!expiry) {
-    return {
-      level: "amber",
-      label: "DATE NEEDED",
-      days: null,
-    };
-  }
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const expiryDate = new Date(`${expiry}T00:00:00`);
-  const days = Math.ceil((expiryDate.getTime() - today.getTime()) / 86_400_000);
-
-  if (days < 0) {
-    return {
-      level: "red",
-      label: `EXPIRED ${Math.abs(days)}d`,
-      days,
-    };
-  }
-
-  if (days <= 7) {
-    return {
-      level: "red",
-      label: days === 0 ? "EXPIRES TODAY" : `NEEDS ATTENTION • ${days}d`,
-      days,
-    };
-  }
-
-  if (days <= 30) {
-    return {
-      level: "amber",
-      label: `EXPIRING SOON • ${days}d`,
-      days,
-    };
-  }
-
-  return {
-    level: "ok",
-    label: `VALID • ${days}d`,
-    days,
-  };
-}
-
-function mostUrgent(results: ComplianceResult[]): ComplianceResult {
-  const rank: Record<ComplianceLevel, number> = {
-    ok: 0,
-    amber: 1,
-    red: 2,
-  };
-
-  return results.reduce((current, next) =>
-    rank[next.level] > rank[current.level] ? next : current
-  );
-}
-
-function StatusBadge({ result }: { result: ComplianceResult }) {
-  return (
-    <Badge
-      tone={
-        result.level === "red"
-          ? "danger"
-          : result.level === "amber"
-            ? "warning"
-            : "success"
-      }
-    >
-      {result.label}
-    </Badge>
-  );
-}
-
-function subcontractorCardStyle(level: ComplianceLevel): string {
-  if (level === "red") {
-    return "rounded-lg border-2 border-danger bg-danger-tint p-3";
-  }
-
-  if (level === "amber") {
-    return "rounded-lg border-2 border-warning bg-warning-tint p-3";
-  }
-
-  return "rounded-lg border border-line bg-surface-2 p-3";
-}
-
-function formatDate(value: string) {
-  const date = new Date(`${value}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-GB");
-}

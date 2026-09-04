@@ -7,24 +7,13 @@ import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { createClient } from "../../lib/supabase/browser";
 import {
   parseTenantContext, pickInitialActiveTenant, computeWriteTenantId, tenantStorageKey,
-  type TenantContextData, type TenantOption, type TenantRole, type TenantStatus,
+  type TenantContextData, type TenantContextValue,
 } from "../../lib/tenant/context";
 import {
   decideResolveMode, shouldRevalidate, applyRevalidation, preserveActiveTenant,
   type ResolveMode,
 } from "../../lib/tenant/revalidate";
 import { applyTenantFilter } from "../../lib/tenant/filter";
-
-type TenantContextValue = {
-  status: TenantStatus;
-  role: TenantRole;
-  userEmail: string | null;
-  tenants: TenantOption[];
-  activeTenantId: string | null;
-  setActiveTenantId: (id: string | null) => void;
-  writeTenantId: string | null;
-  filterByTenant: <Q>(query: Q) => Q;
-};
 
 const TenantContext = createContext<TenantContextValue | null>(null);
 
@@ -168,16 +157,38 @@ export function TenantProvider({ children }: { children: ReactNode }) {
 
   const writeTenantId = computeWriteTenantId(data.role, data.homeTenantId, activeTenantId);
 
-  const value: TenantContextValue = {
-    status: data.status,
+  /* Built as two branches rather than one object with an optional field. An
+     optional `filterByTenant?` on the shared type is the one edit here that
+     would silently undo the union, because it type-checks at every call site
+     without anyone narrowing first.
+
+     Two things in this block look load-bearing and are not. Both were checked
+     against tsc, recorded here so nobody re-derives them:
+       - `status: data.status` compiles in place of the literal, because the
+         condition narrows the property access. The literal is intent, not
+         necessity.
+       - Hoisting filterByTenant into `base` also compiles, and still refuses
+         every unnarrowed call site, because the TYPE is what guards. It only
+         leaves a live filter on unresolved contexts at runtime, which is
+         untidy rather than dangerous.
+     The guard is the type, not the shape of this expression. */
+  const base = {
     role: data.role,
     userEmail,
     tenants: data.tenants,
     activeTenantId,
     setActiveTenantId,
     writeTenantId,
-    filterByTenant: (query) => applyTenantFilter(query, activeTenantId),
   };
+
+  const value: TenantContextValue =
+    data.status === "ready"
+      ? {
+          ...base,
+          status: "ready",
+          filterByTenant: (query) => applyTenantFilter(query, activeTenantId),
+        }
+      : { ...base, status: data.status };
 
   return <TenantContext.Provider value={value}>{children}</TenantContext.Provider>;
 }
