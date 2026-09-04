@@ -4,37 +4,114 @@ import {
   classifyPaymentResult,
   computeChargeAmounts,
   formatPence,
+  PRICE_TIERS,
+  tierBreakdown,
+  weeklyNetPence,
+  WEEKS_PER_CYCLE,
 } from "./money";
 
+describe("pricing constants", () => {
+  // A deliberate tripwire on a commercially meaningful number: if this ever
+  // changes, someone has changed the billing cycle, not refactored the maths.
+  it("pins the cycle length at 4 weeks", () => {
+    expect(WEEKS_PER_CYCLE).toBe(4);
+  });
+});
+
+describe("weeklyNetPence", () => {
+  // Graduated bands: the Nth vehicle is priced by the band N falls in, so the
+  // first ten vehicles stay at GBP 10 even for a 500-vehicle fleet.
+  it("prices a fleet inside the first band at GBP 10 per vehicle", () => {
+    expect(weeklyNetPence(1)).toBe(1000);
+    expect(weeklyNetPence(9)).toBe(9000);
+    expect(weeklyNetPence(10)).toBe(10000);
+  });
+
+  it("prices the 11th to 20th vehicles at GBP 8", () => {
+    expect(weeklyNetPence(11)).toBe(10800);
+    expect(weeklyNetPence(20)).toBe(18000);
+  });
+
+  it("prices the 21st to 50th vehicles at GBP 6", () => {
+    expect(weeklyNetPence(21)).toBe(18600);
+    expect(weeklyNetPence(50)).toBe(36000);
+  });
+
+  it("prices the 51st vehicle onward at GBP 5", () => {
+    expect(weeklyNetPence(51)).toBe(36500);
+    expect(weeklyNetPence(60)).toBe(41000);
+  });
+
+  it("is zero for an empty fleet", () => {
+    expect(weeklyNetPence(0)).toBe(0);
+  });
+});
+
 describe("computeChargeAmounts", () => {
-  it("charges 1000 pence net per vehicle plus 20% VAT", () => {
-    expect(computeChargeAmounts(12)).toEqual({
-      vehicleCount: 12,
-      netPence: 12000,
-      vatPence: 2400,
-      grossPence: 14400,
+  // The figure the commercial model was specified in. If this ever changes,
+  // someone has changed the price, not refactored the maths.
+  it("charges GBP 48 gross for a single vehicle", () => {
+    expect(computeChargeAmounts(1)).toEqual({
+      vehicleCount: 1,
+      weeklyNetPence: 1000,
+      blendedWeeklyPence: 1000,
+      netPence: 4000,
+      vatPence: 800,
+      grossPence: 4800,
       vatRate: 20,
     });
   });
 
-  it("handles a single vehicle", () => {
-    expect(computeChargeAmounts(1)).toEqual({
-      vehicleCount: 1,
-      netPence: 1000,
-      vatPence: 200,
-      grossPence: 1200,
+  it("charges a mixed-band fleet across all reached bands", () => {
+    // 10 x GBP 10 + 10 x GBP 8 + 5 x GBP 6 = GBP 210 per week.
+    expect(computeChargeAmounts(25)).toEqual({
+      vehicleCount: 25,
+      weeklyNetPence: 21000,
+      blendedWeeklyPence: 840,
+      netPence: 84000,
+      vatPence: 16800,
+      grossPence: 100800,
       vatRate: 20,
     });
+  });
+
+  it("reports the blended weekly rate, not the marginal one", () => {
+    // A 50-vehicle fleet pays a blended GBP 7.20, NOT the GBP 6 marginal rate
+    // and NOT the GBP 5 rate that only starts at vehicle 51.
+    expect(computeChargeAmounts(50).blendedWeeklyPence).toBe(720);
+    expect(computeChargeAmounts(60).blendedWeeklyPence).toBe(683);
   });
 
   it("returns all zeros for zero vehicles", () => {
     expect(computeChargeAmounts(0)).toEqual({
       vehicleCount: 0,
+      weeklyNetPence: 0,
+      blendedWeeklyPence: 0,
       netPence: 0,
       vatPence: 0,
       grossPence: 0,
       vatRate: 20,
     });
+  });
+
+  // This is the guard against anyone converting the bands to all-units
+  // pricing, where a fleet crossing a threshold gets its WHOLE fleet
+  // repriced and the bill drops when a vehicle is added.
+  it("never bills less for more vehicles", () => {
+    for (let n = 0; n < 200; n += 1) {
+      expect(
+        computeChargeAmounts(n + 1).grossPence,
+        `n=${n}`
+      ).toBeGreaterThan(computeChargeAmounts(n).grossPence);
+    }
+  });
+
+  it("lands VAT on an exact penny at every fleet size", () => {
+    for (let n = 0; n <= 200; n += 1) {
+      const { netPence, vatPence } = computeChargeAmounts(n);
+      expect(netPence % 100, `n=${n}`).toBe(0);
+      expect(vatPence * 5, `n=${n}`).toBe(netPence);
+    }
   });
 
   it("rejects negative counts", () => {
@@ -43,6 +120,76 @@ describe("computeChargeAmounts", () => {
 
   it("rejects fractional counts", () => {
     expect(() => computeChargeAmounts(2.5)).toThrow();
+  });
+});
+
+describe("tierBreakdown", () => {
+  it("returns no lines for an empty fleet", () => {
+    expect(tierBreakdown(0)).toEqual([]);
+  });
+
+  it("returns one line for a fleet inside the first band", () => {
+    expect(tierBreakdown(5)).toEqual([
+      {
+        fromVehicle: 1,
+        toVehicle: 5,
+        vehiclesInBand: 5,
+        weeklyPence: 1000,
+        bandNetPence: 5000,
+      },
+    ]);
+  });
+
+  it("splits a fleet across the bands it actually reaches", () => {
+    expect(tierBreakdown(15)).toEqual([
+      {
+        fromVehicle: 1,
+        toVehicle: 10,
+        vehiclesInBand: 10,
+        weeklyPence: 1000,
+        bandNetPence: 10000,
+      },
+      {
+        fromVehicle: 11,
+        toVehicle: 15,
+        vehiclesInBand: 5,
+        weeklyPence: 800,
+        bandNetPence: 4000,
+      },
+    ]);
+  });
+
+  it("emits one line per reached band and no empty trailing bands", () => {
+    expect(tierBreakdown(35)).toHaveLength(3);
+    expect(tierBreakdown(75)).toHaveLength(4);
+  });
+
+  it("has a well-formed band table", () => {
+    const ceilings = PRICE_TIERS.map((tier) => tier.upToVehicle);
+    expect(ceilings.filter((c) => c === null)).toHaveLength(1);
+    expect(ceilings[ceilings.length - 1]).toBeNull();
+    const bounded = ceilings.slice(0, -1) as number[];
+    for (let i = 1; i < bounded.length; i += 1) {
+      expect(bounded[i]).toBeGreaterThan(bounded[i - 1]);
+    }
+    for (const tier of PRICE_TIERS) {
+      expect(Number.isInteger(tier.weeklyPence)).toBe(true);
+      expect(tier.weeklyPence).toBeGreaterThan(0);
+    }
+  });
+
+  it("covers every vehicle exactly once", () => {
+    const lines = tierBreakdown(75);
+    expect(lines[0].fromVehicle).toBe(1);
+    expect(lines[lines.length - 1].toVehicle).toBe(75);
+    for (let i = 1; i < lines.length; i += 1) {
+      expect(lines[i].fromVehicle).toBe(lines[i - 1].toVehicle + 1);
+    }
+  });
+
+  it("rejects invalid counts like the other pricing functions", () => {
+    expect(() => tierBreakdown(-1)).toThrow();
+    expect(() => tierBreakdown(2.5)).toThrow();
   });
 });
 

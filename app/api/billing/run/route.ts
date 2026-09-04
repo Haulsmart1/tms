@@ -55,7 +55,6 @@ export async function GET(request: NextRequest) {
     const row: CompanyBillingRow = {
       company_id: raw.company_id,
       status: raw.status,
-      anchor_day: Number(raw.anchor_day),
       next_charge_on: raw.next_charge_on,
       retry_at: raw.retry_at ?? null,
       retry_count: Number(raw.retry_count),

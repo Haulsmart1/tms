@@ -2,6 +2,8 @@
 // Europe/London calendar date, because billing days are business days in the
 // UK, not UTC days.
 
+import { WEEKS_PER_CYCLE } from "./money";
+
 export const MAX_ATTEMPTS = 4;
 
 export function londonDateISO(now: Date): string {
@@ -23,31 +25,25 @@ function parseISO(dateISO: string): { year: number; month: number; day: number }
   return { year, month, day };
 }
 
-function daysInMonth(year: number, month: number): number {
-  // Day 0 of the next month is the last day of this month. UTC avoids DST.
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
-}
-
 export function addDays(dateISO: string, days: number): string {
   const { year, month, day } = parseISO(dateISO);
   const d = new Date(Date.UTC(year, month - 1, day + days));
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
 }
 
-// Next cycle: one calendar month after the cycle just charged, on the anchor
-// day, clamped to the target month's length. Computed from anchor_day (not
-// from the possibly-clamped cycle date) so a 31 anchor bounces back to the
-// 31st after a short month.
-export function computeNextChargeOn(cycleDate: string, anchorDay: number): string {
-  const { year, month } = parseISO(cycleDate);
-  let nextYear = year;
-  let nextMonth = month + 1;
-  if (nextMonth > 12) {
-    nextMonth = 1;
-    nextYear += 1;
-  }
-  const day = Math.min(anchorDay, daysInMonth(nextYear, nextMonth));
-  return `${nextYear}-${pad(nextMonth)}-${pad(day)}`;
+// Derived, not a second literal: money.ts bills WEEKS_PER_CYCLE weeks per
+// charge, and this is how long that cycle actually lasts. Writing 28 here
+// instead would let someone lengthen the cycle in one file while the other
+// kept billing 4 weeks, with no test in either file failing and the amount
+// charged silently diverging from the period covered.
+export const CYCLE_DAYS = WEEKS_PER_CYCLE * 7;
+
+// Cycles are a fixed 4 weeks. There is no anchor day and no month-length
+// clamping: every cycle is the same length, the billing weekday never drifts,
+// and 13 cycles a year collects all 52 weeks. Billing 4 weeks per CALENDAR
+// month would only have collected 48.
+export function computeNextChargeOn(cycleDate: string): string {
+  return addDays(cycleDate, CYCLE_DAYS);
 }
 
 // After failedAttempt attempts have failed, when is the next try? Two days per

@@ -3,8 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../../../lib/supabase/browser";
 import { countBillableVehicles } from "../../../lib/billing/vehicleCount";
-
-const PRICE_PER_LICENSED_VEHICLE = 10;
+import { computeChargeAmounts, formatPence } from "../../../lib/billing/money";
 
 type Company = {
     id: string;
@@ -134,7 +133,11 @@ export default function SuperAdminBillingPage() {
                 vehicles,
                 licences,
             });
-            const monthlyCharge = billableVehicleCount * PRICE_PER_LICENSED_VEHICLE;
+            // Whole pounds net. netPence is always a multiple of 400 under the
+            // tier table, so this never introduces a fraction, and invoices.amount
+            // stays the pounds figure it has always been.
+            const cycleChargePounds =
+                computeChargeAmounts(billableVehicleCount).netPence / 100;
 
             const latestInvoice = invoices.find(
                 (invoice) => invoice.company_id === company.id
@@ -144,7 +147,7 @@ export default function SuperAdminBillingPage() {
                 company,
                 totalVehicles: companyVehicles.length,
                 billableVehicleCount,
-                monthlyCharge,
+                cycleChargePounds,
                 latestInvoice,
             };
         });
@@ -192,7 +195,8 @@ export default function SuperAdminBillingPage() {
                 <div style={{ color: "white", marginBottom: 24 }}>
                     <h1 style={{ marginTop: 0, fontSize: 38 }}>Super Admin Billing</h1>
                     <p style={{ opacity: 0.85, marginBottom: 0 }}>
-                        Billing is charged at £10 per licensed vehicle per month.
+                        Billing is £10 per licensed vehicle per week, less per
+                        vehicle on larger fleets, charged every 4 weeks.
                     </p>
                 </div>
 
@@ -243,7 +247,7 @@ export default function SuperAdminBillingPage() {
                             </div>
 
                             <div style={{ opacity: 0.8, marginBottom: 12 }}>
-                                Monthly Charge: £{row.monthlyCharge}
+                                4-Weekly Charge: {formatPence(row.cycleChargePounds * 100)} (ex VAT)
                             </div>
 
                             {(() => {
@@ -292,7 +296,7 @@ export default function SuperAdminBillingPage() {
                                     createInvoice(
                                         row.company.id,
                                         row.billableVehicleCount,
-                                        row.monthlyCharge
+                                        row.cycleChargePounds
                                     )
                                 }
                                 style={{

@@ -7,7 +7,6 @@ import { computeNextChargeOn, nextRetryOn } from "./schedule";
 export type CompanyBillingRow = {
   company_id: string;
   status: "active" | "past_due" | "canceled";
-  anchor_day: number;
   next_charge_on: string;
   retry_at: string | null;
   retry_count: number;
@@ -67,7 +66,7 @@ export type ChargeOutcomeUpdate = {
 };
 
 export function applyChargeOutcome(args: {
-  row: Pick<CompanyBillingRow, "anchor_day" | "next_charge_on">;
+  row: Pick<CompanyBillingRow, "next_charge_on">;
   cycleDate: string;
   attempt: number;
   succeeded: boolean;
@@ -75,7 +74,7 @@ export function applyChargeOutcome(args: {
   if (args.succeeded) {
     return {
       status: "active",
-      next_charge_on: computeNextChargeOn(args.cycleDate, args.row.anchor_day),
+      next_charge_on: computeNextChargeOn(args.cycleDate),
       retry_at: null,
       retry_count: 0,
     };

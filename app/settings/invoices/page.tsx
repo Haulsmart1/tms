@@ -3,8 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "../../../lib/supabase/browser";
 import Stat from "../../../components/Stat";
-
-const PRICE = 10;
+import { computeChargeAmounts, formatPence } from "../../../lib/billing/money";
 
 export default function BillingPage() {
 
@@ -43,7 +42,11 @@ export default function BillingPage() {
                 </header>
 
                 <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
-                    <Stat label="Monthly Charge" value={`£${count * PRICE}`} sub={`${count} licensed vehicles`} />
+                    <Stat
+                        label="4-Weekly Charge"
+                        value={formatPence(computeChargeAmounts(count).grossPence)}
+                        sub={`${count} licensed vehicles here, inc VAT`}
+                    />
                 </div>
 
             </main>

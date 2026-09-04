@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   addDays,
   computeNextChargeOn,
+  CYCLE_DAYS,
   londonDateISO,
   nextRetryOn,
 } from "./schedule";
@@ -32,29 +33,33 @@ describe("addDays", () => {
 });
 
 describe("computeNextChargeOn", () => {
-  it("advances one month on the anchor day", () => {
-    expect(computeNextChargeOn("2026-08-26", 26)).toBe("2026-09-26");
+  it("advances a fixed 28 days", () => {
+    expect(CYCLE_DAYS).toBe(28);
+    expect(computeNextChargeOn("2026-08-26")).toBe("2026-09-23");
   });
 
-  it("clamps a 31st anchor into a 30-day month", () => {
-    expect(computeNextChargeOn("2026-08-31", 31)).toBe("2026-09-30");
-  });
-
-  it("clamps a 31st anchor into February", () => {
-    expect(computeNextChargeOn("2027-01-31", 31)).toBe("2027-02-28");
-  });
-
-  it("clamps into a leap-year February", () => {
-    expect(computeNextChargeOn("2028-01-31", 31)).toBe("2028-02-29");
-  });
-
-  it("recovers the anchor day after a clamped month", () => {
-    // Charged 28 Feb with a 31 anchor: next charge is 31 March, not 28 March.
-    expect(computeNextChargeOn("2027-02-28", 31)).toBe("2027-03-31");
+  it("crosses a month boundary", () => {
+    expect(computeNextChargeOn("2026-09-20")).toBe("2026-10-18");
   });
 
   it("crosses the year boundary", () => {
-    expect(computeNextChargeOn("2026-12-15", 15)).toBe("2027-01-15");
+    expect(computeNextChargeOn("2026-12-15")).toBe("2027-01-12");
+  });
+
+  it("crosses a 28-day February", () => {
+    expect(computeNextChargeOn("2027-02-10")).toBe("2027-03-10");
+  });
+
+  it("crosses a leap-year February", () => {
+    expect(computeNextChargeOn("2028-02-10")).toBe("2028-03-09");
+  });
+
+  // 28 days is exactly 4 weeks, so the billing weekday never drifts. This is
+  // the property that replaced anchor-day clamping.
+  it("keeps successive cycles exactly 28 days apart", () => {
+    const first = computeNextChargeOn("2026-08-26");
+    const second = computeNextChargeOn(first);
+    expect(second).toBe(addDays("2026-08-26", 56));
   });
 });
 

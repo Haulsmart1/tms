@@ -23,7 +23,7 @@ export default function SettingsPage() {
         },
         {
             title: "Vehicle Licences",
-            description: "Add or remove licences and manage £10 monthly billing",
+            description: "Add or remove licences and manage 4-weekly billing",
             href: "/settings/licences",
             icon: FileText,
         },

@@ -5,8 +5,10 @@ import { cn } from "../../../lib/cn";
 import { formatCycleDate } from "../../../lib/billing/format";
 import {
   formatPence,
-  NET_PENCE_PER_VEHICLE,
+  tierBreakdown,
+  WEEKS_PER_CYCLE,
   type ChargeAmounts,
+  type TierLine,
 } from "../../../lib/billing/money";
 
 type Props = {
@@ -57,15 +59,39 @@ export default function NextInvoiceCard({
       formatPence(pence)
     );
 
-  // Same wording in both states so only the count changes on load.
-  const vehiclesLabel =
-    loading || unavailable
-      ? `Vehicles × ${formatPence(NET_PENCE_PER_VEHICLE)}`
-      : `${amounts.vehicleCount} ${amounts.vehicleCount === 1 ? "vehicle" : "vehicles"} × ${formatPence(NET_PENCE_PER_VEHICLE)}`;
+  // One row per band the fleet reaches. A fleet of 10 or fewer, which is the
+  // common case, still renders as a single row, so the card does not get
+  // heavier for small customers.
+  //
+  // Annotated rather than inferred: the ternary would otherwise infer
+  // never[] | TierLine[] and the label helper below loses its parameter type.
+  const lines: TierLine[] =
+    loading || unavailable ? [] : tierBreakdown(amounts.vehicleCount);
+
+  const lineLabel = (line: TierLine): string =>
+    lines.length === 1
+      ? `${line.vehiclesInBand} ${line.vehiclesInBand === 1 ? "vehicle" : "vehicles"} × ${formatPence(line.weeklyPence)}/week × ${WEEKS_PER_CYCLE} weeks`
+      : `Vehicles ${line.fromVehicle}-${line.toVehicle} × ${formatPence(line.weeklyPence)}/week × ${WEEKS_PER_CYCLE} weeks`;
 
   return (
     <Card kicker="Next invoice">
-      <Row label={vehiclesLabel} value={money(amounts.netPence, "6ch")} />
+      {lines.length === 0 ? (
+        <Row
+          label={`Vehicles × weekly rate × ${WEEKS_PER_CYCLE} weeks`}
+          value={money(amounts.netPence, "6ch")}
+        />
+      ) : (
+        lines.map((line) => (
+          <Row
+            key={line.fromVehicle}
+            label={lineLabel(line)}
+            value={money(line.bandNetPence * WEEKS_PER_CYCLE, "6ch")}
+          />
+        ))
+      )}
+      {lines.length > 1 ? (
+        <Row label="Net" value={money(amounts.netPence, "6ch")} />
+      ) : null}
       <Row label={`VAT at ${amounts.vatRate}%`} value={money(amounts.vatPence, "5ch")} />
       <div className="my-1 border-t border-line" />
       <Row label="Total" value={money(amounts.grossPence, "6ch")} strong />
@@ -82,7 +108,8 @@ export default function NextInvoiceCard({
         )}
       </p>
       <p className="m-0 text-xs text-ink-3">
-        The vehicle count is taken on the billing date, so this can change before then.
+        The vehicle count is taken on the billing date, so this can change
+        before then. Charged every {WEEKS_PER_CYCLE} weeks.
       </p>
     </Card>
   );

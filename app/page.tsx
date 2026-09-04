@@ -23,7 +23,7 @@ import Footer from "../components/landing/Footer";
 export const metadata: Metadata = {
   title: "TMS Wizzard | Cloud Transport Management Software for UK & EU Haulage",
   description:
-    "Cloud transport management software for haulage, logistics and delivery operators. Jobs, proof of delivery, invoicing, fleet, drivers, subcontractors and live tracking in one platform. £10 per vehicle per month.",
+    "Cloud transport management software for haulage, logistics and delivery operators. Jobs, proof of delivery, invoicing, fleet, drivers, subcontractors and live tracking in one platform. From £10 per vehicle per week, billed every 4 weeks.",
   keywords: [
     "transport management software",
     "TMS software",
@@ -74,11 +74,12 @@ export default function HomePage() {
               "Cloud transport management software for jobs, proof of delivery, invoicing, vehicles, drivers, subcontractors, dispatch, and fleet management.",
             offers: {
               // Was price "0", which advertised the product as free and
-              // contradicted the pricing card.
+              // contradicted the pricing card. The price here is the entry
+              // weekly rate; volume bands are on the pricing card.
               "@type": "Offer",
               price: "10",
               priceCurrency: "GBP",
-              description: "Per vehicle, per month",
+              description: "Per vehicle, per week, billed every 4 weeks",
             },
           }),
         }}
