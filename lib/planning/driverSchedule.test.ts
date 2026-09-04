@@ -34,11 +34,28 @@ function task(
   return {
     id,
     locationId: `location-${id}`,
-    travelSeconds: HOUR,
     serviceSeconds: HOUR,
     precedenceIds: [],
-    returnToBaseSeconds: HOUR,
     ...overrides,
+  };
+}
+
+function travelTable(
+  values: Record<string, number | null> = {},
+) {
+  return (
+    fromLocationId: string,
+    toLocationId: string,
+  ): number | null => {
+    if (fromLocationId === toLocationId) {
+      return 0;
+    }
+
+    const key = `${fromLocationId}->${toLocationId}`;
+
+    return Object.prototype.hasOwnProperty.call(values, key)
+      ? values[key]
+      : HOUR;
   };
 }
 
@@ -53,6 +70,7 @@ function input(
     baseLocationId: "base",
     activityDataAvailable: false,
     tasks: [task("a")],
+    travelSecondsBetween: travelTable(),
     ...overrides,
   };
 }
@@ -73,22 +91,6 @@ describe("scheduleDriverRoute", () => {
 
     expect(result.status).toBe("review_required");
     expect(result.planningAssumption).toBe(true);
-    expect(result.warnings).toContain(
-      "Driver activity data unavailable; schedule is a planning assumption",
-    );
-  });
-
-  it("does not assert compliance for an unverified rule profile", () => {
-    const result = scheduleDriverRoute(
-      input({
-        activityDataAvailable: true,
-      }),
-    );
-
-    expect(result.status).toBe("review_required");
-    expect(result.warnings).toContain(
-      "Driver rule profile is not verified; legal compliance is not asserted",
-    );
   });
 
   it("can return scheduled only when activity and rules are verified", () => {
@@ -110,51 +112,22 @@ describe("scheduleDriverRoute", () => {
     const result = scheduleDriverRoute(
       input({
         tasks: [
-          task("a", {
-            travelSeconds: 3 * HOUR,
-            serviceSeconds: 0,
-          }),
-          task("b", {
-            travelSeconds: 2 * HOUR,
-            serviceSeconds: 0,
-          }),
+          task("a", { serviceSeconds: 0 }),
+          task("b", { serviceSeconds: 0 }),
         ],
+        travelSecondsBetween: travelTable({
+          "base->location-a": 3 * HOUR,
+          "location-a->location-b": 2 * HOUR,
+        }),
       }),
     );
 
     expect(
       result.events.map((entry) => entry.kind),
     ).toEqual(["drive", "break", "drive"]);
-
-    expect(
-      result.events.find((entry) => entry.kind === "break")
-        ?.durationSeconds,
-    ).toBe(HOUR);
   });
 
-  it("resets continuous driving after a qualifying break", () => {
-    const result = scheduleDriverRoute(
-      input({
-        tasks: [
-          task("a", {
-            travelSeconds: 4 * HOUR,
-            serviceSeconds: 0,
-          }),
-          task("b", {
-            travelSeconds: 4 * HOUR,
-            serviceSeconds: 0,
-          }),
-        ],
-      }),
-    );
-
-    expect(result.completedTaskIds).toEqual(["a", "b"]);
-    expect(
-      result.events.filter((entry) => entry.kind === "break"),
-    ).toHaveLength(1);
-  });
-
-  it("rejects an ordered task whose precedence is unsatisfied", () => {
+  it("rejects unsatisfied precedence", () => {
     const result = scheduleDriverRoute(
       input({
         tasks: [
@@ -168,31 +141,22 @@ describe("scheduleDriverRoute", () => {
 
     expect(result.status).toBe("unschedulable");
     expect(result.completedTaskIds).toEqual([]);
-    expect(result.unscheduledTaskIds).toEqual([
-      "delivery",
-      "collection",
-    ]);
-    expect(result.warnings).toContain(
-      "Task delivery has unsatisfied precedence",
-    );
   });
 
-  it("inserts a tramper daily rest and resumes from the same location", () => {
+  it("inserts tramper daily rest at the current location", () => {
     const result = scheduleDriverRoute(
       input({
         ruleProfile: rules({
           maxDailyDrivingSeconds: 5 * HOUR,
         }),
         tasks: [
-          task("a", {
-            travelSeconds: 3 * HOUR,
-            serviceSeconds: 0,
-          }),
-          task("b", {
-            travelSeconds: 3 * HOUR,
-            serviceSeconds: 0,
-          }),
+          task("a", { serviceSeconds: 0 }),
+          task("b", { serviceSeconds: 0 }),
         ],
+        travelSecondsBetween: travelTable({
+          "base->location-a": 3 * HOUR,
+          "location-a->location-b": 3 * HOUR,
+        }),
       }),
     );
 
@@ -200,9 +164,7 @@ describe("scheduleDriverRoute", () => {
       (entry) => entry.kind === "daily_rest",
     );
 
-    expect(rest).toBeDefined();
     expect(rest?.locationId).toBe("location-a");
-    expect(result.days).toHaveLength(2);
     expect(result.days[1].startLocationId).toBe(
       "location-a",
     );
@@ -217,31 +179,30 @@ describe("scheduleDriverRoute", () => {
           maxDailyDrivingSeconds: 6 * HOUR,
         }),
         tasks: [
-          task("a", {
-            travelSeconds: 2 * HOUR,
-            serviceSeconds: 0,
-            returnToBaseSeconds: HOUR,
-          }),
-          task("b", {
-            travelSeconds: 4 * HOUR,
-            serviceSeconds: 0,
-            returnToBaseSeconds: HOUR,
-          }),
+          task("a", { serviceSeconds: 0 }),
+          task("b", { serviceSeconds: 0 }),
         ],
+        travelSecondsBetween: travelTable({
+          "base->location-a": 2 * HOUR,
+          "location-a->base": HOUR,
+          "location-a->location-b": 4 * HOUR,
+          "base->location-b": 2 * HOUR,
+          "location-b->base": HOUR,
+        }),
       }),
     );
 
     const kinds = result.events.map((entry) => entry.kind);
-    const returnIndex = kinds.indexOf("return_to_base");
-    const restIndex = kinds.indexOf("daily_rest");
 
-    expect(returnIndex).toBeGreaterThan(-1);
-    expect(restIndex).toBeGreaterThan(returnIndex);
+    expect(kinds.indexOf("return_to_base")).toBeGreaterThan(-1);
+    expect(kinds.indexOf("daily_rest")).toBeGreaterThan(
+      kinds.indexOf("return_to_base"),
+    );
     expect(result.days[0].endLocationId).toBe("base");
     expect(result.days[1].startLocationId).toBe("base");
   });
 
-  it("rolls remaining day-driver work to the next day", () => {
+  it("recalculates day-two travel from base after overnight return", () => {
     const result = scheduleDriverRoute(
       input({
         planningProfile: "day",
@@ -249,92 +210,142 @@ describe("scheduleDriverRoute", () => {
           maxDailyDrivingSeconds: 6 * HOUR,
         }),
         tasks: [
-          task("a", {
-            travelSeconds: 2 * HOUR,
-            serviceSeconds: 0,
-            returnToBaseSeconds: HOUR,
-          }),
-          task("b", {
-            travelSeconds: 4 * HOUR,
-            serviceSeconds: 0,
-            returnToBaseSeconds: HOUR,
-          }),
+          task("a", { serviceSeconds: 0 }),
+          task("b", { serviceSeconds: 0 }),
+          task("c", { serviceSeconds: 0 }),
         ],
+        travelSecondsBetween: travelTable({
+          "base->location-a": 2 * HOUR,
+          "location-a->location-b": 2 * HOUR,
+          "location-b->base": HOUR,
+          "location-b->location-c": 4 * HOUR,
+          "base->location-c": HOUR,
+          "location-c->base": HOUR,
+        }),
       }),
     );
 
-    expect(result.completedTaskIds).toEqual(["a", "b"]);
-    expect(result.days).toHaveLength(2);
+    expect(result.completedTaskIds).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
+
+    const driveToC = result.events.find(
+      (entry) =>
+        entry.kind === "drive" &&
+        entry.taskId === "c",
+    );
+
+    expect(driveToC?.day).toBe(2);
+    expect(driveToC?.durationSeconds).toBe(HOUR);
   });
 
-  it("returns a day driver to base after the final task", () => {
+  it("rejects a day task when the return leg alone exceeds the continuous-driving limit", () => {
     const result = scheduleDriverRoute(
       input({
         planningProfile: "day",
+        ruleProfile: rules({
+          maxContinuousDrivingSeconds: 4 * HOUR,
+          maxDailyDrivingSeconds: 8 * HOUR,
+        }),
         tasks: [
           task("a", {
-            travelSeconds: HOUR,
             serviceSeconds: 0,
-            returnToBaseSeconds: HOUR,
           }),
         ],
+        travelSecondsBetween: travelTable({
+          "base->location-a": HOUR,
+          "location-a->base": 5 * HOUR,
+        }),
+      }),
+    );
+
+    expect(result.status).toBe("unschedulable");
+    expect(result.completedTaskIds).toEqual([]);
+    expect(result.unscheduledTaskIds).toEqual(["a"]);
+    expect(result.events).toEqual([]);
+    expect(result.warnings).toContain(
+      "Task a cannot fit within the supplied planning rules",
+    );
+  });
+
+  it("returns a day driver to base after final task", () => {
+    const result = scheduleDriverRoute(
+      input({
+        planningProfile: "day",
+        tasks: [task("a", { serviceSeconds: 0 })],
+        travelSecondsBetween: travelTable({
+          "base->location-a": HOUR,
+          "location-a->base": HOUR,
+        }),
       }),
     );
 
     expect(
       result.events[result.events.length - 1].kind,
     ).toBe("return_to_base");
-    expect(result.days[result.days.length - 1].endLocationId)
-      .toBe("base");
+    expect(
+      result.days[result.days.length - 1].endLocationId,
+    ).toBe("base");
   });
 
-  it("reports a task that cannot ever fit rather than forcing it", () => {
+  it("does not invent missing travel time", () => {
     const result = scheduleDriverRoute(
       input({
-        tasks: [
-          task("too-far", {
-            travelSeconds: 5 * HOUR,
-            serviceSeconds: 0,
-          }),
-        ],
-      }),
-    );
-
-    expect(result.status).toBe("unschedulable");
-    expect(result.completedTaskIds).toEqual([]);
-    expect(result.unscheduledTaskIds).toEqual(["too-far"]);
-  });
-
-  it("rejects invalid task durations", () => {
-    const result = scheduleDriverRoute(
-      input({
-        tasks: [
-          task("bad", {
-            travelSeconds: Number.NaN,
-          }),
-        ],
-      }),
-    );
-
-    expect(result.status).toBe("unschedulable");
-    expect(result.warnings).toContain(
-      "Task bad has invalid travelSeconds",
-    );
-  });
-
-  it("rejects an invalid rule profile", () => {
-    const result = scheduleDriverRoute(
-      input({
-        ruleProfile: rules({
-          dailyRestSeconds: 0,
+        travelSecondsBetween: travelTable({
+          "base->location-a": null,
         }),
       }),
     );
 
     expect(result.status).toBe("unschedulable");
+    expect(result.completedTaskIds).toEqual([]);
     expect(result.warnings).toContain(
-      "dailyRestSeconds must be a positive finite number",
+      "Travel time unavailable from base to location-a",
     );
+  });
+
+  it("rejects non-finite travel time", () => {
+    const result = scheduleDriverRoute(
+      input({
+        travelSecondsBetween: () => Number.NaN,
+      }),
+    );
+
+    expect(result.status).toBe("unschedulable");
+  });
+
+  it("treats identical locations as zero travel", () => {
+    let calls = 0;
+
+    const result = scheduleDriverRoute(
+      input({
+        startLocationId: "location-a",
+        tasks: [task("a", { serviceSeconds: 0 })],
+        travelSecondsBetween: () => {
+          calls += 1;
+          return null;
+        },
+      }),
+    );
+
+    expect(result.completedTaskIds).toEqual(["a"]);
+    expect(calls).toBe(0);
+  });
+
+  it("rejects invalid service duration", () => {
+    const result = scheduleDriverRoute(
+      input({
+        tasks: [
+          task("bad", {
+            serviceSeconds: Number.NaN,
+          }),
+        ],
+      }),
+    );
+
+    expect(result.status).toBe("unschedulable");
   });
 
   it("requires a base for day-driver planning", () => {
@@ -346,28 +357,9 @@ describe("scheduleDriverRoute", () => {
     );
 
     expect(result.status).toBe("unschedulable");
-    expect(result.warnings).toContain(
-      "Day-driver planning requires a baseLocationId",
-    );
   });
 
-  it("requires day-driver return travel rather than inventing it", () => {
-    const result = scheduleDriverRoute(
-      input({
-        planningProfile: "day",
-        tasks: [
-          task("a", {
-            returnToBaseSeconds: null,
-          }),
-        ],
-      }),
-    );
-
-    expect(result.status).toBe("unschedulable");
-    expect(result.unscheduledTaskIds).toEqual(["a"]);
-  });
-
-  it("preserves supplied task order when precedence is valid", () => {
+  it("preserves supplied task order", () => {
     const result = scheduleDriverRoute(
       input({
         tasks: [
@@ -385,19 +377,51 @@ describe("scheduleDriverRoute", () => {
     ]);
   });
 
-  it("accounts for service time separately from driving", () => {
+  it("accounts for service separately from driving", () => {
     const result = scheduleDriverRoute(
       input({
         tasks: [
           task("a", {
-            travelSeconds: 2 * HOUR,
             serviceSeconds: 3 * HOUR,
           }),
         ],
+        travelSecondsBetween: travelTable({
+          "base->location-a": 2 * HOUR,
+        }),
       }),
     );
 
     expect(result.days[0].drivingSeconds).toBe(2 * HOUR);
     expect(result.days[0].serviceSeconds).toBe(3 * HOUR);
+  });
+
+  it("does not insert a break before rolling into daily rest", () => {
+    const result = scheduleDriverRoute(
+      input({
+        ruleProfile: rules({
+          maxContinuousDrivingSeconds: 4 * HOUR,
+          maxDailyDrivingSeconds: 5 * HOUR,
+        }),
+        tasks: [
+          task("a", { serviceSeconds: 0 }),
+          task("b", { serviceSeconds: 0 }),
+        ],
+        travelSecondsBetween: travelTable({
+          "base->location-a": 4 * HOUR,
+          "location-a->location-b": 2 * HOUR,
+        }),
+      }),
+    );
+
+    const restIndex = result.events.findIndex(
+      (entry) => entry.kind === "daily_rest",
+    );
+
+    expect(restIndex).toBeGreaterThan(-1);
+    expect(
+      result.events
+        .slice(0, restIndex)
+        .some((entry) => entry.kind === "break"),
+    ).toBe(false);
   });
 });

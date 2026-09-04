@@ -8,11 +8,14 @@ export type DriverPlanningProfile = "day" | "tramper";
 export type DriverScheduleTask = {
   id: string;
   locationId: string;
-  travelSeconds: number;
   serviceSeconds: number;
   precedenceIds?: string[];
-  returnToBaseSeconds?: number | null;
 };
+
+export type DriverTravelResolver = (
+  fromLocationId: string,
+  toLocationId: string,
+) => number | null;
 
 export type DriverScheduleEventKind =
   | "drive"
@@ -56,6 +59,7 @@ export type DriverScheduleInput = {
   baseLocationId?: string | null;
   activityDataAvailable: boolean;
   tasks: DriverScheduleTask[];
+  travelSecondsBetween: DriverTravelResolver;
 };
 
 export type DriverScheduleResult = {
@@ -86,6 +90,11 @@ type State = {
   dailyDriving: number;
   dutyStart: number;
   currentDay: MutableDay;
+};
+
+type DrivePlan = {
+  driveSeconds: number;
+  breakRequired: boolean;
 };
 
 const MAX_SCHEDULE_DAYS = 366;
@@ -257,41 +266,102 @@ function dutyWouldExceed(
   );
 }
 
-function ensureDriveCanFit(
+function resolveTravel(
+  input: DriverScheduleInput,
+  fromLocationId: string,
+  toLocationId: string,
+): number | null {
+  if (fromLocationId === toLocationId) {
+    return 0;
+  }
+
+  let value: number | null;
+
+  try {
+    value = input.travelSecondsBetween(
+      fromLocationId,
+      toLocationId,
+    );
+  } catch {
+    return null;
+  }
+
+  return value !== null && isNonNegativeFinite(value)
+    ? value
+    : null;
+}
+
+function planDrive(
   state: State,
-  events: DriverScheduleEvent[],
   rules: DriverRuleProfile,
   driveSeconds: number,
-): boolean {
+  reserveAfterDriveSeconds = 0,
+): DrivePlan | null {
   if (
     driveSeconds > rules.maxContinuousDrivingSeconds ||
     driveSeconds > rules.maxDailyDrivingSeconds
   ) {
-    return false;
+    return null;
   }
+
+  const breakRequired = !durationFits(
+    state.continuousDriving,
+    driveSeconds,
+    rules.maxContinuousDrivingSeconds,
+  );
+
+  const breakSeconds = breakRequired
+    ? rules.qualifyingBreakSeconds
+    : 0;
 
   if (
     !durationFits(
-      state.continuousDriving,
-      driveSeconds,
-      rules.maxContinuousDrivingSeconds,
+      state.dailyDriving,
+      driveSeconds + reserveAfterDriveSeconds,
+      rules.maxDailyDrivingSeconds,
     )
   ) {
+    return null;
+  }
+
+  if (
+    dutyWouldExceed(
+      state,
+      rules,
+      breakSeconds +
+        driveSeconds +
+        reserveAfterDriveSeconds,
+    )
+  ) {
+    return null;
+  }
+
+  return {
+    driveSeconds,
+    breakRequired,
+  };
+}
+
+function executeDrivePlan(
+  state: State,
+  events: DriverScheduleEvent[],
+  rules: DriverRuleProfile,
+  plan: DrivePlan,
+  locationId: string,
+  taskId: string | null,
+  kind: "drive" | "return_to_base",
+): void {
+  if (plan.breakRequired) {
     addBreak(state, events, rules);
   }
 
-  return (
-    durationFits(
-      state.continuousDriving,
-      driveSeconds,
-      rules.maxContinuousDrivingSeconds,
-    ) &&
-    durationFits(
-      state.dailyDriving,
-      driveSeconds,
-      rules.maxDailyDrivingSeconds,
-    ) &&
-    !dutyWouldExceed(state, rules, driveSeconds)
+  addDrive(
+    state,
+    events,
+    plan.driveSeconds,
+    locationId,
+    taskId,
+    kind,
   );
 }
 
@@ -311,28 +381,14 @@ function validateTasks(
     }
 
     if (!task.locationId.trim()) {
-      errors.push(`Task ${task.id || "<unknown>"} requires a locationId`);
-    }
-
-    if (!isNonNegativeFinite(task.travelSeconds)) {
       errors.push(
-        `Task ${task.id || "<unknown>"} has invalid travelSeconds`,
+        `Task ${task.id || "<unknown>"} requires a locationId`,
       );
     }
 
     if (!isNonNegativeFinite(task.serviceSeconds)) {
       errors.push(
         `Task ${task.id || "<unknown>"} has invalid serviceSeconds`,
-      );
-    }
-
-    if (
-      task.returnToBaseSeconds !== undefined &&
-      task.returnToBaseSeconds !== null &&
-      !isNonNegativeFinite(task.returnToBaseSeconds)
-    ) {
-      errors.push(
-        `Task ${task.id || "<unknown>"} has invalid returnToBaseSeconds`,
       );
     }
   }
@@ -349,42 +405,13 @@ function taskPrecedenceSatisfied(
   );
 }
 
-function taskCanEverFit(
-  task: DriverScheduleTask,
-  input: DriverScheduleInput,
-): boolean {
-  const rules = input.ruleProfile;
-  const returnSeconds =
-    input.planningProfile === "day"
-      ? task.returnToBaseSeconds
-      : 0;
-
-  if (
-    task.travelSeconds > rules.maxContinuousDrivingSeconds ||
-    task.travelSeconds > rules.maxDailyDrivingSeconds
-  ) {
-    return false;
-  }
-
-  if (
-    input.planningProfile === "day" &&
-    (returnSeconds === null ||
-      returnSeconds === undefined ||
-      returnSeconds > rules.maxContinuousDrivingSeconds ||
-      task.travelSeconds + returnSeconds >
-        rules.maxDailyDrivingSeconds)
-  ) {
-    return false;
-  }
-
-  const dutySeconds =
-    task.travelSeconds +
-    task.serviceSeconds +
-    (returnSeconds ?? 0);
-
-  return (
-    rules.maxDutyWindowSeconds === null ||
-    dutySeconds <= rules.maxDutyWindowSeconds
+function failTravel(
+  warnings: string[],
+  fromLocationId: string,
+  toLocationId: string,
+): void {
+  warnings.push(
+    `Travel time unavailable from ${fromLocationId} to ${toLocationId}`,
   );
 }
 
@@ -435,6 +462,10 @@ export function scheduleDriverRoute(
     taskErrors.push(
       "startTimeSeconds must be a non-negative finite number",
     );
+  }
+
+  if (typeof input.travelSecondsBetween !== "function") {
+    taskErrors.push("travelSecondsBetween is required");
   }
 
   if (taskErrors.length > 0) {
@@ -504,67 +535,128 @@ export function scheduleDriverRoute(
       break;
     }
 
-    if (!taskCanEverFit(task, input)) {
+    const travelSeconds = resolveTravel(
+      input,
+      state.locationId,
+      task.locationId,
+    );
+
+    if (travelSeconds === null) {
+      failTravel(
+        warnings,
+        state.locationId,
+        task.locationId,
+      );
+      break;
+    }
+
+    let returnSeconds = 0;
+
+    if (input.planningProfile === "day") {
+      const resolvedReturn = resolveTravel(
+        input,
+        task.locationId,
+        input.baseLocationId!,
+      );
+
+      if (resolvedReturn === null) {
+        failTravel(
+          warnings,
+          task.locationId,
+          input.baseLocationId!,
+        );
+        break;
+      }
+
+      returnSeconds = resolvedReturn;
+    }
+
+    const taskDutySeconds =
+      travelSeconds +
+      task.serviceSeconds +
+      returnSeconds;
+
+    const taskCanFitFreshDay =
+      travelSeconds <=
+        input.ruleProfile.maxContinuousDrivingSeconds &&
+      returnSeconds <=
+        input.ruleProfile.maxContinuousDrivingSeconds &&
+      travelSeconds + returnSeconds <=
+        input.ruleProfile.maxDailyDrivingSeconds &&
+      (
+        input.ruleProfile.maxDutyWindowSeconds === null ||
+        taskDutySeconds <=
+          input.ruleProfile.maxDutyWindowSeconds
+      );
+
+    if (!taskCanFitFreshDay) {
       warnings.push(
         `Task ${task.id} cannot fit within the supplied planning rules`,
       );
       break;
     }
 
-    const returnSeconds =
-      input.planningProfile === "day"
-        ? task.returnToBaseSeconds ?? 0
-        : 0;
-
-    const reserveDriving =
-      task.travelSeconds + returnSeconds;
-
-    const reserveDuty =
-      task.travelSeconds +
-      task.serviceSeconds +
-      returnSeconds;
-
-    const dailyFits = durationFits(
-      state.dailyDriving,
-      reserveDriving,
-      input.ruleProfile.maxDailyDrivingSeconds,
-    );
-
-    const dutyFits = !dutyWouldExceed(
+    const drivePlan = planDrive(
       state,
       input.ruleProfile,
-      reserveDuty,
+      travelSeconds,
+      returnSeconds,
     );
 
-    if (!dailyFits || !dutyFits) {
+    const breakSeconds =
+      drivePlan?.breakRequired
+        ? input.ruleProfile.qualifyingBreakSeconds
+        : 0;
+
+    const taskFitsCurrentDuty =
+      drivePlan !== null &&
+      !dutyWouldExceed(
+        state,
+        input.ruleProfile,
+        breakSeconds +
+          travelSeconds +
+          task.serviceSeconds +
+          returnSeconds,
+      );
+
+    if (!taskFitsCurrentDuty) {
       if (
         input.planningProfile === "day" &&
         state.locationId !== input.baseLocationId
       ) {
-        const previous =
-          index > 0 ? input.tasks[index - 1] : null;
-        const back =
-          previous?.returnToBaseSeconds ?? null;
+        const back = resolveTravel(
+          input,
+          state.locationId,
+          input.baseLocationId!,
+        );
 
-        if (
-          back === null ||
-          !ensureDriveCanFit(
-            state,
-            events,
-            input.ruleProfile,
-            back,
-          )
-        ) {
+        if (back === null) {
+          failTravel(
+            warnings,
+            state.locationId,
+            input.baseLocationId!,
+          );
+          break;
+        }
+
+        const returnPlan = planDrive(
+          state,
+          input.ruleProfile,
+          back,
+        );
+
+        if (returnPlan === null) {
           warnings.push(
             "Day driver cannot return to base within the supplied planning rules",
           );
           break;
         }
 
-        addDrive(
+        executeDrivePlan(
           state,
           events,
-          back,
+          input.ruleProfile,
+          returnPlan,
           input.baseLocationId!,
           null,
           "return_to_base",
@@ -587,68 +679,11 @@ export function scheduleDriverRoute(
       continue;
     }
 
-    if (
-      !ensureDriveCanFit(
-        state,
-        events,
-        input.ruleProfile,
-        task.travelSeconds,
-      )
-    ) {
-      if (
-        input.planningProfile === "day" &&
-        state.locationId !== input.baseLocationId
-      ) {
-        const previous =
-          index > 0 ? input.tasks[index - 1] : null;
-        const back =
-          previous?.returnToBaseSeconds ?? null;
-
-        if (
-          back === null ||
-          !ensureDriveCanFit(
-            state,
-            events,
-            input.ruleProfile,
-            back,
-          )
-        ) {
-          warnings.push(
-            "Day driver cannot return to base within the supplied planning rules",
-          );
-          break;
-        }
-
-        addDrive(
-          state,
-          events,
-          back,
-          input.baseLocationId!,
-          null,
-          "return_to_base",
-        );
-      }
-
-      addDailyRest(
-        state,
-        events,
-        days,
-        input.ruleProfile,
-      );
-
-      if (input.planningProfile === "day") {
-        state.locationId = input.baseLocationId!;
-        state.currentDay.startLocationId =
-          input.baseLocationId!;
-      }
-
-      continue;
-    }
-
-    addDrive(
+    executeDrivePlan(
       state,
       events,
-      task.travelSeconds,
+      input.ruleProfile,
+      drivePlan,
       task.locationId,
       task.id,
       "drive",
@@ -680,30 +715,40 @@ export function scheduleDriverRoute(
     input.tasks.length > 0 &&
     state.locationId !== input.baseLocationId
   ) {
-    const lastTask = input.tasks[input.tasks.length - 1];
-    const back = lastTask.returnToBaseSeconds ?? null;
+    const back = resolveTravel(
+      input,
+      state.locationId,
+      input.baseLocationId!,
+    );
 
-    if (
-      back === null ||
-      !ensureDriveCanFit(
-        state,
-        events,
-        input.ruleProfile,
-        back,
-      )
-    ) {
-      warnings.push(
-        "Day driver cannot complete the final return to base within the supplied planning rules",
+    if (back === null) {
+      failTravel(
+        warnings,
+        state.locationId,
+        input.baseLocationId!,
       );
     } else {
-      addDrive(
+      const returnPlan = planDrive(
         state,
-        events,
+        input.ruleProfile,
         back,
-        input.baseLocationId!,
-        null,
-        "return_to_base",
       );
+
+      if (returnPlan === null) {
+        warnings.push(
+          "Day driver cannot complete the final return to base within the supplied planning rules",
+        );
+      } else {
+        executeDrivePlan(
+          state,
+          events,
+          input.ruleProfile,
+          returnPlan,
+          input.baseLocationId!,
+          null,
+          "return_to_base",
+        );
+      }
     }
   }
 
