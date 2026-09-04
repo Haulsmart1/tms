@@ -10,8 +10,8 @@ export const VAT_RATE = 20; // percent
 
 export type PriceTier = {
   /** Inclusive last vehicle position in this band; null means no ceiling. */
-  upToVehicle: number | null;
-  weeklyPence: number;
+  readonly upToVehicle: number | null;
+  readonly weeklyPence: number;
 };
 
 // GRADUATED bands, not all-units: the Nth vehicle is priced by the band N
@@ -40,7 +40,8 @@ export type ChargeAmounts = {
   /** Whole-fleet net for one week, before VAT. */
   weeklyNetPence: number;
   /** weeklyNetPence spread over the fleet, for "works out at GBP X" copy.
-      This is the BLENDED rate, always higher than the marginal band rate. */
+      This is the BLENDED rate, never lower than the marginal band rate.
+      Display only: it is rounded, so it does not multiply back to netPence. */
   blendedWeeklyPence: number;
   netPence: number;
   vatPence: number;
@@ -48,46 +49,13 @@ export type ChargeAmounts = {
   vatRate: number;
 };
 
-export function weeklyNetPence(vehicleCount: number): number {
-  assertVehicleCount(vehicleCount);
-  let total = 0;
-  let priced = 0;
-  for (const tier of PRICE_TIERS) {
-    if (priced >= vehicleCount) break;
-    const ceiling = tier.upToVehicle ?? vehicleCount;
-    const inBand = Math.min(vehicleCount, ceiling) - priced;
-    if (inBand <= 0) continue;
-    total += inBand * tier.weeklyPence;
-    priced += inBand;
-  }
-  return total;
-}
-
-export function computeChargeAmounts(vehicleCount: number): ChargeAmounts {
-  const weekly = weeklyNetPence(vehicleCount);
-  const netPence = weekly * WEEKS_PER_CYCLE;
-  // Every band rate is a whole number of pounds and the cycle is 4 weeks, so
-  // netPence is always a multiple of 100 and this round is a formality.
-  const vatPence = Math.round((netPence * VAT_RATE) / 100);
-  return {
-    vehicleCount,
-    weeklyNetPence: weekly,
-    blendedWeeklyPence:
-      vehicleCount === 0 ? 0 : Math.round(weekly / vehicleCount),
-    netPence,
-    vatPence,
-    grossPence: netPence + vatPence,
-    vatRate: VAT_RATE,
-  };
-}
-
 export type TierLine = {
   /** 1-based inclusive vehicle positions this line covers. */
   fromVehicle: number;
   toVehicle: number;
   vehiclesInBand: number;
   weeklyPence: number;
-  weeklyNetPence: number;
+  bandNetPence: number;
 };
 
 // One line per band the fleet actually reaches, so the UI can show real
@@ -107,11 +75,39 @@ export function tierBreakdown(vehicleCount: number): TierLine[] {
       toVehicle: priced + inBand,
       vehiclesInBand: inBand,
       weeklyPence: tier.weeklyPence,
-      weeklyNetPence: inBand * tier.weeklyPence,
+      bandNetPence: inBand * tier.weeklyPence,
     });
     priced += inBand;
   }
   return lines;
+}
+
+// Derived from tierBreakdown rather than walking PRICE_TIERS a second time:
+// if the two ever diverged, the invoice lines shown to a customer would stop
+// summing to the amount taken off their card.
+export function weeklyNetPence(vehicleCount: number): number {
+  return tierBreakdown(vehicleCount).reduce(
+    (total, line) => total + line.bandNetPence,
+    0
+  );
+}
+
+export function computeChargeAmounts(vehicleCount: number): ChargeAmounts {
+  const weekly = weeklyNetPence(vehicleCount);
+  const netPence = weekly * WEEKS_PER_CYCLE;
+  // Every band rate is a whole number of pounds and the cycle is 4 weeks, so
+  // netPence is always a multiple of 100 and this round is a formality.
+  const vatPence = Math.round((netPence * VAT_RATE) / 100);
+  return {
+    vehicleCount,
+    weeklyNetPence: weekly,
+    blendedWeeklyPence:
+      vehicleCount === 0 ? 0 : Math.round(weekly / vehicleCount),
+    netPence,
+    vatPence,
+    grossPence: netPence + vatPence,
+    vatRate: VAT_RATE,
+  };
 }
 
 // Display formatting for integer pence. No thousands grouping: this matches

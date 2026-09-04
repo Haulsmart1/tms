@@ -4,10 +4,19 @@ import {
   classifyPaymentResult,
   computeChargeAmounts,
   formatPence,
+  PRICE_TIERS,
   tierBreakdown,
   weeklyNetPence,
   WEEKS_PER_CYCLE,
 } from "./money";
+
+describe("pricing constants", () => {
+  // A deliberate tripwire on a commercially meaningful number: if this ever
+  // changes, someone has changed the billing cycle, not refactored the maths.
+  it("pins the cycle length at 4 weeks", () => {
+    expect(WEEKS_PER_CYCLE).toBe(4);
+  });
+});
 
 describe("weeklyNetPence", () => {
   // Graduated bands: the Nth vehicle is priced by the band N falls in, so the
@@ -39,10 +48,6 @@ describe("weeklyNetPence", () => {
 });
 
 describe("computeChargeAmounts", () => {
-  it("bills 4 weeks per cycle", () => {
-    expect(WEEKS_PER_CYCLE).toBe(4);
-  });
-
   // The figure the commercial model was specified in. If this ever changes,
   // someone has changed the price, not refactored the maths.
   it("charges GBP 48 gross for a single vehicle", () => {
@@ -94,17 +99,18 @@ describe("computeChargeAmounts", () => {
   // repriced and the bill drops when a vehicle is added.
   it("never bills less for more vehicles", () => {
     for (let n = 0; n < 200; n += 1) {
-      expect(computeChargeAmounts(n + 1).grossPence).toBeGreaterThan(
-        computeChargeAmounts(n).grossPence
-      );
+      expect(
+        computeChargeAmounts(n + 1).grossPence,
+        `n=${n}`
+      ).toBeGreaterThan(computeChargeAmounts(n).grossPence);
     }
   });
 
   it("lands VAT on an exact penny at every fleet size", () => {
     for (let n = 0; n <= 200; n += 1) {
       const { netPence, vatPence } = computeChargeAmounts(n);
-      expect(netPence % 100).toBe(0);
-      expect(vatPence * 5).toBe(netPence);
+      expect(netPence % 100, `n=${n}`).toBe(0);
+      expect(vatPence * 5, `n=${n}`).toBe(netPence);
     }
   });
 
@@ -129,7 +135,7 @@ describe("tierBreakdown", () => {
         toVehicle: 5,
         vehiclesInBand: 5,
         weeklyPence: 1000,
-        weeklyNetPence: 5000,
+        bandNetPence: 5000,
       },
     ]);
   });
@@ -141,14 +147,14 @@ describe("tierBreakdown", () => {
         toVehicle: 10,
         vehiclesInBand: 10,
         weeklyPence: 1000,
-        weeklyNetPence: 10000,
+        bandNetPence: 10000,
       },
       {
         fromVehicle: 11,
         toVehicle: 15,
         vehiclesInBand: 5,
         weeklyPence: 800,
-        weeklyNetPence: 4000,
+        bandNetPence: 4000,
       },
     ]);
   });
@@ -158,13 +164,17 @@ describe("tierBreakdown", () => {
     expect(tierBreakdown(75)).toHaveLength(4);
   });
 
-  it("sums to weeklyNetPence at every fleet size", () => {
-    for (let n = 0; n <= 200; n += 1) {
-      const summed = tierBreakdown(n).reduce(
-        (total, line) => total + line.weeklyNetPence,
-        0
-      );
-      expect(summed).toBe(weeklyNetPence(n));
+  it("has a well-formed band table", () => {
+    const ceilings = PRICE_TIERS.map((tier) => tier.upToVehicle);
+    expect(ceilings.filter((c) => c === null)).toHaveLength(1);
+    expect(ceilings[ceilings.length - 1]).toBeNull();
+    const bounded = ceilings.slice(0, -1) as number[];
+    for (let i = 1; i < bounded.length; i += 1) {
+      expect(bounded[i]).toBeGreaterThan(bounded[i - 1]);
+    }
+    for (const tier of PRICE_TIERS) {
+      expect(Number.isInteger(tier.weeklyPence)).toBe(true);
+      expect(tier.weeklyPence).toBeGreaterThan(0);
     }
   });
 
