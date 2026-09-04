@@ -6,7 +6,6 @@ function row(overrides: Partial<CompanyBillingRow> = {}): CompanyBillingRow {
   return {
     company_id: "company-1",
     status: "active",
-    anchor_day: 26,
     next_charge_on: "2026-08-26",
     retry_at: null,
     retry_count: 0,
@@ -71,16 +70,16 @@ describe("applyChargeOutcome", () => {
       })
     ).toEqual({
       status: "active",
-      next_charge_on: "2026-09-26",
+      next_charge_on: "2026-09-23",
       retry_at: null,
       retry_count: 0,
     });
   });
 
-  it("anchor-clamps the advanced date", () => {
+  it("advances a fixed 28 days regardless of month length", () => {
     expect(
       applyChargeOutcome({
-        row: row({ anchor_day: 31, next_charge_on: "2027-01-31" }),
+        row: row({ next_charge_on: "2027-01-31" }),
         cycleDate: "2027-01-31",
         attempt: 1,
         succeeded: true,
