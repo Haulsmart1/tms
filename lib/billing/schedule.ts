@@ -2,6 +2,8 @@
 // Europe/London calendar date, because billing days are business days in the
 // UK, not UTC days.
 
+import { WEEKS_PER_CYCLE } from "./money";
+
 export const MAX_ATTEMPTS = 4;
 
 export function londonDateISO(now: Date): string {
@@ -29,7 +31,12 @@ export function addDays(dateISO: string, days: number): string {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
 }
 
-export const CYCLE_DAYS = 28;
+// Derived, not a second literal: money.ts bills WEEKS_PER_CYCLE weeks per
+// charge, and this is how long that cycle actually lasts. Writing 28 here
+// instead would let someone lengthen the cycle in one file while the other
+// kept billing 4 weeks, with no test in either file failing and the amount
+// charged silently diverging from the period covered.
+export const CYCLE_DAYS = WEEKS_PER_CYCLE * 7;
 
 // Cycles are a fixed 4 weeks. There is no anchor day and no month-length
 // clamping: every cycle is the same length, the billing weekday never drifts,
