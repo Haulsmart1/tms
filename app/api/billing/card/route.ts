@@ -143,13 +143,11 @@ export async function POST(request: NextRequest) {
 
       if (recentOrphan) {
         const cycleDate = recentOrphan.cycle_date as string;
-        const anchorDay = Number(cycleDate.slice(8, 10));
-        const nextChargeOn = computeNextChargeOn(cycleDate, anchorDay);
+        const nextChargeOn = computeNextChargeOn(cycleDate);
         const { error: insertError } = await admin.from("company_billing").insert({
           company_id: companyId,
           ...cardFields,
           status: "active",
-          anchor_day: anchorDay,
           next_charge_on: nextChargeOn,
           retry_at: null,
           retry_count: 0,
@@ -191,7 +189,6 @@ export async function POST(request: NextRequest) {
       }
       const firstTimeAttempt = Number(attemptRows?.[0]?.attempt ?? 0) + 1;
 
-      const anchorDay = Number(today.slice(8, 10));
       let result;
       try {
         result = await runChargeCycle(admin, {
@@ -227,12 +224,11 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const nextChargeOn = computeNextChargeOn(today, anchorDay);
+      const nextChargeOn = computeNextChargeOn(today);
       const { error: insertError } = await admin.from("company_billing").insert({
         company_id: companyId,
         ...cardFields,
         status: "active",
-        anchor_day: anchorDay,
         next_charge_on: nextChargeOn,
         retry_at: null,
         retry_count: 0,
@@ -304,7 +300,6 @@ export async function POST(request: NextRequest) {
 
     const outcome = applyChargeOutcome({
       row: {
-        anchor_day: Number(existing.anchor_day),
         next_charge_on: existing.next_charge_on as string,
       },
       cycleDate,
