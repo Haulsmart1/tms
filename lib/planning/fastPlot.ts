@@ -1,5 +1,9 @@
 import type { LatLng, PlanJob } from "./types";
 import {
+  buildDriverTravelMatrix,
+  type DriverTravelMatrix,
+} from "./travelMatrix";
+import {
   isRoutable,
   jobWaypoints,
   sortedStops,
@@ -269,7 +273,6 @@ function finiteCost(value: unknown): number {
     : Number.POSITIVE_INFINITY;
 }
 
-const FAST_PLOT_MATRIX_CHUNK = 10;
 const FAST_PLOT_BEAM_WIDTH = 96;
 
 /**
@@ -283,7 +286,7 @@ const FAST_PLOT_CLUSTER_RADIUS_KM = 35;
 const FAST_PLOT_CLUSTER_REENTRY_SECONDS = 3 * 60 * 60;
 const FAST_PLOT_EARLY_CLUSTER_EXIT_SECONDS = 2 * 60 * 60;
 
-type FastPlotCostTable = Map<string, Map<string, number>>;
+type FastPlotCostTable = DriverTravelMatrix;
 type FastPlotClusterMap = Map<string, number>;
 
 type FastPlotSearchState = {
@@ -383,11 +386,8 @@ function tableCost(
   from: FastPlotVisit,
   to: FastPlotVisit
 ): number {
-  if (from.key === to.key) return 0;
-
-  return (
-    table.get(from.key)?.get(to.key) ??
-    Number.POSITIVE_INFINITY
+  return finiteCost(
+    table.travelSecondsBetween(from.key, to.key)
   );
 }
 
@@ -395,87 +395,13 @@ async function loadFastPlotCostTable(
   visits: FastPlotVisit[],
   loadCosts: FastPlotCostLoader
 ): Promise<FastPlotCostTable | null> {
-  const table: FastPlotCostTable = new Map();
-
-  for (const visit of visits) {
-    table.set(visit.key, new Map([[visit.key, 0]]));
-  }
-
-  for (
-    let originOffset = 0;
-    originOffset < visits.length;
-    originOffset += FAST_PLOT_MATRIX_CHUNK
-  ) {
-    const origins = visits.slice(
-      originOffset,
-      originOffset + FAST_PLOT_MATRIX_CHUNK
-    );
-
-    for (
-      let destinationOffset = 0;
-      destinationOffset < visits.length;
-      destinationOffset += FAST_PLOT_MATRIX_CHUNK
-    ) {
-      const destinations = visits.slice(
-        destinationOffset,
-        destinationOffset + FAST_PLOT_MATRIX_CHUNK
-      );
-
-      let matrix: number[][] | null;
-
-      try {
-        matrix = await loadCosts(
-          origins.map((visit) => visit.point),
-          destinations.map((visit) => visit.point)
-        );
-      } catch {
-        return null;
-      }
-
-      if (
-        !matrix ||
-        matrix.length !== origins.length
-      ) {
-        return null;
-      }
-
-      for (let originIndex = 0; originIndex < origins.length; originIndex++) {
-        const row = matrix[originIndex];
-
-        if (!row || row.length !== destinations.length) {
-          return null;
-        }
-
-        const origin = origins[originIndex];
-        const originCosts = table.get(origin.key);
-
-        if (!originCosts) return null;
-
-        for (
-          let destinationIndex = 0;
-          destinationIndex < destinations.length;
-          destinationIndex++
-        ) {
-          const destination = destinations[destinationIndex];
-
-          if (origin.key === destination.key) {
-            originCosts.set(destination.key, 0);
-            continue;
-          }
-
-          const cost = finiteCost(row[destinationIndex]);
-
-          if (!Number.isFinite(cost)) {
-            return null;
-          }
-
-          originCosts.set(destination.key, cost);
-        }
-      }
-    }
-  }
-
-  return table;
+  return buildDriverTravelMatrix(
+    visits.map((visit) => ({
+      id: visit.key,
+      point: visit.point,
+    })),
+    loadCosts,
+  );
 }
 
 function cloneProgress(
