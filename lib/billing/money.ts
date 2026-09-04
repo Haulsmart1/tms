@@ -1,26 +1,79 @@
 // Platform subscription pricing. All amounts are integer pence, never floats.
+//
+// The rate is per vehicle per WEEK, collected every 4 weeks (13 cycles a
+// year). Billing 4 weeks per calendar month would only collect 48 weeks of
+// revenue a year, which is why the cycle is a fixed 28 days rather than a
+// calendar month. See lib/billing/schedule.ts.
 
-export const NET_PENCE_PER_VEHICLE = 1000; // GBP 10.00
+export const WEEKS_PER_CYCLE = 4;
 export const VAT_RATE = 20; // percent
+
+export type PriceTier = {
+  /** Inclusive last vehicle position in this band; null means no ceiling. */
+  upToVehicle: number | null;
+  weeklyPence: number;
+};
+
+// GRADUATED bands, not all-units: the Nth vehicle is priced by the band N
+// falls in, so the first ten vehicles cost GBP 10 each no matter how large
+// the fleet grows. Do not "simplify" this into repricing the whole fleet at
+// the band rate: 19 vehicles at GBP 8 is GBP 152/week but 20 at GBP 6 is only
+// GBP 120/week, so the bill would FALL when a customer added a vehicle.
+// money.test.ts asserts monotonicity to keep that from being reintroduced.
+export const PRICE_TIERS: readonly PriceTier[] = [
+  { upToVehicle: 10, weeklyPence: 1000 },
+  { upToVehicle: 20, weeklyPence: 800 },
+  { upToVehicle: 50, weeklyPence: 600 },
+  { upToVehicle: null, weeklyPence: 500 },
+];
+
+function assertVehicleCount(vehicleCount: number): void {
+  if (!Number.isInteger(vehicleCount) || vehicleCount < 0) {
+    throw new Error(
+      `vehicleCount must be a non-negative integer, got ${vehicleCount}`
+    );
+  }
+}
 
 export type ChargeAmounts = {
   vehicleCount: number;
+  /** Whole-fleet net for one week, before VAT. */
+  weeklyNetPence: number;
+  /** weeklyNetPence spread over the fleet, for "works out at GBP X" copy.
+      This is the BLENDED rate, always higher than the marginal band rate. */
+  blendedWeeklyPence: number;
   netPence: number;
   vatPence: number;
   grossPence: number;
   vatRate: number;
 };
 
-export function computeChargeAmounts(vehicleCount: number): ChargeAmounts {
-  if (!Number.isInteger(vehicleCount) || vehicleCount < 0) {
-    throw new Error(
-      `vehicleCount must be a non-negative integer, got ${vehicleCount}`
-    );
+export function weeklyNetPence(vehicleCount: number): number {
+  assertVehicleCount(vehicleCount);
+  let total = 0;
+  let priced = 0;
+  for (const tier of PRICE_TIERS) {
+    if (priced >= vehicleCount) break;
+    const ceiling = tier.upToVehicle ?? vehicleCount;
+    const inBand = Math.min(vehicleCount, ceiling) - priced;
+    if (inBand <= 0) continue;
+    total += inBand * tier.weeklyPence;
+    priced += inBand;
   }
-  const netPence = vehicleCount * NET_PENCE_PER_VEHICLE;
+  return total;
+}
+
+export function computeChargeAmounts(vehicleCount: number): ChargeAmounts {
+  const weekly = weeklyNetPence(vehicleCount);
+  const netPence = weekly * WEEKS_PER_CYCLE;
+  // Every band rate is a whole number of pounds and the cycle is 4 weeks, so
+  // netPence is always a multiple of 100 and this round is a formality.
   const vatPence = Math.round((netPence * VAT_RATE) / 100);
   return {
     vehicleCount,
+    weeklyNetPence: weekly,
+    blendedWeeklyPence:
+      vehicleCount === 0 ? 0 : Math.round(weekly / vehicleCount),
     netPence,
     vatPence,
     grossPence: netPence + vatPence,
