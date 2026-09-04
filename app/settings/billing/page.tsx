@@ -99,8 +99,8 @@ function PageFrame({ children }: { children: ReactNode }) {
               Billing
             </h1>
             <p className="m-0 text-sm text-ink-3">
-              From £10 per active licensed vehicle per week, plus VAT, with
-              volume rates for larger fleets. Charged to your card every 4
+              £10 per active licensed vehicle per week, plus VAT, and less
+              per vehicle as the fleet grows. Charged to your card every 4
               weeks.
             </p>
           </header>

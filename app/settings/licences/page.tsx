@@ -272,9 +272,9 @@ export default function VehicleLicencesPage() {
                 <div className="text-kicker uppercase text-ink-3">Admin</div>
                 <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">Vehicle Licences</h1>
                 <p className="m-0 text-sm text-ink-3">
-                    Add and manage vehicle licences. Billing starts at £10 per
-                    licensed vehicle per week, with volume rates for larger
-                    fleets, charged every 4 weeks.
+                    Add and manage vehicle licences. £10 per licensed vehicle
+                    per week, less per vehicle on larger fleets, charged every 4
+                    weeks.
                 </p>
             </header>
 
@@ -297,14 +297,14 @@ export default function VehicleLicencesPage() {
                     label="4-Weekly Charge"
                     value={
                         showSkeleton ? (
-                            <Skeleton display="inline-block" w="7ch" h="1.25rem" />
+                            <Skeleton display="inline-block" w="10ch" h="1.25rem" />
                         ) : (
                             formatPence(amounts.grossPence)
                         )
                     }
-                    sub="inc VAT"
+                    sub="this tenant only, inc VAT"
                 />
-                <Stat label="Billing Rule" value="From £10" sub="per licensed vehicle per week" />
+                <Stat label="Billing Rule" value="£10" sub="per vehicle per week, less on larger fleets" />
             </div>
 
             <form

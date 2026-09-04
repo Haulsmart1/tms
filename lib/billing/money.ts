@@ -111,7 +111,9 @@ export function computeChargeAmounts(vehicleCount: number): ChargeAmounts {
 }
 
 // Display formatting for integer pence. No thousands grouping: this matches
-// the helper it replaces on /settings/billing, and platform charges are small.
+// the helper it replaces on /settings/billing. Cycle totals are larger than
+// they were under monthly flat pricing (a 60-vehicle fleet renders £1968.00),
+// so revisit this if the ungrouped figures start reading badly.
 export function formatPence(pence: number): string {
   return `£${(pence / 100).toFixed(2)}`;
 }

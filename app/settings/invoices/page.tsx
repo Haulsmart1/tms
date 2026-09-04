@@ -45,7 +45,7 @@ export default function BillingPage() {
                     <Stat
                         label="4-Weekly Charge"
                         value={formatPence(computeChargeAmounts(count).grossPence)}
-                        sub={`${count} licensed vehicles, inc VAT`}
+                        sub={`${count} licensed vehicles here, inc VAT`}
                     />
                 </div>
 

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../../../lib/supabase/browser";
 import { countBillableVehicles } from "../../../lib/billing/vehicleCount";
-import { computeChargeAmounts } from "../../../lib/billing/money";
+import { computeChargeAmounts, formatPence } from "../../../lib/billing/money";
 
 type Company = {
     id: string;
@@ -195,8 +195,8 @@ export default function SuperAdminBillingPage() {
                 <div style={{ color: "white", marginBottom: 24 }}>
                     <h1 style={{ marginTop: 0, fontSize: 38 }}>Super Admin Billing</h1>
                     <p style={{ opacity: 0.85, marginBottom: 0 }}>
-                        Billing starts at £10 per licensed vehicle per week, with
-                        volume rates for larger fleets, charged every 4 weeks.
+                        Billing is £10 per licensed vehicle per week, less per
+                        vehicle on larger fleets, charged every 4 weeks.
                     </p>
                 </div>
 
@@ -247,7 +247,7 @@ export default function SuperAdminBillingPage() {
                             </div>
 
                             <div style={{ opacity: 0.8, marginBottom: 12 }}>
-                                4-Weekly Charge: £{row.cycleChargePounds} (ex VAT)
+                                4-Weekly Charge: {formatPence(row.cycleChargePounds * 100)} (ex VAT)
                             </div>
 
                             {(() => {

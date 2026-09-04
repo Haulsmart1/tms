@@ -30,7 +30,8 @@ export default function PricingCard() {
             </span>
           </div>
           <p className="mt-1 text-sm text-ink-2">
-            Billed every 4 weeks · every module included · no setup fee
+            Billed every 4 weeks · excludes VAT · every module included · no
+            setup fee
           </p>
 
           <table className="mt-4 w-full border-collapse text-sm">

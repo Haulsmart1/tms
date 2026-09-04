@@ -10,7 +10,22 @@
 --
 --   1. Run STEP 1 BEFORE deploying the code.
 --   2. Deploy the code.
---   3. Run STEP 2 any time after.
+--   3. Soak, then run STEP 2. See the rollback warning below first.
+--
+-- ROLLBACK. STEP 2 is the point of no return, and the deploy itself is
+-- already one-way before that:
+--
+--   * After STEP 2, reverting the code breaks card capture outright. The old
+--     insert names anchor_day and the column is gone: Postgres 42703.
+--   * Between the deploy and STEP 2, reverting is ALSO unsafe. Rows written by
+--     the new code have anchor_day NULL, and the old applyChargeOutcome does
+--     Number(existing.anchor_day) on them, which is 0, which the old
+--     Math.min(anchorDay, daysInMonth(...)) turns into a date ending -00.
+--
+-- So: leave a soak window before STEP 2, and if you must revert after the
+-- deploy, backfill anchor_day first (for example
+-- update public.company_billing set anchor_day = extract(day from next_charge_on)
+-- where anchor_day is null) before restoring the old code.
 --
 -- Why: the new code stops writing anchor_day, and the column is NOT NULL with
 -- no default, so a new-code insert fails 23502 against the untouched schema.
