@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-TMS Wizzard: a multi-tenant Transport Management System (SaaS, GBP 10/vehicle/month) for UK/EU road-haulage
+TMS Wizzard: a multi-tenant Transport Management System (SaaS, from GBP 10/vehicle/week billed 4-weekly) for UK/EU road-haulage
 operators — jobs, proof of delivery, invoicing, fleet/driver/compliance tracking, telematics. Next.js 16 (App
 Router) + React 19 + TypeScript, backed by Supabase (Postgres, Auth, Storage), deployed on Vercel.
 
