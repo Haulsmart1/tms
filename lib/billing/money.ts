@@ -81,6 +81,39 @@ export function computeChargeAmounts(vehicleCount: number): ChargeAmounts {
   };
 }
 
+export type TierLine = {
+  /** 1-based inclusive vehicle positions this line covers. */
+  fromVehicle: number;
+  toVehicle: number;
+  vehiclesInBand: number;
+  weeklyPence: number;
+  weeklyNetPence: number;
+};
+
+// One line per band the fleet actually reaches, so the UI can show real
+// invoice lines ("Vehicles 11-15 x GBP 8.00/week") instead of a single
+// multiplication that is only correct for fleets inside the first band.
+export function tierBreakdown(vehicleCount: number): TierLine[] {
+  assertVehicleCount(vehicleCount);
+  const lines: TierLine[] = [];
+  let priced = 0;
+  for (const tier of PRICE_TIERS) {
+    if (priced >= vehicleCount) break;
+    const ceiling = tier.upToVehicle ?? vehicleCount;
+    const inBand = Math.min(vehicleCount, ceiling) - priced;
+    if (inBand <= 0) continue;
+    lines.push({
+      fromVehicle: priced + 1,
+      toVehicle: priced + inBand,
+      vehiclesInBand: inBand,
+      weeklyPence: tier.weeklyPence,
+      weeklyNetPence: inBand * tier.weeklyPence,
+    });
+    priced += inBand;
+  }
+  return lines;
+}
+
 // Display formatting for integer pence. No thousands grouping: this matches
 // the helper it replaces on /settings/billing, and platform charges are small.
 export function formatPence(pence: number): string {

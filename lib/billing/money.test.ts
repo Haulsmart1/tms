@@ -4,6 +4,7 @@ import {
   classifyPaymentResult,
   computeChargeAmounts,
   formatPence,
+  tierBreakdown,
   weeklyNetPence,
   WEEKS_PER_CYCLE,
 } from "./money";
@@ -113,6 +114,72 @@ describe("computeChargeAmounts", () => {
 
   it("rejects fractional counts", () => {
     expect(() => computeChargeAmounts(2.5)).toThrow();
+  });
+});
+
+describe("tierBreakdown", () => {
+  it("returns no lines for an empty fleet", () => {
+    expect(tierBreakdown(0)).toEqual([]);
+  });
+
+  it("returns one line for a fleet inside the first band", () => {
+    expect(tierBreakdown(5)).toEqual([
+      {
+        fromVehicle: 1,
+        toVehicle: 5,
+        vehiclesInBand: 5,
+        weeklyPence: 1000,
+        weeklyNetPence: 5000,
+      },
+    ]);
+  });
+
+  it("splits a fleet across the bands it actually reaches", () => {
+    expect(tierBreakdown(15)).toEqual([
+      {
+        fromVehicle: 1,
+        toVehicle: 10,
+        vehiclesInBand: 10,
+        weeklyPence: 1000,
+        weeklyNetPence: 10000,
+      },
+      {
+        fromVehicle: 11,
+        toVehicle: 15,
+        vehiclesInBand: 5,
+        weeklyPence: 800,
+        weeklyNetPence: 4000,
+      },
+    ]);
+  });
+
+  it("emits one line per reached band and no empty trailing bands", () => {
+    expect(tierBreakdown(35)).toHaveLength(3);
+    expect(tierBreakdown(75)).toHaveLength(4);
+  });
+
+  it("sums to weeklyNetPence at every fleet size", () => {
+    for (let n = 0; n <= 200; n += 1) {
+      const summed = tierBreakdown(n).reduce(
+        (total, line) => total + line.weeklyNetPence,
+        0
+      );
+      expect(summed).toBe(weeklyNetPence(n));
+    }
+  });
+
+  it("covers every vehicle exactly once", () => {
+    const lines = tierBreakdown(75);
+    expect(lines[0].fromVehicle).toBe(1);
+    expect(lines[lines.length - 1].toVehicle).toBe(75);
+    for (let i = 1; i < lines.length; i += 1) {
+      expect(lines[i].fromVehicle).toBe(lines[i - 1].toVehicle + 1);
+    }
+  });
+
+  it("rejects invalid counts like the other pricing functions", () => {
+    expect(() => tierBreakdown(-1)).toThrow();
+    expect(() => tierBreakdown(2.5)).toThrow();
   });
 });
 
