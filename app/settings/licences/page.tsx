@@ -10,9 +10,8 @@ import Skeleton from "../../../components/Skeleton";
 import Stat from "../../../components/Stat";
 import LicenceCard from "./LicenceCard";
 import { shouldShowSkeleton } from "../../../lib/loading/skeletonVisibility";
+import { computeChargeAmounts, formatPence } from "../../../lib/billing/money";
 import type { LicenceVehicle, VehicleLicence } from "./types";
-
-const PRICE_PER_LICENSED_VEHICLE = 10;
 
 /* Three, because these cards are full width in a single-column grid and are
    taller than a vehicle card. A guess about data that has not arrived. */
@@ -242,7 +241,7 @@ export default function VehicleLicencesPage() {
         return uniqueVehicleIds.size;
     }, [licences]);
 
-    const monthlyTotal = billableVehicleCount * PRICE_PER_LICENSED_VEHICLE;
+    const amounts = computeChargeAmounts(billableVehicleCount);
 
     /* ONE flag, because the two containers it drives - the Stat row and the
        card grid - both read `licences` and nothing else, which makes them one
@@ -273,7 +272,9 @@ export default function VehicleLicencesPage() {
                 <div className="text-kicker uppercase text-ink-3">Admin</div>
                 <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">Vehicle Licences</h1>
                 <p className="m-0 text-sm text-ink-3">
-                    Add and manage vehicle licences. Billing is £10 per licensed vehicle per month.
+                    Add and manage vehicle licences. Billing starts at £10 per
+                    licensed vehicle per week, with volume rates for larger
+                    fleets, charged every 4 weeks.
                 </p>
             </header>
 
@@ -293,16 +294,17 @@ export default function VehicleLicencesPage() {
                     }
                 />
                 <Stat
-                    label="Monthly Charge"
+                    label="4-Weekly Charge"
                     value={
                         showSkeleton ? (
-                            <Skeleton display="inline-block" w="5ch" h="1.25rem" />
+                            <Skeleton display="inline-block" w="7ch" h="1.25rem" />
                         ) : (
-                            `£${monthlyTotal}`
+                            formatPence(amounts.grossPence)
                         )
                     }
+                    sub="inc VAT"
                 />
-                <Stat label="Billing Rule" value="£10" sub="per licensed vehicle" />
+                <Stat label="Billing Rule" value="From £10" sub="per licensed vehicle per week" />
             </div>
 
             <form
