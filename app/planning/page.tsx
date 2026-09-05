@@ -23,6 +23,12 @@ import {
   jobRepresentativePoint,
 } from "../../lib/planning/waypoints";
 import { optimizeFastPlotOrder } from "../../lib/planning/fastPlot";
+import {
+  MAX_PLANNING_ROUTE_JOBS,
+  mergeRouteResults,
+  splitRoutePoints,
+  wouldExceedPlanningRouteJobLimit,
+} from "../../lib/planning/routeChunks";
 import { bestOrder } from "../../lib/planning/optimize";
 import { sanitizeTravelSeconds } from "../../lib/planning/matrix";
 import type { PlanJob, RouteResult } from "../../lib/planning/types";
@@ -548,6 +554,19 @@ export default function PlanningPage() {
 
   useEffect(() => {
     if (!selectedVehicleId || !geocodeSettled) return;
+
+    if (selectedLaneJobs.length > MAX_PLANNING_ROUTE_JOBS) {
+      setRoutes((prev) => {
+        const next = { ...prev };
+        delete next[selectedVehicleId];
+        return next;
+      });
+      setMapNotice(
+        `Planning routes support up to ${MAX_PLANNING_ROUTE_JOBS} jobs per vehicle.`
+      );
+      return;
+    }
+
     const routableJobs = selectedLaneJobs.filter(isRoutable);
     const physicalPointCount = new Set(
       routableJobs.flatMap((job) =>
@@ -628,27 +647,43 @@ export default function PlanningPage() {
         );
         if (cancelled) return;
 
-        if (routePoints.length < 2 || routePoints.length > 50) {
-          setMapNotice(
-            routePoints.length > 50
-              ? "Fast Plot supports up to 50 unique mappable stops."
-              : "Not enough mappable stops to draw a route."
-          );
+        if (routePoints.length < 2) {
+          setMapNotice("Not enough mappable stops to draw a route.");
           return;
         }
 
-        const response = await fetch("/api/tomtom/route", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ points: routePoints }),
-        });
-        if (cancelled) return;
-        if (!response.ok) {
-          const body = await response.json().catch(() => null);
-          setMapNotice(body?.error ?? "Route calculation failed.");
+        const chunks = splitRoutePoints(routePoints);
+        const chunkResults: RouteResult[] = [];
+
+        for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+          const response = await fetch("/api/tomtom/route", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ points: chunks[chunkIndex] }),
+          });
+
+          if (cancelled) return;
+
+          if (!response.ok) {
+            const body = await response.json().catch(() => null);
+            setMapNotice(
+              body?.error ??
+                `Route segment ${chunkIndex + 1} of ${chunks.length} failed.`
+            );
+            return;
+          }
+
+          const chunkRoute: RouteResult = await response.json();
+          chunkResults.push(chunkRoute);
+        }
+
+        const route = mergeRouteResults(chunkResults);
+
+        if (!route) {
+          setMapNotice("Route calculation failed.");
           return;
         }
-        const route: RouteResult = await response.json();
+
         setRoutes((prev) => ({ ...prev, [selectedVehicleId]: route }));
         setMapNotice(null);
       } catch {
@@ -662,6 +697,20 @@ export default function PlanningPage() {
   function moveJob(jobId: string, vehicleId: string | null, beforeJobId: string | null) {
     const job = jobById.get(jobId);
     if (!job || job.subcontractor_id) return;
+
+    if (vehicleId) {
+      const targetLane = laneOrders[vehicleId] ?? [];
+
+      if (
+        !targetLane.includes(jobId) &&
+        wouldExceedPlanningRouteJobLimit(targetLane, [jobId])
+      ) {
+        setMessage(
+          `A vehicle route can contain up to ${MAX_PLANNING_ROUTE_JOBS} jobs.`
+        );
+        return;
+      }
+    }
 
     setSelectedUnassignedJobIds((prev) => {
       if (!prev.has(jobId)) return prev;
@@ -980,6 +1029,15 @@ export default function PlanningPage() {
 
     if (selectedIds.length === 0) {
       setMessage("Check at least one unassigned job first.");
+      return;
+    }
+
+    const targetLane = laneOrders[vehicleId] ?? [];
+
+    if (wouldExceedPlanningRouteJobLimit(targetLane, selectedIds)) {
+      setMessage(
+        `A vehicle route can contain up to ${MAX_PLANNING_ROUTE_JOBS} jobs.`
+      );
       return;
     }
 
