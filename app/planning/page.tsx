@@ -18,19 +18,18 @@ import {
 import { formatDistance, formatDuration } from "../../lib/planning/format";
 import {
   isRoutable,
-  jobEntryPoint,
-  jobExitPoint,
   jobRepresentativePoint,
 } from "../../lib/planning/waypoints";
-import { optimizeFastPlotOrder } from "../../lib/planning/fastPlot";
+import {
+  jobsInFastPlotOrder,
+  optimizeFastPlotOrder,
+} from "../../lib/planning/fastPlot";
 import {
   MAX_PLANNING_ROUTE_JOBS,
   mergeRouteResults,
   splitRoutePoints,
   wouldExceedPlanningRouteJobLimit,
 } from "../../lib/planning/routeChunks";
-import { bestOrder } from "../../lib/planning/optimize";
-import { sanitizeTravelSeconds } from "../../lib/planning/matrix";
 import type { PlanJob, RouteResult } from "../../lib/planning/types";
 import { createSupabasePositionSource } from "../../lib/tracking/supabasePositions";
 import type { PositionReading } from "../../lib/tracking/position";
@@ -72,6 +71,56 @@ type Driver = PlanningComplianceDriver;
    larger with a 400 (it does not truncate), so the client chunks. */
 const GEOCODE_BATCH = 100;
 const POSITION_POLL_MS = 30_000;
+
+async function loadFastPlotCosts(
+  origins: { lat: number; lng: number }[],
+  destinations: { lat: number; lng: number }[]
+): Promise<number[][] | null> {
+  if (
+    origins.length < 1 ||
+    destinations.length < 1 ||
+    origins.length * destinations.length > 100
+  ) {
+    return null;
+  }
+
+  try {
+    const response = await fetch("/api/tomtom/matrix", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ origins, destinations }),
+    });
+
+    if (!response.ok) return null;
+
+    const body = await response.json();
+    const raw = body?.travelSeconds;
+
+    if (
+      !Array.isArray(raw) ||
+      raw.length !== origins.length ||
+      raw.some(
+        (row: unknown) =>
+          !Array.isArray(row) ||
+          row.length !== destinations.length
+      )
+    ) {
+      return null;
+    }
+
+    return raw.map((row: unknown[]) =>
+      row.map((value) =>
+        typeof value === "number" &&
+        Number.isFinite(value) &&
+        value >= 0
+          ? value
+          : Number.POSITIVE_INFINITY
+      )
+    );
+  } catch {
+    return null;
+  }
+}
 
 export default function PlanningPage() {
   const router = useRouter();
@@ -591,56 +640,6 @@ export default function PlanningPage() {
     let cancelled = false;
     (async () => {
       try {
-        async function loadFastPlotCosts(
-          origins: { lat: number; lng: number }[],
-          destinations: { lat: number; lng: number }[]
-        ): Promise<number[][] | null> {
-          if (
-            origins.length < 1 ||
-            destinations.length < 1 ||
-            origins.length * destinations.length > 100
-          ) {
-            return null;
-          }
-
-          try {
-            const matrixResponse = await fetch("/api/tomtom/matrix", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ origins, destinations }),
-            });
-
-            if (!matrixResponse.ok) return null;
-
-            const body = await matrixResponse.json();
-            const raw = body?.travelSeconds;
-
-            if (
-              !Array.isArray(raw) ||
-              raw.length !== origins.length ||
-              raw.some(
-                (row: unknown) =>
-                  !Array.isArray(row) ||
-                  row.length !== destinations.length
-              )
-            ) {
-              return null;
-            }
-
-            return raw.map((row: unknown[]) =>
-              row.map((value) =>
-                typeof value === "number" &&
-                !Number.isNaN(value) &&
-                value >= 0
-                  ? value
-                  : Number.POSITIVE_INFINITY
-              )
-            );
-          } catch {
-            return null;
-          }
-        }
-
         const routePoints = await optimizeFastPlotOrder(
           selectedLaneJobs,
           loadFastPlotCosts
@@ -1145,66 +1144,51 @@ export default function PlanningPage() {
 
   async function optimize() {
     if (optimizing || !selectedVehicleId) return;
+
     const routable = selectedLaneJobs.filter(isRoutable);
+
     if (routable.length < 2) {
-      setMessage("Optimize needs at least two mappable jobs in the selected lane.");
+      setMessage(
+        "Optimize needs at least two mappable jobs in the selected lane."
+      );
       return;
     }
+
     setOptimizing(true);
     setMessage("");
+
     try {
-      const origins = routable.flatMap((job) => {
-        const point = jobExitPoint(job);
-        return point ? [point] : [];
-      });
-      const destinations = routable.flatMap((job) => {
-        const point = jobEntryPoint(job);
-        return point ? [point] : [];
-      });
+      const route = await optimizeFastPlotOrder(
+        selectedLaneJobs,
+        loadFastPlotCosts
+      );
+      const reordered = jobsInFastPlotOrder(
+        selectedLaneJobs,
+        route
+      );
+
+      const expectedIds = new Set(
+        selectedLaneJobs.map((job) => job.id)
+      );
+      const reorderedIds = new Set(reordered);
 
       if (
-        origins.length !== routable.length ||
-        destinations.length !== routable.length
-      ) {
-        setMessage("Smart Optimize failed: one or more jobs has no route entry or exit.");
-        return;
-      }
-
-      const response = await fetch("/api/tomtom/matrix", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ origins, destinations }),
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        setMessage(body?.error ?? "Optimize failed.");
-        return;
-      }
-      const matrix = sanitizeTravelSeconds((await response.json())?.travelSeconds, routable.length);
-      if (!matrix) { setMessage("Optimize failed."); return; }
-      const order = bestOrder(matrix);
-      // The optimizer must never delete, duplicate or invent jobs.
-      const uniqueIndexes = new Set(order);
-      if (
-        order.length !== routable.length ||
-        uniqueIndexes.size !== routable.length ||
-        order.some(
-          (index) =>
-            !Number.isInteger(index) ||
-            index < 0 ||
-            index >= routable.length
-        )
+        reordered.length !== selectedLaneJobs.length ||
+        reorderedIds.size !== expectedIds.size ||
+        reordered.some((id) => !expectedIds.has(id))
       ) {
         setMessage("Smart Optimize failed.");
         return;
       }
-      const reordered = order
-        .map((i) => routable[i].id)
-        .concat(selectedLaneJobs.filter((j) => !isRoutable(j)).map((j) => j.id));
-      setLaneOrders((prev) => ({ ...prev, [selectedVehicleId]: reordered }));
+
+      setLaneOrders((prev) => ({
+        ...prev,
+        [selectedVehicleId]: reordered,
+      }));
       setMessage(
         "Smart Optimize updated the proposed drop order. Review it, then Save plan to persist it."
       );
+
       // The lane's order changed, so its cached route describes the old one.
       setRoutes((prev) => {
         const next = { ...prev };

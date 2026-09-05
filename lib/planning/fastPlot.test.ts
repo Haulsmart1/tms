@@ -3,6 +3,7 @@ import {
   buildFastPlotVisits,
   fallbackFastPlotOrder,
   hasPhysicalPrecedenceCycle,
+  jobsInFastPlotOrder,
   optimizeFastPlotOrder,
   requiresPhysicalRevisit,
 } from "./fastPlot";
@@ -571,4 +572,302 @@ describe("Fast Plot V5", () => {
     });
   });
 
+
+  it("uses bounded sparse TomTom requests for 70 physical visits", async () => {
+    const jobs = Array.from({ length: 35 }, (_, index) =>
+      job(`large-${index}`, [
+        stop(
+          `large-c-${index}`,
+          1,
+          "collection",
+          50 + index / 100,
+          -4
+        ),
+        stop(
+          `large-d-${index}`,
+          2,
+          "delivery",
+          51 + index / 100,
+          -3
+        ),
+      ])
+    );
+
+    const loader = vi.fn(async (
+      origins: LatLng[],
+      destinations: LatLng[]
+    ) => origins.map((origin) =>
+      destinations.map((destination) =>
+        secondsBetween(origin, destination)
+      )
+    ));
+
+    const route = await optimizeFastPlotOrder(jobs, loader);
+
+    expect(route).toHaveLength(70);
+    expect(loader.mock.calls.length).toBeLessThanOrEqual(32);
+
+    for (const [origins, destinations] of loader.mock.calls) {
+      expect(origins.length).toBeGreaterThan(0);
+      expect(destinations.length).toBeGreaterThan(0);
+      expect(origins.length * destinations.length).toBeLessThanOrEqual(100);
+    }
+
+    const positions = new Map(
+      route.map((point, index) => [`${point.lat},${point.lng}`, index])
+    );
+
+    for (let index = 0; index < 35; index++) {
+      const collectionIndex = positions.get(
+        `${50 + index / 100},-4`
+      );
+      const deliveryIndex = positions.get(
+        `${51 + index / 100},-3`
+      );
+
+      expect(collectionIndex).toBeDefined();
+      expect(deliveryIndex).toBeDefined();
+
+      if (
+        collectionIndex === undefined ||
+        deliveryIndex === undefined
+      ) {
+        throw new Error("Expected collection and delivery in sparse route.");
+      }
+
+      expect(collectionIndex).toBeLessThan(deliveryIndex);
+    }
+  });
+
+  it("does not construct an all-to-all matrix for 350 two-stop jobs", async () => {
+    const jobs = Array.from({ length: 350 }, (_, index) =>
+      job(`courier-${index}`, [
+        stop(
+          `courier-c-${index}`,
+          1,
+          "collection",
+          50 + index / 10000,
+          -4
+        ),
+        stop(
+          `courier-d-${index}`,
+          2,
+          "delivery",
+          52 + index / 10000,
+          -2
+        ),
+      ])
+    );
+
+    let requestedCells = 0;
+
+    const loader = vi.fn(async (
+      origins: LatLng[],
+      destinations: LatLng[]
+    ) => {
+      requestedCells += origins.length * destinations.length;
+
+      return origins.map((origin) =>
+        destinations.map((destination) =>
+          secondsBetween(origin, destination)
+        )
+      );
+    });
+
+    const route = await optimizeFastPlotOrder(jobs, loader);
+
+    expect(route).toHaveLength(700);
+    expect(loader.mock.calls.length).toBeLessThanOrEqual(32);
+    expect(requestedCells).toBeLessThanOrEqual(4000);
+    expect(requestedCells).toBeLessThan(700 * 700);
+
+    for (const [origins, destinations] of loader.mock.calls) {
+      expect(origins.length * destinations.length).toBeLessThanOrEqual(100);
+    }
+
+    const positions = new Map(
+      route.map((point, index) => [`${point.lat},${point.lng}`, index])
+    );
+
+    for (let index = 0; index < 350; index++) {
+      const collectionIndex = positions.get(
+        `${50 + index / 10000},-4`
+      );
+      const deliveryIndex = positions.get(
+        `${52 + index / 10000},-2`
+      );
+
+      expect(collectionIndex).toBeDefined();
+      expect(deliveryIndex).toBeDefined();
+
+      if (
+        collectionIndex === undefined ||
+        deliveryIndex === undefined
+      ) {
+        throw new Error("Expected collection and delivery in sparse route.");
+      }
+
+      expect(collectionIndex).toBeLessThan(deliveryIndex);
+    }
+  });
+
+  it("stops sparse matrix loading after the first failed request", async () => {
+    const jobs = Array.from({ length: 31 }, (_, index) =>
+      job(`failure-${index}`, [
+        stop(
+          `failure-c-${index}`,
+          1,
+          "collection",
+          50 + index / 100,
+          -5
+        ),
+        stop(
+          `failure-d-${index}`,
+          2,
+          "delivery",
+          53 + index / 100,
+          -2
+        ),
+      ])
+    );
+
+    const loader = vi.fn(async () => null);
+
+    const first = await optimizeFastPlotOrder(jobs, loader);
+    const second = await optimizeFastPlotOrder(jobs, loader);
+
+    expect(first).toHaveLength(62);
+    expect(second).toEqual(first);
+
+    // One failed load per independent optimization; no retry storm.
+    expect(loader).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps sparse routing deterministic after the TomTom budget is exhausted", async () => {
+    const jobs = Array.from({ length: 40 }, (_, index) =>
+      job(`deterministic-${index}`, [
+        stop(
+          `deterministic-c-${index}`,
+          1,
+          "collection",
+          54 + index / 1000,
+          -4
+        ),
+        stop(
+          `deterministic-d-${index}`,
+          2,
+          "delivery",
+          55 + index / 1000,
+          -3
+        ),
+      ])
+    );
+
+    const loader = vi.fn(async (
+      origins: LatLng[],
+      destinations: LatLng[]
+    ) => origins.map((origin) =>
+      destinations.map((destination) =>
+        secondsBetween(origin, destination)
+      )
+    ));
+
+    const first = await optimizeFastPlotOrder(jobs, loader);
+    loader.mockClear();
+    const second = await optimizeFastPlotOrder(jobs, loader);
+
+    expect(second).toEqual(first);
+    expect(loader.mock.calls.length).toBeLessThanOrEqual(32);
+  });
+
+  it("maps a physical Fast Plot route back to stable job order", () => {
+    const jobs = [
+      job("a", [
+        stop("a-c", 1, "collection", 10, 0),
+        stop("a-d", 2, "delivery", 20, 0),
+      ]),
+      job("b", [
+        stop("b-c", 1, "collection", 30, 0),
+        stop("b-d", 2, "delivery", 40, 0),
+      ]),
+    ];
+
+    expect(
+      jobsInFastPlotOrder(jobs, [
+        { lat: 30, lng: 0 },
+        { lat: 10, lng: 0 },
+        { lat: 20, lng: 0 },
+        { lat: 40, lng: 0 },
+      ])
+    ).toEqual(["b", "a"]);
+  });
+
+  it("keeps lane order when jobs share the same first physical visit", () => {
+    const jobs = [
+      job("first", [
+        stop("first-c", 1, "collection", 10, 0),
+        stop("first-d", 2, "delivery", 20, 0),
+      ]),
+      job("second", [
+        stop("second-c", 1, "collection", 10, 0),
+        stop("second-d", 2, "delivery", 30, 0),
+      ]),
+    ];
+
+    expect(
+      jobsInFastPlotOrder(jobs, [
+        { lat: 10, lng: 0 },
+        { lat: 30, lng: 0 },
+        { lat: 20, lng: 0 },
+      ])
+    ).toEqual(["first", "second"]);
+  });
+
+  it("keeps unmatched routable jobs deterministically instead of deleting them", () => {
+    const jobs = [
+      job("matched", [
+        stop("matched-c", 1, "collection", 10, 0),
+        stop("matched-d", 2, "delivery", 20, 0),
+      ]),
+      job("unmatched", [
+        stop("unmatched-c", 1, "collection", 30, 0),
+        stop("unmatched-d", 2, "delivery", 40, 0),
+      ]),
+    ];
+
+    expect(
+      jobsInFastPlotOrder(jobs, [
+        { lat: 10, lng: 0 },
+        { lat: 20, lng: 0 },
+      ])
+    ).toEqual(["matched", "unmatched"]);
+  });
+
+  it("preserves every lane job exactly once when converting Fast Plot order", () => {
+    const unroutable = job("no-map", []);
+    const jobs = [
+      job("a", [
+        stop("a-c", 1, "collection", 1, 0),
+        stop("a-d", 2, "delivery", 4, 0),
+      ]),
+      unroutable,
+      job("b", [
+        stop("b-c", 1, "collection", 2, 0),
+        stop("b-d", 2, "delivery", 3, 0),
+      ]),
+    ];
+
+    const order = jobsInFastPlotOrder(jobs, [
+      { lat: 2, lng: 0 },
+      { lat: 3, lng: 0 },
+      { lat: 1, lng: 0 },
+      { lat: 4, lng: 0 },
+    ]);
+
+    expect(order).toEqual(["b", "a", "no-map"]);
+    expect(new Set(order)).toEqual(
+      new Set(jobs.map((item) => item.id))
+    );
+    expect(order).toHaveLength(jobs.length);
+  });
 });
