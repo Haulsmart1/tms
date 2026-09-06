@@ -5,6 +5,7 @@ import {
   hasPhysicalPrecedenceCycle,
   jobsInFastPlotOrder,
   optimizeFastPlotOrder,
+  optimizeFastPlotOrderFromStart,
   requiresPhysicalRevisit,
 } from "./fastPlot";
 import type { LatLng, PlanJob, PlanStop } from "./types";
@@ -869,5 +870,172 @@ describe("Fast Plot V5", () => {
       new Set(jobs.map((item) => item.id))
     );
     expect(order).toHaveLength(jobs.length);
+  });
+
+  it("anchors Job 1 to the reachable visit with the lowest directed TomTom time", async () => {
+    const jobs = [
+      job("a", [
+        stop("a-c", 1, "collection", 1, 0),
+        stop("a-d", 2, "delivery", 4, 0),
+      ]),
+      job("b", [
+        stop("b-c", 1, "collection", 2, 0),
+        stop("b-d", 2, "delivery", 3, 0),
+      ]),
+    ];
+
+    const loader = vi.fn(async (
+      origins: LatLng[],
+      destinations: LatLng[]
+    ) => origins.map((origin) =>
+      destinations.map((destination) => {
+        if (origin.lat === 0 && origin.lng === 0) {
+          if (destination.lat === 1) return 100;
+          if (destination.lat === 2) return 10;
+        }
+
+        return secondsBetween(origin, destination);
+      })
+    ));
+
+    const result = await optimizeFastPlotOrderFromStart(
+      jobs,
+      { lat: 0, lng: 0 },
+      loader,
+    );
+
+    expect(result.ok).toBe(true);
+
+    if (result.ok) {
+      expect(result.route[0]).toEqual({ lat: 2, lng: 0 });
+      expect(result.firstTravelSeconds).toBe(10);
+    }
+  });
+
+  it("ignores individually unreachable anchored candidates", async () => {
+    const jobs = [
+      job("a", [
+        stop("a-c", 1, "collection", 1, 0),
+        stop("a-d", 2, "delivery", 4, 0),
+      ]),
+      job("b", [
+        stop("b-c", 1, "collection", 2, 0),
+        stop("b-d", 2, "delivery", 3, 0),
+      ]),
+    ];
+
+    const loader = vi.fn(async (
+      origins: LatLng[],
+      destinations: LatLng[]
+    ) => origins.map((origin) =>
+      destinations.map((destination) => {
+        if (origin.lat === 0 && origin.lng === 0) {
+          return destination.lat === 1
+            ? Number.POSITIVE_INFINITY
+            : 20;
+        }
+
+        return secondsBetween(origin, destination);
+      })
+    ));
+
+    const result = await optimizeFastPlotOrderFromStart(
+      jobs,
+      { lat: 0, lng: 0 },
+      loader,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.route[0]).toEqual({ lat: 2, lng: 0 });
+    }
+  });
+
+  it("fails explicitly when every anchored first visit is unreachable", async () => {
+    const jobs = [
+      job("a", [
+        stop("a-c", 1, "collection", 1, 0),
+        stop("a-d", 2, "delivery", 2, 0),
+      ]),
+    ];
+
+    const result = await optimizeFastPlotOrderFromStart(
+      jobs,
+      { lat: 0, lng: 0 },
+      async (origins, destinations) =>
+        origins.map(() =>
+          destinations.map(() => Number.POSITIVE_INFINITY)
+        ),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "no_reachable_first_visit",
+    });
+  });
+
+  it("keeps anchored lookup requests within 100 cells for a large lane", async () => {
+    const jobs = Array.from({ length: 350 }, (_, index) =>
+      job(`anchor-${index}`, [
+        stop(
+          `anchor-c-${index}`,
+          1,
+          "collection",
+          50 + index / 10000,
+          -4,
+        ),
+        stop(
+          `anchor-d-${index}`,
+          2,
+          "delivery",
+          52 + index / 10000,
+          -2,
+        ),
+      ])
+    );
+
+    const loader = vi.fn(async (
+      origins: LatLng[],
+      destinations: LatLng[]
+    ) => origins.map((origin) =>
+      destinations.map((destination) =>
+        secondsBetween(origin, destination)
+      )
+    ));
+
+    const result = await optimizeFastPlotOrderFromStart(
+      jobs,
+      { lat: 49, lng: -4 },
+      loader,
+    );
+
+    expect(result.ok).toBe(true);
+    for (const [origins, destinations] of loader.mock.calls) {
+      expect(origins.length * destinations.length).toBeLessThanOrEqual(100);
+    }
+
+    // Four 1x100-or-smaller anchor chunks plus the existing 32 sparse budget.
+    expect(loader.mock.calls.length).toBeLessThanOrEqual(36);
+  });
+
+  it("does not claim closest-first for a route requiring a physical revisit", async () => {
+    const jobs = [
+      job("revisit", [
+        stop("first", 1, "collection", 1, 1),
+        stop("middle", 2, "other", 2, 2),
+        stop("last", 3, "delivery", 1, 1),
+      ]),
+    ];
+
+    const result = await optimizeFastPlotOrderFromStart(
+      jobs,
+      { lat: 0, lng: 0 },
+      costLoader,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "unsupported_physical_route",
+    });
   });
 });

@@ -20,6 +20,21 @@ export type FastPlotCostLoader = (
   destinations: LatLng[]
 ) => Promise<number[][] | null>;
 
+export type AnchoredFastPlotResult =
+  | {
+      ok: true;
+      route: LatLng[];
+      firstTravelSeconds: number;
+    }
+  | {
+      ok: false;
+      reason:
+        | "no_routable_visits"
+        | "no_reachable_first_visit"
+        | "start_cost_unavailable"
+        | "unsupported_physical_route";
+    };
+
 function pointKey(point: LatLng): string {
   return `${point.lat},${point.lng}`;
 }
@@ -416,6 +431,108 @@ async function loadFastPlotCostTable(
   );
 }
 
+
+type AnchoredFirstVisitResult =
+  | {
+      ok: true;
+      visit: FastPlotVisit;
+      travelSeconds: number;
+    }
+  | {
+      ok: false;
+      reason: "no_reachable_first_visit" | "start_cost_unavailable";
+    };
+
+async function chooseAnchoredFirstVisit(
+  visits: FastPlotVisit[],
+  counts: Map<string, number>,
+  startPoint: LatLng,
+  loadCosts: FastPlotCostLoader
+): Promise<AnchoredFirstVisitResult> {
+  const eligible = eligibleVisits(
+    visits,
+    new Map<string, number>()
+  );
+
+  if (eligible.length === 0) {
+    return { ok: false, reason: "no_reachable_first_visit" };
+  }
+
+  let bestVisit: FastPlotVisit | null = null;
+  let bestTravelSeconds = Number.POSITIVE_INFINITY;
+
+  for (
+    let offset = 0;
+    offset < eligible.length;
+    offset += FAST_PLOT_SPARSE_CANDIDATE_LIMIT
+  ) {
+    const candidates = eligible.slice(
+      offset,
+      offset + FAST_PLOT_SPARSE_CANDIDATE_LIMIT
+    );
+
+    let loaded: number[][] | null = null;
+
+    try {
+      loaded = await loadCosts(
+        [startPoint],
+        candidates.map((candidate) => candidate.point)
+      );
+    } catch {
+      return { ok: false, reason: "start_cost_unavailable" };
+    }
+
+    if (
+      !Array.isArray(loaded) ||
+      loaded.length !== 1 ||
+      !Array.isArray(loaded[0]) ||
+      loaded[0].length !== candidates.length
+    ) {
+      return { ok: false, reason: "start_cost_unavailable" };
+    }
+
+    for (let index = 0; index < candidates.length; index++) {
+      const raw = loaded[0][index];
+      const travelSeconds =
+        typeof raw === "number" &&
+        Number.isFinite(raw) &&
+        raw >= 0
+          ? raw
+          : null;
+
+      if (travelSeconds === null) continue;
+
+      const candidate = candidates[index];
+
+      if (
+        travelSeconds < bestTravelSeconds ||
+        (
+          travelSeconds === bestTravelSeconds &&
+          candidate.key < (bestVisit?.key ?? "\uffff")
+        )
+      ) {
+        bestVisit = candidate;
+        bestTravelSeconds = travelSeconds;
+      }
+    }
+  }
+
+  if (!bestVisit) {
+    return { ok: false, reason: "no_reachable_first_visit" };
+  }
+
+  // Defensive assertion: an initial visit must be legal at progress zero.
+  if (!visitIsEligible(bestVisit, new Map<string, number>())) {
+    return { ok: false, reason: "no_reachable_first_visit" };
+  }
+
+  return {
+    ok: true,
+    visit: bestVisit,
+    travelSeconds: bestTravelSeconds,
+  };
+}
+
 function cloneProgress(
   progress: Map<string, number>
 ): Map<string, number> {
@@ -603,22 +720,49 @@ function bestBeamStates(
 async function beamSearchFastPlotOrder(
   visits: FastPlotVisit[],
   counts: Map<string, number>,
-  table: FastPlotCostTable
+  table: FastPlotCostTable,
+  firstVisit: FastPlotVisit | null = null
 ): Promise<LatLng[] | null> {
   const clusters = buildFastPlotClusters(visits);
+  const initialProgress = new Map<string, number>();
+  const initialVisited = new Set<string>();
+  const initialRoute: FastPlotVisit[] = [];
+
+  if (firstVisit) {
+    applyVisit(firstVisit, initialProgress, counts);
+    initialVisited.add(firstVisit.key);
+    initialRoute.push(firstVisit);
+  }
+
+  const initialRemaining = remainingVisitsForState(
+    visits,
+    initialVisited
+  );
 
   let beam: FastPlotSearchState[] = [{
-    route: [],
-    visited: new Set<string>(),
-    progress: new Map<string, number>(),
+    route: initialRoute,
+    visited: initialVisited,
+    progress: initialProgress,
     cost: 0,
     operationalPenalty: 0,
-    score: 0,
-    currentCluster: null,
+    score: firstVisit
+      ? remainingCostLowerBound(
+          firstVisit,
+          initialRemaining,
+          table
+        )
+      : 0,
+    currentCluster: firstVisit
+      ? clusters.get(firstVisit.key) ?? null
+      : null,
     exitedClusters: new Set<number>(),
   }];
 
-  for (let depth = 0; depth < visits.length; depth++) {
+  for (
+    let depth = firstVisit ? 1 : 0;
+    depth < visits.length;
+    depth++
+  ) {
     const next: FastPlotSearchState[] = [];
 
     for (const state of beam) {
@@ -792,7 +936,8 @@ function validSparseCosts(
 async function sparseFastPlotOrder(
   visits: FastPlotVisit[],
   counts: Map<string, number>,
-  loadCosts: FastPlotCostLoader
+  loadCosts: FastPlotCostLoader,
+  firstVisit: FastPlotVisit | null = null
 ): Promise<LatLng[] | null> {
   const clusters = buildFastPlotClusters(visits);
   const progress = new Map<string, number>();
@@ -800,7 +945,15 @@ async function sparseFastPlotOrder(
   const exitedClusters = new Set<number>();
   const route: FastPlotVisit[] = [];
 
-  let currentCluster: number | null = null;
+  if (firstVisit) {
+    applyVisit(firstVisit, progress, counts);
+    visited.add(firstVisit.key);
+    route.push(firstVisit);
+  }
+
+  let currentCluster: number | null = firstVisit
+    ? clusters.get(firstVisit.key) ?? null
+    : null;
   let requestsUsed = 0;
   let loadingAvailable = true;
 
@@ -992,6 +1145,83 @@ export function jobsInFastPlotOrder(
     .map((job) => job.id);
 
   return [...routable, ...unroutable];
+}
+
+
+export async function optimizeFastPlotOrderFromStart(
+  jobs: PlanJob[],
+  startPoint: LatLng,
+  loadCosts: FastPlotCostLoader
+): Promise<AnchoredFastPlotResult> {
+  if (
+    requiresPhysicalRevisit(jobs) ||
+    hasPhysicalPrecedenceCycle(jobs)
+  ) {
+    return { ok: false, reason: "unsupported_physical_route" };
+  }
+
+  const visits = buildFastPlotVisits(jobs);
+
+  if (visits.length === 0) {
+    return { ok: false, reason: "no_routable_visits" };
+  }
+
+  const counts = jobStopCounts(jobs);
+  const first = await chooseAnchoredFirstVisit(
+    visits,
+    counts,
+    startPoint,
+    loadCosts
+  );
+
+  if (!first.ok) {
+    return first;
+  }
+
+  if (visits.length === 1) {
+    return {
+      ok: true,
+      route: [first.visit.point],
+      firstTravelSeconds: first.travelSeconds,
+    };
+  }
+
+  let route: LatLng[] | null;
+
+  if (visits.length > FAST_PLOT_COMPLETE_MATRIX_MAX_VISITS) {
+    route = await sparseFastPlotOrder(
+      visits,
+      counts,
+      loadCosts,
+      first.visit
+    );
+  } else {
+    const table = await loadFastPlotCostTable(
+      visits,
+      loadCosts
+    );
+
+    if (!table) {
+      return { ok: false, reason: "start_cost_unavailable" };
+    }
+
+    route = await beamSearchFastPlotOrder(
+      visits,
+      counts,
+      table,
+      first.visit
+    );
+  }
+
+  if (!route || route.length !== visits.length) {
+    return { ok: false, reason: "start_cost_unavailable" };
+  }
+
+  return {
+    ok: true,
+    route,
+    firstTravelSeconds: first.travelSeconds,
+  };
 }
 
 export async function optimizeFastPlotOrder(
