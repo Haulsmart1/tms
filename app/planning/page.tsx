@@ -21,8 +21,9 @@ import {
   jobRepresentativePoint,
 } from "../../lib/planning/waypoints";
 import {
+  buildFastPlotVisits,
   jobsInFastPlotOrder,
-  optimizeFastPlotOrder,
+  optimizeFastPlotOrderFromStart,
 } from "../../lib/planning/fastPlot";
 import {
   MAX_PLANNING_ROUTE_JOBS,
@@ -640,9 +641,10 @@ export default function PlanningPage() {
     let cancelled = false;
     (async () => {
       try {
-        const routePoints = await optimizeFastPlotOrder(
-          selectedLaneJobs,
-          loadFastPlotCosts
+        // The lane order is already the planner's proposed order. The map must
+        // render that proposal rather than independently optimizing it again.
+        const routePoints = buildFastPlotVisits(selectedLaneJobs).map(
+          (visit) => visit.point
         );
         if (cancelled) return;
 
@@ -1158,13 +1160,42 @@ export default function PlanningPage() {
     setMessage("");
 
     try {
-      const route = await optimizeFastPlotOrder(
+      const vehicleReading = positions.get(selectedVehicleId) ?? null;
+
+      if (
+        !vehicleReading ||
+        !Number.isFinite(vehicleReading.lat) ||
+        !Number.isFinite(vehicleReading.lng)
+      ) {
+        setMessage(
+          "Smart Optimize needs a last-known vehicle position so Drop 1 can start from the van."
+        );
+        return;
+      }
+
+      const optimized = await optimizeFastPlotOrderFromStart(
         selectedLaneJobs,
+        { lat: vehicleReading.lat, lng: vehicleReading.lng },
         loadFastPlotCosts
       );
+
+      if (!optimized.ok) {
+        const reason =
+          optimized.reason === "no_reachable_first_visit"
+            ? "TomTom could not reach any eligible first stop from the van."
+            : optimized.reason === "no_routable_visits"
+              ? "The selected lane has no routable stops."
+              : optimized.reason === "unsupported_physical_route"
+                ? "The selected lane has a physical stop sequence that Fast Plot cannot safely optimize."
+                : "Smart Optimize could not build a van-anchored route.";
+
+        setMessage(reason);
+        return;
+      }
+
       const reordered = jobsInFastPlotOrder(
         selectedLaneJobs,
-        route
+        optimized.route
       );
 
       const expectedIds = new Set(
