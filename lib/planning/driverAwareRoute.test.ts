@@ -219,3 +219,106 @@ describe("buildDriverScheduleStopTasks", () => {
     expect(tasks.map((task) => task.id)).toEqual(["stop:a-1"]);
   });
 });
+
+describe("buildDriverScheduleStopTasksFromRoute", () => {
+  it("maps service tasks in physical-route order with global precedence", async () => {
+    const { buildDriverScheduleStopTasksFromRoute } = await import(
+      "./driverAwareRoute"
+    );
+    const a = job("a", [[1, 1], [4, 4]]);
+    const b = job("b", [[2, 2], [3, 3]]);
+
+    const result = buildDriverScheduleStopTasksFromRoute(
+      [a, b],
+      [
+        { lat: 1, lng: 1 },
+        { lat: 2, lng: 2 },
+        { lat: 3, lng: 3 },
+        { lat: 4, lng: 4 },
+      ],
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.tasks.map((task) => task.id)).toEqual([
+        "stop:a-1",
+        "stop:b-1",
+        "stop:b-2",
+        "stop:a-2",
+      ]);
+      expect(result.tasks.map((task) => task.precedenceIds)).toEqual([
+        [],
+        ["stop:a-1"],
+        ["stop:b-1"],
+        ["stop:b-2"],
+      ]);
+      expect(result.tasks.every((task) => task.serviceSeconds === 600)).toBe(
+        true,
+      );
+    }
+  });
+
+  it("keeps multiple service operations at one coordinate", async () => {
+    const { buildDriverScheduleStopTasksFromRoute } = await import(
+      "./driverAwareRoute"
+    );
+
+    const result = buildDriverScheduleStopTasksFromRoute(
+      [
+        job("a", [[1, 1], [1, 1]]),
+        job("b", [[1, 1], [2, 2]]),
+      ],
+      [
+        { lat: 1, lng: 1 },
+        { lat: 2, lng: 2 },
+      ],
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.tasks.map((task) => task.id)).toEqual([
+        "stop:a-1",
+        "stop:b-1",
+        "stop:a-2",
+        "stop:b-2",
+      ]);
+      expect(result.tasks.slice(0, 3).map((task) => task.locationId)).toEqual([
+        "location:1,1",
+        "location:1,1",
+        "location:1,1",
+      ]);
+    }
+  });
+
+  it("fails explicitly when the physical route omits a routable stop", async () => {
+    const { buildDriverScheduleStopTasksFromRoute } = await import(
+      "./driverAwareRoute"
+    );
+
+    const result = buildDriverScheduleStopTasksFromRoute(
+      [job("a", [[1, 1], [2, 2]])],
+      [{ lat: 1, lng: 1 }],
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "physical_route_mismatch",
+      remainingStopIds: ["a-2"],
+    });
+  });
+
+  it("does not fabricate tasks for jobs with missing coordinates", async () => {
+    const { buildDriverScheduleStopTasksFromRoute } = await import(
+      "./driverAwareRoute"
+    );
+    const incomplete = job("missing", [[1, 1], [2, 2]]);
+    incomplete.stops[1].lat = null;
+
+    const result = buildDriverScheduleStopTasksFromRoute(
+      [incomplete],
+      [],
+    );
+
+    expect(result).toEqual({ ok: true, tasks: [] });
+  });
+});

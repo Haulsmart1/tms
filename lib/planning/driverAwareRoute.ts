@@ -139,6 +139,102 @@ export async function optimizeDriverAwareJobOrder(input: {
  * occurrences to globally chained tasks. Every valid physical collection or
  * delivery still contributes ten minutes of service/work here.
  */
+export type DriverPhysicalTaskBuildResult =
+  | {
+      ok: true;
+      tasks: DriverScheduleStopTask[];
+    }
+  | {
+      ok: false;
+      reason: "physical_route_mismatch";
+      remainingStopIds: string[];
+    };
+
+function samePoint(left: LatLng, right: LatLng): boolean {
+  return left.lat === right.lat && left.lng === right.lng;
+}
+
+/**
+ * Map the optimized physical route to every routable service occurrence.
+ *
+ * Tasks are globally chained so the driver scheduler cannot reorder the
+ * physical route. Jobs with incomplete coordinates are intentionally excluded
+ * from this physical schedule rather than having travel invented for them.
+ */
+export function buildDriverScheduleStopTasksFromRoute(
+  jobs: PlanJob[],
+  physicalRoute: LatLng[],
+): DriverPhysicalTaskBuildResult {
+  const routableJobs = jobs.filter(isRoutable);
+  const stopsByJob = new Map(
+    routableJobs.map((job) => [job.id, orderedStops(job)] as const),
+  );
+  const progress = new Map<string, number>(
+    routableJobs.map((job) => [job.id, 0] as const),
+  );
+  const tasks: DriverScheduleStopTask[] = [];
+  let previousTaskId: string | null = null;
+
+  for (const routePoint of physicalRoute) {
+    let advanced = true;
+
+    while (advanced) {
+      advanced = false;
+
+      for (const job of routableJobs) {
+        const stops = stopsByJob.get(job.id) ?? [];
+        const index = progress.get(job.id) ?? 0;
+        const stop = stops[index];
+
+        if (!stop) continue;
+
+        const point = stopPoint(stop);
+
+        if (!point || !samePoint(point, routePoint)) {
+          continue;
+        }
+
+        const taskId = `stop:${stop.id}`;
+
+        tasks.push({
+          id: taskId,
+          jobId: job.id,
+          locationId: `location:${point.lat},${point.lng}`,
+          point,
+          type: stop.type ?? null,
+          serviceSeconds: DRIVER_STOP_SERVICE_SECONDS,
+          precedenceIds: previousTaskId ? [previousTaskId] : [],
+        });
+
+        previousTaskId = taskId;
+        progress.set(job.id, index + 1);
+        advanced = true;
+      }
+    }
+  }
+
+  const remainingStopIds: string[] = [];
+
+  for (const job of routableJobs) {
+    const stops = stopsByJob.get(job.id) ?? [];
+    const index = progress.get(job.id) ?? 0;
+
+    for (const stop of stops.slice(index)) {
+      remainingStopIds.push(stop.id);
+    }
+  }
+
+  if (remainingStopIds.length > 0) {
+    return {
+      ok: false,
+      reason: "physical_route_mismatch",
+      remainingStopIds,
+    };
+  }
+
+  return { ok: true, tasks };
+}
+
 export function buildDriverScheduleStopTasks(
   jobs: PlanJob[],
 ): DriverScheduleStopTask[] {
