@@ -1205,6 +1205,24 @@ export default function PlanningPage() {
   const selectedVehicle = selectedVehicleId
     ? vehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? null
     : null;
+
+  const displayVehicles = useMemo(() => {
+    if (!selectedVehicleId) return vehicles;
+
+    const selected = vehicles.find(
+      (vehicle) => vehicle.id === selectedVehicleId
+    );
+
+    if (!selected) return vehicles;
+
+    return [
+      selected,
+      ...vehicles.filter(
+        (vehicle) => vehicle.id !== selectedVehicleId
+      ),
+    ];
+  }, [vehicles, selectedVehicleId]);
+
   const selectedRoute = selectedVehicleId ? (routes[selectedVehicleId] ?? null) : null;
   const selectedVehicleReading = selectedVehicleId
     ? (positions.get(selectedVehicleId) ?? null)
@@ -1540,7 +1558,7 @@ export default function PlanningPage() {
                 {vehicles.length === 0 ? (
                   <p className="text-sm text-ink-3">No active vehicles. Add one under Fleet.</p>
                 ) : (
-                  vehicles.map((v) => (
+                  displayVehicles.map((v) => (
                     <VehicleLane
                       key={v.id}
                       vehicle={v}
