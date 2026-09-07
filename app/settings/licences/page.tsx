@@ -48,11 +48,26 @@ type VehicleLicenceRow = {
    silent success. A customer who is charged without being told will read it
    as a surprise charge when the receipt arrives. */
 function licenceAddedMessage(
-    payload: { charged?: boolean; grossPence?: number; days?: number },
+    payload: {
+        charged?: boolean;
+        grossPence?: number;
+        days?: number;
+        alreadyPaid?: boolean;
+    },
     base = "Licence added."
 ): string {
     if (!payload.charged || payload.grossPence == null || payload.days == null) {
         return base;
+    }
+    /* `charged: true` with `alreadyPaid` is NOT a charge that just happened.
+       chargeVehicleAddon found a succeeded row from an earlier attempt, took
+       no money this time, and returned that attempt's amounts. Repeating the
+       "Charged £x" wording would announce a payment the customer is about to
+       look for on their statement and not find twice, which reads as a
+       duplicate charge. Name the amount anyway, so they can match it to the
+       payment that did happen. */
+    if (payload.alreadyPaid) {
+        return `${base} An earlier payment of ${formatPence(payload.grossPence)}, covering the ${payload.days} days left in this billing cycle, already paid for this vehicle, so you have not been charged again.`;
     }
     return `${base} Charged ${formatPence(payload.grossPence)} for the ${payload.days} days left in this billing cycle.`;
 }
@@ -81,6 +96,17 @@ function errorText(payload: Record<string, unknown>, fallback: string): string {
    way out (an admin), not just the refusal. */
 const RESTRICTED_NOTICE =
     "Adding or activating a licence charges your company card, so it is limited to company admins. Ask a company admin to make the change for you.";
+
+/* Deleting is gated for a different reason, so it gets its own wording rather
+   than borrowing the one above: a delete never charges the card, and telling a
+   staff member that it does would be its own small lie. It is gated because
+   deleting an active licence removes a billable vehicle, which is the
+   deactivation half of the change the route already reserves for admins.
+   Deletion stays a direct table write (the migration keeps the browser's
+   DELETE grant on purpose, since removing a licence can only ever reduce a
+   bill); this is the affordance catching up with that decision. */
+const RESTRICTED_DELETE_NOTICE =
+    "Deleting a licence changes what your company is billed for, so it is limited to company admins. Ask a company admin to make the change for you.";
 
 export default function VehicleLicencesPage() {
     const supabase = createClient();
@@ -290,20 +316,46 @@ export default function VehicleLicencesPage() {
     }
 
     async function deleteLicence(id: string) {
+        /* Same early return as toggleLicence, and for the same reason: the
+           disabled button is an affordance that devtools removes in one click,
+           so the refusal has to live in the handler too. */
+        if (!canManageLicences) {
+            setMessage(RESTRICTED_DELETE_NOTICE);
+            return;
+        }
+
         if (!window.confirm("Delete licence?")) return;
 
+        /* Shares writeInFlight with the two charging paths rather than keeping
+           its own flag. A delete landing between an activation's POST and its
+           reload would leave the page reporting a charge for a row that is
+           gone, and one guard for every write on the page is the only version
+           of this rule that cannot drift. */
+        if (writeInFlight.current) return;
+        writeInFlight.current = true;
+        setSaving(true);
+
+        /* Straight at the table, unlike create and toggle: billing_03 keeps
+           the browser's DELETE grant because removing a licence can only
+           reduce a bill, so there is no money for the server to settle first. */
         const { error } = await supabase
             .from("vehicle_licences")
             .delete()
             .eq("id", id);
+
+        writeInFlight.current = false;
+        setSaving(false);
 
         if (error) {
             setMessage(error.message);
             return;
         }
 
-        setMessage("Licence deleted.");
         await loadData();
+
+        /* After the refresh, for the same reason as createLicence: loadData
+           clears `message` on entry. */
+        setMessage("Licence deleted.");
     }
 
     async function toggleLicence(id: string, currentActive: boolean | null) {
@@ -581,8 +633,9 @@ export default function VehicleLicencesPage() {
                             <LicenceCard
                                 key={licence.id}
                                 licence={licence}
-                                /* Affordance only. toggleLicence keeps its own
-                                   early return and the route keeps
+                                /* Affordance only, for both buttons.
+                                   toggleLicence and deleteLicence each keep
+                                   their own early return, and the route keeps
                                    requireCompanyAdmin: a disabled attribute is
                                    removed in devtools in one click. */
                                 canManage={canManageLicences}

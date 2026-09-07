@@ -142,9 +142,18 @@ export function chargeIdempotencyKey(
 // The attempt number is load-bearing, not decoration. It gives two properties
 // at once:
 //
-//   * A request that crashes after the Square call but before the audit row
-//     is written recomputes the SAME attempt on retry, so it replays the same
-//     key and Square deduplicates rather than charging twice.
+//   * A request that crashes after the Square call but before the outcome is
+//     recorded recomputes the SAME attempt on retry, so it replays the same
+//     key. Necessary for a replay, but NOT sufficient on its own: Square only
+//     returns the original payment when the request BODY is byte-identical
+//     too, and the caller's arguments drift (`days` counts down at every
+//     London midnight, `baselineCount` moves whenever another vehicle is
+//     added), so a body recomputed from them is refused with
+//     IDEMPOTENCY_KEY_REUSED rather than deduplicated. That is why
+//     chargeVehicleAddon records a PENDING row before calling Square and
+//     rebuilds the body (amounts, days, card) from that row instead of
+//     recomputing it. See lib/billing/addonServer.ts; do not read this key as
+//     making the pending row redundant.
 //   * A customer who is declined, replaces their card and tries again gets a
 //     NEW attempt and therefore a new key, so Square takes a real second
 //     payment. Without the attempt in the key, that retry would be stuck

@@ -93,7 +93,7 @@ Status tags: [OK] functional against live data, [PARTIAL] real data but view-onl
 - **`/drivers`** [OK]: driver roster; admin-managed create / edit / delete.
 - **`/assets`** [OK]: trailers / pallets / equipment; create and list (no edit / delete yet).
 - **`/maintenance`** [OK]: maintenance records; logging a VOR record marks the vehicle off-road, completion restores it.
-- **`/settings/licences`** [OK]: vehicle licence tracking. Adding a licence, and activating or deactivating one, is company-admin only, because an active licence is a billable vehicle and activating one charges the company card. Those writes go through `POST /api/licences/activate` rather than writing `vehicle_licences` directly; the browser no longer holds insert or update rights on that table's `active` and `vehicle_id` columns. Other licence fields (type, dates, notes) are still edited in place.
+- **`/settings/licences`** [OK]: vehicle licence tracking. Adding a licence, and activating or deactivating one, is company-admin only, because an active licence is a billable vehicle and activating one charges the company card. Those writes go through `POST /api/licences/activate` rather than writing `vehicle_licences` directly; the browser no longer holds insert or update rights on that table's `active` and `vehicle_id` columns. The other columns (`licence_type`, `issue_date`, `expiry_date`, `notes`) stay client-writable, though the page has no in-place edit UI that uses that grant today. Deleting a licence stays a direct client write (the DELETE grant is unchanged, since removing a licence can only reduce a bill), but the page offers the control to company admins only, because it removes a billable vehicle.
 
 ### Settings
 - **`/settings`** [LAUNCHER]: settings hub cards.
