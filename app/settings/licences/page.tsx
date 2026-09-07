@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../../../lib/supabase/browser";
 import { useTenant } from "../../components/TenantProvider";
 import TenantGate from "../../components/TenantGate";
@@ -44,6 +44,37 @@ type VehicleLicenceRow = {
     vehicles?: LicenceVehicle[] | null;
 };
 
+/* A mid-cycle activation can take money, so say so rather than reporting a
+   silent success. A customer who is charged without being told will read it
+   as a surprise charge when the receipt arrives. */
+function licenceAddedMessage(
+    payload: { charged?: boolean; grossPence?: number; days?: number },
+    base = "Licence added."
+): string {
+    if (!payload.charged || payload.grossPence == null || payload.days == null) {
+        return base;
+    }
+    return `${base} Charged ${formatPence(payload.grossPence)} for the ${payload.days} days left in this billing cycle.`;
+}
+
+/* The route always answers JSON, but a proxy, an edge timeout or a crash can
+   put something else on the wire. Reading the body must never be the thing
+   that throws, or a declined card surfaces as an unhandled rejection and the
+   customer sees nothing at all. */
+async function readJson(response: Response): Promise<Record<string, unknown>> {
+    try {
+        return (await response.json()) as Record<string, unknown>;
+    } catch {
+        return {};
+    }
+}
+
+function errorText(payload: Record<string, unknown>, fallback: string): string {
+    return typeof payload.error === "string" && payload.error
+        ? payload.error
+        : fallback;
+}
+
 export default function VehicleLicencesPage() {
     const supabase = createClient();
     const tenant = useTenant();
@@ -53,6 +84,13 @@ export default function VehicleLicencesPage() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState("");
+
+    /* A ref, not the `saving` state, because state is what makes the double
+       charge possible: two clicks in the same tick both read the pre-render
+       value and both post. Activating a vehicle mid-cycle takes real money, so
+       the second post must be refused synchronously. `saving` stays as the
+       thing the submit button reads. */
+    const writeInFlight = useRef(false);
     const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
 
     const [vehicleId, setVehicleId] = useState("");
@@ -162,30 +200,64 @@ export default function VehicleLicencesPage() {
             return;
         }
 
+        if (writeInFlight.current) return;
+        writeInFlight.current = true;
         setSaving(true);
 
-        const { error } = await supabase.from("vehicle_licences").insert([
-            {
-                tenant_id: tenant.writeTenantId,
-                vehicle_id: vehicleId,
-                licence_type: licenceType.trim(),
-                issue_date: issueDate || null,
-                expiry_date: expiryDate || null,
-                active,
-                notes: notes.trim() || null,
-            },
-        ]);
+        /* Through the route, never straight at the table: an active licence is
+           what makes a vehicle billable, so creating one may have to take a
+           pro-rata payment first. billing_03 revokes the browser's INSERT and
+           UPDATE grant on vehicle_licences for exactly that reason, so this is
+           the only path that can still write one. */
+        let successText = "Licence added.";
+        try {
+            const response = await fetch("/api/licences/activate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    action: "create",
+                    tenantId: tenant.writeTenantId,
+                    vehicleId,
+                    licenceType: licenceType.trim(),
+                    issueDate: issueDate || null,
+                    expiryDate: expiryDate || null,
+                    active,
+                    notes: notes.trim() || null,
+                }),
+            });
+            const payload = await readJson(response);
 
-        if (error) {
-            setMessage(error.message);
-            setSaving(false);
+            if (!response.ok) {
+                /* The route's own wording, verbatim. Its 402 and 409 texts name
+                   the card, the billing page or the wait-and-retry the customer
+                   actually has to do; a generic "could not add licence" would
+                   throw that away. */
+                setMessage(
+                    errorText(payload, "Could not add the licence. Please try again.")
+                );
+                return;
+            }
+
+            resetForm();
+            successText = licenceAddedMessage(payload);
+        } catch {
+            /* A network failure leaves the outcome unknown: the request may
+               have reached the route and charged. Do not claim it did nothing. */
+            setMessage(
+                "Could not reach the server, so it is not clear whether the licence was added. Reload the page to check before trying again."
+            );
             return;
+        } finally {
+            writeInFlight.current = false;
+            setSaving(false);
         }
 
-        resetForm();
-        setMessage("Licence added.");
-        setSaving(false);
         await loadData();
+
+        /* AFTER the refresh, because loadData clears `message` on entry. Said
+           before it, a "charged £x" notice would be wiped in the same render
+           and the customer would never see that money had been taken. */
+        setMessage(successText);
     }
 
     async function deleteLicence(id: string) {
@@ -206,18 +278,70 @@ export default function VehicleLicencesPage() {
     }
 
     async function toggleLicence(id: string, currentActive: boolean | null) {
-        const { error } = await supabase
-            .from("vehicle_licences")
-            .update({ active: !currentActive })
-            .eq("id", id);
+        /* Unguarded before this: the card's Activate button is only disabled
+           while the skeleton shows, so two quick clicks used to send two
+           updates. Harmless against a plain UPDATE, but each one can now take a
+           pro-rata payment, so the second click must be dropped. */
+        if (writeInFlight.current) return;
+        writeInFlight.current = true;
+        setSaving(true);
+        setMessage("");
 
-        if (error) {
-            setMessage(error.message);
+        const nextActive = !currentActive;
+        let successText = nextActive
+            ? "Licence activated."
+            : "Licence deactivated.";
+
+        /* Both directions go through the route, not just activation: billing_03
+           revokes the browser's UPDATE grant on vehicle_licences outright,
+           because `active` is what makes a vehicle billable and the server has
+           to be the only thing that can set it either way. */
+        try {
+            const response = await fetch("/api/licences/activate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    action: "setActive",
+                    licenceId: id,
+                    active: nextActive,
+                }),
+            });
+            const payload = await readJson(response);
+
+            if (!response.ok) {
+                setMessage(
+                    errorText(
+                        payload,
+                        nextActive
+                            ? "Could not activate the licence. Please try again."
+                            : "Could not deactivate the licence. Please try again."
+                    )
+                );
+                return;
+            }
+
+            /* Only an activation can have taken money. A deactivation is never
+               charged and never refunded, so it says nothing about money. */
+            if (nextActive) {
+                successText = licenceAddedMessage(payload, "Licence activated.");
+            }
+        } catch {
+            setMessage(
+                nextActive
+                    ? "Could not reach the server, so it is not clear whether the licence was activated. Reload the page to check before trying again."
+                    : "Could not reach the server, so the licence may not have been deactivated. Reload the page to check."
+            );
             return;
+        } finally {
+            writeInFlight.current = false;
+            setSaving(false);
         }
 
-        setMessage(!currentActive ? "Licence activated." : "Licence deactivated.");
         await loadData();
+
+        /* After the refresh, for the same reason as createLicence: loadData
+           clears `message`. */
+        setMessage(successText);
     }
 
     function vehicleLabel(vehicle: LicenceVehicle) {
