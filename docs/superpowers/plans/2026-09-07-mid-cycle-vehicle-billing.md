@@ -502,8 +502,12 @@ describe("selectAddonAction", () => {
   });
 
   it("charges nearly a full cycle the day after a charge", () => {
+    // Only "today" moves here. cycleDate is derived from next_charge_on
+    // alone, so it stays 2026-08-24 no matter how far into the cycle we
+    // are: anchoring the subtraction to today instead would be the
+    // double-billing bug the cycle date rule exists to prevent.
     const action = select({ todayISO: "2026-08-25" });
-    expect(action).toEqual({ kind: "charge", cycleDate: "2026-07-28", days: 27 });
+    expect(action).toEqual({ kind: "charge", cycleDate: "2026-08-24", days: 27 });
   });
 
   it("is free when the vehicle is already covered for this cycle", () => {
