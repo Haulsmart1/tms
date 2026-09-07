@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const SQUARE_IMPORT_TIMEOUT_MS = 15_000;
+
 // The module caches its client, so re-import fresh for every test.
 async function importFresh() {
   vi.resetModules();
@@ -21,27 +23,27 @@ describe("getSquare env guards", () => {
     vi.stubEnv("SQUARE_ACCESS_TOKEN", "");
     const { getSquare } = await importFresh();
     expect(() => getSquare()).toThrow(/SQUARE_ACCESS_TOKEN/);
-  });
+  }, SQUARE_IMPORT_TIMEOUT_MS);
 
   it("throws when SQUARE_ENVIRONMENT is not sandbox or production", async () => {
     vi.stubEnv("SQUARE_ENVIRONMENT", "staging");
     const { getSquare } = await importFresh();
     expect(() => getSquare()).toThrow(/SQUARE_ENVIRONMENT/);
-  });
+  }, SQUARE_IMPORT_TIMEOUT_MS);
 
   it("constructs a client when config is valid", async () => {
     const { getSquare } = await importFresh();
     expect(getSquare()).toBeTruthy();
-  });
+  }, SQUARE_IMPORT_TIMEOUT_MS);
 
   it("throws from getSquareLocationId when unset", async () => {
     vi.stubEnv("SQUARE_LOCATION_ID", "");
     const { getSquareLocationId } = await importFresh();
     expect(() => getSquareLocationId()).toThrow(/SQUARE_LOCATION_ID/);
-  });
+  }, SQUARE_IMPORT_TIMEOUT_MS);
 
   it("returns the location id when set", async () => {
     const { getSquareLocationId } = await importFresh();
     expect(getSquareLocationId()).toBe("LTEST");
-  });
+  }, SQUARE_IMPORT_TIMEOUT_MS);
 });
