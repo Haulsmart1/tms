@@ -12,7 +12,7 @@ import {
   classifyPaymentResult,
   computeChargeAmounts,
 } from "./money";
-import { countBillableVehicles } from "./vehicleCount";
+import { billableVehicleIds } from "./vehicleCount";
 
 // PostgREST caps unscoped selects at 1000 rows by default. Hitting this cap
 // means the vehicle/licence count below is silently truncated, which
@@ -51,10 +51,10 @@ export async function requireCompanyAdmin() {
   return { admin, user, companyId: profile.company_id as string, role };
 }
 
-export async function fetchBillableVehicleCount(
+export async function fetchBillableVehicles(
   admin: SupabaseClient,
   companyId: string
-): Promise<number> {
+): Promise<Set<string>> {
   const tenantsRes = await admin
     .from("tenants")
     .select("id")
@@ -91,7 +91,7 @@ export async function fetchBillableVehicleCount(
 
   const vehicleIds = vehicles.map((v) => v.id as string);
   if (vehicleIds.length === 0) {
-    return 0;
+    return new Set();
   }
 
   const licencesRes = await admin
@@ -111,7 +111,7 @@ export async function fetchBillableVehicleCount(
     );
   }
 
-  return countBillableVehicles({
+  return billableVehicleIds({
     companyId,
     companyTenantIds: tenantIds,
     vehicles,
@@ -200,7 +200,8 @@ export async function runChargeCycle(
     };
   }
 
-  const vehicleCount = await fetchBillableVehicleCount(admin, args.companyId);
+  const vehicleIds = await fetchBillableVehicles(admin, args.companyId);
+  const vehicleCount = vehicleIds.size;
   const amounts = computeChargeAmounts(vehicleCount);
 
   let succeeded = true;
@@ -300,6 +301,36 @@ export async function runChargeCycle(
     throw new Error(
       `Charge recorded at Square but platform_charges insert failed: ${insertError.message}`
     );
+  }
+
+  // Record which vehicles this cycle has now paid for. Written only on
+  // success: a failed charge covers nothing, and the retry will recount.
+  //
+  // Upsert with ignoreDuplicates so a crashed-and-rerun cycle is idempotent,
+  // and so a vehicle already covered by a mid-cycle add-on charge is left
+  // alone rather than erroring the whole run.
+  //
+  // A failure here is logged, not thrown: the card has already been charged
+  // and the audit row written, so throwing would leave the caller believing
+  // the cycle did not happen and retrying a charge that already succeeded.
+  // Missing coverage is self-correcting, because the next cycle rewrites it.
+  if (succeeded && vehicleCount > 0) {
+    const { error: coverageError } = await admin
+      .from("vehicle_cycle_coverage")
+      .upsert(
+        [...vehicleIds].map((vehicleId) => ({
+          company_id: args.companyId,
+          cycle_date: args.cycleDate,
+          vehicle_id: vehicleId,
+        })),
+        { onConflict: "company_id,cycle_date,vehicle_id", ignoreDuplicates: true }
+      );
+    if (coverageError) {
+      console.error(
+        `billing: coverage write failed for company ${args.companyId} cycle ${args.cycleDate}:`,
+        coverageError.message
+      );
+    }
   }
 
   return {
