@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  addonIdempotencyKey,
   chargeIdempotencyKey,
   classifyPaymentResult,
   computeChargeAmounts,
@@ -211,6 +212,42 @@ describe("chargeIdempotencyKey", () => {
       99
     );
     expect(key.length).toBeLessThanOrEqual(45);
+  });
+});
+
+describe("addonIdempotencyKey", () => {
+  const COMPANY = "3f2a1b4c-5d6e-7f80-9a1b-2c3d4e5f6071";
+  const VEHICLE = "8e7d6c5b-4a39-2817-0f6e-5d4c3b2a1908";
+
+  it("fits inside Square's 45 character limit", () => {
+    expect(
+      addonIdempotencyKey(COMPANY, "2026-09-07", VEHICLE, 1).length
+    ).toBeLessThanOrEqual(45);
+    // Even a pathological attempt count must still fit.
+    expect(
+      addonIdempotencyKey(COMPANY, "2026-09-07", VEHICLE, 999).length
+    ).toBeLessThanOrEqual(45);
+  });
+
+  it("is stable for the same inputs", () => {
+    expect(addonIdempotencyKey(COMPANY, "2026-09-07", VEHICLE, 1)).toBe(
+      addonIdempotencyKey(COMPANY, "2026-09-07", VEHICLE, 1)
+    );
+  });
+
+  it("differs across vehicles, cycles and attempts", () => {
+    const base = addonIdempotencyKey(COMPANY, "2026-09-07", VEHICLE, 1);
+    expect(addonIdempotencyKey(COMPANY, "2026-10-05", VEHICLE, 1)).not.toBe(base);
+    expect(
+      addonIdempotencyKey(COMPANY, "2026-09-07", "11112222-3333-4444-5555-666677778888", 1)
+    ).not.toBe(base);
+    expect(addonIdempotencyKey(COMPANY, "2026-09-07", VEHICLE, 2)).not.toBe(base);
+  });
+
+  it("never collides with a cycle charge key", () => {
+    expect(addonIdempotencyKey(COMPANY, "2026-09-07", VEHICLE, 1)).not.toBe(
+      chargeIdempotencyKey(COMPANY, "2026-09-07", 1)
+    );
   });
 });
 

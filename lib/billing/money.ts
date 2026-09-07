@@ -133,6 +133,37 @@ export function chargeIdempotencyKey(
   return `${compactCompany}_${compactDate}_${attempt}`;
 }
 
+// Idempotency key for a single mid-cycle vehicle add-on. Square allows 45
+// characters, and company + cycle + vehicle + attempt does not fit at full
+// UUID width, so the two ids are truncated to 14 hex characters (56 bits
+// each). Truncation is safe here because the key only has to be unique within
+// one Square account, not globally.
+//
+// The attempt number is load-bearing, not decoration. It gives two properties
+// at once:
+//
+//   * A request that crashes after the Square call but before the audit row
+//     is written recomputes the SAME attempt on retry, so it replays the same
+//     key and Square deduplicates rather than charging twice.
+//   * A customer who is declined, replaces their card and tries again gets a
+//     NEW attempt and therefore a new key, so Square takes a real second
+//     payment. Without the attempt in the key, that retry would be stuck
+//     replaying the original decline forever.
+//
+// The `a` prefix keeps add-on keys in a different namespace from
+// chargeIdempotencyKey, so a cycle charge and an add-on can never collide.
+export function addonIdempotencyKey(
+  companyId: string,
+  cycleDate: string,
+  vehicleId: string,
+  attempt: number
+): string {
+  const compactCompany = companyId.replace(/-/g, "").slice(0, 14);
+  const compactVehicle = vehicleId.replace(/-/g, "").slice(0, 14);
+  const compactDate = cycleDate.replace(/-/g, "");
+  return `a_${compactCompany}_${compactDate}_${compactVehicle}_${attempt}`;
+}
+
 export type PaymentClassification =
   | { kind: "succeeded" }
   | { kind: "failed"; failureCode: string }
