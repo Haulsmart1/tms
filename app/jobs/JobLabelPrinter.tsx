@@ -685,7 +685,7 @@ function BoxLabel({
 
   return (
     <article
-      className="absolute overflow-hidden border border-slate-300 bg-white text-black"
+      className="absolute box-border overflow-hidden border border-slate-300 bg-white text-black"
       style={{
         left: `${leftMm}mm`,
         top: `${topMm}mm`,

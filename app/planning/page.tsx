@@ -12,19 +12,32 @@ import VehicleLane from "./VehicleLane";
 import { stopsNeedingGeocode } from "../../lib/planning/geocoding";
 import { computeSaveDiff, type LanePlan } from "../../lib/planning/saveDiff";
 import {
+  createPlanningDraft,
+  parsePlanningDraft,
+  planningDraftMatchesPlan,
+  planningDraftStorageKey,
+  type PlanningDraft,
+} from "../../lib/planning/draftCache";
+import {
   assignJobsToLane,
   moveJobInLane,
 } from "../../lib/planning/boardActions";
 import { formatDistance, formatDuration } from "../../lib/planning/format";
 import {
   isRoutable,
-  jobEntryPoint,
-  jobExitPoint,
   jobRepresentativePoint,
 } from "../../lib/planning/waypoints";
-import { optimizeFastPlotOrder } from "../../lib/planning/fastPlot";
-import { bestOrder } from "../../lib/planning/optimize";
-import { sanitizeTravelSeconds } from "../../lib/planning/matrix";
+import {
+  buildFastPlotVisits,
+  jobsInFastPlotOrder,
+  optimizeFastPlotOrderFromStart,
+} from "../../lib/planning/fastPlot";
+import {
+  MAX_PLANNING_ROUTE_JOBS,
+  mergeRouteResults,
+  splitRoutePoints,
+  wouldExceedPlanningRouteJobLimit,
+} from "../../lib/planning/routeChunks";
 import type { PlanJob, RouteResult } from "../../lib/planning/types";
 import { createSupabasePositionSource } from "../../lib/tracking/supabasePositions";
 import type { PositionReading } from "../../lib/tracking/position";
@@ -66,6 +79,56 @@ type Driver = PlanningComplianceDriver;
    larger with a 400 (it does not truncate), so the client chunks. */
 const GEOCODE_BATCH = 100;
 const POSITION_POLL_MS = 30_000;
+
+async function loadFastPlotCosts(
+  origins: { lat: number; lng: number }[],
+  destinations: { lat: number; lng: number }[]
+): Promise<number[][] | null> {
+  if (
+    origins.length < 1 ||
+    destinations.length < 1 ||
+    origins.length * destinations.length > 100
+  ) {
+    return null;
+  }
+
+  try {
+    const response = await fetch("/api/tomtom/matrix", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ origins, destinations }),
+    });
+
+    if (!response.ok) return null;
+
+    const body = await response.json();
+    const raw = body?.travelSeconds;
+
+    if (
+      !Array.isArray(raw) ||
+      raw.length !== origins.length ||
+      raw.some(
+        (row: unknown) =>
+          !Array.isArray(row) ||
+          row.length !== destinations.length
+      )
+    ) {
+      return null;
+    }
+
+    return raw.map((row: unknown[]) =>
+      row.map((value) =>
+        typeof value === "number" &&
+        Number.isFinite(value) &&
+        value >= 0
+          ? value
+          : Number.POSITIVE_INFINITY
+      )
+    );
+  } catch {
+    return null;
+  }
+}
 
 export default function PlanningPage() {
   const router = useRouter();
@@ -123,6 +186,10 @@ export default function PlanningPage() {
   const [geocodeUnavailable, setGeocodeUnavailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<
+    "idle" | "pending" | "saving" | "saved" | "local-only"
+  >("idle");
+  const [recoveryDraft, setRecoveryDraft] = useState<PlanningDraft | null>(null);
   const [optimizing, setOptimizing] = useState(false);
   const [acceptanceTarget, setAcceptanceTarget] = useState<{
     jobs: {
@@ -144,6 +211,9 @@ export default function PlanningPage() {
      Replaces a single-flag "cancelled" boolean so a save-triggered reload can
      itself be superseded by a later load, not just by unmount. */
   const loadSeq = useRef(0);
+  const saveInFlight = useRef(false);
+  const latestPendingUpdatesJson = useRef("[]");
+  const loadedPlanningScope = useRef<string | null>(null);
 
   const jobById = useMemo(() => new Map(jobs.map((j) => [j.id, j])), [jobs]);
   const driverById = useMemo(
@@ -190,11 +260,15 @@ export default function PlanningPage() {
      Save still writes pendingUpdates in full, normalisation included: by the
      time the button is enabled the user has made a deliberate edit. */
   const dirty = pendingUpdatesJson !== baselineDiff;
+  latestPendingUpdatesJson.current = pendingUpdatesJson;
 
   async function loadData(isCancelled: () => boolean) {
     // Guard lives here, not in the effect: see TenantContextValue in lib/tenant/context.ts
     if (tenant.status !== "ready") return;
 
+    loadedPlanningScope.current = null;
+    setRecoveryDraft(null);
+    setSaveStatus("idle");
     setLoading(true);
     setMessage("");
     setGeocodeSettled(false);
@@ -393,6 +467,51 @@ export default function PlanningPage() {
     }
 
     if (isCancelled()) return;
+
+    const activeTenantId =
+      typeof tenant.activeTenantId === "string" && tenant.activeTenantId.length > 0
+        ? tenant.activeTenantId
+        : null;
+
+    const planningScope = activeTenantId
+      ? planningDraftStorageKey(activeTenantId, date)
+      : null;
+
+    let cachedDraft: PlanningDraft | null = null;
+
+    if (planningScope && activeTenantId && typeof window !== "undefined") {
+      try {
+        cachedDraft = parsePlanningDraft(
+          window.localStorage.getItem(planningScope),
+          {
+            tenantId: activeTenantId,
+            date,
+            validVehicleIds: new Set(vehicleList.map((vehicle) => vehicle.id)),
+            validJobIds: new Set(loaded.map((job) => job.id)),
+            validDriverIds: new Set(
+              (driverData ?? []).map((driver) => driver.id)
+            ),
+            now: Date.now(),
+          }
+        );
+
+        if (
+          cachedDraft &&
+          planningDraftMatchesPlan(
+            cachedDraft,
+            orders,
+            laneDriverInit,
+            vehicleList.map((vehicle) => vehicle.id)
+          )
+        ) {
+          window.localStorage.removeItem(planningScope);
+          cachedDraft = null;
+        }
+      } catch {
+        cachedDraft = null;
+      }
+    }
+
     setPlanningTimeZone(loadedTimeZone);
     setJobs(loaded);
     setSelectedUnassignedJobIds(new Set());
@@ -404,6 +523,9 @@ export default function PlanningPage() {
     setDriverConflicts(conflicts);
     setBaselineDiff(JSON.stringify(initialDiff));
     setDisplacedNotes(displaced);
+    setRecoveryDraft(cachedDraft);
+    loadedPlanningScope.current = planningScope;
+
     // Keep the planner's current lane if it survived the reload; only fall
     // back when it did not, so a save-triggered reload does not jump the board.
     setSelectedVehicleId((prev) =>
@@ -548,6 +670,19 @@ export default function PlanningPage() {
 
   useEffect(() => {
     if (!selectedVehicleId || !geocodeSettled) return;
+
+    if (selectedLaneJobs.length > MAX_PLANNING_ROUTE_JOBS) {
+      setRoutes((prev) => {
+        const next = { ...prev };
+        delete next[selectedVehicleId];
+        return next;
+      });
+      setMapNotice(
+        `Planning routes support up to ${MAX_PLANNING_ROUTE_JOBS} jobs per vehicle.`
+      );
+      return;
+    }
+
     const routableJobs = selectedLaneJobs.filter(isRoutable);
     const physicalPointCount = new Set(
       routableJobs.flatMap((job) =>
@@ -572,83 +707,50 @@ export default function PlanningPage() {
     let cancelled = false;
     (async () => {
       try {
-        async function loadFastPlotCosts(
-          origins: { lat: number; lng: number }[],
-          destinations: { lat: number; lng: number }[]
-        ): Promise<number[][] | null> {
-          if (
-            origins.length < 1 ||
-            destinations.length < 1 ||
-            origins.length * destinations.length > 100
-          ) {
-            return null;
-          }
-
-          try {
-            const matrixResponse = await fetch("/api/tomtom/matrix", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ origins, destinations }),
-            });
-
-            if (!matrixResponse.ok) return null;
-
-            const body = await matrixResponse.json();
-            const raw = body?.travelSeconds;
-
-            if (
-              !Array.isArray(raw) ||
-              raw.length !== origins.length ||
-              raw.some(
-                (row: unknown) =>
-                  !Array.isArray(row) ||
-                  row.length !== destinations.length
-              )
-            ) {
-              return null;
-            }
-
-            return raw.map((row: unknown[]) =>
-              row.map((value) =>
-                typeof value === "number" &&
-                !Number.isNaN(value) &&
-                value >= 0
-                  ? value
-                  : Number.POSITIVE_INFINITY
-              )
-            );
-          } catch {
-            return null;
-          }
-        }
-
-        const routePoints = await optimizeFastPlotOrder(
-          selectedLaneJobs,
-          loadFastPlotCosts
+        // The lane order is already the planner's proposed order. The map must
+        // render that proposal rather than independently optimizing it again.
+        const routePoints = buildFastPlotVisits(selectedLaneJobs).map(
+          (visit) => visit.point
         );
         if (cancelled) return;
 
-        if (routePoints.length < 2 || routePoints.length > 50) {
-          setMapNotice(
-            routePoints.length > 50
-              ? "Fast Plot supports up to 50 unique mappable stops."
-              : "Not enough mappable stops to draw a route."
-          );
+        if (routePoints.length < 2) {
+          setMapNotice("Not enough mappable stops to draw a route.");
           return;
         }
 
-        const response = await fetch("/api/tomtom/route", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ points: routePoints }),
-        });
-        if (cancelled) return;
-        if (!response.ok) {
-          const body = await response.json().catch(() => null);
-          setMapNotice(body?.error ?? "Route calculation failed.");
+        const chunks = splitRoutePoints(routePoints);
+        const chunkResults: RouteResult[] = [];
+
+        for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+          const response = await fetch("/api/tomtom/route", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ points: chunks[chunkIndex] }),
+          });
+
+          if (cancelled) return;
+
+          if (!response.ok) {
+            const body = await response.json().catch(() => null);
+            setMapNotice(
+              body?.error ??
+                `Route segment ${chunkIndex + 1} of ${chunks.length} failed.`
+            );
+            return;
+          }
+
+          const chunkRoute: RouteResult = await response.json();
+          chunkResults.push(chunkRoute);
+        }
+
+        const route = mergeRouteResults(chunkResults);
+
+        if (!route) {
+          setMapNotice("Route calculation failed.");
           return;
         }
-        const route: RouteResult = await response.json();
+
         setRoutes((prev) => ({ ...prev, [selectedVehicleId]: route }));
         setMapNotice(null);
       } catch {
@@ -662,6 +764,20 @@ export default function PlanningPage() {
   function moveJob(jobId: string, vehicleId: string | null, beforeJobId: string | null) {
     const job = jobById.get(jobId);
     if (!job || job.subcontractor_id) return;
+
+    if (vehicleId) {
+      const targetLane = laneOrders[vehicleId] ?? [];
+
+      if (
+        !targetLane.includes(jobId) &&
+        wouldExceedPlanningRouteJobLimit(targetLane, [jobId])
+      ) {
+        setMessage(
+          `A vehicle route can contain up to ${MAX_PLANNING_ROUTE_JOBS} jobs.`
+        );
+        return;
+      }
+    }
 
     setSelectedUnassignedJobIds((prev) => {
       if (!prev.has(jobId)) return prev;
@@ -983,6 +1099,15 @@ export default function PlanningPage() {
       return;
     }
 
+    const targetLane = laneOrders[vehicleId] ?? [];
+
+    if (wouldExceedPlanningRouteJobLimit(targetLane, selectedIds)) {
+      setMessage(
+        `A vehicle route can contain up to ${MAX_PLANNING_ROUTE_JOBS} jobs.`
+      );
+      return;
+    }
+
     setLaneOrders((prev) =>
       assignJobsToLane(prev, selectedIds, vehicleId)
     );
@@ -1026,10 +1151,13 @@ export default function PlanningPage() {
     setMessage("");
   }
 
-  async function savePlan() {
-    if (saving || pendingUpdates.length === 0) return;
+  async function persistPlan(mode: "manual" | "auto"): Promise<boolean> {
+    if (saveInFlight.current || pendingUpdates.length === 0) return false;
 
-    const missingTenantUpdate = pendingUpdates.find(
+    const updates = pendingUpdates.map((update) => ({ ...update }));
+    const snapshotJson = pendingUpdatesJson;
+
+    const missingTenantUpdate = updates.find(
       (update) => !jobById.get(update.id)?.tenant_id
     );
 
@@ -1037,116 +1165,300 @@ export default function PlanningPage() {
       setMessage(
         "Save error: one or more jobs are missing tenant information."
       );
+      setSaveStatus("local-only");
+      return false;
+    }
+
+    saveInFlight.current = true;
+    setSaving(true);
+    setSaveStatus("saving");
+
+    if (mode === "manual") {
+      setMessage("");
+    }
+
+    try {
+      for (const update of updates) {
+        const tenantId = jobById.get(update.id)?.tenant_id;
+
+        if (!tenantId) {
+          throw new Error(
+            "one or more jobs are missing tenant information."
+          );
+        }
+
+        const { error } = await supabase
+          .from("jobs")
+          .update({
+            vehicle_id: update.vehicle_id,
+            driver_id: update.driver_id,
+            route_order: update.route_order,
+          })
+          .eq("id", update.id)
+          .eq("tenant_id", tenantId);
+
+        if (error) {
+          throw new Error(error.message);
+        }
+      }
+
+      const savedByJobId = new Map(
+        updates.map((update) => [update.id, update])
+      );
+
+      // Move the in-memory server baseline forward to exactly what landed.
+      // If the planner edited again while this request was in flight, those
+      // newer lane changes remain in laneOrders/laneDrivers and become the
+      // next diff rather than being overwritten by a reload.
+      setJobs((previous) =>
+        previous.map((job) => {
+          const saved = savedByJobId.get(job.id);
+          return saved
+            ? {
+                ...job,
+                vehicle_id: saved.vehicle_id,
+                driver_id: saved.driver_id,
+                route_order: saved.route_order,
+              }
+            : job;
+        })
+      );
+      setBaselineDiff("[]");
+
+      const newerEditsExist =
+        latestPendingUpdatesJson.current !== snapshotJson;
+
+      if (!newerEditsExist) {
+        const activeTenantId =
+          tenant.status === "ready" &&
+          typeof tenant.activeTenantId === "string"
+            ? tenant.activeTenantId
+            : null;
+
+        if (activeTenantId && typeof window !== "undefined") {
+          try {
+            window.localStorage.removeItem(
+              planningDraftStorageKey(activeTenantId, date)
+            );
+          } catch {
+            // Saving to the database succeeded; storage cleanup is best effort.
+          }
+        }
+
+        setSaveStatus("saved");
+      } else {
+        setSaveStatus("pending");
+      }
+
+      return true;
+    } catch (error) {
+      const reason =
+        error instanceof Error ? error.message : "unknown save failure";
+
+      setMessage(
+        mode === "auto"
+          ? `Autosave failed: ${reason}. Changes are kept locally.`
+          : `Save error: ${reason}`
+      );
+      setSaveStatus("local-only");
+      return false;
+    } finally {
+      saveInFlight.current = false;
+      setSaving(false);
+    }
+  }
+
+  async function savePlan() {
+    await persistPlan("manual");
+  }
+
+  useEffect(() => {
+    if (
+      tenant.status !== "ready" ||
+      typeof tenant.activeTenantId !== "string" ||
+      tenant.activeTenantId.length === 0 ||
+      loading ||
+      recoveryDraft ||
+      !dirty
+    ) {
       return;
     }
 
-    setSaving(true);
-    setMessage("");
+    const storageKey = planningDraftStorageKey(
+      tenant.activeTenantId,
+      date
+    );
 
-    for (const u of pendingUpdates) {
-      const tenantId = jobById.get(u.id)?.tenant_id;
+    if (loadedPlanningScope.current !== storageKey) {
+      return;
+    }
 
-      if (!tenantId) {
-        setMessage(
-          "Save error: one or more jobs are missing tenant information."
+    const draft = createPlanningDraft({
+      tenantId: tenant.activeTenantId,
+      date,
+      laneOrders,
+      laneDrivers,
+      selectedVehicleId,
+      updatedAt: Date.now(),
+    });
+
+    try {
+      window.localStorage.setItem(
+        storageKey,
+        JSON.stringify(draft)
+      );
+    } catch {
+      setSaveStatus("local-only");
+      return;
+    }
+
+    if (saving || saveInFlight.current) {
+      setSaveStatus("pending");
+      return;
+    }
+
+    setSaveStatus("pending");
+
+    const timer = window.setTimeout(() => {
+      void persistPlan("auto");
+    }, 1200);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+
+    // persistPlan intentionally uses the exact render snapshot represented by
+    // pendingUpdatesJson. A new edit tears down this timer and schedules a new
+    // snapshot rather than racing the old one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    tenant.status,
+    tenant.activeTenantId,
+    date,
+    loading,
+    recoveryDraft,
+    dirty,
+    saving,
+    pendingUpdatesJson,
+    laneOrders,
+    laneDrivers,
+    selectedVehicleId,
+  ]);
+
+  function restoreRecoveryDraft() {
+    if (!recoveryDraft) return;
+
+    setLaneOrders(recoveryDraft.laneOrders);
+    setLaneDrivers(recoveryDraft.laneDrivers);
+    setSelectedVehicleId(recoveryDraft.selectedVehicleId);
+    setBulkVehicleId(recoveryDraft.selectedVehicleId ?? "");
+    setRoutes({});
+    setDriverConflicts(new Set());
+    setRecoveryDraft(null);
+    setSaveStatus("pending");
+    setMessage(
+      "Recovered the local planning draft. Autosave will persist it."
+    );
+  }
+
+  function discardRecoveryDraft() {
+    if (
+      tenant.status === "ready" &&
+      typeof tenant.activeTenantId === "string" &&
+      typeof window !== "undefined"
+    ) {
+      try {
+        window.localStorage.removeItem(
+          planningDraftStorageKey(tenant.activeTenantId, date)
         );
-        setSaving(false);
-        return;
-      }
-
-      const { error } = await supabase
-        .from("jobs")
-        .update({
-          vehicle_id: u.vehicle_id,
-          driver_id: u.driver_id,
-          route_order: u.route_order,
-        })
-        .eq("id", u.id)
-        .eq("tenant_id", tenantId);
-      if (error) {
-        const failure = `Save error: ${error.message}`;
-        setMessage(failure);
-        setSaving(false);
-        /* Earlier updates in this loop already landed. A partial save must not
-           leave the board confidently showing the unwritten plan, so reload
-           what was actually written. loadData clears `message` on entry, so
-           the failure is restated afterwards: the planner must still see it. */
-        const seq = ++loadSeq.current;
-        await loadData(() => loadSeq.current !== seq);
-        setMessage(failure);
-        return;
+      } catch {
+        // Discarding browser recovery data is best effort.
       }
     }
-    setSaving(false);
-    // Claim the next generation so a date/tenant change during this reload
-    // (or the reload itself being superseded by a later save) cancels it
-    // instead of painting stale state over the newer load.
-    const seq = ++loadSeq.current;
-    await loadData(() => loadSeq.current !== seq);
+
+    setRecoveryDraft(null);
+    setSaveStatus("saved");
+    setMessage("");
   }
 
   async function optimize() {
     if (optimizing || !selectedVehicleId) return;
+
     const routable = selectedLaneJobs.filter(isRoutable);
+
     if (routable.length < 2) {
-      setMessage("Optimize needs at least two mappable jobs in the selected lane.");
+      setMessage(
+        "Optimize needs at least two mappable jobs in the selected lane."
+      );
       return;
     }
+
     setOptimizing(true);
     setMessage("");
+
     try {
-      const origins = routable.flatMap((job) => {
-        const point = jobExitPoint(job);
-        return point ? [point] : [];
-      });
-      const destinations = routable.flatMap((job) => {
-        const point = jobEntryPoint(job);
-        return point ? [point] : [];
-      });
+      const vehicleReading = positions.get(selectedVehicleId) ?? null;
 
       if (
-        origins.length !== routable.length ||
-        destinations.length !== routable.length
+        !vehicleReading ||
+        !Number.isFinite(vehicleReading.lat) ||
+        !Number.isFinite(vehicleReading.lng)
       ) {
-        setMessage("Smart Optimize failed: one or more jobs has no route entry or exit.");
+        setMessage(
+          "Smart Optimize needs a last-known vehicle position so Drop 1 can start from the van."
+        );
         return;
       }
 
-      const response = await fetch("/api/tomtom/matrix", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ origins, destinations }),
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        setMessage(body?.error ?? "Optimize failed.");
+      const optimized = await optimizeFastPlotOrderFromStart(
+        selectedLaneJobs,
+        { lat: vehicleReading.lat, lng: vehicleReading.lng },
+        loadFastPlotCosts
+      );
+
+      if (!optimized.ok) {
+        const reason =
+          optimized.reason === "no_reachable_first_visit"
+            ? "TomTom could not reach any eligible first stop from the van."
+            : optimized.reason === "no_routable_visits"
+              ? "The selected lane has no routable stops."
+              : optimized.reason === "unsupported_physical_route"
+                ? "The selected lane has a physical stop sequence that Fast Plot cannot safely optimize."
+                : optimized.reason === "start_cost_unavailable"
+                  ? "TomTom could not calculate travel from the van to the eligible first stops."
+                  : "TomTom anchored Drop 1, but Fast Plot could not calculate the remaining route.";
+
+        setMessage(reason);
         return;
       }
-      const matrix = sanitizeTravelSeconds((await response.json())?.travelSeconds, routable.length);
-      if (!matrix) { setMessage("Optimize failed."); return; }
-      const order = bestOrder(matrix);
-      // The optimizer must never delete, duplicate or invent jobs.
-      const uniqueIndexes = new Set(order);
+
+      const reordered = jobsInFastPlotOrder(
+        selectedLaneJobs,
+        optimized.route
+      );
+
+      const expectedIds = new Set(
+        selectedLaneJobs.map((job) => job.id)
+      );
+      const reorderedIds = new Set(reordered);
+
       if (
-        order.length !== routable.length ||
-        uniqueIndexes.size !== routable.length ||
-        order.some(
-          (index) =>
-            !Number.isInteger(index) ||
-            index < 0 ||
-            index >= routable.length
-        )
+        reordered.length !== selectedLaneJobs.length ||
+        reorderedIds.size !== expectedIds.size ||
+        reordered.some((id) => !expectedIds.has(id))
       ) {
         setMessage("Smart Optimize failed.");
         return;
       }
-      const reordered = order
-        .map((i) => routable[i].id)
-        .concat(selectedLaneJobs.filter((j) => !isRoutable(j)).map((j) => j.id));
-      setLaneOrders((prev) => ({ ...prev, [selectedVehicleId]: reordered }));
+
+      setLaneOrders((prev) => ({
+        ...prev,
+        [selectedVehicleId]: reordered,
+      }));
       setMessage(
-        "Smart Optimize updated the proposed drop order. Review it, then Save plan to persist it."
+        "Smart Optimize updated the proposed drop order. Autosave will persist it."
       );
+
       // The lane's order changed, so its cached route describes the old one.
       setRoutes((prev) => {
         const next = { ...prev };
@@ -1163,6 +1475,24 @@ export default function PlanningPage() {
   const selectedVehicle = selectedVehicleId
     ? vehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? null
     : null;
+
+  const displayVehicles = useMemo(() => {
+    if (!selectedVehicleId) return vehicles;
+
+    const selected = vehicles.find(
+      (vehicle) => vehicle.id === selectedVehicleId
+    );
+
+    if (!selected) return vehicles;
+
+    return [
+      selected,
+      ...vehicles.filter(
+        (vehicle) => vehicle.id !== selectedVehicleId
+      ),
+    ];
+  }, [vehicles, selectedVehicleId]);
+
   const selectedRoute = selectedVehicleId ? (routes[selectedVehicleId] ?? null) : null;
   const selectedVehicleReading = selectedVehicleId
     ? (positions.get(selectedVehicleId) ?? null)
@@ -1464,16 +1794,43 @@ export default function PlanningPage() {
             </Button>
 
             <span className="text-xs text-ink-3">
-              {dirty
-                ? "Unsaved changes"
-                : "Plan saved"}
+              {saveStatus === "saving"
+                ? "Saving…"
+                : saveStatus === "local-only"
+                  ? "Saved locally — retry pending"
+                  : dirty || saveStatus === "pending"
+                    ? "Autosave pending"
+                    : "Plan saved ✓"}
             </span>
+
+            {recoveryDraft ? (
+              <div className="basis-full rounded-md border border-line bg-surface p-3 text-sm">
+                <p className="font-medium">
+                  Recovered local planning draft available
+                </p>
+                <p className="mt-1 text-xs text-ink-3">
+                  This browser has a newer unsaved draft for this tenant and planning date.
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <Button size="sm" onClick={restoreRecoveryDraft}>
+                    Restore draft
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={discardRecoveryDraft}
+                  >
+                    Discard
+                  </Button>
+                </div>
+              </div>
+            ) : null}
 
             <span className="basis-full text-xs text-ink-3">
               Drop order: drag cards between positions or use Up / Down.
               Fast Plot maps unique collections first, then unique deliveries,
               and TomTom optimizes up to 10 matrix points with shared endpoints anchored. Smart Optimize changes
-              job order; Save plan persists vehicle, driver and drop order.
+              job order; autosave persists vehicle, driver and drop order. Save plan remains available as a manual fallback.
             </span>
           </section>
 
@@ -1498,7 +1855,7 @@ export default function PlanningPage() {
                 {vehicles.length === 0 ? (
                   <p className="text-sm text-ink-3">No active vehicles. Add one under Fleet.</p>
                 ) : (
-                  vehicles.map((v) => (
+                  displayVehicles.map((v) => (
                     <VehicleLane
                       key={v.id}
                       vehicle={v}
