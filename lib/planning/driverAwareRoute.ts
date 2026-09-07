@@ -100,6 +100,7 @@ export async function optimizeDriverAwareJobOrder(input: {
       case "no_routable_visits":
         return { ok: false, reason: "no_routable_jobs" };
       case "start_cost_unavailable":
+      case "route_cost_unavailable":
         return { ok: false, reason: "route_cost_unavailable" };
     }
   }

@@ -912,6 +912,86 @@ describe("Fast Plot V5", () => {
     }
   });
 
+  it("reports an unavailable van-to-first-stop cost separately", async () => {
+    const jobs = [
+      job("a", [
+        stop("a-c", 1, "collection", 1, 0),
+        stop("a-d", 2, "delivery", 4, 0),
+      ]),
+      job("b", [
+        stop("b-c", 1, "collection", 2, 0),
+        stop("b-d", 2, "delivery", 3, 0),
+      ]),
+    ];
+
+    const loader = vi.fn(async () => {
+      throw new Error("anchor lookup unavailable");
+    });
+
+    const result = await optimizeFastPlotOrderFromStart(
+      jobs,
+      { lat: 0, lng: 0 },
+      loader,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "start_cost_unavailable",
+    });
+    expect(loader).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports remaining route costs separately after anchoring Drop 1", async () => {
+    const jobs = [
+      job("a", [
+        stop("a-c", 1, "collection", 1, 0),
+        stop("a-d", 2, "delivery", 4, 0),
+      ]),
+      job("b", [
+        stop("b-c", 1, "collection", 2, 0),
+        stop("b-d", 2, "delivery", 3, 0),
+      ]),
+    ];
+
+    let callNumber = 0;
+    const loader = vi.fn(async (
+      origins: LatLng[],
+      destinations: LatLng[],
+    ) => {
+      callNumber += 1;
+
+      if (callNumber === 1) {
+        return origins.map((origin) =>
+          destinations.map((destination) =>
+            secondsBetween(origin, destination)
+          )
+        );
+      }
+
+      throw new Error("remaining route costs unavailable");
+    });
+
+    const result = await optimizeFastPlotOrderFromStart(
+      jobs,
+      { lat: 0, lng: 0 },
+      loader,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "route_cost_unavailable",
+    });
+
+    expect(loader.mock.calls.length).toBeGreaterThanOrEqual(2);
+
+    const [anchorOrigins, anchorDestinations] = loader.mock.calls[0];
+    expect(anchorOrigins).toEqual([{ lat: 0, lng: 0 }]);
+    expect(anchorDestinations).toEqual([
+      { lat: 1, lng: 0 },
+      { lat: 2, lng: 0 },
+    ]);
+  });
+
   it("ignores individually unreachable anchored candidates", async () => {
     const jobs = [
       job("a", [

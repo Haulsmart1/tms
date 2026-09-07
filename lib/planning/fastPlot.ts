@@ -32,6 +32,7 @@ export type AnchoredFastPlotResult =
         | "no_routable_visits"
         | "no_reachable_first_visit"
         | "start_cost_unavailable"
+        | "route_cost_unavailable"
         | "unsupported_physical_route";
     };
 
@@ -1202,7 +1203,7 @@ export async function optimizeFastPlotOrderFromStart(
     );
 
     if (!table) {
-      return { ok: false, reason: "start_cost_unavailable" };
+      return { ok: false, reason: "route_cost_unavailable" };
     }
 
     route = await beamSearchFastPlotOrder(
@@ -1214,7 +1215,7 @@ export async function optimizeFastPlotOrderFromStart(
   }
 
   if (!route || route.length !== visits.length) {
-    return { ok: false, reason: "start_cost_unavailable" };
+    return { ok: false, reason: "route_cost_unavailable" };
   }
 
   return {

@@ -1424,7 +1424,9 @@ export default function PlanningPage() {
               ? "The selected lane has no routable stops."
               : optimized.reason === "unsupported_physical_route"
                 ? "The selected lane has a physical stop sequence that Fast Plot cannot safely optimize."
-                : "Smart Optimize could not build a van-anchored route.";
+                : optimized.reason === "start_cost_unavailable"
+                  ? "TomTom could not calculate travel from the van to the eligible first stops."
+                  : "TomTom anchored Drop 1, but Fast Plot could not calculate the remaining route.";
 
         setMessage(reason);
         return;
