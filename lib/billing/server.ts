@@ -275,73 +275,65 @@ export async function runChargeCycle(
     }
   }
 
-  // Record which vehicles this cycle has now paid for, BEFORE the audit row.
-  // Written only on success: a failed charge covers nothing, and the retry
-  // will recount.
+  // Record the audit row and the coverage it bought in ONE call
+  // (docs/sql/billing_04_atomic_charge_record.sql). They are written by a
+  // single SECURITY DEFINER function so they land together or not at all.
   //
-  // The order matters and is the whole point. A throw here leaves nothing
-  // recorded at all, so the next run's prior-success check finds no row,
-  // recomputes the same attempt number and calls Square with the same
-  // idempotency key: Square replays the original payment instead of taking a
-  // second one, and audit plus coverage then land together. Written the other
-  // way round, a crash between the two writes would leave the charge recorded
-  // and this cycle's coverage lost with nothing able to repair it, and the
-  // next mid-cycle addition would silently bill a vehicle twice.
+  // Why not two statements in this file: coverage completeness is money. The
+  // licence-activation route reads vehicle_cycle_coverage to decide whether a
+  // mid-cycle vehicle needs a pro-rata charge, so a lost coverage row bills
+  // the customer again for something this cycle already paid for. Sequencing
+  // the two writes here is wrong in either order. Audit first with coverage
+  // errors swallowed can lose coverage permanently, and the prior-success
+  // early return above then stops any rerun from repairing it. Coverage first
+  // with a throw on failure leaves the card route's first-time-setup path
+  // charged with no platform_charges row and no company_billing row, which is
+  // precisely the state its orphan recovery cannot detect.
   //
-  // ignoreDuplicates covers the crashed-and-rerun case, where this upsert
-  // already ran before the audit insert was reached. It is not about the
-  // add-on route, which files coverage against the previous cycle_date and so
-  // never collides with this one.
+  // Folding coverage into the audit insert's own statement adds NO new failure
+  // mode: that insert already threw on error before this change, so coverage
+  // now shares a fate it could not previously escape.
   //
-  // Cost of throwing, stated honestly: on the card route's first-time-setup
-  // path this aborts before company_billing is written, so the customer is
-  // charged with no subscription row and no audit row for orphan recovery to
-  // find. Their next attempt self-repairs under the same idempotency key
-  // without a second charge, so the exposure is a confusing error and a
-  // retry, not lost money. That beats over-charging them weeks later.
-  if (succeeded && vehicleCount > 0) {
-    const { error: coverageError } = await admin
-      .from("vehicle_cycle_coverage")
-      .upsert(
-        [...vehicleIds].map((vehicleId) => ({
-          company_id: args.companyId,
-          cycle_date: args.cycleDate,
-          vehicle_id: vehicleId,
-        })),
-        { onConflict: "company_id,cycle_date,vehicle_id", ignoreDuplicates: true }
-      );
-    if (coverageError) {
-      throw new Error(
-        `Charge recorded at Square but coverage write failed for company ${args.companyId} cycle ${args.cycleDate}: ${coverageError.message}`
-      );
-    }
-  }
-
-  const { error: insertError } = await admin.from("platform_charges").insert({
-    company_id: args.companyId,
-    cycle_date: args.cycleDate,
-    attempt: args.attempt,
-    vehicle_count: vehicleCount,
-    net_pence: amounts.netPence,
-    vat_pence: amounts.vatPence,
-    gross_pence: amounts.grossPence,
-    vat_rate: amounts.vatRate,
-    currency: "GBP",
-    square_payment_id: squarePaymentId,
-    receipt_url: receiptUrl,
-    status: succeeded ? "succeeded" : "failed",
-    failure_code: failureCode,
+  // p_vehicle_ids is empty for a failed charge, and the function additionally
+  // refuses to write coverage unless p_status is 'succeeded', so the rule
+  // ("a failed charge covers nothing") is enforced in one place rather than
+  // duplicated here. A zero-vehicle cycle passes an empty array and writes no
+  // coverage rows.
+  //
+  // The old 23505 (unique_violation) tolerance is gone: the function's
+  // `on conflict (company_id, cycle_date, attempt) do nothing` absorbs a
+  // rerun of an already-recorded attempt inside the database, so there is no
+  // duplicate error left for this code to classify.
+  //
+  // A throw here means Square has the money and the database does not. The
+  // rerun path is the same as it has always been: the prior-success check
+  // finds no row, this attempt number is recomputed identically, and the same
+  // idempotency key goes back to Square. That replays the original payment
+  // rather than taking a second one ONLY while the request body is unchanged.
+  // The body carries amountMoney and a note containing the vehicle count, so
+  // if the fleet changed between runs Square answers IDEMPOTENCY_KEY_REUSED
+  // instead, which is handled above as PAYMENT_INDETERMINATE and needs a
+  // human.
+  const { error: recordError } = await admin.rpc("record_cycle_charge", {
+    p_company_id: args.companyId,
+    p_cycle_date: args.cycleDate,
+    p_attempt: args.attempt,
+    p_vehicle_count: vehicleCount,
+    p_net_pence: amounts.netPence,
+    p_vat_pence: amounts.vatPence,
+    p_gross_pence: amounts.grossPence,
+    p_vat_rate: amounts.vatRate,
+    p_currency: "GBP",
+    p_square_payment_id: squarePaymentId,
+    p_receipt_url: receiptUrl,
+    p_status: succeeded ? "succeeded" : "failed",
+    p_failure_code: failureCode,
+    p_vehicle_ids: succeeded ? [...vehicleIds] : [],
   });
 
-  // 23505 = Postgres unique_violation. A rerun of the same (company, cycle,
-  // attempt) after a crash reuses the same idempotency key, so Square
-  // returns the SAME payment and the recomputed outcome matches the row
-  // already recorded: treat the duplicate as already-recorded, not an error.
-  // Any other insert error keeps the loud throw (the payment, if any, went
-  // through, so pretending the cycle did not happen would be worse).
-  if (insertError && insertError.code !== "23505") {
+  if (recordError) {
     throw new Error(
-      `Charge recorded at Square but platform_charges insert failed: ${insertError.message}`
+      `Charge recorded at Square but the platform_charges/coverage record failed for company ${args.companyId} cycle ${args.cycleDate}: ${recordError.message}`
     );
   }
 
