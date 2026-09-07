@@ -75,6 +75,13 @@ function errorText(payload: Record<string, unknown>, fallback: string): string {
         : fallback;
 }
 
+/* One string, said in every place the restriction bites: the notice where the
+   form used to be, and the answer to a staff member who clicks Activate. Two
+   wordings would drift, and this one has to name the reason (money) and the
+   way out (an admin), not just the refusal. */
+const RESTRICTED_NOTICE =
+    "Adding or activating a licence charges your company card, so it is limited to company admins. Ask a company admin to make the change for you.";
+
 export default function VehicleLicencesPage() {
     const supabase = createClient();
     const tenant = useTenant();
@@ -92,6 +99,20 @@ export default function VehicleLicencesPage() {
        thing the submit button reads. */
     const writeInFlight = useRef(false);
     const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
+
+    /* Mirrors the route's gate rather than inventing a second rule: the route
+       authorises through requireCompanyAdmin, which allows ACCOUNTS_ADMIN_ROLES
+       (lib/accounts/authz.ts), and that is exactly ["admin", "super_admin"].
+       Reading tenant.role only once status is "ready" is the pattern
+       app/settings/billing/page.tsx uses, and for its stated reason: before
+       that, role is the provider's placeholder "staff", so gating early would
+       flash this notice at every admin. Not-ready therefore counts as allowed.
+       That optimism is safe because it only decides what is on screen; the
+       route is the boundary and refuses anyone it lets through. */
+    const canManageLicences =
+        tenant.status !== "ready" ||
+        tenant.role === "admin" ||
+        tenant.role === "super_admin";
 
     const [vehicleId, setVehicleId] = useState("");
     const [licenceType, setLicenceType] = useState("");
@@ -184,6 +205,14 @@ export default function VehicleLicencesPage() {
     async function createLicence(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
         setMessage("");
+
+        /* The form is not rendered for a non-admin, so this only fires if one
+           reaches the handler another way. Cheaper than letting them fill in a
+           form and read a raw 403 back from the route. */
+        if (!canManageLicences) {
+            setMessage(RESTRICTED_NOTICE);
+            return;
+        }
 
         if (!vehicleId) {
             setMessage("Please select a vehicle.");
@@ -278,6 +307,16 @@ export default function VehicleLicencesPage() {
     }
 
     async function toggleLicence(id: string, currentActive: boolean | null) {
+        /* Answers the click with the reason instead of the route's raw 403,
+           which says "You do not have access to this tenant." and is both
+           confusing and wrong about why. Deactivation is refused here too: the
+           route gates the whole endpoint, not just the charging direction, so
+           letting the button through would only move the 403 later. */
+        if (!canManageLicences) {
+            setMessage(RESTRICTED_NOTICE);
+            return;
+        }
+
         /* Unguarded before this: the card's Activate button is only disabled
            while the skeleton shows, so two quick clicks used to send two
            updates. Harmless against a plain UPDATE, but each one can now take a
@@ -431,6 +470,15 @@ export default function VehicleLicencesPage() {
                 <Stat label="Billing Rule" value="£10" sub="per vehicle per week, less on larger fleets" />
             </div>
 
+            {/* The notice replaces the form rather than disabling it: a filled
+                in form that cannot be submitted is a longer way of saying the
+                same thing. The list below stays untouched, because a staff
+                member losing sight of their own licences would be a worse
+                regression than losing the ability to change them.
+                MessageBanner tone="info" is what settings/billing uses for its
+                "managed by your company admin" notice, so this is that page's
+                treatment and not a new one. */}
+            {canManageLicences ? (
             <form
                 onSubmit={createLicence}
                 className="mb-4 grid gap-3 rounded-lg border border-line bg-surface p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-3"
@@ -495,6 +543,9 @@ export default function VehicleLicencesPage() {
                     </Button>
                 </div>
             </form>
+            ) : (
+                <MessageBanner tone="info">{RESTRICTED_NOTICE}</MessageBanner>
+            )}
 
             <MessageBanner tone="neutral">{message}</MessageBanner>
 
