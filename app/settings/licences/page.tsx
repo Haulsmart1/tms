@@ -581,6 +581,11 @@ export default function VehicleLicencesPage() {
                             <LicenceCard
                                 key={licence.id}
                                 licence={licence}
+                                /* Affordance only. toggleLicence keeps its own
+                                   early return and the route keeps
+                                   requireCompanyAdmin: a disabled attribute is
+                                   removed in devtools in one click. */
+                                canManage={canManageLicences}
                                 onToggle={(id, active) => void toggleLicence(id, active)}
                                 onDelete={(id) => void deleteLicence(id)}
                             />

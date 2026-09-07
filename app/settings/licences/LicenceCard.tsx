@@ -6,9 +6,20 @@ import type { VehicleLicence } from "./types";
 type Props = {
     licence: VehicleLicence;
     loading?: boolean;
+    /* Whether the viewer may change `active`. Defaults to true so the skeleton
+       call site and any future caller keep today's behaviour without opting in.
+       This is an affordance, not a boundary: the page still refuses the write
+       and the route still authorises through requireCompanyAdmin. */
+    canManage?: boolean;
     onToggle: (id: string, active: boolean | null) => void;
     onDelete: (id: string) => void;
 };
+
+/* Short form of the page's RESTRICTED_NOTICE. A disabled control with no
+   explanation is worse than an enabled one that explains itself, and disabling
+   this button removes the banner that used to answer the click. */
+const CANNOT_MANAGE_TITLE =
+    "Only company admins can activate a licence, because it charges the company card.";
 
 /* ONE layout definition for both states, per the batch 1 decision: a separate
    skeleton component mirroring these class names drifts the first time anyone
@@ -19,7 +30,7 @@ type Props = {
    for real, the buttons merely disabled.
 
    Four-space indent, matching page.tsx rather than the rest of the app. */
-export default function LicenceCard({ licence, loading = false, onToggle, onDelete }: Props) {
+export default function LicenceCard({ licence, loading = false, canManage = true, onToggle, onDelete }: Props) {
     return (
         <article className="rounded-lg border border-line bg-surface p-4 shadow-sm" aria-busy={loading}>
             <h3 className="m-0 mb-2 text-md font-semibold text-ink">
@@ -58,9 +69,14 @@ export default function LicenceCard({ licence, loading = false, onToggle, onDele
             </div>
 
             <div className="flex flex-wrap gap-2">
+                {/* ORed into the existing `loading`, never replacing it, so the
+                    skeleton state is exactly what it was. Only this button is
+                    gated: Delete is deliberately out of scope, since deleting a
+                    licence never makes a vehicle billable. */}
                 <Button
                     variant="secondary"
-                    disabled={loading}
+                    disabled={loading || !canManage}
+                    title={!loading && !canManage ? CANNOT_MANAGE_TITLE : undefined}
                     onClick={() => onToggle(licence.id, licence.active)}
                 >
                     {/* "Deactivate" while loading: the wider of the two labels,
