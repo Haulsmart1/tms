@@ -20,12 +20,12 @@ export type LicenceRow = {
   active: boolean | null;
 };
 
-export function countBillableVehicles(args: {
+export function billableVehicleIds(args: {
   companyId: string;
   companyTenantIds: readonly string[];
   vehicles: readonly VehicleRow[];
   licences: readonly LicenceRow[];
-}): number {
+}): Set<string> {
   const tenantIds = new Set(args.companyTenantIds);
 
   const companyVehicleIds = new Set(
@@ -38,11 +38,22 @@ export function countBillableVehicles(args: {
       .map((v) => v.id)
   );
 
-  const licensed = new Set(
+  return new Set(
     args.licences
       .filter((l) => l.active && companyVehicleIds.has(l.vehicle_id))
       .map((l) => l.vehicle_id)
   );
+}
 
-  return licensed.size;
+// A thin wrapper on purpose. The cron needs the ids (to write coverage rows)
+// and /super-admin/billing needs the count; deriving one from the other keeps
+// a single definition of "billable", which is what this file exists to
+// guarantee.
+export function countBillableVehicles(args: {
+  companyId: string;
+  companyTenantIds: readonly string[];
+  vehicles: readonly VehicleRow[];
+  licences: readonly LicenceRow[];
+}): number {
+  return billableVehicleIds(args).size;
 }

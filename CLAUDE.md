@@ -62,6 +62,16 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
     currently active (or `null` when viewing "All").
 - Any new data-fetching/writing page must go through `useTenant()` / `filterByTenant` / `writeTenantId` — do not
   query Supabase tables directly by an assumed tenant.
+- `vehicle_licences.active` and `vehicle_licences.vehicle_id` are **server-only**. `billing_03` revokes the
+  client's insert and update grants and installs a trigger, because an active licence is a billable vehicle
+  and repointing `vehicle_id` would make a different vehicle billable for free. Activation goes through
+  `POST /api/licences/activate`, which charges pro-rata for the rest of the cycle first and only then writes
+  the row. Other columns on that table (`licence_type`, `issue_date`, `expiry_date`, `notes`) are still
+  client-writable. Never reintroduce a direct client write to either column.
+- `lib/billing/vehicleCount.ts` is the single definition of billable: a company vehicle with at least one
+  active licence. What a cycle actually paid for is a separate fact, recorded per vehicle in
+  `vehicle_cycle_coverage`; `lib/billing/addon.ts` charges a mid-cycle addition only when the current cycle
+  has no coverage row for it. Keep those two ideas distinct, and do not add a second billable-count rule.
 - POD (proof-of-delivery) files live in a private `pod-files` Storage bucket, tenant-scoped via the storage
   path's tenant segment, served through short-lived signed URLs (`lib/pod/podUrl.ts`, `lib/pod/shareToken.ts`) —
   never public URLs. The sibling `job-files` bucket is **not yet locked down** (see README roadmap); don't assume

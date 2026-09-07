@@ -93,7 +93,7 @@ Status tags: [OK] functional against live data, [PARTIAL] real data but view-onl
 - **`/drivers`** [OK]: driver roster; admin-managed create / edit / delete.
 - **`/assets`** [OK]: trailers / pallets / equipment; create and list (no edit / delete yet).
 - **`/maintenance`** [OK]: maintenance records; logging a VOR record marks the vehicle off-road, completion restores it.
-- **`/settings/licences`** [OK]: vehicle licence tracking.
+- **`/settings/licences`** [OK]: vehicle licence tracking. Adding a licence, and activating or deactivating one, is company-admin only, because an active licence is a billable vehicle and activating one charges the company card. Those writes go through `POST /api/licences/activate` rather than writing `vehicle_licences` directly; the browser no longer holds insert or update rights on that table's `active` and `vehicle_id` columns. The other columns (`licence_type`, `issue_date`, `expiry_date`, `notes`) stay client-writable, though the page has no in-place edit UI that uses that grant today. Deleting a licence stays a direct client write (the DELETE grant is unchanged, since removing a licence can only reduce a bill), but the page offers the control to company admins only, because it removes a billable vehicle.
 
 ### Settings
 - **`/settings`** [LAUNCHER]: settings hub cards.
@@ -116,6 +116,7 @@ Status tags: [OK] functional against live data, [PARTIAL] real data but view-onl
 - **Microsoft Teams** (`TEAMS_WEBHOOK_URL`): Adaptive Card alert to the team when a lead is submitted.
 - **Resend** (`RESEND_API_KEY`, `MAIL_FROM`, `LEAD_INBOX`): transactional email for lead notifications.
 - **Square** (`SQUARE_ACCESS_TOKEN`, `SQUARE_ENVIRONMENT`, `SQUARE_LOCATION_ID`, `NEXT_PUBLIC_SQUARE_APP_ID`, `NEXT_PUBLIC_SQUARE_LOCATION_ID`): platform subscription billing, card on file plus the daily `/api/billing/run` charge cron (see `/settings/billing` and `/super-admin/billing`). This is separate from Stripe Connect (tenant-to-customer invoice payments), which is unrelated to platform billing. The earlier catalogue / plan-creation scaffolding under `app/subscription page/` is superseded by this and not wired into a live route.
+  - **Mid-cycle vehicle additions.** Billing is a paid-coverage set, not a headcount taken at charge time. Adding or activating a vehicle licence part way through a cycle charges the card immediately, pro-rata for the days left in the cycle, at the marginal band rate (the difference between the whole fleet's weekly price before and after the vehicle, since the bands are graduated). Each cycle's payment writes a `vehicle_cycle_coverage` row per vehicle it paid for, and `/api/licences/activate` charges only for a vehicle that cycle did not cover. Deactivating licences before the charge date and reactivating them after therefore no longer avoids the bill: the reactivation is an uncovered vehicle and is charged pro-rata. A company that is past due, in dunning, or canceled cannot add vehicles at all. Add-on attempts are recorded in `vehicle_addon_charges`, written as `pending` before the Square call so a retry replays a byte-identical request rather than being refused for reusing the idempotency key; a `pending` row is a payment whose outcome is unknown, never one that did not happen, and must not be deleted.
   - **Card form postal code (sandbox gotcha).** The Web Payments SDK picks the postal-code
     field's format from the *card's* issuing country, not the Square account's country. It sends the
     typed BIN to `POST /v2/tokenization/product-information` and localises the field from the
@@ -166,13 +167,27 @@ CRON_SECRET=                        # bearer token protecting /api/billing/run; 
 
 Database: the schema is managed in Supabase. RLS policies and helper functions are drafted as SQL under `docs/sql/` and applied in the Supabase SQL editor (not through an automated migration runner). This includes `docs/sql/billing_01_platform_billing.sql` (platform billing tables and policies), which is an unapplied draft until it is run there.
 
+Deploying the mid-cycle billing work: the order is not optional, and it is spelled out in each migration's header. Read those before touching anything; the summary here is a checklist, not the reasoning.
+
+Before the deploy, in this order:
+
+1. `billing_03_mid_cycle_charges.sql` **STEP 1 only** (down to the STEP 2 banner). Do not paste the whole file: the steps are separated by comment banners, so one paste runs all three. STEP 1 creates `vehicle_cycle_coverage` and `vehicle_addon_charges` and backfills coverage for the cycle already paid for. Run its pre-flight checks first.
+2. `billing_04_atomic_charge_record.sql` in full. It creates `record_cycle_charge`, which the deployed `lib/billing/server.ts` calls by name. Ship the code first and every cron charge and first-time card setup takes the customer's money at Square and then fails on a missing function, recording neither the charge nor its coverage.
+3. `billing_05_addon_intent.sql` in full. It widens the `vehicle_addon_charges` status constraint to allow `pending`, which `lib/billing/addonServer.ts` writes before calling Square. Ship the code first and vehicle additions fail outright, but before any payment is attempted, so no money moves.
+
+Then deploy the code, and immediately re-run the STEP 1 backfill. STEP 1 runs while the old cron is still live and the old cron writes no coverage, so a charge date falling in that window leaves the new cycle uncovered and the next mid-cycle addition double-charges. The backfill is only safe to re-run inside that window: once a cron cycle has advanced `next_charge_on` it mints coverage nobody paid for.
+
+After the deploy has soaked, run `billing_03` STEP 2 and STEP 3 together. They revoke the browser's insert and update on `vehicle_licences` and add a trigger over `active` and `vehicle_id`. Run either one before the new code is live and licence creation breaks immediately, because the old licences page writes that table directly. After them, reverting the code breaks licence creation for the same reason.
+
+`billing_01_platform_billing.sql` and `billing_02_four_weekly.sql` precede all of this and are assumed already applied; `billing_02` has its own before-deploy / after-soak split in its header.
+
 ## Project structure
 
 ```
 app/                      Next.js App Router pages and API routes
   components/             shared UI (AppHeader, TenantProvider, TenantGate, TenantSelector, PodLink)
   <feature>/page.tsx      one page per feature (jobs, pod, invoices, ...)
-  api/                    route handlers (auth callback, request-access, billing/run, billing/card)
+  api/                    route handlers (auth callback, request-access, billing/run, billing/card, licences/activate)
   subscription page/      earlier Square catalogue / plan-creation scaffolding, superseded by lib/payments/square.ts
 lib/
   supabase/               browser, server, and admin (service-role) clients
@@ -182,7 +197,10 @@ lib/
   validation/             Zod schemas
   roles.ts                role-name helper
 docs/
-  sql/                    RLS + storage policy migrations (rls_01..rls_10), plus billing_01_platform_billing.sql (unapplied draft)
+  sql/                    RLS + storage policy migrations (rls_01..rls_10), plus the billing series applied in
+                          order: billing_01_platform_billing, billing_02_four_weekly,
+                          billing_03_mid_cycle_charges, billing_04_atomic_charge_record,
+                          billing_05_addon_intent
   superpowers/specs/      design specs
   superpowers/plans/      implementation plans
   handoffs/               session handoffs

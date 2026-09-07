@@ -6,9 +6,29 @@ import type { VehicleLicence } from "./types";
 type Props = {
     licence: VehicleLicence;
     loading?: boolean;
+    /* Whether the viewer may change the licence, meaning both `active` and
+       whether the row exists at all. Defaults to true so the skeleton
+       call site and any future caller keep today's behaviour without opting in.
+       This is an affordance, not a boundary: the page still refuses the write
+       and the route still authorises through requireCompanyAdmin. */
+    canManage?: boolean;
     onToggle: (id: string, active: boolean | null) => void;
     onDelete: (id: string) => void;
 };
+
+/* Short form of the page's RESTRICTED_NOTICE. A disabled control with no
+   explanation is worse than an enabled one that explains itself, and disabling
+   this button removes the banner that used to answer the click. */
+const CANNOT_MANAGE_TITLE =
+    "Only company admins can activate a licence, because it charges the company card.";
+
+/* Deleting does not charge anything, so it cannot borrow the title above. It
+   is admin-only because removing an active licence removes a billable vehicle,
+   which is the same change to the bill that Deactivate makes. Leaving Delete
+   enabled beside a disabled Deactivate offered exactly that change by another
+   route. */
+const CANNOT_DELETE_TITLE =
+    "Only company admins can delete a licence, because it changes what the company is billed for.";
 
 /* ONE layout definition for both states, per the batch 1 decision: a separate
    skeleton component mirroring these class names drifts the first time anyone
@@ -19,7 +39,7 @@ type Props = {
    for real, the buttons merely disabled.
 
    Four-space indent, matching page.tsx rather than the rest of the app. */
-export default function LicenceCard({ licence, loading = false, onToggle, onDelete }: Props) {
+export default function LicenceCard({ licence, loading = false, canManage = true, onToggle, onDelete }: Props) {
     return (
         <article className="rounded-lg border border-line bg-surface p-4 shadow-sm" aria-busy={loading}>
             <h3 className="m-0 mb-2 text-md font-semibold text-ink">
@@ -58,9 +78,15 @@ export default function LicenceCard({ licence, loading = false, onToggle, onDele
             </div>
 
             <div className="flex flex-wrap gap-2">
+                {/* ORed into the existing `loading`, never replacing it, so the
+                    skeleton state is exactly what it was. Both buttons are
+                    gated: deleting never makes a vehicle billable, but it does
+                    unmake one, which is the half of the change Deactivate is
+                    refused for. */}
                 <Button
                     variant="secondary"
-                    disabled={loading}
+                    disabled={loading || !canManage}
+                    title={!loading && !canManage ? CANNOT_MANAGE_TITLE : undefined}
                     onClick={() => onToggle(licence.id, licence.active)}
                 >
                     {/* "Deactivate" while loading: the wider of the two labels,
@@ -68,7 +94,12 @@ export default function LicenceCard({ licence, loading = false, onToggle, onDele
                     {loading ? "Deactivate" : licence.active ? "Deactivate" : "Activate"}
                 </Button>
 
-                <Button variant="danger" disabled={loading} onClick={() => onDelete(licence.id)}>
+                <Button
+                    variant="danger"
+                    disabled={loading || !canManage}
+                    title={!loading && !canManage ? CANNOT_DELETE_TITLE : undefined}
+                    onClick={() => onDelete(licence.id)}
+                >
                     Delete
                 </Button>
             </div>

@@ -133,6 +133,46 @@ export function chargeIdempotencyKey(
   return `${compactCompany}_${compactDate}_${attempt}`;
 }
 
+// Idempotency key for a single mid-cycle vehicle add-on. Square allows 45
+// characters, and company + cycle + vehicle + attempt does not fit at full
+// UUID width, so the two ids are truncated to 14 hex characters (56 bits
+// each). Truncation is safe here because the key only has to be unique within
+// one Square account, not globally.
+//
+// The attempt number is load-bearing, not decoration. It gives two properties
+// at once:
+//
+//   * A request that crashes after the Square call but before the outcome is
+//     recorded recomputes the SAME attempt on retry, so it replays the same
+//     key. Necessary for a replay, but NOT sufficient on its own: Square only
+//     returns the original payment when the request BODY is byte-identical
+//     too, and the caller's arguments drift (`days` counts down at every
+//     London midnight, `baselineCount` moves whenever another vehicle is
+//     added), so a body recomputed from them is refused with
+//     IDEMPOTENCY_KEY_REUSED rather than deduplicated. That is why
+//     chargeVehicleAddon records a PENDING row before calling Square and
+//     rebuilds the body (amounts, days, card) from that row instead of
+//     recomputing it. See lib/billing/addonServer.ts; do not read this key as
+//     making the pending row redundant.
+//   * A customer who is declined, replaces their card and tries again gets a
+//     NEW attempt and therefore a new key, so Square takes a real second
+//     payment. Without the attempt in the key, that retry would be stuck
+//     replaying the original decline forever.
+//
+// The `a` prefix keeps add-on keys in a different namespace from
+// chargeIdempotencyKey, so a cycle charge and an add-on can never collide.
+export function addonIdempotencyKey(
+  companyId: string,
+  cycleDate: string,
+  vehicleId: string,
+  attempt: number
+): string {
+  const compactCompany = companyId.replace(/-/g, "").slice(0, 14);
+  const compactVehicle = vehicleId.replace(/-/g, "").slice(0, 14);
+  const compactDate = cycleDate.replace(/-/g, "");
+  return `a_${compactCompany}_${compactDate}_${compactVehicle}_${attempt}`;
+}
+
 export type PaymentClassification =
   | { kind: "succeeded" }
   | { kind: "failed"; failureCode: string }
@@ -142,11 +182,23 @@ export type PaymentClassification =
 // safe to retry under a new idempotency key. Anything else (PENDING, APPROVED,
 // unknown) is not finished: the caller must NOT record an outcome, so the next
 // run replays the SAME key and reads the payment's eventual terminal state.
+//
+// One philosophy runs through this function and through classifySquareThrow in
+// ./squareThrow.ts: an outcome is only ever RECORDED on positive evidence of
+// what Square did. Absence of an answer is never evidence of absence of a
+// payment.
 export function classifyPaymentResult(
   payment: { status?: string | null } | undefined
 ): PaymentClassification {
   if (!payment) {
-    return { kind: "failed", failureCode: "NO_PAYMENT_RETURNED" };
+    // A 2xx from Square with no payment object in it. This used to be reported
+    // as a terminal failure, and that had the same defect as misreading a
+    // dropped connection as a decline: settling the row retires the attempt,
+    // so the customer's next click mints a NEW idempotency key and charges the
+    // card again for a payment that may well have been taken. We got a
+    // successful HTTP response and could not read a payment out of it, which
+    // is unknown, not failed.
+    return { kind: "indeterminate", status: "NO_PAYMENT_RETURNED" };
   }
   const status = payment.status ?? "NO_STATUS";
   if (status === "COMPLETED") return { kind: "succeeded" };

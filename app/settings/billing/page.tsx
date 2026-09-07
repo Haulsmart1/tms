@@ -25,15 +25,50 @@ type ChargeRow = {
   attempt: number;
   vehicle_count: number;
   gross_pence: number;
-  status: "succeeded" | "failed";
+  /* "pending" only ever arrives via an addon row (see AddonChargeRow below):
+     platform_charges is written succeeded/failed in one step and never goes
+     through an intent row, so a cycle charge can never actually be pending.
+     It is included here anyway because this is the merged type the table
+     renders, and a merged row from either source has to satisfy it. */
+  status: "succeeded" | "failed" | "pending";
   failure_code: string | null;
   receipt_url: string | null;
   created_at: string;
+  /* Present only on rows merged in from vehicle_addon_charges. A 4-weekly
+     cycle charge leaves it undefined and renders exactly as it always has.
+     It carries the registration and the days covered, because on a mid-cycle
+     charge the cycle date alone tells the customer nothing about why they
+     were charged in the middle of a cycle. */
+  addon_label?: string;
 };
 
-/* Which of the three queries failed, so each region withholds only what it
+/* The raw vehicle_addon_charges shape, kept local to this file: it exists only
+   to be folded into ChargeRow below. PostgREST returns an embedded to-one join
+   as an array, hence `vehicles` being a list of at most one row. */
+type AddonChargeRow = {
+  id: string;
+  cycle_date: string;
+  attempt: number;
+  covers_days: number;
+  gross_pence: number;
+  /* See docs/sql/billing_05_addon_intent.sql: rows are written 'pending'
+     BEFORE the Square call and settled to succeeded/failed after, so a
+     replayed request can rebuild the exact same payload instead of risking a
+     double charge. A pending row's outcome is genuinely unknown here, not
+     "not yet happened" - the card may already have been charged. */
+  status: "succeeded" | "failed" | "pending";
+  failure_code: string | null;
+  receipt_url: string | null;
+  created_at: string;
+  vehicles?: { registration: string | null }[] | null;
+};
+
+/* Which of the three regions failed, so each region withholds only what it
    cannot vouch for: a charge-history failure must not hide a valid card on
-   file, and vice versa. `message` is the first error, for the banner. */
+   file, and vice versa. `message` is the first error, for the banner.
+   `charges` covers BOTH history queries (cycle charges and mid-cycle add-ons):
+   they render as one table, so a half-loaded history would read as a complete
+   one and quietly hide charges the customer has actually paid. */
 type LoadError = {
   message: string;
   billing: boolean;
@@ -41,11 +76,52 @@ type LoadError = {
   licences: boolean;
 };
 
+/* Both history queries are limited to this, then merged. See the note in
+   `load` about what that means for a company with many add-ons. */
+const HISTORY_LIMIT = 24;
+
+/* An add-on always covers exactly one vehicle, so the registration is the
+   whole story. Falls back to a generic word rather than rendering blank: the
+   FK is `on delete cascade`, so a missing vehicle should be impossible, but
+   a select the RLS policy does not reach would also land here. */
+function addonLabel(row: AddonChargeRow): string {
+  const registration = row.vehicles?.[0]?.registration?.trim();
+  const days = row.covers_days;
+  return `${registration || "Vehicle"} added mid-cycle · ${days} day${days === 1 ? "" : "s"}`;
+}
+
+function toChargeRow(row: AddonChargeRow): ChargeRow {
+  return {
+    id: row.id,
+    cycle_date: row.cycle_date,
+    attempt: row.attempt,
+    /* Not a stored column: an add-on charge is per vehicle by construction
+       (vehicle_addon_charges is unique on company/cycle/vehicle/attempt). */
+    vehicle_count: 1,
+    gross_pence: row.gross_pence,
+    status: row.status,
+    failure_code: row.failure_code,
+    receipt_url: row.receipt_url,
+    created_at: row.created_at,
+    addon_label: addonLabel(row),
+  };
+}
+
 /* No widths: DataTable's comment says set them on every column or none. */
 const CHARGE_COLUMNS: Column<ChargeRow>[] = [
   {
     header: "Billing date",
-    cell: (c) => <span className="font-mono">{formatCycleDate(c.cycle_date)}</span>,
+    cell: (c) => (
+      <div>
+        <span className="font-mono">{formatCycleDate(c.cycle_date)}</span>
+        {/* Mid-cycle add-ons share the cycle date of the cycle they fall in,
+            so without this two rows would show the same date with no hint of
+            what the second one was for. */}
+        {c.addon_label ? (
+          <div className="text-xs text-ink-3">{c.addon_label}</div>
+        ) : null}
+      </div>
+    ),
   },
   { header: "Attempt", cell: (c) => String(c.attempt) },
   { header: "Vehicles", align: "right", cell: (c) => String(c.vehicle_count) },
@@ -58,15 +134,32 @@ const CHARGE_COLUMNS: Column<ChargeRow>[] = [
   },
   {
     header: "Status",
-    cell: (c) =>
-      c.status === "succeeded" ? (
-        <Badge tone="success">Paid</Badge>
-      ) : (
+    cell: (c) => {
+      if (c.status === "succeeded") return <Badge tone="success">Paid</Badge>;
+      /* "pending" means the outcome is unknown, not that nothing happened -
+         the card may already be charged (see billing_05_addon_intent.sql).
+         Reusing "danger"/Failed here would tell a customer whose money has
+         genuinely left their account to go retry a card that may already
+         have been charged. warning (amber) is the closest existing tone to
+         "still being confirmed": it does not claim success, and unlike
+         danger it does not invite a retry. Rows normally clear this state in
+         under a second; wording says "still confirming" rather than naming a
+         timeout so it does not read as broken for that ordinary case. */
+      if (c.status === "pending") {
+        return (
+          <span className="inline-flex items-center gap-2">
+            <Badge tone="warning">Pending</Badge>
+            <span className="text-xs text-ink-3">still confirming with your bank</span>
+          </span>
+        );
+      }
+      return (
         <span className="inline-flex items-center gap-2">
           <Badge tone="danger">Failed</Badge>
           <span className="text-xs text-ink-3">{c.failure_code ?? "declined"}</span>
         </span>
-      ),
+      );
+    },
   },
   {
     header: "Receipt",
@@ -142,32 +235,64 @@ export default function BillingSettingsPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [billingRes, chargesRes, licencesRes] = await Promise.all([
+      const [billingRes, chargesRes, addonRes, licencesRes] = await Promise.all([
         supabase.from("company_billing").select("*").maybeSingle(),
         supabase
           .from("platform_charges")
           .select("*")
           .order("created_at", { ascending: false })
-          .limit(24),
+          .limit(HISTORY_LIMIT),
+        /* Company-wide on purpose, no filterByTenant, for the same reason as
+           platform_charges above: this is the bill, not an operational view.
+           RLS scopes it to the admin's company. Limited to HISTORY_LIMIT like
+           the query above, then merged and sliced back down to it; see the
+           note on the slice in setCharges for why that is exact. */
+        supabase
+          .from("vehicle_addon_charges")
+          .select("*, vehicles ( registration )")
+          .order("created_at", { ascending: false })
+          .limit(HISTORY_LIMIT),
         /* Company-wide on purpose, no filterByTenant: this is the bill, not
            an operational view, and the charge spans every tenant under the
            company. RLS scopes it to the admin's company. See the
            count-divergence follow-up in the spec before "fixing" this. */
         supabase.from("vehicle_licences").select("vehicle_id").eq("active", true),
       ]);
-      const firstError = billingRes.error ?? chargesRes.error ?? licencesRes.error;
+      const firstError =
+        billingRes.error ?? chargesRes.error ?? addonRes.error ?? licencesRes.error;
       setLoadError(
         firstError
           ? {
               message: firstError.message,
               billing: Boolean(billingRes.error),
-              charges: Boolean(chargesRes.error),
+              /* No fourth flag: both queries feed the one history table, so
+                 either failing means the table cannot be vouched for. */
+              charges: Boolean(chargesRes.error) || Boolean(addonRes.error),
               licences: Boolean(licencesRes.error),
             }
           : null
       );
       setBilling((billingRes.data as BillingRow | null) ?? null);
-      setCharges((chargesRes.data as ChargeRow[] | null) ?? []);
+      /* One chronological sequence rather than two tables: a mid-cycle charge
+         is a charge, and splitting them would leave the customer reconciling
+         two lists against one card statement.
+
+         The slice is what makes the tail of that list honest, and it is exact
+         rather than approximate: each query independently returns its own most
+         recent HISTORY_LIMIT, so their union always contains the true most
+         recent HISTORY_LIMIT of the combined set. Sorting then slicing turns
+         two per-table windows into one real "most recent charges" list.
+         Without it the list runs to twice the limit and silently omits older
+         rows of one kind while showing older rows of the other, which the
+         customer has no way to see. */
+      setCharges(
+        [
+          ...((chargesRes.data as ChargeRow[] | null) ?? []),
+          ...((addonRes.data as AddonChargeRow[] | null) ?? []).map(toChargeRow),
+        ]
+          .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+          .slice(0, HISTORY_LIMIT)
+      );
       setVehicleCount(
         new Set((licencesRes.data ?? []).map((l) => l.vehicle_id)).size
       );

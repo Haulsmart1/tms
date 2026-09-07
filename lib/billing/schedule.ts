@@ -31,6 +31,18 @@ export function addDays(dateISO: string, days: number): string {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
 }
 
+// Whole days from one calendar date to another, negative when `toISO` is in
+// the past. Both dates are parsed as UTC midnight, so this never sees a
+// 23- or 25-hour day at a BST transition, which is exactly why billing dates
+// are plain YYYY-MM-DD strings and not timestamps.
+export function daysBetween(fromISO: string, toISO: string): number {
+  const from = parseISO(fromISO);
+  const to = parseISO(toISO);
+  const fromMs = Date.UTC(from.year, from.month - 1, from.day);
+  const toMs = Date.UTC(to.year, to.month - 1, to.day);
+  return Math.round((toMs - fromMs) / 86_400_000);
+}
+
 // Derived, not a second literal: money.ts bills WEEKS_PER_CYCLE weeks per
 // charge, and this is how long that cycle actually lasts. Writing 28 here
 // instead would let someone lengthen the cycle in one file while the other

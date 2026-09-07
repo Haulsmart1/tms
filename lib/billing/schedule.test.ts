@@ -3,6 +3,7 @@ import {
   addDays,
   computeNextChargeOn,
   CYCLE_DAYS,
+  daysBetween,
   londonDateISO,
   nextRetryOn,
 } from "./schedule";
@@ -80,5 +81,35 @@ describe("nextRetryOn", () => {
 
   it("returns null after the fourth failure (dunning exhausted)", () => {
     expect(nextRetryOn("2026-08-26", 4)).toBeNull();
+  });
+});
+
+describe("daysBetween", () => {
+  it("counts whole days forward", () => {
+    expect(daysBetween("2026-09-07", "2026-09-14")).toBe(7);
+  });
+
+  it("returns zero for the same date", () => {
+    expect(daysBetween("2026-09-07", "2026-09-07")).toBe(0);
+  });
+
+  it("returns a negative number when the target is in the past", () => {
+    expect(daysBetween("2026-09-07", "2026-09-05")).toBe(-2);
+  });
+
+  it("counts across a month boundary", () => {
+    expect(daysBetween("2026-09-25", "2026-10-02")).toBe(7);
+  });
+
+  // British Summer Time ends on 2026-10-25. Both dates are parsed as UTC
+  // midnight, so the 23-hour local day must not round to 0 days.
+  it("is unaffected by the BST to GMT transition", () => {
+    expect(daysBetween("2026-10-24", "2026-10-26")).toBe(2);
+  });
+
+  it("spans a full cycle", () => {
+    expect(daysBetween("2026-09-07", computeNextChargeOn("2026-09-07"))).toBe(
+      CYCLE_DAYS
+    );
   });
 });
