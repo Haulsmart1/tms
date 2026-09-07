@@ -22,6 +22,8 @@ Three things the spec got slightly wrong, discovered while writing exact code. T
 
 4. **`status === "active"` does not mean the subscription is healthy** (found by the Task 4 review). When a cycle charge fails but dunning has retries left, `applyChargeOutcome` in `lib/billing/run.ts` leaves `status: "active"` and `next_charge_on` unchanged in the past, setting only `retry_at`. A company mid-dunning therefore looked healthy to `selectAddonAction`, fell through to the `days <= 0` branch, and could add vehicles free for the whole dunning window; if dunning then exhausted, that cycle was never charged and the vehicles rode free for a full cycle on a card that was already failing. `AddonBillingRow` now carries `retry_at`, a non-null value blocks with reason `dunning`, and the status gate fails closed on any value outside the union.
 
+5. **`revoke update (active)` would have been a complete no-op** (found by the Task 6 implementer). Postgres stores table-level privileges in `pg_class.relacl` and column-level ones in `pg_attribute.attacl`, and permits a write when EITHER allows it, so a column-level revoke cannot subtract from a table-level grant. Supabase's default bootstrap grants `authenticated` table-level UPDATE across `public`, and `rls_05_revoke_grants.sql` never revoked it for `vehicle_licences`. The original STEP 2 would have applied without error, looked correct in review, and left the exploit entirely open. It is now a full table-level revoke followed by generated per-column grants on every column except `active`. This was the single most important correction in the whole implementation: without it every other task here is decoration.
+
 ---
 
 ## File Structure
@@ -953,27 +955,64 @@ on conflict do nothing;
 -- with a raw supabase-js call from devtools using the user's own token, which
 -- is exactly the hole being closed.
 --
--- Column-level revoke, not a blanket one: `active` is the only column on this
--- table that costs money, so ordinary edits (expiry date, notes, licence
--- type) keep working straight from the browser. Precedent for a column-level
--- guard: docs/sql/profiles_privileged_columns_guard.sql.
+-- `active` is the only column on this table that costs money, so ordinary
+-- edits (expiry date, notes, licence type) must keep working straight from
+-- the browser. Precedent for a column-level guard:
+-- docs/sql/profiles_privileged_columns_guard.sql.
+--
+-- This has to be a full revoke followed by per-column grants, NOT a bare
+-- `revoke update (active)`. Postgres holds table-level and column-level
+-- privileges separately and allows a write when EITHER of them permits it, so
+-- a column-level revoke against a role that still holds the table-level UPDATE
+-- grant (which is exactly what Supabase's default grants give authenticated)
+-- takes nothing away and leaves the exploit wide open.
 --
 -- DELETE is deliberately left alone. Removing a licence never creates
 -- billable state, and coverage means a delete-then-reinsert inside one cycle
 -- is free anyway.
 revoke insert on public.vehicle_licences from authenticated, anon;
-revoke update (active) on public.vehicle_licences from authenticated, anon;
+revoke update on public.vehicle_licences from authenticated, anon;
+
+-- Generated rather than typed out, so this stays correct as the table gains
+-- columns and a re-run does not leave a new column unwritable.
+do $$
+declare
+  cols text;
+begin
+  select string_agg(quote_ident(column_name), ', ' order by ordinal_position)
+    into cols
+  from information_schema.columns
+  where table_schema = 'public'
+    and table_name = 'vehicle_licences'
+    and column_name <> 'active';
+
+  if cols is not null then
+    execute format('grant update (%s) on public.vehicle_licences to authenticated', cols);
+  end if;
+end $$;
 ```
 
 - [ ] **Step 2: Verify the backfill query parses**
 
 There is no local Postgres, so this is a read-through rather than an execution. Confirm by eye that:
-- every table referenced (`companies`, `vehicles`, `tenants`, `company_billing`, `vehicle_licences`) exists in `docs/sql/schema_rls_dump.sql`;
 - `get_my_role()` and `get_my_company_id()` are used exactly as `billing_01_platform_billing.sql` uses them;
-- the backfill's tenant matching is character-for-character the same rule as `billableVehicleIds` in `lib/billing/vehicleCount.ts`.
+- the backfill's tenant matching is character-for-character the same rule as `billableVehicleIds` in `lib/billing/vehicleCount.ts`;
+- the backfill files coverage under `next_charge_on - 28`, matching `currentCycleDate` in `lib/billing/addon.ts`.
 
-Run: `grep -n "create table public.vehicle_licences" -A 15 docs/sql/schema_rls_dump.sql`
-Expected: the column list confirms `vehicle_id`, `active` and a uuid primary key.
+Note that `docs/sql/schema_rls_dump.sql` is **not** a schema dump despite the name: it is a
+`select jsonb_pretty(...)` introspection query you run in the SQL editor to produce one. Do not
+try to grep table definitions out of it; there are none.
+
+The foreign keys assume `vehicles.id` and `companies.id` are `uuid`. `companies.id` is certain
+(`billing_01` already declares a `uuid` reference to it and is applied in production).
+`vehicles.id` should be confirmed in the SQL editor before applying:
+
+```sql
+select data_type from information_schema.columns
+where table_name = 'vehicles' and column_name = 'id';
+```
+
+A mismatch fails loudly at apply time and creates nothing, so it is safe to find out this way.
 
 - [ ] **Step 3: Commit**
 
