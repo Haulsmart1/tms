@@ -217,11 +217,9 @@ export default function BillingSettingsPage() {
           .limit(HISTORY_LIMIT),
         /* Company-wide on purpose, no filterByTenant, for the same reason as
            platform_charges above: this is the bill, not an operational view.
-           RLS scopes it to the admin's company. Each query is limited
-           independently and the two are then merged, so with more than
-           HISTORY_LIMIT add-ons in the window the oldest of the merged list is
-           not a true cut-off point; the customer still sees the most recent of
-           each kind, which is what the page is for. */
+           RLS scopes it to the admin's company. Limited to HISTORY_LIMIT like
+           the query above, then merged and sliced back down to it; see the
+           note on the slice in setCharges for why that is exact. */
         supabase
           .from("vehicle_addon_charges")
           .select("*, vehicles ( registration )")
@@ -250,12 +248,23 @@ export default function BillingSettingsPage() {
       setBilling((billingRes.data as BillingRow | null) ?? null);
       /* One chronological sequence rather than two tables: a mid-cycle charge
          is a charge, and splitting them would leave the customer reconciling
-         two lists against one card statement. */
+         two lists against one card statement.
+
+         The slice is what makes the tail of that list honest, and it is exact
+         rather than approximate: each query independently returns its own most
+         recent HISTORY_LIMIT, so their union always contains the true most
+         recent HISTORY_LIMIT of the combined set. Sorting then slicing turns
+         two per-table windows into one real "most recent charges" list.
+         Without it the list runs to twice the limit and silently omits older
+         rows of one kind while showing older rows of the other, which the
+         customer has no way to see. */
       setCharges(
         [
           ...((chargesRes.data as ChargeRow[] | null) ?? []),
           ...((addonRes.data as AddonChargeRow[] | null) ?? []).map(toChargeRow),
-        ].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+        ]
+          .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+          .slice(0, HISTORY_LIMIT)
       );
       setVehicleCount(
         new Set((licencesRes.data ?? []).map((l) => l.vehicle_id)).size
