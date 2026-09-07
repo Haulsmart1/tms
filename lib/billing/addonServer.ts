@@ -54,6 +54,20 @@ export async function chargeVehicleAddon(
     squareCardId: string;
   }
 ): Promise<AddonChargeResult> {
+  // A zero-day add-on is not a cheap charge, it is a free cycle. days === 0
+  // means the cycle charge is due today, and selectAddonAction deliberately
+  // returns free/cycle_due there WITHOUT recording coverage, precisely so the
+  // imminent cron run bills the vehicle at full price. Reaching this function
+  // with days === 0 would instead write a coverage row for a payment of
+  // nothing, which is the exploit this feature exists to close. Unreachable
+  // through selectAddonAction today; guarded because the cost of being wrong
+  // here is a free fleet.
+  if (!Number.isInteger(args.days) || args.days < 1) {
+    throw new Error(
+      `chargeVehicleAddon requires at least one day, got ${args.days} for company ${args.companyId} vehicle ${args.vehicleId}`
+    );
+  }
+
   // Has this vehicle already been paid for in this cycle by an earlier
   // attempt that crashed before writing coverage? Same guard as
   // runChargeCycle's prior-success check, and for the same reason.
