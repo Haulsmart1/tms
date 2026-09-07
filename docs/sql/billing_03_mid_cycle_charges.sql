@@ -2,6 +2,12 @@
 -- Apply manually in the Supabase SQL editor, like the rls_* and billing_*
 -- series.
 --
+-- DO NOT PASTE THIS WHOLE FILE INTO THE EDITOR AND RUN IT. The three steps are
+-- separated by comment banners only, so a single paste applies all of them at
+-- once, which is exactly the order this header forbids: STEP 2 and STEP 3 must
+-- not reach the database until the new code is deployed. Run each step by
+-- selecting it.
+--
 -- ORDER MATTERS. This touches live payment code.
 --
 --   1. Run STEP 1 (everything down to the STEP 2 banner) BEFORE deploying.
@@ -40,6 +46,36 @@
 --   where table_schema = 'public' and column_name = 'id'
 --     and table_name in ('vehicles', 'companies');
 --
+-- Nothing may write vehicle_licences with the owner's rights. A SECURITY
+-- DEFINER function owned by postgres would bypass the grants AND satisfy the
+-- trigger's exemption list, hollowing out both layers at once. It is the exact
+-- inverse of the mistake this file avoids in STEP 3, arriving from outside the
+-- file. Nothing in docs/sql/ defines one today, but that directory is not a
+-- complete picture of the live database (see the rls_11 header). Expect no
+-- rows:
+--
+--   select p.proname, p.prosecdef, pg_get_userbyid(p.proowner) as owner
+--   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--   where n.nspname = 'public' and p.prosrc ilike '%vehicle_licences%';
+--
+-- An auto-updatable view without security_invoker checks base-table privileges
+-- as the VIEW OWNER, so it bypasses the column allowlist. PostgREST exposes
+-- views. Expect no rows:
+--
+--   select viewname from pg_views where definition ilike '%vehicle_licences%';
+--
+-- RLS must actually be ON for vehicle_licences. The "DELETE is deliberately
+-- left alone" reasoning in STEP 2 assumes the tenant policy bites, and that is
+-- not a given here: rls_03 creates a policy for every tenant_id table but
+-- never runs `enable row level security`, and rls_11_enable_rls_explicit.sql,
+-- which does, is still marked NOT YET APPLIED in its own header. A policy on a
+-- table with RLS disabled is inert. This must return true before STEP 2; if it
+-- returns false, apply rls_11 first, because otherwise the DELETE grant this
+-- file deliberately leaves in place reaches every company's licence rows:
+--
+--   select relrowsecurity from pg_class
+--   where oid = 'public.vehicle_licences'::regclass;
+--
 -- !!! PRE-FLIGHT FOR STEP 3, READ THIS OR YOU WILL TAKE THE FEATURE DOWN !!!
 -- The trigger in STEP 3 exempts the database roles ('postgres',
 -- 'supabase_admin', 'service_role'). Those names are an ASSUMPTION about this
@@ -49,8 +85,22 @@
 --
 --   select current_user;
 --
--- from a service-role connection (the same credentials lib/supabase/admin.ts
--- uses), and edit the list in STEP 3 to match before applying it.
+-- as the server does. Note you cannot literally run that over the service-role
+-- path: that path is PostgREST, which does not execute arbitrary SQL. Either
+-- expose a throwaway `create function whoami() returns text language sql as
+-- $f$ select current_user $f$;` and call it as the service role, then drop it,
+-- or accept the derivation: PostgREST connects as `authenticator` and issues
+-- SET ROLE from the JWT `role` claim, so a service-role key yields
+-- current_user = 'service_role'. Edit the list in STEP 3 to match before
+-- applying it.
+--
+-- AFTER STEP 2 AND STEP 3, NO BROWSER SESSION CAN TOGGLE `active`, INCLUDING A
+-- SUPER ADMIN. Grants and the trigger both key off the database role, and
+-- platform staff sit on `authenticated` like everyone else; get_my_role() is
+-- an application-level notion this layer never consults. Nothing breaks today,
+-- since the super-admin billing page only reads. But the manual escape hatch
+-- for fixing a stuck licence by hand is gone, and the remaining routes are the
+-- SQL editor or the API. Worth knowing before you need it.
 --
 -- ROLLBACK. Between the deploy and STEP 2 the code reverts cleanly, because
 -- everything in STEP 1 is additive and the old code never reads it. After
@@ -66,15 +116,26 @@
 -- that one grant undoes the column guard; the leftover per-column grants are
 -- harmless. The trigger is NOT undone by any grant, hence the third line.
 --
--- Restoring the INSERT grant is safe to do on its own, and safer than it looks:
--- the trigger still refuses an insert with active = true from a non-service
--- role, so the old page can create licences again without reopening the
--- free-vehicle hole. Drop the trigger only if the revert must also restore
--- browser-side activation.
+-- Restoring the INSERT grant on its own does not reopen the free-vehicle hole,
+-- because the trigger still refuses an insert with active = true from a
+-- non-service role. But it does not restore the old page either, and the
+-- earlier wording overstated it: that page's form defaults active to true
+-- (useState(true) in app/settings/licences/page.tsx), so the ordinary create
+-- path raises 42501 and surfaces a raw Postgres error to the user. With INSERT
+-- re-granted and the trigger still in place, a user can create only an
+-- INACTIVE licence, and only by unticking the box first. A revert that needs
+-- the old page working properly must drop the trigger as well.
 
 -- ===========================================================================
 -- STEP 1: run BEFORE deploying the code.
 -- ===========================================================================
+--
+-- One transaction, like STEP 2. A mid-batch abort would otherwise leave the
+-- new tables created and carrying Supabase's default DML grants to
+-- authenticated, or, aborting earlier still, created with RLS not yet enabled:
+-- either state is an open billing table sitting in production until someone
+-- notices.
+begin;
 
 -- One row per vehicle per cycle that has actually been paid for. This is what
 -- makes billing a paid-coverage set rather than a snapshot taken on charge
@@ -161,8 +222,14 @@ grant select on public.vehicle_cycle_coverage, public.vehicle_addon_charges
 -- No INSERT/UPDATE/DELETE policies on purpose. All writes come from server
 -- routes on the service role, which bypasses RLS. Belt and braces: revoke the
 -- table grants too, matching billing_01 and rls_05_revoke_grants.sql.
-revoke insert, update, delete on public.vehicle_cycle_coverage from authenticated, anon;
-revoke insert, update, delete on public.vehicle_addon_charges from authenticated, anon;
+--
+-- `public` is in the list, unlike in those two files. A privilege granted to
+-- PUBLIC is held by every role, and `revoke ... from authenticated` does not
+-- touch it: the two are separate ACL entries and the effective privilege is
+-- their sum, so authenticated keeps whatever PUBLIC has. Revoking it here is
+-- the enforcement of what the STEP 2 verify note otherwise only warns about.
+revoke insert, update, delete on public.vehicle_cycle_coverage from authenticated, anon, public;
+revoke insert, update, delete on public.vehicle_addon_charges from authenticated, anon, public;
 
 -- Backfill coverage for every subscribed company's CURRENT cycle from the
 -- live billable set.
@@ -186,6 +253,14 @@ revoke insert, update, delete on public.vehicle_addon_charges from authenticated
 -- The 28 here is CYCLE_DAYS again, same caveat as the covers_days check:
 -- next_charge_on is the NEXT charge, so the cycle already paid for started
 -- CYCLE_DAYS earlier. This must stay in step with currentCycleDate.
+--
+-- It grants coverage for that cycle without checking a payment actually landed
+-- for it. True today, because the card-setup route charges immediately, so an
+-- active company has paid for the cycle in progress. Tightening this with an
+-- `exists` against platform_charges is deliberately NOT done: any row it
+-- wrongly excluded would leave a paid vehicle uncovered, and an uncovered
+-- vehicle gets charged again. The loose form fails toward free, the tight form
+-- fails toward double-billing.
 insert into public.vehicle_cycle_coverage (company_id, cycle_date, vehicle_id)
 select distinct
   cb.company_id,
@@ -206,6 +281,8 @@ where cb.status = 'active'
   )
 on conflict do nothing;
 
+commit;
+
 -- ===========================================================================
 -- STEP 2: run AFTER the code is deployed and has soaked.
 -- ===========================================================================
@@ -223,7 +300,13 @@ on conflict do nothing;
 -- would break with no half-applied state to reason about.
 begin;
 
-revoke insert on public.vehicle_licences from authenticated, anon;
+-- `public` is revoked alongside the two API roles throughout STEP 2. A grant
+-- to PUBLIC is a separate ACL entry that every role inherits, and revoking
+-- from authenticated leaves it completely untouched, so a stray
+-- `grant update on ... to public` would keep the hole open while both queries
+-- an operator is likely to run against `grantee = 'authenticated'` show
+-- nothing wrong.
+revoke insert on public.vehicle_licences from authenticated, anon, public;
 
 -- `active` is the column that costs money, so it must not be writable from the
 -- browser, while ordinary edits (expiry date, notes, licence type) keep
@@ -239,7 +322,7 @@ revoke insert on public.vehicle_licences from authenticated, anon;
 --
 -- anon is not re-granted: it has no RLS policy on this table and never had any
 -- business writing licences.
-revoke update on public.vehicle_licences from authenticated, anon;
+revoke update on public.vehicle_licences from authenticated, anon, public;
 
 -- An explicit allowlist, NOT "every column except active". Generating the
 -- list from the catalogue would grant vehicle_id, which is a bypass of this
@@ -253,18 +336,29 @@ grant update (licence_type, issue_date, expiry_date, notes)
 
 commit;
 
+-- Note the asymmetry with STEP 3: the allowlist leaves FIVE columns unwritable
+-- (id, tenant_id, vehicle_id, active, created_at) while the trigger guards
+-- TWO (active, vehicle_id). That is correct today rather than an oversight.
+-- Only `active` and `vehicle_id` are billing inputs, and the trigger exists to
+-- survive the grants being wiped, so it need only cover what costs money. The
+-- licence's own tenant_id is not consulted by billing: countBillableVehicles
+-- reads vehicles.tenant_id, never vehicle_licences.tenant_id. If that ever
+-- changes, the trigger needs a third clause, because the grant layer alone is
+-- one careless `grant all` away from gone.
+
 -- VERIFY the guard. The first query must list exactly the four allowlisted
--- columns. The second must contain no UPDATE grant reachable by authenticated:
--- neither an `authenticated=...U...` entry nor a bare `=...U...` entry, which
--- is PUBLIC and sums into every role's effective privileges. Checking
--- role_table_grants for grantee = 'authenticated' would miss the PUBLIC case
--- entirely, which is why this reads the ACL directly.
+-- columns against authenticated, and nothing at all against PUBLIC. The second
+-- must contain no UPDATE grant reachable by authenticated: neither an
+-- `authenticated=...U...` entry nor a bare `=...U...` entry, which is PUBLIC
+-- and sums into every role's effective privileges. Neither query filters to
+-- grantee = 'authenticated' alone, because that is precisely the filter that
+-- cannot see a PUBLIC grant.
 --
---   select column_name, privilege_type
+--   select grantee, column_name, privilege_type
 --   from information_schema.column_privileges
 --   where table_schema = 'public' and table_name = 'vehicle_licences'
---     and grantee = 'authenticated' and privilege_type = 'UPDATE'
---   order by column_name;
+--     and grantee in ('authenticated', 'PUBLIC') and privilege_type = 'UPDATE'
+--   order by grantee, column_name;
 --
 --   select relacl from pg_class where oid = 'public.vehicle_licences'::regclass;
 
@@ -316,16 +410,24 @@ begin
     return new;
   end if;
 
-  if new.active is distinct from old.active
-     and current_user not in ('postgres', 'supabase_admin', 'service_role') then
-    raise exception 'vehicle_licences.active is server-only; use /api/licences/activate'
-      using errcode = '42501';
+  -- Tested explicitly rather than left as the fallthrough. Inert today, since
+  -- the trigger is insert-or-update only, but if `delete` is ever added to the
+  -- trigger definition the fallthrough would dereference an unassigned NEW and
+  -- every delete would error.
+  if tg_op = 'UPDATE' then
+    if new.active is distinct from old.active
+       and current_user not in ('postgres', 'supabase_admin', 'service_role') then
+      raise exception 'vehicle_licences.active is server-only; use /api/licences/activate'
+        using errcode = '42501';
+    end if;
+    if new.vehicle_id is distinct from old.vehicle_id
+       and current_user not in ('postgres', 'supabase_admin', 'service_role') then
+      raise exception 'vehicle_licences.vehicle_id is server-only; it decides billing'
+        using errcode = '42501';
+    end if;
+    return new;
   end if;
-  if new.vehicle_id is distinct from old.vehicle_id
-     and current_user not in ('postgres', 'supabase_admin', 'service_role') then
-    raise exception 'vehicle_licences.vehicle_id is server-only; it decides billing'
-      using errcode = '42501';
-  end if;
+
   return new;
 end $$;
 
