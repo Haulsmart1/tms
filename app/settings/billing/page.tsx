@@ -25,7 +25,12 @@ type ChargeRow = {
   attempt: number;
   vehicle_count: number;
   gross_pence: number;
-  status: "succeeded" | "failed";
+  /* "pending" only ever arrives via an addon row (see AddonChargeRow below):
+     platform_charges is written succeeded/failed in one step and never goes
+     through an intent row, so a cycle charge can never actually be pending.
+     It is included here anyway because this is the merged type the table
+     renders, and a merged row from either source has to satisfy it. */
+  status: "succeeded" | "failed" | "pending";
   failure_code: string | null;
   receipt_url: string | null;
   created_at: string;
@@ -46,7 +51,12 @@ type AddonChargeRow = {
   attempt: number;
   covers_days: number;
   gross_pence: number;
-  status: "succeeded" | "failed";
+  /* See docs/sql/billing_05_addon_intent.sql: rows are written 'pending'
+     BEFORE the Square call and settled to succeeded/failed after, so a
+     replayed request can rebuild the exact same payload instead of risking a
+     double charge. A pending row's outcome is genuinely unknown here, not
+     "not yet happened" - the card may already have been charged. */
+  status: "succeeded" | "failed" | "pending";
   failure_code: string | null;
   receipt_url: string | null;
   created_at: string;
@@ -124,15 +134,32 @@ const CHARGE_COLUMNS: Column<ChargeRow>[] = [
   },
   {
     header: "Status",
-    cell: (c) =>
-      c.status === "succeeded" ? (
-        <Badge tone="success">Paid</Badge>
-      ) : (
+    cell: (c) => {
+      if (c.status === "succeeded") return <Badge tone="success">Paid</Badge>;
+      /* "pending" means the outcome is unknown, not that nothing happened -
+         the card may already be charged (see billing_05_addon_intent.sql).
+         Reusing "danger"/Failed here would tell a customer whose money has
+         genuinely left their account to go retry a card that may already
+         have been charged. warning (amber) is the closest existing tone to
+         "still being confirmed": it does not claim success, and unlike
+         danger it does not invite a retry. Rows normally clear this state in
+         under a second; wording says "still confirming" rather than naming a
+         timeout so it does not read as broken for that ordinary case. */
+      if (c.status === "pending") {
+        return (
+          <span className="inline-flex items-center gap-2">
+            <Badge tone="warning">Pending</Badge>
+            <span className="text-xs text-ink-3">still confirming with your bank</span>
+          </span>
+        );
+      }
+      return (
         <span className="inline-flex items-center gap-2">
           <Badge tone="danger">Failed</Badge>
           <span className="text-xs text-ink-3">{c.failure_code ?? "declined"}</span>
         </span>
-      ),
+      );
+    },
   },
   {
     header: "Receipt",
