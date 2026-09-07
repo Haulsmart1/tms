@@ -34,9 +34,24 @@ export function selectAddonAction(args: {
 }): AddonAction {
   // Checked before the status gate on purpose. Coverage is only ever written
   // by a payment that actually succeeded, so honouring it is not exploitable,
-  // and blocking a past_due company from re-activating a vehicle it has
-  // already paid for this cycle would be taking money for nothing.
-  if (args.alreadyCovered) {
+  // and blocking a company from re-activating a vehicle it has already paid
+  // for this cycle would be taking money for nothing.
+  //
+  // But coverage only vouches for a cycle that is still RUNNING. Once
+  // next_charge_on is at or before today, the cycle it names has elapsed, and
+  // for a past_due company that date is frozen forever (selectDueAction
+  // returns none once the dunning ladder is exhausted, so next_charge_on
+  // never moves again). Without the date check, currentCycleDate would keep
+  // naming that same elapsed cycle and the whole last-paid fleet would read
+  // as covered, letting a past_due company deactivate and reactivate it
+  // indefinitely for free with the status gates below never firing. A healthy
+  // company always has next_charge_on in the future, so this costs them
+  // nothing.
+  if (
+    args.alreadyCovered &&
+    args.billingRow !== null &&
+    args.todayISO < args.billingRow.next_charge_on
+  ) {
     return { kind: "free", reason: "already_covered" };
   }
 

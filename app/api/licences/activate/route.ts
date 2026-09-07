@@ -30,14 +30,22 @@ import { londonDateISO } from "../../../../lib/billing/schedule";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Dates are plain calendar days, matching every other billing date in this
+// codebase. Validated here so "banana" gives a clean 400 rather than reaching
+// Postgres and coming back as a raw 22007 at 500.
+const DateISO = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected a YYYY-MM-DD date.")
+  .nullable();
+
 const BodySchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("create"),
     tenantId: z.string().uuid(),
     vehicleId: z.string().uuid(),
     licenceType: z.string().min(1),
-    issueDate: z.string().nullable(),
-    expiryDate: z.string().nullable(),
+    issueDate: DateISO,
+    expiryDate: DateISO,
     active: z.boolean(),
     notes: z.string().nullable(),
   }),
@@ -122,7 +130,7 @@ export async function POST(request: NextRequest) {
     } else {
       const licenceRes = await admin
         .from("vehicle_licences")
-        .select("id, vehicle_id")
+        .select("id, vehicle_id, tenant_id")
         .eq("id", body.licenceId)
         .maybeSingle();
       if (licenceRes.error) {
@@ -134,9 +142,16 @@ export async function POST(request: NextRequest) {
           { status: 404 }
         );
       }
-      // The licence's own tenant_id is not taken as the ownership proof. The
-      // vehicle is what gets billed, so the vehicle is what must be checked,
-      // and the vehicle check below is the same one the create path gets.
+      // Both halves are checked, mirroring create. The vehicle is what gets
+      // billed, so the vehicle check below is the one that guards the money;
+      // the licence's own tenant is checked too so a row whose two halves
+      // disagree cannot be toggled from either side.
+      if (!scopeIds.includes(licenceRes.data.tenant_id as string)) {
+        return NextResponse.json(
+          { error: "That licence does not belong to your company." },
+          { status: 403 }
+        );
+      }
       vehicleId = licenceRes.data.vehicle_id as string;
     }
 
@@ -154,6 +169,24 @@ export async function POST(request: NextRequest) {
     ) {
       return NextResponse.json(
         { error: "That vehicle does not belong to your company." },
+        { status: 403 }
+      );
+    }
+
+    // Both halves in scope is not enough on create: the licence's tenant must
+    // be the vehicle's own tenant. Otherwise an admin can file a licence under
+    // tenant A for a vehicle owned by tenant B in the same company, and the
+    // licences page (which lists by tenant) never shows it to the tenant whose
+    // vehicle it certifies. The old browser path could not produce that shape,
+    // and this route is about to be the only writer, so it should not start
+    // accepting it. Legacy rows carrying the company id in tenant_id satisfy
+    // this naturally, since both sides then hold the company id.
+    if (
+      body.action === "create" &&
+      body.tenantId !== (vehicleRes.data.tenant_id as string)
+    ) {
+      return NextResponse.json(
+        { error: "That vehicle belongs to a different tenant." },
         { status: 403 }
       );
     }
@@ -355,7 +388,37 @@ export async function POST(request: NextRequest) {
 
     // Money is confirmed and coverage is recorded. Only now does the licence
     // become active.
-    await writeLicence();
+    //
+    // This is the one state the header designs for, so it gets its own answer
+    // rather than a raw Postgres message at 500. The customer has paid and has
+    // no vehicle; the coverage row is already written, so a retry takes the
+    // already_covered free path and cannot charge them a second time. It will
+    // not repair itself, so the message asks them to try again.
+    try {
+      await writeLicence();
+    } catch (writeError) {
+      console.error(
+        "Licence activation charged but not written",
+        JSON.stringify({
+          companyId,
+          vehicleId,
+          cycleDate: result.cycleDate,
+          squarePaymentId: result.squarePaymentId,
+          message:
+            writeError instanceof Error ? writeError.message : String(writeError),
+        })
+      );
+      return NextResponse.json(
+        {
+          error:
+            "Your payment succeeded but the vehicle could not be activated. Please try again; you will not be charged a second time. Contact support if it keeps failing.",
+          charged: true,
+          grossPence: result.grossPence,
+          receiptUrl: result.receiptUrl,
+        },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       ok: true,
@@ -367,7 +430,22 @@ export async function POST(request: NextRequest) {
       alreadyPaid: result.alreadyPaid,
     });
   } catch (error) {
-    const result = errorResponse(error);
-    return NextResponse.json(result.body, { status: result.status });
+    const mapped = errorResponse(error);
+    // errorResponse passes anything that is not UNAUTHENTICATED/FORBIDDEN
+    // through verbatim, and the throws reachable from here name internals:
+    // fetchBillableVehicles reports the company id and the 1000-row cap,
+    // chargeVehicleAddon names tables. Log the detail, hand back a generic
+    // message.
+    if (mapped.status === 500) {
+      console.error(
+        "Licence activation failed",
+        error instanceof Error ? error.stack ?? error.message : String(error)
+      );
+      return NextResponse.json(
+        { error: "Something went wrong. Please try again." },
+        { status: 500 }
+      );
+    }
+    return NextResponse.json(mapped.body, { status: mapped.status });
   }
 }

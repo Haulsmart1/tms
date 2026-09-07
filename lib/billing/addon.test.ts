@@ -58,16 +58,58 @@ describe("selectAddonAction", () => {
     });
   });
 
-  // Coverage is only ever written by a real payment, so honouring it even for
-  // a past_due company cannot be exploited: they paid for this vehicle in
-  // this cycle already.
-  it("honours existing coverage even when the company is past due", () => {
+  // Coverage is only ever written by a real payment, so honouring it while
+  // the cycle it names is still running cannot be exploited: they paid for
+  // this vehicle in this cycle already, even if their card has since failed.
+  it("honours coverage for a past due company while the paid cycle is still running", () => {
     expect(
       select({
         billingRow: { status: "past_due", next_charge_on: "2026-09-21", retry_at: null },
         alreadyCovered: true,
       })
     ).toEqual({ kind: "free", reason: "already_covered" });
+  });
+
+  // The frozen-date case. Once dunning is exhausted, selectDueAction returns
+  // none and next_charge_on never advances again, so currentCycleDate names
+  // the same elapsed cycle forever and the entire last-paid fleet reads as
+  // covered. Honouring that would let a past_due company cycle its whole
+  // fleet off and on for free with the status gate never firing.
+  it("refuses stale coverage once the paid cycle has elapsed", () => {
+    expect(
+      select({
+        todayISO: "2026-10-30",
+        billingRow: { status: "past_due", next_charge_on: "2026-09-21", retry_at: null },
+        alreadyCovered: true,
+      })
+    ).toEqual({ kind: "blocked", reason: "past_due" });
+  });
+
+  // The same frozen date for a company still marked active but mid-dunning:
+  // coverage must not talk it past the dunning gate either.
+  it("refuses stale coverage for a mid-dunning company", () => {
+    expect(
+      select({
+        todayISO: "2026-10-30",
+        billingRow: {
+          status: "active",
+          next_charge_on: "2026-09-21",
+          retry_at: "2026-09-23",
+        },
+        alreadyCovered: true,
+      })
+    ).toEqual({ kind: "blocked", reason: "dunning" });
+  });
+
+  // A healthy company whose cycle charge is due today or overdue: coverage is
+  // no longer honoured, but the outcome is unchanged (still free, still no
+  // coverage written, still billed in full by the imminent cron run). Only
+  // the reason string differs.
+  it("falls through to cycle_due rather than already_covered on the charge date", () => {
+    expect(select({ todayISO: "2026-09-21", alreadyCovered: true })).toEqual({
+      kind: "free",
+      reason: "cycle_due",
+    });
   });
 
   it("is free when the company has no subscription at all", () => {
