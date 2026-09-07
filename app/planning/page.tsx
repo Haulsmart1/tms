@@ -12,6 +12,13 @@ import VehicleLane from "./VehicleLane";
 import { stopsNeedingGeocode } from "../../lib/planning/geocoding";
 import { computeSaveDiff, type LanePlan } from "../../lib/planning/saveDiff";
 import {
+  createPlanningDraft,
+  parsePlanningDraft,
+  planningDraftMatchesPlan,
+  planningDraftStorageKey,
+  type PlanningDraft,
+} from "../../lib/planning/draftCache";
+import {
   assignJobsToLane,
   moveJobInLane,
 } from "../../lib/planning/boardActions";
@@ -179,6 +186,10 @@ export default function PlanningPage() {
   const [geocodeUnavailable, setGeocodeUnavailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<
+    "idle" | "pending" | "saving" | "saved" | "local-only"
+  >("idle");
+  const [recoveryDraft, setRecoveryDraft] = useState<PlanningDraft | null>(null);
   const [optimizing, setOptimizing] = useState(false);
   const [acceptanceTarget, setAcceptanceTarget] = useState<{
     jobs: {
@@ -200,6 +211,9 @@ export default function PlanningPage() {
      Replaces a single-flag "cancelled" boolean so a save-triggered reload can
      itself be superseded by a later load, not just by unmount. */
   const loadSeq = useRef(0);
+  const saveInFlight = useRef(false);
+  const latestPendingUpdatesJson = useRef("[]");
+  const loadedPlanningScope = useRef<string | null>(null);
 
   const jobById = useMemo(() => new Map(jobs.map((j) => [j.id, j])), [jobs]);
   const driverById = useMemo(
@@ -246,11 +260,15 @@ export default function PlanningPage() {
      Save still writes pendingUpdates in full, normalisation included: by the
      time the button is enabled the user has made a deliberate edit. */
   const dirty = pendingUpdatesJson !== baselineDiff;
+  latestPendingUpdatesJson.current = pendingUpdatesJson;
 
   async function loadData(isCancelled: () => boolean) {
     // Guard lives here, not in the effect: see TenantContextValue in lib/tenant/context.ts
     if (tenant.status !== "ready") return;
 
+    loadedPlanningScope.current = null;
+    setRecoveryDraft(null);
+    setSaveStatus("idle");
     setLoading(true);
     setMessage("");
     setGeocodeSettled(false);
@@ -449,6 +467,51 @@ export default function PlanningPage() {
     }
 
     if (isCancelled()) return;
+
+    const activeTenantId =
+      typeof tenant.activeTenantId === "string" && tenant.activeTenantId.length > 0
+        ? tenant.activeTenantId
+        : null;
+
+    const planningScope = activeTenantId
+      ? planningDraftStorageKey(activeTenantId, date)
+      : null;
+
+    let cachedDraft: PlanningDraft | null = null;
+
+    if (planningScope && activeTenantId && typeof window !== "undefined") {
+      try {
+        cachedDraft = parsePlanningDraft(
+          window.localStorage.getItem(planningScope),
+          {
+            tenantId: activeTenantId,
+            date,
+            validVehicleIds: new Set(vehicleList.map((vehicle) => vehicle.id)),
+            validJobIds: new Set(loaded.map((job) => job.id)),
+            validDriverIds: new Set(
+              (driverData ?? []).map((driver) => driver.id)
+            ),
+            now: Date.now(),
+          }
+        );
+
+        if (
+          cachedDraft &&
+          planningDraftMatchesPlan(
+            cachedDraft,
+            orders,
+            laneDriverInit,
+            vehicleList.map((vehicle) => vehicle.id)
+          )
+        ) {
+          window.localStorage.removeItem(planningScope);
+          cachedDraft = null;
+        }
+      } catch {
+        cachedDraft = null;
+      }
+    }
+
     setPlanningTimeZone(loadedTimeZone);
     setJobs(loaded);
     setSelectedUnassignedJobIds(new Set());
@@ -460,6 +523,9 @@ export default function PlanningPage() {
     setDriverConflicts(conflicts);
     setBaselineDiff(JSON.stringify(initialDiff));
     setDisplacedNotes(displaced);
+    setRecoveryDraft(cachedDraft);
+    loadedPlanningScope.current = planningScope;
+
     // Keep the planner's current lane if it survived the reload; only fall
     // back when it did not, so a save-triggered reload does not jump the board.
     setSelectedVehicleId((prev) =>
@@ -1085,10 +1151,13 @@ export default function PlanningPage() {
     setMessage("");
   }
 
-  async function savePlan() {
-    if (saving || pendingUpdates.length === 0) return;
+  async function persistPlan(mode: "manual" | "auto"): Promise<boolean> {
+    if (saveInFlight.current || pendingUpdates.length === 0) return false;
 
-    const missingTenantUpdate = pendingUpdates.find(
+    const updates = pendingUpdates.map((update) => ({ ...update }));
+    const snapshotJson = pendingUpdatesJson;
+
+    const missingTenantUpdate = updates.find(
       (update) => !jobById.get(update.id)?.tenant_id
     );
 
@@ -1096,52 +1165,220 @@ export default function PlanningPage() {
       setMessage(
         "Save error: one or more jobs are missing tenant information."
       );
+      setSaveStatus("local-only");
+      return false;
+    }
+
+    saveInFlight.current = true;
+    setSaving(true);
+    setSaveStatus("saving");
+
+    if (mode === "manual") {
+      setMessage("");
+    }
+
+    try {
+      for (const update of updates) {
+        const tenantId = jobById.get(update.id)?.tenant_id;
+
+        if (!tenantId) {
+          throw new Error(
+            "one or more jobs are missing tenant information."
+          );
+        }
+
+        const { error } = await supabase
+          .from("jobs")
+          .update({
+            vehicle_id: update.vehicle_id,
+            driver_id: update.driver_id,
+            route_order: update.route_order,
+          })
+          .eq("id", update.id)
+          .eq("tenant_id", tenantId);
+
+        if (error) {
+          throw new Error(error.message);
+        }
+      }
+
+      const savedByJobId = new Map(
+        updates.map((update) => [update.id, update])
+      );
+
+      // Move the in-memory server baseline forward to exactly what landed.
+      // If the planner edited again while this request was in flight, those
+      // newer lane changes remain in laneOrders/laneDrivers and become the
+      // next diff rather than being overwritten by a reload.
+      setJobs((previous) =>
+        previous.map((job) => {
+          const saved = savedByJobId.get(job.id);
+          return saved
+            ? {
+                ...job,
+                vehicle_id: saved.vehicle_id,
+                driver_id: saved.driver_id,
+                route_order: saved.route_order,
+              }
+            : job;
+        })
+      );
+      setBaselineDiff("[]");
+
+      const newerEditsExist =
+        latestPendingUpdatesJson.current !== snapshotJson;
+
+      if (!newerEditsExist) {
+        const activeTenantId =
+          tenant.status === "ready" &&
+          typeof tenant.activeTenantId === "string"
+            ? tenant.activeTenantId
+            : null;
+
+        if (activeTenantId && typeof window !== "undefined") {
+          try {
+            window.localStorage.removeItem(
+              planningDraftStorageKey(activeTenantId, date)
+            );
+          } catch {
+            // Saving to the database succeeded; storage cleanup is best effort.
+          }
+        }
+
+        setSaveStatus("saved");
+      } else {
+        setSaveStatus("pending");
+      }
+
+      return true;
+    } catch (error) {
+      const reason =
+        error instanceof Error ? error.message : "unknown save failure";
+
+      setMessage(
+        mode === "auto"
+          ? `Autosave failed: ${reason}. Changes are kept locally.`
+          : `Save error: ${reason}`
+      );
+      setSaveStatus("local-only");
+      return false;
+    } finally {
+      saveInFlight.current = false;
+      setSaving(false);
+    }
+  }
+
+  async function savePlan() {
+    await persistPlan("manual");
+  }
+
+  useEffect(() => {
+    if (
+      tenant.status !== "ready" ||
+      typeof tenant.activeTenantId !== "string" ||
+      tenant.activeTenantId.length === 0 ||
+      loading ||
+      recoveryDraft ||
+      !dirty
+    ) {
       return;
     }
 
-    setSaving(true);
-    setMessage("");
+    const storageKey = planningDraftStorageKey(
+      tenant.activeTenantId,
+      date
+    );
 
-    for (const u of pendingUpdates) {
-      const tenantId = jobById.get(u.id)?.tenant_id;
+    if (loadedPlanningScope.current !== storageKey) {
+      return;
+    }
 
-      if (!tenantId) {
-        setMessage(
-          "Save error: one or more jobs are missing tenant information."
+    const draft = createPlanningDraft({
+      tenantId: tenant.activeTenantId,
+      date,
+      laneOrders,
+      laneDrivers,
+      selectedVehicleId,
+      updatedAt: Date.now(),
+    });
+
+    try {
+      window.localStorage.setItem(
+        storageKey,
+        JSON.stringify(draft)
+      );
+    } catch {
+      setSaveStatus("local-only");
+      return;
+    }
+
+    if (saving || saveInFlight.current) {
+      setSaveStatus("pending");
+      return;
+    }
+
+    setSaveStatus("pending");
+
+    const timer = window.setTimeout(() => {
+      void persistPlan("auto");
+    }, 1200);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+
+    // persistPlan intentionally uses the exact render snapshot represented by
+    // pendingUpdatesJson. A new edit tears down this timer and schedules a new
+    // snapshot rather than racing the old one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    tenant.status,
+    tenant.activeTenantId,
+    date,
+    loading,
+    recoveryDraft,
+    dirty,
+    saving,
+    pendingUpdatesJson,
+    laneOrders,
+    laneDrivers,
+    selectedVehicleId,
+  ]);
+
+  function restoreRecoveryDraft() {
+    if (!recoveryDraft) return;
+
+    setLaneOrders(recoveryDraft.laneOrders);
+    setLaneDrivers(recoveryDraft.laneDrivers);
+    setSelectedVehicleId(recoveryDraft.selectedVehicleId);
+    setBulkVehicleId(recoveryDraft.selectedVehicleId ?? "");
+    setRoutes({});
+    setDriverConflicts(new Set());
+    setRecoveryDraft(null);
+    setSaveStatus("pending");
+    setMessage(
+      "Recovered the local planning draft. Autosave will persist it."
+    );
+  }
+
+  function discardRecoveryDraft() {
+    if (
+      tenant.status === "ready" &&
+      typeof tenant.activeTenantId === "string" &&
+      typeof window !== "undefined"
+    ) {
+      try {
+        window.localStorage.removeItem(
+          planningDraftStorageKey(tenant.activeTenantId, date)
         );
-        setSaving(false);
-        return;
-      }
-
-      const { error } = await supabase
-        .from("jobs")
-        .update({
-          vehicle_id: u.vehicle_id,
-          driver_id: u.driver_id,
-          route_order: u.route_order,
-        })
-        .eq("id", u.id)
-        .eq("tenant_id", tenantId);
-      if (error) {
-        const failure = `Save error: ${error.message}`;
-        setMessage(failure);
-        setSaving(false);
-        /* Earlier updates in this loop already landed. A partial save must not
-           leave the board confidently showing the unwritten plan, so reload
-           what was actually written. loadData clears `message` on entry, so
-           the failure is restated afterwards: the planner must still see it. */
-        const seq = ++loadSeq.current;
-        await loadData(() => loadSeq.current !== seq);
-        setMessage(failure);
-        return;
+      } catch {
+        // Discarding browser recovery data is best effort.
       }
     }
-    setSaving(false);
-    // Claim the next generation so a date/tenant change during this reload
-    // (or the reload itself being superseded by a later save) cancels it
-    // instead of painting stale state over the newer load.
-    const seq = ++loadSeq.current;
-    await loadData(() => loadSeq.current !== seq);
+
+    setRecoveryDraft(null);
+    setSaveStatus("saved");
+    setMessage("");
   }
 
   async function optimize() {
@@ -1217,7 +1454,7 @@ export default function PlanningPage() {
         [selectedVehicleId]: reordered,
       }));
       setMessage(
-        "Smart Optimize updated the proposed drop order. Review it, then Save plan to persist it."
+        "Smart Optimize updated the proposed drop order. Autosave will persist it."
       );
 
       // The lane's order changed, so its cached route describes the old one.
@@ -1555,16 +1792,43 @@ export default function PlanningPage() {
             </Button>
 
             <span className="text-xs text-ink-3">
-              {dirty
-                ? "Unsaved changes"
-                : "Plan saved"}
+              {saveStatus === "saving"
+                ? "Saving…"
+                : saveStatus === "local-only"
+                  ? "Saved locally — retry pending"
+                  : dirty || saveStatus === "pending"
+                    ? "Autosave pending"
+                    : "Plan saved ✓"}
             </span>
+
+            {recoveryDraft ? (
+              <div className="basis-full rounded-md border border-line bg-surface p-3 text-sm">
+                <p className="font-medium">
+                  Recovered local planning draft available
+                </p>
+                <p className="mt-1 text-xs text-ink-3">
+                  This browser has a newer unsaved draft for this tenant and planning date.
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <Button size="sm" onClick={restoreRecoveryDraft}>
+                    Restore draft
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={discardRecoveryDraft}
+                  >
+                    Discard
+                  </Button>
+                </div>
+              </div>
+            ) : null}
 
             <span className="basis-full text-xs text-ink-3">
               Drop order: drag cards between positions or use Up / Down.
               Fast Plot maps unique collections first, then unique deliveries,
               and TomTom optimizes up to 10 matrix points with shared endpoints anchored. Smart Optimize changes
-              job order; Save plan persists vehicle, driver and drop order.
+              job order; autosave persists vehicle, driver and drop order. Save plan remains available as a manual fallback.
             </span>
           </section>
 
