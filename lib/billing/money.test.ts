@@ -269,10 +269,13 @@ describe("classifyPaymentResult", () => {
     });
   });
 
-  it("treats a missing payment as a terminal failure", () => {
+  it("treats a missing payment as indeterminate, never failed", () => {
+    // A 2xx we could not read a payment out of is an unknown outcome. Calling
+    // it failed would settle the audit row and free the attempt number, so the
+    // next call would open a new idempotency key and charge the card twice.
     expect(classifyPaymentResult(undefined)).toEqual({
-      kind: "failed",
-      failureCode: "NO_PAYMENT_RETURNED",
+      kind: "indeterminate",
+      status: "NO_PAYMENT_RETURNED",
     });
   });
 

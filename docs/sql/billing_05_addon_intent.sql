@@ -1,4 +1,5 @@
--- billing_05: allow vehicle_addon_charges.status = 'pending'.
+-- billing_05: allow vehicle_addon_charges.status = 'pending', and record the
+-- card an intent was raised against.
 -- Apply manually in the Supabase SQL editor, like the rls_* and billing_*
 -- series. Safe to re-run: the whole change sits in a do-block that inspects the
 -- catalogue first and does nothing when the constraint is already correct.
@@ -56,13 +57,17 @@
 -- select * from public.vehicle_addon_charges
 -- where status = 'pending' and created_at < now() - interval '1 day';
 --
--- NOTHING ELSE READS THIS TABLE.
--- The only queries against vehicle_addon_charges are inside
--- lib/billing/addonServer.ts, and the one that decides "already paid" filters
--- on status = 'succeeded'. No page, view or report surfaces these rows today,
--- so widening the domain cannot make a pending row read as a paid one. If a
--- billing page ever starts listing this table, it must filter status
--- explicitly, or it will show an unknown-outcome charge as a completed one.
+-- ANY READER OF THIS TABLE MUST FILTER ON status. NOT OPTIONAL.
+-- This was written as an observation that nothing outside
+-- lib/billing/addonServer.ts read the table. That is no longer true:
+-- app/settings/billing/page.tsx now lists these rows, and every future reader
+-- inherits the same obligation. A pending row is an UNKNOWN outcome, so a
+-- query that does not filter status shows a charge that may never have
+-- happened as a completed one, and a total that sums pending rows overstates
+-- what the customer actually paid. addonServer.ts's own "already paid" check
+-- filters on status = 'succeeded' for exactly this reason. Anything customer
+-- facing should show succeeded rows only; an operational view may show pending
+-- rows provided it labels them as unresolved.
 --
 -- WHY A do-BLOCK RATHER THAN A PLAIN ALTER.
 -- billing_03 declared the column with an INLINE check, so the constraint name
@@ -92,10 +97,38 @@
 -- valid`: an unvalidated constraint would leave the pending rows in place and
 -- hide them behind a domain that claims they cannot exist.
 
+-- THE CARD IS PART OF THE RECORDED INTENT.
+-- Square only replays a reused idempotency key when the request BODY is
+-- byte-identical, and sourceId (the card) and customerId are in that body just
+-- as much as the amount is. Storing only the amounts left the code reading the
+-- card from the caller's arguments on the replay path, so a customer who was
+-- told "still settling", replaced their card and tried again sent the stored
+-- key with a different card. Square refused it with IDEMPOTENCY_KEY_REUSED,
+-- and because the pending row is found on every subsequent call the attempt
+-- could never advance: the vehicle was wedged permanently, on the single most
+-- likely thing a customer does after a payment does not resolve.
+--
+-- Nullable, because rows written before this change have no card recorded. The
+-- code falls back to the caller's card for those.
+alter table public.vehicle_addon_charges
+  add column if not exists square_card_id text;
+
+alter table public.vehicle_addon_charges
+  add column if not exists square_customer_id text;
+
+comment on column public.vehicle_addon_charges.square_card_id is
+  'Card id sent to Square for this attempt. Part of the idempotency-keyed request body, so a replay must resend exactly this value.';
+
+comment on column public.vehicle_addon_charges.square_customer_id is
+  'Customer id sent to Square for this attempt. Part of the idempotency-keyed request body, see square_card_id.';
+
 do $$
 declare
   v_status_attnum smallint;
   v_already_correct boolean;
+  v_any_constraint boolean := false;
+  v_all_permit boolean := true;
+  v_permits boolean;
   r record;
 begin
   -- The attnum of the status column, used to find the check constraints that
@@ -113,18 +146,51 @@ begin
     raise exception 'public.vehicle_addon_charges has no status column; apply billing_03 first';
   end if;
 
-  -- Idempotence check: is there already a check constraint on status that
-  -- permits 'pending'? If so this file has been applied and there is nothing
-  -- to do. Re-running must not drop and recreate, because between the drop and
+  -- Idempotence check: do the check constraints on status actually ACCEPT the
+  -- value 'pending'? If so this file has been applied and there is nothing to
+  -- do. Re-running must not drop and recreate, because between the drop and
   -- the add the table would briefly accept any status at all.
-  select exists (
-    select 1
+  --
+  -- The question is answered by EVALUATING each constraint expression against
+  -- the literal 'pending', not by looking for the word in the constraint text.
+  -- Matching on `ilike '%pending%'` was the very technique this file argues
+  -- against 50 lines above for finding the constraint, and it is worse here
+  -- than there: `check (status <> 'pending')`, a constraint that FORBIDS the
+  -- value outright, contains the word and would satisfy it, so this file would
+  -- report success and every intent insert would still fail with 23514.
+  --
+  -- Each expression is run over a one-row subquery that supplies a `status`
+  -- column, which is how a bare column reference in the constraint resolves.
+  -- `is not false` mirrors Postgres's own rule that a check passes on NULL.
+  for r in
+    select c.conname, pg_get_expr(c.conbin, c.conrelid) as expr
     from pg_constraint c
     where c.conrelid = 'public.vehicle_addon_charges'::regclass
       and c.contype = 'c'
       and c.conkey @> array[v_status_attnum]
-      and pg_get_constraintdef(c.oid) ilike '%pending%'
-  ) into v_already_correct;
+  loop
+    v_any_constraint := true;
+    begin
+      execute format(
+        'select (%s) is not false from (select %L::text as status) t',
+        r.expr,
+        'pending'
+      ) into v_permits;
+    exception when others then
+      -- A multi-column check cannot be evaluated with status alone. Unproven
+      -- is treated as not permitting, which sends us down the drop-and-recreate
+      -- path below. That is the same thing this file did before the expression
+      -- test existed, so the fallback is no worse than the old behaviour.
+      v_permits := false;
+      raise notice 'billing_05: could not evaluate % (%), treating it as not permitting pending', r.conname, sqlerrm;
+    end;
+
+    if not v_permits then
+      v_all_permit := false;
+    end if;
+  end loop;
+
+  v_already_correct := v_any_constraint and v_all_permit;
 
   if v_already_correct then
     raise notice 'billing_05: status already allows pending, nothing to do';
@@ -186,7 +252,10 @@ end $$;
 -- vehicle_id from, and the foreign keys will refuse an invented one.)
 --
 -- WHAT BREAKS IF THIS IS NOT APPLIED BEFORE THE DEPLOY.
--- Every mid-cycle vehicle addition fails with 23514 on the intent insert,
--- surfaced to the customer as a 500 from /api/licences/activate. No payment is
--- attempted, no coverage is written, no licence is activated. Apply this file
--- and the next attempt works; there is nothing to reconcile.
+-- Every mid-cycle vehicle addition fails, surfaced to the customer as a 500
+-- from /api/licences/activate: first on the pending-row select, which asks for
+-- square_card_id and gets PostgREST 42703 ("column does not exist"), and then
+-- on the intent insert with 23514 if only the columns were added. Both happen
+-- BEFORE any Square call, so no payment is attempted, no coverage is written
+-- and no licence is activated. Apply this file and the next attempt works;
+-- there is nothing to reconcile.

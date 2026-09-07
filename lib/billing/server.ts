@@ -12,6 +12,7 @@ import {
   classifyPaymentResult,
   computeChargeAmounts,
 } from "./money";
+import { classifySquareThrow } from "./squareThrow";
 import { billableVehicleIds } from "./vehicleCount";
 
 // PostgREST caps unscoped selects at 1000 rows by default. Hitting this cap
@@ -119,16 +120,6 @@ export async function fetchBillableVehicles(
   });
 }
 
-function extractSquareFailureCode(error: unknown): string {
-  // v45 throws SquareError with a typed errors array; fall back to the
-  // message for anything else (network errors, etc).
-  if (error instanceof SquareError) {
-    return error.errors[0]?.code ?? error.message.slice(0, 120);
-  }
-  const maybe = error as { message?: string };
-  return maybe?.message ? maybe.message.slice(0, 120) : "UNKNOWN";
-}
-
 export type CycleResult = {
   companyId: string;
   cycleDate: string;
@@ -213,8 +204,14 @@ export async function runChargeCycle(
     let payment: { id?: string; receiptUrl?: string; status?: string } | undefined;
     let callThrew = false;
 
+    // Resolved BEFORE the try. Both throw when an env var is missing, which is
+    // a configuration outage with no request sent, and inside the try that
+    // would be classified as a payment of unknown outcome and reported as
+    // "the money may have moved" for a call that never left the process.
+    const square = getSquare();
+    const locationId = getSquareLocationId();
+
     try {
-      const square = getSquare();
       const response = await square.payments.create({
         idempotencyKey: chargeIdempotencyKey(
           args.companyId,
@@ -223,7 +220,7 @@ export async function runChargeCycle(
         ),
         sourceId: args.squareCardId,
         customerId: args.squareCustomerId,
-        locationId: getSquareLocationId(),
+        locationId,
         amountMoney: {
           amount: BigInt(amounts.grossPence),
           currency: "GBP",
@@ -245,9 +242,22 @@ export async function runChargeCycle(
           `PAYMENT_INDETERMINATE: idempotency key already used for company ${args.companyId} cycle ${args.cycleDate} attempt ${args.attempt}; a payment exists with unknown outcome, re-run later`
         );
       }
+
+      // Only a throw that PROVES Square refused the payment may be recorded as
+      // a decline. See classifySquareThrow: a dropped connection arrives here
+      // as a SquareError too, and recording that as failed would retire this
+      // attempt and let the next run open a new idempotency key against a card
+      // that may already have been charged.
+      const thrown = classifySquareThrow(error);
+      if (thrown.kind === "indeterminate") {
+        throw new Error(
+          `PAYMENT_INDETERMINATE: no usable answer from Square for company ${args.companyId} cycle ${args.cycleDate} attempt ${args.attempt}: ${thrown.reason}; nothing recorded, the next run replays the same idempotency key`
+        );
+      }
+
       callThrew = true;
       succeeded = false;
-      failureCode = extractSquareFailureCode(error);
+      failureCode = thrown.failureCode;
     }
 
     // Classification happens outside the try/catch: the try/catch only

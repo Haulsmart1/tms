@@ -173,11 +173,23 @@ export type PaymentClassification =
 // safe to retry under a new idempotency key. Anything else (PENDING, APPROVED,
 // unknown) is not finished: the caller must NOT record an outcome, so the next
 // run replays the SAME key and reads the payment's eventual terminal state.
+//
+// One philosophy runs through this function and through classifySquareThrow in
+// ./squareThrow.ts: an outcome is only ever RECORDED on positive evidence of
+// what Square did. Absence of an answer is never evidence of absence of a
+// payment.
 export function classifyPaymentResult(
   payment: { status?: string | null } | undefined
 ): PaymentClassification {
   if (!payment) {
-    return { kind: "failed", failureCode: "NO_PAYMENT_RETURNED" };
+    // A 2xx from Square with no payment object in it. This used to be reported
+    // as a terminal failure, and that had the same defect as misreading a
+    // dropped connection as a decline: settling the row retires the attempt,
+    // so the customer's next click mints a NEW idempotency key and charges the
+    // card again for a payment that may well have been taken. We got a
+    // successful HTTP response and could not read a payment out of it, which
+    // is unknown, not failed.
+    return { kind: "indeterminate", status: "NO_PAYMENT_RETURNED" };
   }
   const status = payment.status ?? "NO_STATUS";
   if (status === "COMPLETED") return { kind: "succeeded" };

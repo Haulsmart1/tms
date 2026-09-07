@@ -7,7 +7,8 @@
 //
 // It deliberately DOES diverge on two points, and both are documented where
 // they happen rather than here: this file records its audit row BEFORE calling
-// Square (see recordIntent below), and it writes coverage AFTER the audit row
+// Square (see the "RECORD INTENT BEFORE SPENDING THE KEY" comment on the
+// vehicle_addon_charges insert below), and it writes coverage AFTER the audit row
 // rather than atomically with it (see the writeCoverage call). Do not
 // "resynchronise" either one with ./server.ts without reading those comments;
 // the asymmetry is what makes each path safe.
@@ -16,6 +17,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { SquareError } from "square";
 import { getSquare, getSquareLocationId } from "../payments/square";
 import { addonIdempotencyKey, classifyPaymentResult } from "./money";
+import { classifySquareThrow } from "./squareThrow";
 import { computeAddonAmounts } from "./prorata";
 
 export type AddonChargeResult = {
@@ -41,21 +43,24 @@ export type AddonChargeResult = {
 // a reused idempotency key when the request body is byte-identical, so a body
 // rebuilt from drifted args is refused with IDEMPOTENCY_KEY_REUSED instead of
 // returning the original payment.
+//
+// The CARD is part of that body too, which is why it is stored and read back
+// with the amounts. A customer who is told "still settling" and reacts by
+// replacing their card would otherwise replay the stored amounts under the
+// stored key with a NEW sourceId, and Square would refuse the whole thing with
+// IDEMPOTENCY_KEY_REUSED. Because the pending row is found on every later call,
+// the attempt could never advance and the vehicle would be wedged permanently
+// on the single most likely action after an indeterminate payment.
 type ResolvedCharge = {
   attempt: number;
   days: number;
   netPence: number;
   vatPence: number;
   grossPence: number;
+  /** Null only for rows written before the card columns existed. */
+  squareCardId: string | null;
+  squareCustomerId: string | null;
 };
-
-function extractSquareFailureCode(error: unknown): string {
-  if (error instanceof SquareError) {
-    return error.errors[0]?.code ?? error.message.slice(0, 120);
-  }
-  const maybe = error as { message?: string };
-  return maybe?.message ? maybe.message.slice(0, 120) : "UNKNOWN";
-}
 
 // The highest-numbered attempt that has not yet reached a terminal status, if
 // any. Selecting the amounts as well as the attempt is the point: this row is
@@ -69,7 +74,9 @@ async function readPendingIntent(
 ): Promise<ResolvedCharge | null> {
   const { data, error } = await admin
     .from("vehicle_addon_charges")
-    .select("attempt, covers_days, net_pence, vat_pence, gross_pence")
+    .select(
+      "attempt, covers_days, net_pence, vat_pence, gross_pence, square_card_id, square_customer_id"
+    )
     .eq("company_id", companyId)
     .eq("cycle_date", cycleDate)
     .eq("vehicle_id", vehicleId)
@@ -90,6 +97,8 @@ async function readPendingIntent(
     netPence: Number(row.net_pence),
     vatPence: Number(row.vat_pence),
     grossPence: Number(row.gross_pence),
+    squareCardId: (row.square_card_id as string | null) ?? null,
+    squareCustomerId: (row.square_customer_id as string | null) ?? null,
   };
 }
 
@@ -240,6 +249,11 @@ export async function chargeVehicleAddon(
         gross_pence: amounts.grossPence,
         vat_rate: amounts.vatRate,
         currency: "GBP",
+        // Recorded because the card is part of the request body Square hashes
+        // against the idempotency key, so a replay has to send THIS card, not
+        // whatever card the customer has switched to since.
+        square_card_id: args.squareCardId,
+        square_customer_id: args.squareCustomerId,
         square_payment_id: null,
         receipt_url: null,
         status: "pending",
@@ -253,6 +267,8 @@ export async function chargeVehicleAddon(
         netPence: amounts.netPence,
         vatPence: amounts.vatPence,
         grossPence: amounts.grossPence,
+        squareCardId: args.squareCardId,
+        squareCustomerId: args.squareCustomerId,
       };
       break;
     }
@@ -272,8 +288,14 @@ export async function chargeVehicleAddon(
     // Only reachable if something else keeps taking the attempt number away
     // from us. Throwing leaves whatever rows exist untouched and no payment
     // attempted, which is the safe direction.
+    //
+    // NOT prefixed PAYMENT_INDETERMINATE, deliberately. The routes turn that
+    // prefix into "a previous payment attempt is still settling", and here no
+    // payment was ever attempted: this loop exits before the Square call. That
+    // message would send the customer away to wait for a payment that does not
+    // exist, and hide a contention bug behind a reassuring 409.
     throw new Error(
-      `PAYMENT_INDETERMINATE: could not claim an attempt for company ${args.companyId} vehicle ${args.vehicleId} cycle ${args.cycleDate}; try again shortly`
+      `ATTEMPT_CLAIM_FAILED: could not claim an attempt number for company ${args.companyId} vehicle ${args.vehicleId} cycle ${args.cycleDate}; no payment was attempted, try again shortly`
     );
   }
 
@@ -294,8 +316,26 @@ export async function chargeVehicleAddon(
   // the band minimum is what makes charging unconditionally safe here; if a
   // free band is ever introduced, handle it in selectAddonAction so it returns
   // `free` and never reaches this function.
+  // Resolved BEFORE the try. Both throw when an env var is missing, which is a
+  // configuration outage with no request sent; inside the try that would be
+  // classified as an unknown payment outcome and the customer would be told
+  // their money may have moved for a call that never left the process.
+  const square = getSquare();
+  const locationId = getSquareLocationId();
+
+  // charge.*, not args.*, for every field Square hashes into the idempotency
+  // key. A replay must be byte-identical or Square answers
+  // IDEMPOTENCY_KEY_REUSED instead of returning the original payment, and the
+  // card is as much a part of that body as the amount is. The fallback to args
+  // covers pending rows written before billing_05 added these two columns:
+  // those rows have no stored card, and the caller's card is the best guess
+  // available. It is only a guess, so it can still hit IDEMPOTENCY_KEY_REUSED
+  // if the customer changed cards, which is handled below as indeterminate
+  // rather than as a decline.
+  const sourceId = charge.squareCardId ?? args.squareCardId;
+  const customerId = charge.squareCustomerId ?? args.squareCustomerId;
+
   try {
-    const square = getSquare();
     const response = await square.payments.create({
       idempotencyKey: addonIdempotencyKey(
         args.companyId,
@@ -303,9 +343,9 @@ export async function chargeVehicleAddon(
         args.vehicleId,
         charge.attempt
       ),
-      sourceId: args.squareCardId,
-      customerId: args.squareCustomerId,
-      locationId: getSquareLocationId(),
+      sourceId,
+      customerId,
+      locationId,
       amountMoney: {
         amount: BigInt(charge.grossPence),
         currency: "GBP",
@@ -326,27 +366,29 @@ export async function chargeVehicleAddon(
       );
     }
 
-    // A THROW THAT IS NOT A SquareError IS NOT A DECLINE. A socket reset, a
-    // DNS failure or a request timeout means we have no answer, and "no
-    // response" is not evidence that no payment was taken: Square may have
-    // processed the request perfectly and lost the reply. Recording that as
-    // `failed` would retire this attempt, and the next call would open a NEW
-    // idempotency key and charge the card a second time for the same vehicle.
+    // ONLY POSITIVE EVIDENCE OF A REFUSAL IS A DECLINE. classifySquareThrow
+    // holds the reasoning and the SDK details; the short version is that
+    // `instanceof SquareError` is NOT that evidence, because a socket reset, a
+    // DNS failure and a TLS error all arrive as a SquareError with no status
+    // code. Recording one of those as `failed` settles this pending row and
+    // retires the attempt, so the customer's next click derives a new attempt,
+    // mints a new idempotency key, and charges the card a second time for a
+    // payment Square may have completed before the connection died.
     //
-    // So rethrow and leave the pending row exactly as it is. The next call
-    // finds it, replays the same key with the same body, and observes the real
-    // outcome from Square instead of guessing at one.
-    if (!(error instanceof SquareError)) {
+    // On anything indeterminate, rethrow and leave the pending row exactly as
+    // it is. The next call finds it, replays the same key with the same body
+    // and the same card, and observes the real outcome from Square instead of
+    // guessing at one.
+    const thrown = classifySquareThrow(error);
+    if (thrown.kind === "indeterminate") {
       throw new Error(
-        `PAYMENT_INDETERMINATE: no response from Square for company ${args.companyId} vehicle ${args.vehicleId} cycle ${args.cycleDate} attempt ${charge.attempt}: ${extractSquareFailureCode(error)}; the payment may have been taken, try again shortly`
+        `PAYMENT_INDETERMINATE: no usable answer from Square for company ${args.companyId} vehicle ${args.vehicleId} cycle ${args.cycleDate} attempt ${charge.attempt}: ${thrown.reason}; the payment may have been taken, try again shortly`
       );
     }
 
-    // A SquareError IS an answer: the API accepted the request and refused it.
-    // That is terminal and safe to record as a decline.
     callThrew = true;
     succeeded = false;
-    failureCode = extractSquareFailureCode(error);
+    failureCode = thrown.failureCode;
   }
 
   // Outside the try/catch on purpose: the catch only sees network and SDK
@@ -378,10 +420,16 @@ export async function chargeVehicleAddon(
   // rewriting them from args would destroy the record of what the idempotency
   // key actually bought.
   //
-  // No status filter on the update. If a concurrent request settled the same
-  // attempt first, it saw the same replayed payment and therefore reached the
-  // same outcome, so writing it again is a no-op in content.
-  const { error: settleError } = await admin
+  // status = 'pending' IS PART OF THE FILTER, and it is load-bearing. The
+  // claim it replaces, that a concurrent settler "saw the same replayed
+  // payment and therefore reached the same outcome", is false. A replaying
+  // request can be rejected BEFORE Square's dedupe ever runs, so two callers
+  // on one attempt can legitimately reach different answers, and an unfiltered
+  // update lets a late `failed` overwrite an already-settled `succeeded`,
+  // wiping the payment id and the receipt url. Those are the only record that
+  // the customer's money was taken. Settling only from 'pending' makes the
+  // first terminal answer the one that sticks.
+  const { data: settledRows, error: settleError } = await admin
     .from("vehicle_addon_charges")
     .update({
       square_payment_id: squarePaymentId,
@@ -392,11 +440,27 @@ export async function chargeVehicleAddon(
     .eq("company_id", args.companyId)
     .eq("cycle_date", args.cycleDate)
     .eq("vehicle_id", args.vehicleId)
-    .eq("attempt", charge.attempt);
+    .eq("attempt", charge.attempt)
+    .eq("status", "pending")
+    .select("attempt, status");
 
   if (settleError) {
     throw new Error(
       `Charge recorded at Square but vehicle_addon_charges update failed: ${settleError.message}`
+    );
+  }
+
+  if ((settledRows?.length ?? 0) === 0) {
+    // The row we own was no longer pending. Either a concurrent settler got
+    // there first (benign, and its answer stands), or something outside this
+    // function moved the row, in which case a real payment has just lost its
+    // audit record. There is no way to tell from here, and the cost of the
+    // second case is money that cannot be reconciled, so say so loudly rather
+    // than continue in silence. Not a throw: on the success path the coverage
+    // write below still has to run, and refusing it would leave a paid vehicle
+    // uncovered.
+    console.error(
+      `[billing] settle matched no pending row for company ${args.companyId} vehicle ${args.vehicleId} cycle ${args.cycleDate} attempt ${charge.attempt}; outcome ${succeeded ? "succeeded" : "failed"} payment ${squarePaymentId ?? "none"} was not recorded. Reconcile against Square by idempotency key.`
     );
   }
 
