@@ -9,9 +9,11 @@
 --   3. Re-run the STEP 1 backfill immediately after the deploy (see below).
 --   4. Soak, then run STEP 2 and STEP 3 together.
 --
--- Never run STEP 2 first. It revokes the browser's ability to write
--- vehicle_licences, and until the new code is live the licences page writes
--- that table directly: running it early breaks licence creation outright.
+-- Never run STEP 2 or STEP 3 first. Between them they remove the browser's
+-- ability to write vehicle_licences, and until the new code is live the
+-- licences page writes that table directly: running either early breaks
+-- licence creation outright. The trigger in STEP 3 does that even for a role
+-- that still holds every grant, so it is not covered by re-granting.
 --
 -- RE-RUN SAFETY, precisely. The DDL, policies, grants and trigger are all
 -- idempotent. The backfill is NOT idempotent in general: `on conflict do
@@ -63,6 +65,12 @@
 -- A table-level update grant satisfies a write on any column on its own, so
 -- that one grant undoes the column guard; the leftover per-column grants are
 -- harmless. The trigger is NOT undone by any grant, hence the third line.
+--
+-- Restoring the INSERT grant is safe to do on its own, and safer than it looks:
+-- the trigger still refuses an insert with active = true from a non-service
+-- role, so the old page can create licences again without reopening the
+-- free-vehicle hole. Drop the trigger only if the revert must also restore
+-- browser-side activation.
 
 -- ===========================================================================
 -- STEP 1: run BEFORE deploying the code.
@@ -269,17 +277,45 @@ commit;
 -- silently gone, with no error and no failing test. This trigger does not
 -- depend on the grant state at all. Precedent: profiles_privileged_columns_guard.sql.
 --
+-- It covers INSERT as well as UPDATE, for the same reason that guard does: an
+-- update-only trigger is bypassable by inserting an already-active licence, or
+-- by delete-then-insert, neither of which fires an update trigger. Today the
+-- INSERT revoke in STEP 2 also blocks that, but relying on the grant alone
+-- would leave this control single-layered, which is the fragility STEP 3
+-- exists to remove.
+--
 -- Confirm the role names below against `select current_user;` on a
 -- service-role connection BEFORE running this. See the pre-flight warning in
 -- the header: a wrong name here rejects the route's own writes and vehicle
 -- addition stops working.
+-- NOT security definer, deliberately, and this is load-bearing rather than
+-- stylistic. Under SECURITY DEFINER current_user evaluates to the function
+-- OWNER, not the caller, and this file is applied in the SQL editor as
+-- postgres: every check below would then compare postgres against the exempt
+-- list, pass, and the trigger would enforce nothing while looking installed.
+-- It needs no elevated privileges anyway, since all it does is raise. The
+-- precedent, guard_profiles_privileged_columns, is invoker-rights for the same
+-- reason. current_user (not session_user) is also the right test: PostgREST
+-- connects as `authenticator` and reaches the caller's role by SET ROLE, so
+-- session_user cannot tell a browser request from a service-role one.
 create or replace function public.guard_vehicle_licence_active()
 returns trigger
 language plpgsql
-security definer
 set search_path = public
 as $$
 begin
+  -- INSERT first, because OLD does not exist on that path and referencing it
+  -- below would error. An inactive licence costs nothing, so creating one from
+  -- the browser stays allowed; only activation moves money.
+  if tg_op = 'INSERT' then
+    if new.active is true
+       and current_user not in ('postgres', 'supabase_admin', 'service_role') then
+      raise exception 'vehicle_licences.active is server-only; use /api/licences/activate'
+        using errcode = '42501';
+    end if;
+    return new;
+  end if;
+
   if new.active is distinct from old.active
      and current_user not in ('postgres', 'supabase_admin', 'service_role') then
     raise exception 'vehicle_licences.active is server-only; use /api/licences/activate'
@@ -295,5 +331,5 @@ end $$;
 
 drop trigger if exists guard_vehicle_licence_active on public.vehicle_licences;
 create trigger guard_vehicle_licence_active
-  before update on public.vehicle_licences
+  before insert or update on public.vehicle_licences
   for each row execute function public.guard_vehicle_licence_active();
