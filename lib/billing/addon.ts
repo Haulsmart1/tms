@@ -7,11 +7,12 @@ import { addDays, CYCLE_DAYS, daysBetween } from "./schedule";
 export type AddonBillingRow = {
   status: "active" | "past_due" | "canceled";
   next_charge_on: string;
+  retry_at: string | null;
 };
 
 export type AddonAction =
   | { kind: "free"; reason: "already_covered" | "no_subscription" | "cycle_due" }
-  | { kind: "blocked"; reason: "past_due" | "canceled" }
+  | { kind: "blocked"; reason: "past_due" | "canceled" | "dunning" | "inactive_subscription" }
   | { kind: "charge"; cycleDate: string; days: number };
 
 // The cycle a mid-cycle addition belongs to.
@@ -54,12 +55,31 @@ export function selectAddonAction(args: {
   if (args.billingRow.status === "past_due") {
     return { kind: "blocked", reason: "past_due" };
   }
+  // Fails CLOSED on anything outside the union. The union is a compile-time
+  // claim about a runtime column, so a future status (paused, trialing) or a
+  // NULL would otherwise fall through every check below and charge the card.
+  if (args.billingRow.status !== "active") {
+    return { kind: "blocked", reason: "inactive_subscription" };
+  }
+
+  // Mid-dunning: a cycle charge has already FAILED and is waiting to retry.
+  // applyChargeOutcome leaves status "active" and next_charge_on unchanged in
+  // that state, so status alone reads as healthy while the card is actively
+  // failing. Without this check such a company falls through to the cycle_due
+  // branch below and adds vehicles free for the whole dunning window, and if
+  // dunning then exhausts that cycle is never charged at all, so the vehicles
+  // ride free for a full cycle. retry_at is the cron's own health signal;
+  // agreeing with selectDueAction here is the point.
+  if (args.billingRow.retry_at !== null) {
+    return { kind: "blocked", reason: "dunning" };
+  }
 
   const days = daysBetween(args.todayISO, args.billingRow.next_charge_on);
 
-  // The cycle charge is due or overdue and has not run yet. The imminent cron
-  // run counts live vehicles, so it will bill this one at full price. Writing
-  // coverage here would hand over a free cycle instead.
+  // The cycle charge is due or overdue and has not run yet. If it succeeds,
+  // the imminent cron run bills this vehicle at full price, so writing
+  // coverage here would hand over a free cycle instead. If it fails instead,
+  // that is caught above by the retry_at check on the next call, not here.
   if (days <= 0) {
     return { kind: "free", reason: "cycle_due" };
   }

@@ -8,6 +8,7 @@ const TODAY = "2026-09-07";
 const ACTIVE: AddonBillingRow = {
   status: "active",
   next_charge_on: "2026-09-21",
+  retry_at: null,
 };
 
 function select(
@@ -63,7 +64,7 @@ describe("selectAddonAction", () => {
   it("honours existing coverage even when the company is past due", () => {
     expect(
       select({
-        billingRow: { status: "past_due", next_charge_on: "2026-09-21" },
+        billingRow: { status: "past_due", next_charge_on: "2026-09-21", retry_at: null },
         alreadyCovered: true,
       })
     ).toEqual({ kind: "free", reason: "already_covered" });
@@ -78,14 +79,54 @@ describe("selectAddonAction", () => {
 
   it("blocks a past due company", () => {
     expect(
-      select({ billingRow: { status: "past_due", next_charge_on: "2026-09-21" } })
+      select({ billingRow: { status: "past_due", next_charge_on: "2026-09-21", retry_at: null } })
     ).toEqual({ kind: "blocked", reason: "past_due" });
   });
 
   it("blocks a canceled company", () => {
     expect(
-      select({ billingRow: { status: "canceled", next_charge_on: "2026-09-21" } })
+      select({ billingRow: { status: "canceled", next_charge_on: "2026-09-21", retry_at: null } })
     ).toEqual({ kind: "blocked", reason: "canceled" });
+  });
+
+  // applyChargeOutcome leaves a mid-dunning company as status "active" with
+  // next_charge_on in the past, so without the retry_at check this is the
+  // free-fleet exploit: unlimited additions on a card that is already failing.
+  it("blocks a company mid-dunning even though its status is active", () => {
+    expect(
+      select({
+        billingRow: {
+          status: "active",
+          next_charge_on: "2026-09-21",
+          retry_at: "2026-09-23",
+        },
+      })
+    ).toEqual({ kind: "blocked", reason: "dunning" });
+  });
+
+  it("blocks a mid-dunning company whose cycle is already overdue", () => {
+    expect(
+      select({
+        todayISO: "2026-09-25",
+        billingRow: {
+          status: "active",
+          next_charge_on: "2026-09-21",
+          retry_at: "2026-09-23",
+        },
+      })
+    ).toEqual({ kind: "blocked", reason: "dunning" });
+  });
+
+  it("fails closed on a status outside the known set", () => {
+    expect(
+      select({
+        billingRow: {
+          status: "paused" as AddonBillingRow["status"],
+          next_charge_on: "2026-09-21",
+          retry_at: null,
+        },
+      })
+    ).toEqual({ kind: "blocked", reason: "inactive_subscription" });
   });
 
   // Between a cycle falling due and the cron running, next_charge_on is in
