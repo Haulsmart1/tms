@@ -275,6 +275,48 @@ export async function runChargeCycle(
     }
   }
 
+  // Record which vehicles this cycle has now paid for, BEFORE the audit row.
+  // Written only on success: a failed charge covers nothing, and the retry
+  // will recount.
+  //
+  // The order matters and is the whole point. A throw here leaves nothing
+  // recorded at all, so the next run's prior-success check finds no row,
+  // recomputes the same attempt number and calls Square with the same
+  // idempotency key: Square replays the original payment instead of taking a
+  // second one, and audit plus coverage then land together. Written the other
+  // way round, a crash between the two writes would leave the charge recorded
+  // and this cycle's coverage lost with nothing able to repair it, and the
+  // next mid-cycle addition would silently bill a vehicle twice.
+  //
+  // ignoreDuplicates covers the crashed-and-rerun case, where this upsert
+  // already ran before the audit insert was reached. It is not about the
+  // add-on route, which files coverage against the previous cycle_date and so
+  // never collides with this one.
+  //
+  // Cost of throwing, stated honestly: on the card route's first-time-setup
+  // path this aborts before company_billing is written, so the customer is
+  // charged with no subscription row and no audit row for orphan recovery to
+  // find. Their next attempt self-repairs under the same idempotency key
+  // without a second charge, so the exposure is a confusing error and a
+  // retry, not lost money. That beats over-charging them weeks later.
+  if (succeeded && vehicleCount > 0) {
+    const { error: coverageError } = await admin
+      .from("vehicle_cycle_coverage")
+      .upsert(
+        [...vehicleIds].map((vehicleId) => ({
+          company_id: args.companyId,
+          cycle_date: args.cycleDate,
+          vehicle_id: vehicleId,
+        })),
+        { onConflict: "company_id,cycle_date,vehicle_id", ignoreDuplicates: true }
+      );
+    if (coverageError) {
+      throw new Error(
+        `Charge recorded at Square but coverage write failed for company ${args.companyId} cycle ${args.cycleDate}: ${coverageError.message}`
+      );
+    }
+  }
+
   const { error: insertError } = await admin.from("platform_charges").insert({
     company_id: args.companyId,
     cycle_date: args.cycleDate,
@@ -301,36 +343,6 @@ export async function runChargeCycle(
     throw new Error(
       `Charge recorded at Square but platform_charges insert failed: ${insertError.message}`
     );
-  }
-
-  // Record which vehicles this cycle has now paid for. Written only on
-  // success: a failed charge covers nothing, and the retry will recount.
-  //
-  // Upsert with ignoreDuplicates so a crashed-and-rerun cycle is idempotent,
-  // and so a vehicle already covered by a mid-cycle add-on charge is left
-  // alone rather than erroring the whole run.
-  //
-  // A failure here is logged, not thrown: the card has already been charged
-  // and the audit row written, so throwing would leave the caller believing
-  // the cycle did not happen and retrying a charge that already succeeded.
-  // Missing coverage is self-correcting, because the next cycle rewrites it.
-  if (succeeded && vehicleCount > 0) {
-    const { error: coverageError } = await admin
-      .from("vehicle_cycle_coverage")
-      .upsert(
-        [...vehicleIds].map((vehicleId) => ({
-          company_id: args.companyId,
-          cycle_date: args.cycleDate,
-          vehicle_id: vehicleId,
-        })),
-        { onConflict: "company_id,cycle_date,vehicle_id", ignoreDuplicates: true }
-      );
-    if (coverageError) {
-      console.error(
-        `billing: coverage write failed for company ${args.companyId} cycle ${args.cycleDate}:`,
-        coverageError.message
-      );
-    }
   }
 
   return {

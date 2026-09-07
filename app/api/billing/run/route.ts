@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
 
   // PostgREST caps unscoped selects at 1000 rows by default. Hitting this cap
   // means some due companies are silently missing from this run; refuse
-  // rather than under-charge. Same discipline as fetchBillableVehicleCount.
+  // rather than under-charge. Same discipline as fetchBillableVehicles.
   if ((rows ?? []).length >= 1000) {
     return NextResponse.json(
       {
