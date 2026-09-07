@@ -276,44 +276,64 @@ export async function runChargeCycle(
   }
 
   // Record the audit row and the coverage it bought in ONE call
-  // (docs/sql/billing_04_atomic_charge_record.sql). They are written by a
-  // single SECURITY DEFINER function so they land together or not at all.
+  // (docs/sql/billing_04_atomic_charge_record.sql). Both inserts run inside
+  // the single transaction PostgREST wraps around the rpc, so they land
+  // together or not at all.
   //
-  // Why not two statements in this file: coverage completeness is money. The
+  // Why not two statements here: coverage completeness is money. The
   // licence-activation route reads vehicle_cycle_coverage to decide whether a
   // mid-cycle vehicle needs a pro-rata charge, so a lost coverage row bills
-  // the customer again for something this cycle already paid for. Sequencing
-  // the two writes here is wrong in either order. Audit first with coverage
-  // errors swallowed can lose coverage permanently, and the prior-success
-  // early return above then stops any rerun from repairing it. Coverage first
-  // with a throw on failure leaves the card route's first-time-setup path
-  // charged with no platform_charges row and no company_billing row, which is
-  // precisely the state its orphan recovery cannot detect.
+  // the customer again for a vehicle this cycle already paid for. Sequencing
+  // the two writes in this file is wrong in either order. Audit first with
+  // coverage errors swallowed can lose coverage permanently, and the
+  // prior-success early return above then stops any later run from repairing
+  // it. Coverage first with a throw on failure leaves the card route's
+  // first-time-setup path charged with no platform_charges row and no
+  // company_billing row, which is the one state its orphan recovery cannot
+  // detect.
   //
-  // Folding coverage into the audit insert's own statement adds NO new failure
-  // mode: that insert already threw on error before this change, so coverage
-  // now shares a fate it could not previously escape.
+  // Folding coverage into the audit row's own statement adds no failure mode
+  // that was not already there: in the code this replaces the COVERAGE write
+  // threw on error too, so a coverage failure already aborted this function.
+  // (The audit insert threw on everything except 23505, and that single
+  // tolerance now lives in the database as `on conflict do nothing`, so there
+  // is no duplicate error left for this code to classify.)
   //
-  // p_vehicle_ids is empty for a failed charge, and the function additionally
-  // refuses to write coverage unless p_status is 'succeeded', so the rule
-  // ("a failed charge covers nothing") is enforced in one place rather than
-  // duplicated here. A zero-vehicle cycle passes an empty array and writes no
-  // coverage rows.
+  // p_vehicle_ids is empty for a failed charge, and the function independently
+  // refuses to write coverage unless p_status is 'succeeded', so "a failed
+  // charge covers nothing" is decided in one place rather than duplicated
+  // here. A zero-vehicle cycle passes an empty array and writes no coverage.
   //
-  // The old 23505 (unique_violation) tolerance is gone: the function's
-  // `on conflict (company_id, cycle_date, attempt) do nothing` absorbs a
-  // rerun of an already-recorded attempt inside the database, so there is no
-  // duplicate error left for this code to classify.
+  // What a throw here costs depends on the branch that produced it. With
+  // grossPence === 0 no Square call happened, so only a zero-amount audit row
+  // is lost. On a decline no money moved, so only the failure audit row is
+  // lost. Only on success is the money taken with nothing recorded.
   //
-  // A throw here means Square has the money and the database does not. The
-  // rerun path is the same as it has always been: the prior-success check
-  // finds no row, this attempt number is recomputed identically, and the same
-  // idempotency key goes back to Square. That replays the original payment
-  // rather than taking a second one ONLY while the request body is unchanged.
-  // The body carries amountMoney and a note containing the vehicle count, so
-  // if the fleet changed between runs Square answers IDEMPOTENCY_KEY_REUSED
-  // instead, which is handled above as PAYMENT_INDETERMINATE and needs a
-  // human.
+  // Recovery from that last case differs by caller, and only one of them
+  // self-heals:
+  //
+  //   Cron (/api/billing/run): the per-company catch absorbs the throw and
+  //   applyChargeOutcome never runs, so status, retry_count and
+  //   next_charge_on are untouched; the next run recomputes an identical
+  //   (cycleDate, attempt) and sends Square the same idempotency key, which
+  //   replays the original payment instead of taking a second one. That
+  //   replay holds only while the request body is unchanged. The body carries
+  //   amountMoney and a note containing the vehicle count, so a change in
+  //   FLEET SIZE makes Square answer IDEMPOTENCY_KEY_REUSED instead (handled
+  //   above as PAYMENT_INDETERMINATE). Swapping one vehicle for another
+  //   leaves both the amount and the note identical, so the payment does
+  //   replay, and coverage is then written for the CURRENT set rather than
+  //   the set the payment actually covered.
+  //
+  //   Card route first-time setup (/api/billing/card): does NOT self-heal.
+  //   firstTimeAttempt is derived from platform_charges rows for
+  //   cycle_date = today and orphan recovery looks for a succeeded
+  //   platform_charges row; a throw here suppressed both, so neither can see
+  //   the payment. A same-day retry does not double-charge (same cycleDate,
+  //   same attempt, so the key is refused as IDEMPOTENCY_KEY_REUSED against
+  //   the newly stored card and the customer gets a 409), but the next day
+  //   cycleDate is a different date, so the key differs and the customer is
+  //   charged a second full cycle with still no record of the first.
   const { error: recordError } = await admin.rpc("record_cycle_charge", {
     p_company_id: args.companyId,
     p_cycle_date: args.cycleDate,
