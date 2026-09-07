@@ -20,6 +20,8 @@ Three things the spec got slightly wrong, discovered while writing exact code. T
 2. **Activating a second licence on a vehicle that already has one is free.** Such a vehicle is already in the billable count, and the only way it got there was by being paid for. Charging again would bill a company twice for one vehicle.
 3. **The spec's "rounding at half a penny" test is unwritable.** The divisor is 7, so the fraction is always `k/7` and can never be exactly half a penny. The rounding test uses a real `k/7` case instead.
 
+4. **`status === "active"` does not mean the subscription is healthy** (found by the Task 4 review). When a cycle charge fails but dunning has retries left, `applyChargeOutcome` in `lib/billing/run.ts` leaves `status: "active"` and `next_charge_on` unchanged in the past, setting only `retry_at`. A company mid-dunning therefore looked healthy to `selectAddonAction`, fell through to the `days <= 0` branch, and could add vehicles free for the whole dunning window; if dunning then exhausted, that cycle was never charged and the vehicles rode free for a full cycle on a card that was already failing. `AddonBillingRow` now carries `retry_at`, a non-null value blocks with reason `dunning`, and the status gate fails closed on any value outside the union.
+
 ---
 
 ## File Structure
@@ -1422,11 +1424,21 @@ const SetActiveSchema = z.object({
 
 const BodySchema = z.discriminatedUnion("action", [CreateSchema, SetActiveSchema]);
 
-const BLOCKED_MESSAGE: Record<"past_due" | "canceled", string> = {
+// Every blocked reason needs its own line here. A missing key would render
+// `undefined` to a customer who has just been refused a charge, which is the
+// worst moment for a blank error.
+const BLOCKED_MESSAGE: Record<
+  "past_due" | "canceled" | "dunning" | "inactive_subscription",
+  string
+> = {
   past_due:
     "Your subscription is past due, so vehicles cannot be added. Update your payment card on the billing page and try again.",
   canceled:
     "Your subscription has been canceled, so vehicles cannot be added. Contact support to reactivate it.",
+  dunning:
+    "A payment on your account has failed and is being retried, so vehicles cannot be added until it clears. Update your payment card on the billing page.",
+  inactive_subscription:
+    "Your subscription is not active, so vehicles cannot be added. Contact support.",
 };
 
 // Every tenant under the caller's company, plus the company id itself.
@@ -1536,7 +1548,11 @@ export async function POST(request: NextRequest) {
 
     const { data: billingRaw, error: billingError } = await admin
       .from("company_billing")
-      .select("status, next_charge_on, square_customer_id, square_card_id")
+      // retry_at is load-bearing, not incidental: a company mid-dunning has
+      // status "active" with next_charge_on in the past, so without it the
+      // decision function cannot tell a healthy subscription from a failing
+      // card and would let vehicles be added free.
+      .select("status, next_charge_on, retry_at, square_customer_id, square_card_id")
       .eq("company_id", companyId)
       .maybeSingle();
     if (billingError) {
@@ -1547,6 +1563,7 @@ export async function POST(request: NextRequest) {
       ? {
           status: billingRaw.status as AddonBillingRow["status"],
           next_charge_on: billingRaw.next_charge_on as string,
+          retry_at: (billingRaw.retry_at as string | null) ?? null,
         }
       : null;
 
