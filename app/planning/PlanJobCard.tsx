@@ -8,6 +8,9 @@ type Props = {
   job: PlanJob;
   /** 1-based position in its lane; null in the unassigned pool. */
   sequence: number | null;
+  /** Canonical service Drop numbers for this job. Undefined means the lane
+      currently has no canonical itinerary and sequence remains the fallback. */
+  dropNumbers?: number[];
   /** True once geocoding has been attempted, so the badge means "failed",
       never "still loading". */
   geocodeSettled: boolean;
@@ -30,6 +33,7 @@ export const JOB_ID_MIME = "text/plain";
 export default function PlanJobCard({
   job,
   sequence,
+  dropNumbers,
   geocodeSettled,
   note,
   onDropBefore,
@@ -53,6 +57,16 @@ export default function PlanJobCard({
           stops.length > 1 ? ` → ${last.city ?? last.postcode ?? "?"}` : ""
         }`;
   const warn = geocodeSettled && !isRoutable(job);
+  const dropLabel =
+    dropNumbers === undefined
+      ? sequence !== null
+        ? `Drop ${sequence}`
+        : null
+      : dropNumbers.length === 0
+        ? "No mapped Drop"
+        : dropNumbers.length === 1
+          ? `Drop ${dropNumbers[0]}`
+          : `Drops ${dropNumbers.join(", ")}`;
 
   function handleDragStart(e: DragEvent) {
     dragged.current = true;
@@ -161,7 +175,9 @@ export default function PlanJobCard({
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
-          <span className="mr-1 text-xs text-ink-3">Drop {sequence}</span>
+          {dropLabel ? (
+            <span className="mr-1 text-xs text-ink-3">{dropLabel}</span>
+          ) : null}
 
           <button
             type="button"

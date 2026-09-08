@@ -34,6 +34,10 @@ import {
 } from "../../lib/planning/fastPlot";
 import { buildPlanningPhysicalItinerary } from "../../lib/planning/physicalItinerary";
 import {
+  buildPlanningDropMarkers,
+  buildPlanningDropNumbersByJobId,
+} from "../../lib/planning/dropPresentation";
+import {
   buildPlanningItineraryRpcVisits,
   parsePersistedPlanningItineraries,
   type PendingPlanningItinerary,
@@ -562,7 +566,7 @@ export default function PlanningPage() {
           (itineraryRows ?? []) as any[],
           (visitRows ?? []) as any[],
           (serviceRows ?? []) as any[],
-          loaded
+          loaded.filter(isRoutable)
         );
       }
     }
@@ -1392,17 +1396,47 @@ export default function PlanningPage() {
         }
       }
 
-      if (invalidations.length > 0) {
+      const completedInvalidations = invalidations.filter(
+        (vehicleId) =>
+          canonicalMutationGeneration.current[vehicleId] ===
+          generationSnapshot[vehicleId]
+      );
+
+      const completedCanonical = pendingCanonical.filter(
+        (itinerary) =>
+          canonicalMutationGeneration.current[itinerary.vehicleId] ===
+          generationSnapshot[itinerary.vehicleId]
+      );
+
+      if (completedInvalidations.length > 0) {
         setItineraryInvalidations((previous) => {
           const next = new Set(previous);
 
-          for (const vehicleId of invalidations) {
-            if (
-              canonicalMutationGeneration.current[vehicleId] ===
-              generationSnapshot[vehicleId]
-            ) {
-              next.delete(vehicleId);
-              delete canonicalMutationGeneration.current[vehicleId];
+          for (const vehicleId of completedInvalidations) {
+            next.delete(vehicleId);
+          }
+
+          return next;
+        });
+      }
+
+      if (completedCanonical.length > 0) {
+        setPersistedItineraries((previous) => {
+          const next = { ...previous };
+
+          for (const itinerary of completedCanonical) {
+            next[itinerary.vehicleId] = itinerary;
+          }
+
+          return next;
+        });
+
+        setPendingItineraries((previous) => {
+          const next = { ...previous };
+
+          for (const itinerary of completedCanonical) {
+            if (previous[itinerary.vehicleId] === itinerary) {
+              delete next[itinerary.vehicleId];
             }
           }
 
@@ -1410,23 +1444,22 @@ export default function PlanningPage() {
         });
       }
 
-      if (pendingCanonical.length > 0) {
-        setPendingItineraries((previous) => {
-          const next = { ...previous };
+      for (const vehicleId of completedInvalidations) {
+        if (
+          canonicalMutationGeneration.current[vehicleId] ===
+          generationSnapshot[vehicleId]
+        ) {
+          delete canonicalMutationGeneration.current[vehicleId];
+        }
+      }
 
-          for (const itinerary of pendingCanonical) {
-            if (
-              previous[itinerary.vehicleId] === itinerary &&
-              canonicalMutationGeneration.current[itinerary.vehicleId] ===
-                generationSnapshot[itinerary.vehicleId]
-            ) {
-              delete next[itinerary.vehicleId];
-              delete canonicalMutationGeneration.current[itinerary.vehicleId];
-            }
-          }
-
-          return next;
-        });
+      for (const itinerary of completedCanonical) {
+        if (
+          canonicalMutationGeneration.current[itinerary.vehicleId] ===
+          generationSnapshot[itinerary.vehicleId]
+        ) {
+          delete canonicalMutationGeneration.current[itinerary.vehicleId];
+        }
       }
 
       const savedByJobId = new Map(
@@ -1452,8 +1485,16 @@ export default function PlanningPage() {
       );
       setBaselineDiff("[]");
 
+      const newerCanonicalEditsExist = Object.entries(
+        canonicalMutationGeneration.current
+      ).some(
+        ([vehicleId, generation]) =>
+          generationSnapshot[vehicleId] !== generation
+      );
+
       const newerEditsExist =
-        latestPendingUpdatesJson.current !== snapshotJson;
+        latestPendingUpdatesJson.current !== snapshotJson ||
+        newerCanonicalEditsExist;
 
       if (!newerEditsExist) {
         if (activeTenantId && typeof window !== "undefined") {
@@ -1837,20 +1878,33 @@ export default function PlanningPage() {
     unassigned.length,
   ]);
 
-  /* Memoised: a fresh markers array on every parent render tears down and
-     rebuilds every TomTom marker, which flickers during a drag.
+  /* Canonical itineraries number every collection/delivery service occurrence
+     as a Drop. Shared physical locations therefore use a combined marker such
+     as "1/2". Without a canonical itinerary the legacy lane position remains
+     the manual-planning fallback. */
+  const markers: MapMarker[] = useMemo(() => {
+    const canonical = selectedVehicleId
+      ? pendingItineraries[selectedVehicleId] ??
+        persistedItineraries[selectedVehicleId]
+      : null;
 
-     The label is the job's position IN THE LANE, not its position among the
-     routable ones, so a pin always carries the same number as its card even
-     when an unroutable job sits between two routable ones. */
-  const markers: MapMarker[] = useMemo(
-    () =>
-      selectedLaneJobs.flatMap((job, index) => {
-        const position = jobRepresentativePoint(job);
-        return position ? [{ position, label: String(index + 1) }] : [];
-      }),
-    [selectedLaneJobs]
-  );
+    if (canonical) {
+      return buildPlanningDropMarkers(
+        canonical.orderedVisits,
+        canonical.serviceStops
+      );
+    }
+
+    return selectedLaneJobs.flatMap((job, index) => {
+      const position = jobRepresentativePoint(job);
+      return position ? [{ position, label: String(index + 1) }] : [];
+    });
+  }, [
+    selectedVehicleId,
+    selectedLaneJobs,
+    pendingItineraries,
+    persistedItineraries,
+  ]);
 
   function laneSummary(vehicleId: string): string | null {
     const route = routes[vehicleId];
@@ -2119,6 +2173,16 @@ export default function PlanningPage() {
                       jobs={(laneOrders[v.id] ?? [])
                         .map((id) => jobById.get(id))
                         .filter((j): j is PlanJob => Boolean(j))}
+                      canonicalDropNumbersByJobId={
+                        pendingItineraries[v.id] ?? persistedItineraries[v.id]
+                          ? buildPlanningDropNumbersByJobId(
+                              (
+                                pendingItineraries[v.id] ??
+                                persistedItineraries[v.id]
+                              ).serviceStops
+                            )
+                          : undefined
+                      }
                       driverId={laneDrivers[v.id] ?? null}
                       drivers={drivers}
                       selected={v.id === selectedVehicleId}

@@ -58,7 +58,7 @@ function unauthenticated(
   return redirect;
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   /* Held in a mutable binding because setAll below has to rebuild it. Returning
      a response created BEFORE the cookie writes silently discards the refreshed
      session, and the symptom is users being logged out every hour with nothing
