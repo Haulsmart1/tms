@@ -16,21 +16,39 @@ describe("planningMapMarkerPresentation", () => {
     });
   });
 
-  it("compacts a large shared-location Drop list", () => {
+  it("shows a range for contiguous shared Drops", () => {
     expect(
       planningMapMarkerPresentation("95/96/97/98/99")
     ).toEqual({
-      text: "95+4",
+      text: "95\u201399",
       title: "Drops 95, 96, 97, 98, 99",
     });
   });
 
-  it("ignores empty slash segments when counting", () => {
+  it("shows a count for non-contiguous shared Drops", () => {
+    expect(
+      planningMapMarkerPresentation("95/101/152")
+    ).toEqual({
+      text: "3 drops",
+      title: "Drops 95, 101, 152",
+    });
+  });
+
+  it("ignores empty slash segments when building a range", () => {
     expect(
       planningMapMarkerPresentation("95//96/97/")
     ).toEqual({
-      text: "95+2",
+      text: "95\u201397",
       title: "Drops 95, 96, 97",
+    });
+  });
+
+  it("does not invent a range for non-numeric labels", () => {
+    expect(
+      planningMapMarkerPresentation("95/A/97")
+    ).toEqual({
+      text: "3 drops",
+      title: "Drops 95, A, 97",
     });
   });
 });
