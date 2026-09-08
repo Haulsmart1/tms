@@ -2003,14 +2003,6 @@ export default function PlanningPage() {
             </p>
           </section>
 
-          <PlanningMap
-            markers={markers}
-            route={selectedRoute}
-            notice={mapNotice}
-            reading={selectedVehicleReading}
-            now={positionNow}
-          />
-
           <section
             aria-label="Planning actions"
             className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-2 p-3"
@@ -2167,7 +2159,15 @@ export default function PlanningPage() {
                 onAcceptJob={openAcceptance}
                 onDropJob={(jobId) => moveJob(jobId, null, null)}
               />
-              <div className="flex flex-1 flex-col gap-3">
+              <div className="min-w-0 flex flex-1 flex-col gap-3">
+                <PlanningMap
+                  markers={markers}
+                  route={selectedRoute}
+                  notice={mapNotice}
+                  reading={selectedVehicleReading}
+                  now={positionNow}
+                />
+
                 {vehicles.length === 0 ? (
                   <p className="text-sm text-ink-3">No active vehicles. Add one under Fleet.</p>
                 ) : (
