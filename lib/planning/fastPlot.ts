@@ -313,6 +313,9 @@ const FAST_PLOT_COMPLETE_MATRIX_MAX_VISITS = 60;
  */
 const FAST_PLOT_SPARSE_REQUEST_BUDGET = 8;
 const FAST_PLOT_SPARSE_CANDIDATE_LIMIT = 100;
+const FAST_PLOT_SPARSE_RELOCATION_MAX_VISITS = 160;
+const FAST_PLOT_SPARSE_RELOCATION_PASSES = 6;
+const FAST_PLOT_SPARSE_RELOCATION_MIN_IMPROVEMENT_KM = 0.5;
 
 /**
  * V5 operational-routing preferences.
@@ -912,6 +915,154 @@ function chooseGeographicSparseCandidate(
     })[0];
 }
 
+function geographicRouteDistanceKm(
+  route: FastPlotVisit[]
+): number {
+  let total = 0;
+
+  for (let index = 1; index < route.length; index++) {
+    total += haversineKm(
+      route[index - 1].point,
+      route[index].point
+    );
+  }
+
+  return total;
+}
+
+function routeMaintainsPhysicalPrecedence(
+  route: FastPlotVisit[],
+  counts: Map<string, number>
+): boolean {
+  const progress = new Map<string, number>();
+
+  for (const visit of route) {
+    if (!visitIsEligible(visit, progress)) {
+      return false;
+    }
+
+    applyVisit(visit, progress, counts);
+  }
+
+  for (const [jobId, count] of counts) {
+    if ((progress.get(jobId) ?? 0) !== count) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function relocateFastPlotVisit(
+  route: FastPlotVisit[],
+  fromIndex: number,
+  insertionIndex: number
+): FastPlotVisit[] {
+  const moved = route[fromIndex];
+  const withoutMoved = [
+    ...route.slice(0, fromIndex),
+    ...route.slice(fromIndex + 1),
+  ];
+
+  return [
+    ...withoutMoved.slice(0, insertionIndex),
+    moved,
+    ...withoutMoved.slice(insertionIndex),
+  ];
+}
+
+/**
+ * Improve only the geographic fallback suffix of a large sparse route.
+ *
+ * The anchored first visit and every TomTom-guided sparse transition stay
+ * fixed. Candidate relocations are accepted only when the complete physical
+ * route remains precedence-safe for every job and reduces straight-line route
+ * length by a meaningful amount.
+ *
+ * This specifically prevents a still-eligible isolated collection from being
+ * stranded until after the route has already swept across the country, while
+ * never moving a delivery ahead of its prerequisite collection/intermediate
+ * stop.
+ */
+function improveSparseGeographicRoute(
+  route: FastPlotVisit[],
+  counts: Map<string, number>,
+  movableStartIndex: number
+): FastPlotVisit[] {
+  if (
+    route.length > FAST_PLOT_SPARSE_RELOCATION_MAX_VISITS ||
+    movableStartIndex >= route.length - 1
+  ) {
+    return route;
+  }
+
+  const firstMovable = Math.max(1, movableStartIndex);
+  let bestRoute = route;
+  let bestDistance = geographicRouteDistanceKm(route);
+
+  for (
+    let pass = 0;
+    pass < FAST_PLOT_SPARSE_RELOCATION_PASSES;
+    pass++
+  ) {
+    let passRoute: FastPlotVisit[] | null = null;
+    let passDistance = bestDistance;
+
+    for (
+      let fromIndex = firstMovable;
+      fromIndex < bestRoute.length;
+      fromIndex++
+    ) {
+      for (
+        let insertionIndex = firstMovable;
+        insertionIndex < bestRoute.length;
+        insertionIndex++
+      ) {
+        if (insertionIndex === fromIndex) {
+          continue;
+        }
+
+        const candidate = relocateFastPlotVisit(
+          bestRoute,
+          fromIndex,
+          insertionIndex
+        );
+
+        const candidateDistance =
+          geographicRouteDistanceKm(candidate);
+
+        if (
+          passDistance - candidateDistance <
+          FAST_PLOT_SPARSE_RELOCATION_MIN_IMPROVEMENT_KM
+        ) {
+          continue;
+        }
+
+        if (
+          !routeMaintainsPhysicalPrecedence(
+            candidate,
+            counts
+          )
+        ) {
+          continue;
+        }
+
+        passRoute = candidate;
+        passDistance = candidateDistance;
+      }
+    }
+
+    if (!passRoute) {
+      break;
+    }
+
+    bestRoute = passRoute;
+    bestDistance = passDistance;
+  }
+
+  return bestRoute;
+}
+
 function validSparseCosts(
   value: unknown,
   expectedColumns: number
@@ -969,6 +1120,7 @@ async function sparseFastPlotOrder(
     : null;
   let requestsUsed = 0;
   let loadingAvailable = true;
+  let refinementStartIndex: number | null = null;
 
   while (route.length < visits.length) {
     const remaining = visits.filter(
@@ -981,6 +1133,18 @@ async function sparseFastPlotOrder(
     }
 
     const current = route.at(-1) ?? null;
+
+    if (
+      current &&
+      refinementStartIndex === null &&
+      (
+        !loadingAvailable ||
+        requestsUsed >= FAST_PLOT_SPARSE_REQUEST_BUDGET
+      )
+    ) {
+      refinementStartIndex = route.length;
+    }
+
     let chosen: FastPlotVisit;
 
     if (!current) {
@@ -1081,7 +1245,11 @@ async function sparseFastPlotOrder(
     currentCluster = chosenCluster;
   }
 
-  return route;
+  return improveSparseGeographicRoute(
+    route,
+    counts,
+    refinementStartIndex ?? route.length
+  );
 }
 
 /** Build a low-cost physical route while enforcing every job's stop_order.

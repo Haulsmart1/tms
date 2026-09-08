@@ -1099,6 +1099,92 @@ describe("Fast Plot V5", () => {
     expect(loader.mock.calls.length).toBeLessThanOrEqual(12);
   });
 
+  it("relocates a stranded large-lane collection without breaking precedence", async () => {
+    const jobs = Array.from({ length: 31 }, (_, index) => {
+      const collection =
+        index === 30
+          ? { lat: 50, lng: 0.2 }
+          : { lat: 50, lng: -index * 0.01 };
+
+      return job(`sweep-${index}`, [
+        stop(
+          `sweep-c-${index}`,
+          1,
+          "collection",
+          collection.lat,
+          collection.lng
+        ),
+        stop(
+          `sweep-d-${index}`,
+          2,
+          "delivery",
+          50,
+          -1 - index * 0.01
+        ),
+      ]);
+    });
+
+    const loader = vi.fn(
+      async (
+        origins: LatLng[],
+        destinations: LatLng[]
+      ) =>
+        origins.map((origin) =>
+          destinations.map((destination) =>
+            Math.round(
+              (
+                Math.abs(destination.lat - origin.lat) +
+                Math.abs(destination.lng - origin.lng)
+              ) * 100000
+            )
+          )
+        )
+    );
+
+    const result = await optimizeFastPlotOrderFromStart(
+      jobs,
+      { lat: 50, lng: 0.01 },
+      loader
+    );
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    const outlierCollectionIndex =
+      result.orderedVisits.findIndex(
+        (visit) =>
+          visit.requirements["sweep-30"]?.includes(0) === true
+      );
+
+    const outlierDeliveryIndex =
+      result.orderedVisits.findIndex(
+        (visit) =>
+          visit.requirements["sweep-30"]?.includes(1) === true
+      );
+
+    expect(outlierCollectionIndex).toBeGreaterThanOrEqual(0);
+    expect(outlierDeliveryIndex).toBeGreaterThanOrEqual(0);
+
+    // The TomTom-guided prefix stays fixed, but the geographic suffix must
+    // not leave the eastern collection until the end of the westbound sweep.
+    expect(outlierCollectionIndex).toBeLessThan(20);
+
+    // Relocation must never weaken collection-before-delivery precedence.
+    expect(outlierCollectionIndex).toBeLessThan(
+      outlierDeliveryIndex
+    );
+
+    // One <=100-cell anchored request plus the 8-call sparse budget.
+    expect(loader.mock.calls.length).toBeLessThanOrEqual(9);
+
+    expect(
+      result.orderedVisits.map((visit) => visit.point)
+    ).toEqual(result.route);
+  });
+
   it("does not claim closest-first for a route requiring a physical revisit", async () => {
     const jobs = [
       job("revisit", [
