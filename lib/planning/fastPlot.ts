@@ -24,6 +24,7 @@ export type AnchoredFastPlotResult =
   | {
       ok: true;
       route: LatLng[];
+      orderedVisits: FastPlotVisit[];
       firstTravelSeconds: number;
     }
   | {
@@ -300,8 +301,21 @@ const FAST_PLOT_BEAM_WIDTH = 96;
  * builder. That stays below the 40-request optimization budget.
  */
 const FAST_PLOT_COMPLETE_MATRIX_MAX_VISITS = 60;
-const FAST_PLOT_SPARSE_REQUEST_BUDGET = 32;
+
+/**
+ * Large planning lanes run interactively in the browser. Each sparse route
+ * step depends on the previous TomTom-selected visit, so those requests cannot
+ * safely be parallelised. Keep a small sequential TomTom budget, then finish
+ * with the existing deterministic precedence-safe geographic/cluster ranking.
+ *
+ * Drop 1 is NOT governed by this budget: chooseAnchoredFirstVisit separately
+ * compares every eligible first physical visit from the van using TomTom.
+ */
+const FAST_PLOT_SPARSE_REQUEST_BUDGET = 8;
 const FAST_PLOT_SPARSE_CANDIDATE_LIMIT = 100;
+const FAST_PLOT_SPARSE_RELOCATION_MAX_VISITS = 160;
+const FAST_PLOT_SPARSE_RELOCATION_PASSES = 6;
+const FAST_PLOT_SPARSE_RELOCATION_MIN_IMPROVEMENT_KM = 0.5;
 
 /**
  * V5 operational-routing preferences.
@@ -723,7 +737,7 @@ async function beamSearchFastPlotOrder(
   counts: Map<string, number>,
   table: FastPlotCostTable,
   firstVisit: FastPlotVisit | null = null
-): Promise<LatLng[] | null> {
+): Promise<FastPlotVisit[] | null> {
   const clusters = buildFastPlotClusters(visits);
   const initialProgress = new Map<string, number>();
   const initialVisited = new Set<string>();
@@ -810,7 +824,7 @@ async function beamSearchFastPlotOrder(
 
   if (!best) return null;
 
-  return best.route.map((visit) => visit.point);
+  return best.route;
 }
 
 function sparseTransitionPenalty(
@@ -901,6 +915,154 @@ function chooseGeographicSparseCandidate(
     })[0];
 }
 
+function geographicRouteDistanceKm(
+  route: FastPlotVisit[]
+): number {
+  let total = 0;
+
+  for (let index = 1; index < route.length; index++) {
+    total += haversineKm(
+      route[index - 1].point,
+      route[index].point
+    );
+  }
+
+  return total;
+}
+
+function routeMaintainsPhysicalPrecedence(
+  route: FastPlotVisit[],
+  counts: Map<string, number>
+): boolean {
+  const progress = new Map<string, number>();
+
+  for (const visit of route) {
+    if (!visitIsEligible(visit, progress)) {
+      return false;
+    }
+
+    applyVisit(visit, progress, counts);
+  }
+
+  for (const [jobId, count] of counts) {
+    if ((progress.get(jobId) ?? 0) !== count) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function relocateFastPlotVisit(
+  route: FastPlotVisit[],
+  fromIndex: number,
+  insertionIndex: number
+): FastPlotVisit[] {
+  const moved = route[fromIndex];
+  const withoutMoved = [
+    ...route.slice(0, fromIndex),
+    ...route.slice(fromIndex + 1),
+  ];
+
+  return [
+    ...withoutMoved.slice(0, insertionIndex),
+    moved,
+    ...withoutMoved.slice(insertionIndex),
+  ];
+}
+
+/**
+ * Improve only the geographic fallback suffix of a large sparse route.
+ *
+ * The anchored first visit and every TomTom-guided sparse transition stay
+ * fixed. Candidate relocations are accepted only when the complete physical
+ * route remains precedence-safe for every job and reduces straight-line route
+ * length by a meaningful amount.
+ *
+ * This specifically prevents a still-eligible isolated collection from being
+ * stranded until after the route has already swept across the country, while
+ * never moving a delivery ahead of its prerequisite collection/intermediate
+ * stop.
+ */
+function improveSparseGeographicRoute(
+  route: FastPlotVisit[],
+  counts: Map<string, number>,
+  movableStartIndex: number
+): FastPlotVisit[] {
+  if (
+    route.length > FAST_PLOT_SPARSE_RELOCATION_MAX_VISITS ||
+    movableStartIndex >= route.length - 1
+  ) {
+    return route;
+  }
+
+  const firstMovable = Math.max(1, movableStartIndex);
+  let bestRoute = route;
+  let bestDistance = geographicRouteDistanceKm(route);
+
+  for (
+    let pass = 0;
+    pass < FAST_PLOT_SPARSE_RELOCATION_PASSES;
+    pass++
+  ) {
+    let passRoute: FastPlotVisit[] | null = null;
+    let passDistance = bestDistance;
+
+    for (
+      let fromIndex = firstMovable;
+      fromIndex < bestRoute.length;
+      fromIndex++
+    ) {
+      for (
+        let insertionIndex = firstMovable;
+        insertionIndex < bestRoute.length;
+        insertionIndex++
+      ) {
+        if (insertionIndex === fromIndex) {
+          continue;
+        }
+
+        const candidate = relocateFastPlotVisit(
+          bestRoute,
+          fromIndex,
+          insertionIndex
+        );
+
+        const candidateDistance =
+          geographicRouteDistanceKm(candidate);
+
+        if (
+          passDistance - candidateDistance <
+          FAST_PLOT_SPARSE_RELOCATION_MIN_IMPROVEMENT_KM
+        ) {
+          continue;
+        }
+
+        if (
+          !routeMaintainsPhysicalPrecedence(
+            candidate,
+            counts
+          )
+        ) {
+          continue;
+        }
+
+        passRoute = candidate;
+        passDistance = candidateDistance;
+      }
+    }
+
+    if (!passRoute) {
+      break;
+    }
+
+    bestRoute = passRoute;
+    bestDistance = passDistance;
+  }
+
+  return bestRoute;
+}
+
 function validSparseCosts(
   value: unknown,
   expectedColumns: number
@@ -929,17 +1091,18 @@ function validSparseCosts(
  * It deliberately avoids an all-to-all TomTom matrix. At each route step the
  * currently legal physical visits are ranked geographically, then at most 100
  * candidates are evaluated in one directed 1xN TomTom request. Loading stops
- * after a hard request budget. Missing/unavailable TomTom data never becomes
- * invented travel seconds: once loading is unavailable/exhausted, deterministic
- * geographic ordering is used while the same precedence and cluster rules
- * continue to apply.
+ * after a small interactive request budget because each next request depends
+ * on the visit chosen by the previous response. Missing/unavailable TomTom data
+ * never becomes invented travel seconds: once loading is unavailable/exhausted,
+ * deterministic geographic ordering is used while the same precedence and
+ * cluster rules continue to apply.
  */
 async function sparseFastPlotOrder(
   visits: FastPlotVisit[],
   counts: Map<string, number>,
   loadCosts: FastPlotCostLoader,
   firstVisit: FastPlotVisit | null = null
-): Promise<LatLng[] | null> {
+): Promise<FastPlotVisit[] | null> {
   const clusters = buildFastPlotClusters(visits);
   const progress = new Map<string, number>();
   const visited = new Set<string>();
@@ -957,6 +1120,7 @@ async function sparseFastPlotOrder(
     : null;
   let requestsUsed = 0;
   let loadingAvailable = true;
+  let refinementStartIndex: number | null = null;
 
   while (route.length < visits.length) {
     const remaining = visits.filter(
@@ -969,6 +1133,18 @@ async function sparseFastPlotOrder(
     }
 
     const current = route.at(-1) ?? null;
+
+    if (
+      current &&
+      refinementStartIndex === null &&
+      (
+        !loadingAvailable ||
+        requestsUsed >= FAST_PLOT_SPARSE_REQUEST_BUDGET
+      )
+    ) {
+      refinementStartIndex = route.length;
+    }
+
     let chosen: FastPlotVisit;
 
     if (!current) {
@@ -1069,7 +1245,11 @@ async function sparseFastPlotOrder(
     currentCluster = chosenCluster;
   }
 
-  return route.map((visit) => visit.point);
+  return improveSparseGeographicRoute(
+    route,
+    counts,
+    refinementStartIndex ?? route.length
+  );
 }
 
 /** Build a low-cost physical route while enforcing every job's stop_order.
@@ -1183,14 +1363,15 @@ export async function optimizeFastPlotOrderFromStart(
     return {
       ok: true,
       route: [first.visit.point],
+      orderedVisits: [first.visit],
       firstTravelSeconds: first.travelSeconds,
     };
   }
 
-  let route: LatLng[] | null;
+  let orderedVisits: FastPlotVisit[] | null;
 
   if (visits.length > FAST_PLOT_COMPLETE_MATRIX_MAX_VISITS) {
-    route = await sparseFastPlotOrder(
+    orderedVisits = await sparseFastPlotOrder(
       visits,
       counts,
       loadCosts,
@@ -1206,7 +1387,7 @@ export async function optimizeFastPlotOrderFromStart(
       return { ok: false, reason: "route_cost_unavailable" };
     }
 
-    route = await beamSearchFastPlotOrder(
+    orderedVisits = await beamSearchFastPlotOrder(
       visits,
       counts,
       table,
@@ -1214,13 +1395,14 @@ export async function optimizeFastPlotOrderFromStart(
     );
   }
 
-  if (!route || route.length !== visits.length) {
+  if (!orderedVisits || orderedVisits.length !== visits.length) {
     return { ok: false, reason: "route_cost_unavailable" };
   }
 
   return {
     ok: true,
-    route,
+    route: orderedVisits.map((visit) => visit.point),
+    orderedVisits,
     firstTravelSeconds: first.travelSeconds,
   };
 }
@@ -1251,7 +1433,9 @@ export async function optimizeFastPlotOrder(
       loadCosts
     );
 
-    return optimized ?? fallbackFastPlotOrder(jobs);
+    return optimized
+      ? optimized.map((visit) => visit.point)
+      : fallbackFastPlotOrder(jobs);
   }
 
   const table = await loadFastPlotCostTable(
@@ -1269,5 +1453,7 @@ export async function optimizeFastPlotOrder(
     table
   );
 
-  return optimized ?? fallbackFastPlotOrder(jobs);
+  return optimized
+    ? optimized.map((visit) => visit.point)
+    : fallbackFastPlotOrder(jobs);
 }

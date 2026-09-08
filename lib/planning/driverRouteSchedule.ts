@@ -1,5 +1,5 @@
 import {
-  buildDriverScheduleStopTasksFromRoute,
+  buildDriverScheduleStopTasksFromItinerary,
   type DriverAwareRouteResult,
   type DriverScheduleStopTask,
 } from "./driverAwareRoute";
@@ -50,9 +50,10 @@ export type DriverAwareScheduleResult =
 export function scheduleDriverAwareRoute(
   input: DriverAwareScheduleInput,
 ): DriverAwareScheduleResult {
-  const taskResult = buildDriverScheduleStopTasksFromRoute(
+  const taskResult = buildDriverScheduleStopTasksFromItinerary(
     input.route.jobs,
-    input.route.physicalRoute,
+    input.route.orderedVisits,
+    input.route.serviceStops,
   );
 
   if (!taskResult.ok) {

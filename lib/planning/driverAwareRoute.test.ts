@@ -77,8 +77,12 @@ describe("optimizeDriverAwareJobOrder", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.firstJobId).toBe("b");
+      expect(result.firstJobId).toBe(result.serviceStops[0]?.jobId);
       expect(result.jobs.map((value) => value.id)[0]).toBe("b");
       expect(result.physicalRoute[0]).toEqual({ lat: 2, lng: 0 });
+      expect(result.physicalRoute).toEqual(
+        result.orderedVisits.map((visit) => visit.point),
+      );
       expect(result.firstTravelSeconds).toBe(10);
     }
   });
@@ -139,6 +143,103 @@ describe("optimizeDriverAwareJobOrder", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.totalServiceSeconds).toBe(1200);
+      expect(result.serviceStops).toHaveLength(2);
+      expect(
+        result.serviceStops.every((service) => service.serviceSeconds === 600),
+      ).toBe(true);
+    }
+  });
+
+  it("preserves interleaved physical service order without collapsing to jobs", async () => {
+    const a = job("a", [[1, 0], [4, 0]]);
+    const b = job("b", [[2, 0], [3, 0]]);
+
+    const directedCosts: Record<string, number> = {
+      "2->1": 1,
+      "2->3": 100,
+      "1->3": 1,
+      "1->4": 100,
+      "3->4": 1,
+    };
+
+    const result = await optimizeDriverAwareJobOrder({
+      jobs: [a, b],
+      vanPosition: { lat: 0, lng: 0 },
+      loadCosts: async (origins, destinations) =>
+        origins.map((origin) =>
+          destinations.map((destination) => {
+            if (origin.lat === 0 && origin.lng === 0) {
+              if (destination.lat === 2 && destination.lng === 0) return 10;
+              if (destination.lat === 1 && destination.lng === 0) return 100;
+            }
+
+            return (
+              directedCosts[`${origin.lat}->${destination.lat}`] ??
+              secondsBetween(origin, destination) + 1000
+            );
+          }),
+        ),
+    });
+
+    expect(result.ok).toBe(true);
+
+    if (result.ok) {
+      expect(result.physicalRoute).toEqual([
+        { lat: 2, lng: 0 },
+        { lat: 1, lng: 0 },
+        { lat: 3, lng: 0 },
+        { lat: 4, lng: 0 },
+      ]);
+      expect(result.serviceStops.map((service) => service.stopId)).toEqual([
+        "b-1",
+        "a-1",
+        "b-2",
+        "a-2",
+      ]);
+      expect(result.serviceStops.map((service) => service.jobId)).toEqual([
+        "b",
+        "a",
+        "b",
+        "a",
+      ]);
+      expect(result.firstJobId).toBe("b");
+      expect(result.totalServiceSeconds).toBe(2400);
+    }
+  });
+
+  it("travels once to shared coordinates while preserving every service", async () => {
+    const a = job("a", [[1, 1], [1, 1]]);
+    const b = job("b", [[1, 1], [2, 2]]);
+
+    const result = await optimizeDriverAwareJobOrder({
+      jobs: [a, b],
+      vanPosition: { lat: 0, lng: 0 },
+      loadCosts: async (origins, destinations) =>
+        origins.map((origin) =>
+          destinations.map((destination) =>
+            secondsBetween(origin, destination),
+          ),
+        ),
+    });
+
+    expect(result.ok).toBe(true);
+
+    if (result.ok) {
+      expect(result.physicalRoute).toEqual([
+        { lat: 1, lng: 1 },
+        { lat: 2, lng: 2 },
+      ]);
+      expect(result.orderedVisits).toHaveLength(2);
+      expect(result.serviceStops).toHaveLength(4);
+      expect(
+        result.serviceStops
+          .filter((service) => service.visitSequenceNumber === 1)
+          .map((service) => service.stopId),
+      ).toEqual(["a-1", "a-2", "b-1"]);
+      expect(
+        result.serviceStops.every((service) => service.serviceSeconds === 600),
+      ).toBe(true);
+      expect(result.totalServiceSeconds).toBe(2400);
     }
   });
 

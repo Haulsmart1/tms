@@ -8,6 +8,7 @@ import {
   type PositionReading,
 } from "../../lib/tracking/position";
 import type { LatLng, RouteResult } from "../../lib/planning/types";
+import { planningMapMarkerPresentation } from "../../lib/planning/mapPresentation";
 
 export type MapMarker = { position: LatLng; label: string };
 
@@ -32,7 +33,7 @@ type Props = {
    are on the way. The board around it keeps working either way. */
 
 const MAP_KEY = process.env.NEXT_PUBLIC_TOMTOM_MAP_KEY;
-const HEIGHT = 380;
+const NORMAL_HEIGHT = 460;
 // Roughly central England, wide enough to see a UK operation before data loads.
 const DEFAULT_CENTER: [number, number] = [-1.5, 53.0];
 const DEFAULT_ZOOM = 6;
@@ -48,6 +49,7 @@ export default function PlanningMap({
   const handleRef = useRef<{ tt: any; map: any } | null>(null);
   const markerObjsRef = useRef<any[]>([]);
   const [ready, setReady] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const vehicleSignal = signalState(reading, now);
 
   useEffect(() => {
@@ -74,20 +76,88 @@ export default function PlanningMap({
   }, []);
 
   useEffect(() => {
+    if (!expanded) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setExpanded(false);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [expanded]);
+
+  useEffect(() => {
+    const map = handleRef.current?.map;
+
+    if (!map || !ready) {
+      return;
+    }
+
+    const firstFrame = window.requestAnimationFrame(() => {
+      map.resize();
+    });
+
+    const timer = window.setTimeout(() => {
+      map.resize();
+    }, 180);
+
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.clearTimeout(timer);
+    };
+  }, [expanded, ready]);
+
+  useEffect(() => {
     const handle = handleRef.current;
     if (!handle || !ready) return;
     const { tt, map } = handle;
 
     markerObjsRef.current.forEach((m) => m.remove());
     markerObjsRef.current = markers.map((m) => {
+      const presentation = planningMapMarkerPresentation(m.label);
       const el = document.createElement("div");
-      el.textContent = m.label;
-      // A real DOM node inside the page, so the design tokens apply: the
-      // numbered pin reads as a primary-filled control in either theme.
-      el.style.cssText =
-        "width:26px;height:26px;border-radius:50%;background:var(--primary);color:var(--on-primary);" +
-        "display:flex;align-items:center;justify-content:center;" +
-        "font:600 13px sans-serif;border:2px solid var(--on-primary);box-shadow:0 1px 4px rgba(0,0,0,.4)";
+
+      el.textContent = presentation.text;
+
+      if (presentation.title) {
+        el.title = presentation.title;
+        el.setAttribute("aria-label", presentation.title);
+      } else {
+        el.title = `Drop ${m.label}`;
+        el.setAttribute("aria-label", `Drop ${m.label}`);
+      }
+
+      const shared = presentation.text.includes("/");
+
+      el.style.cssText = [
+        shared ? "min-width:34px" : "min-width:28px",
+        shared ? "height:28px" : "height:28px",
+        shared ? "padding:0 5px" : "padding:0 3px",
+        "max-width:52px",
+        "box-sizing:border-box",
+        "border-radius:999px",
+        "background:var(--primary)",
+        "color:var(--on-primary)",
+        "display:flex",
+        "align-items:center",
+        "justify-content:center",
+        "white-space:nowrap",
+        "overflow:hidden",
+        "text-overflow:ellipsis",
+        "font:600 12px sans-serif",
+        "border:2px solid var(--on-primary)",
+        "box-shadow:0 1px 4px rgba(0,0,0,.4)",
+      ].join(";");
+
       return new tt.Marker({ element: el })
         .setLngLat([m.position.lng, m.position.lat])
         .addTo(map);
@@ -192,7 +262,7 @@ export default function PlanningMap({
       <section
         aria-label="Route map"
         className="flex flex-col items-center justify-center gap-1.5 rounded-lg border border-line bg-surface-2 p-6 text-center shadow-sm"
-        style={{ height: HEIGHT }}
+        style={{ height: NORMAL_HEIGHT }}
       >
         <p className="text-sm font-semibold text-ink-2">
           The route map appears here once the TomTom map key is configured.
@@ -205,24 +275,57 @@ export default function PlanningMap({
   }
 
   return (
-    <section aria-label="Route map" className="relative overflow-hidden rounded-lg border border-line shadow-sm">
-      <div ref={containerRef} style={{ height: HEIGHT }} />
-
-      <div className="absolute left-2 top-2">
-        <span className="rounded-md border border-line bg-surface px-2.5 py-1 text-xs font-medium text-ink shadow-sm">
-          {vehicleSignal === "live"
-            ? `Live vehicle - ${pingLabel(reading, now)}`
-            : vehicleSignal === "stale"
-              ? `Last known vehicle - ${pingLabel(reading, now)}`
-              : "No vehicle GPS"}
-        </span>
-      </div>
-
-      {notice ? (
-        <p className="absolute bottom-2 left-2 rounded-md border border-line bg-surface px-2.5 py-1 text-xs text-ink-2 shadow-sm">
-          {notice}
-        </p>
+    <>
+      {expanded ? (
+        <div
+          className="fixed inset-0 z-[90] bg-black/50"
+          aria-hidden="true"
+        />
       ) : null}
-    </section>
+
+      <section
+        aria-label="Route map"
+        className={
+          expanded
+            ? "fixed inset-3 z-[100] overflow-hidden rounded-xl border border-line bg-surface shadow-2xl sm:inset-5"
+            : "relative w-full overflow-hidden rounded-lg border border-line shadow-sm"
+        }
+      >
+        <div
+          ref={containerRef}
+          style={{
+            height: expanded
+              ? "calc(100vh - 2.5rem)"
+              : NORMAL_HEIGHT,
+          }}
+        />
+
+        <div className="absolute left-2 top-2 z-10">
+          <span className="rounded-md border border-line bg-surface px-2.5 py-1 text-xs font-medium text-ink shadow-sm">
+            {vehicleSignal === "live"
+              ? `Live vehicle - ${pingLabel(reading, now)}`
+              : vehicleSignal === "stale"
+                ? `Last known vehicle - ${pingLabel(reading, now)}`
+                : "No vehicle GPS"}
+          </span>
+        </div>
+
+        <button
+          type="button"
+          className="absolute right-2 top-2 z-10 rounded-md border border-line bg-surface px-3 py-1.5 text-xs font-semibold text-ink shadow-sm hover:bg-surface-2 focus:outline-none focus:ring-2 focus:ring-primary"
+          aria-expanded={expanded}
+          aria-label={expanded ? "Close expanded route map" : "Expand route map"}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? "Close map" : "Expand map"}
+        </button>
+
+        {notice ? (
+          <p className="absolute bottom-2 left-2 z-10 max-w-[calc(100%-1rem)] rounded-md border border-line bg-surface px-2.5 py-1 text-xs text-ink-2 shadow-sm">
+            {notice}
+          </p>
+        ) : null}
+      </section>
+    </>
   );
 }

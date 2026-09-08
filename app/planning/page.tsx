@@ -32,6 +32,17 @@ import {
   jobsInFastPlotOrder,
   optimizeFastPlotOrderFromStart,
 } from "../../lib/planning/fastPlot";
+import { buildPlanningPhysicalItinerary } from "../../lib/planning/physicalItinerary";
+import {
+  buildPlanningDropMarkers,
+  buildPlanningDropNumbersByJobId,
+} from "../../lib/planning/dropPresentation";
+import {
+  buildPlanningItineraryRpcVisits,
+  parsePersistedPlanningItineraries,
+  type PendingPlanningItinerary,
+  type PersistedPlanningItinerary,
+} from "../../lib/planning/itineraryPersistence";
 import {
   MAX_PLANNING_ROUTE_JOBS,
   mergeRouteResults,
@@ -166,6 +177,15 @@ export default function PlanningPage() {
     new Set()
   );
   const [routes, setRoutes] = useState<Record<string, RouteResult>>({});
+  const [pendingItineraries, setPendingItineraries] = useState<
+    Record<string, PendingPlanningItinerary>
+  >({});
+  const [itineraryInvalidations, setItineraryInvalidations] = useState<
+    Set<string>
+  >(new Set());
+  const [persistedItineraries, setPersistedItineraries] = useState<
+    Record<string, PersistedPlanningItinerary>
+  >({});
   /* The diff the freshly loaded board already implies before the user touches
      anything. Loading normalises the saved plan (one driver per lane, jobs on
      inactive vehicles fall back to the pool), and that normalisation is not
@@ -214,6 +234,8 @@ export default function PlanningPage() {
   const saveInFlight = useRef(false);
   const latestPendingUpdatesJson = useRef("[]");
   const loadedPlanningScope = useRef<string | null>(null);
+  const canonicalGeneration = useRef(0);
+  const canonicalMutationGeneration = useRef<Record<string, number>>({});
 
   const jobById = useMemo(() => new Map(jobs.map((j) => [j.id, j])), [jobs]);
   const driverById = useMemo(
@@ -260,6 +282,10 @@ export default function PlanningPage() {
      Save still writes pendingUpdates in full, normalisation included: by the
      time the button is enabled the user has made a deliberate edit. */
   const dirty = pendingUpdatesJson !== baselineDiff;
+  const hasCanonicalWork =
+    Object.keys(pendingItineraries).length > 0 ||
+    itineraryInvalidations.size > 0;
+  const hasUnsavedWork = dirty || hasCanonicalWork;
   latestPendingUpdatesJson.current = pendingUpdatesJson;
 
   async function loadData(isCancelled: () => boolean) {
@@ -274,6 +300,10 @@ export default function PlanningPage() {
     setGeocodeSettled(false);
     setGeocodeUnavailable(false);
     setRoutes({});
+    setPendingItineraries({});
+    setItineraryInvalidations(new Set());
+    setPersistedItineraries({});
+    canonicalMutationGeneration.current = {};
     setPlanningTimeZone(OPERATOR_TIME_ZONE);
 
     const profileQuery = tenant
@@ -477,6 +507,70 @@ export default function PlanningPage() {
       ? planningDraftStorageKey(activeTenantId, date)
       : null;
 
+    let loadedPersistedItineraries: Record<
+      string,
+      PersistedPlanningItinerary
+    > = {};
+
+    if (activeTenantId) {
+      const { data: itineraryRows, error: itineraryError } = await supabase
+        .from("planning_route_itineraries")
+        .select("id, vehicle_id, driver_id")
+        .eq("tenant_id", activeTenantId)
+        .eq("planning_date", date);
+
+      if (isCancelled()) return;
+
+      if (itineraryError) {
+        setMessage(`Canonical itinerary load error: ${itineraryError.message}`);
+        setLoading(false);
+        return;
+      }
+
+      const itineraryIds = (itineraryRows ?? []).map(
+        (row: any) => row.id as string
+      );
+
+      if (itineraryIds.length > 0) {
+        const { data: visitRows, error: visitError } = await supabase
+          .from("planning_route_visits")
+          .select("id, itinerary_id, sequence_number, lat, lng")
+          .eq("tenant_id", activeTenantId)
+          .in("itinerary_id", itineraryIds);
+
+        if (isCancelled()) return;
+
+        if (visitError) {
+          setMessage(`Canonical visit load error: ${visitError.message}`);
+          setLoading(false);
+          return;
+        }
+
+        const { data: serviceRows, error: serviceError } = await supabase
+          .from("planning_route_visit_stops")
+          .select(
+            "itinerary_id, visit_id, service_sequence_number, visit_service_order, job_id, stop_id, service_seconds"
+          )
+          .eq("tenant_id", activeTenantId)
+          .in("itinerary_id", itineraryIds);
+
+        if (isCancelled()) return;
+
+        if (serviceError) {
+          setMessage(`Canonical service load error: ${serviceError.message}`);
+          setLoading(false);
+          return;
+        }
+
+        loadedPersistedItineraries = parsePersistedPlanningItineraries(
+          (itineraryRows ?? []) as any[],
+          (visitRows ?? []) as any[],
+          (serviceRows ?? []) as any[],
+          loaded.filter(isRoutable)
+        );
+      }
+    }
+
     let cachedDraft: PlanningDraft | null = null;
 
     if (planningScope && activeTenantId && typeof window !== "undefined") {
@@ -520,6 +614,7 @@ export default function PlanningPage() {
     setDrivers(driverData ?? []);
     setLaneOrders(orders);
     setLaneDrivers(laneDriverInit);
+    setPersistedItineraries(loadedPersistedItineraries);
     setDriverConflicts(conflicts);
     setBaselineDiff(JSON.stringify(initialDiff));
     setDisplacedNotes(displaced);
@@ -709,9 +804,13 @@ export default function PlanningPage() {
       try {
         // The lane order is already the planner's proposed order. The map must
         // render that proposal rather than independently optimizing it again.
-        const routePoints = buildFastPlotVisits(selectedLaneJobs).map(
-          (visit) => visit.point
-        );
+        const canonical =
+          pendingItineraries[selectedVehicleId] ??
+          persistedItineraries[selectedVehicleId];
+
+        const routePoints = canonical
+          ? canonical.orderedVisits.map((visit) => visit.point)
+          : buildFastPlotVisits(selectedLaneJobs).map((visit) => visit.point);
         if (cancelled) return;
 
         if (routePoints.length < 2) {
@@ -759,7 +858,43 @@ export default function PlanningPage() {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedVehicleId, selectedLaneJobs, geocodeSettled]);
+  }, [
+    selectedVehicleId,
+    selectedLaneJobs,
+    geocodeSettled,
+    pendingItineraries,
+    persistedItineraries,
+  ]);
+
+  function invalidateCanonicalVehicles(vehicleIds: Iterable<string>) {
+    const ids = [...new Set(vehicleIds)];
+
+    if (ids.length === 0) return;
+
+    for (const vehicleId of ids) {
+      canonicalGeneration.current += 1;
+      canonicalMutationGeneration.current[vehicleId] =
+        canonicalGeneration.current;
+    }
+
+    setPersistedItineraries((previous) => {
+      const next = { ...previous };
+      for (const vehicleId of ids) delete next[vehicleId];
+      return next;
+    });
+
+    setPendingItineraries((previous) => {
+      const next = { ...previous };
+      for (const vehicleId of ids) delete next[vehicleId];
+      return next;
+    });
+
+    setItineraryInvalidations((previous) => {
+      const next = new Set(previous);
+      for (const vehicleId of ids) next.add(vehicleId);
+      return next;
+    });
+  }
 
   function moveJob(jobId: string, vehicleId: string | null, beforeJobId: string | null) {
     const job = jobById.get(jobId);
@@ -796,6 +931,7 @@ export default function PlanningPage() {
       if (ids.includes(jobId)) affected.add(vid);
     }
     if (affected.size > 0) {
+      invalidateCanonicalVehicles(affected);
       setRoutes((prev) => {
         const next = { ...prev };
         for (const vid of affected) delete next[vid];
@@ -1108,6 +1244,8 @@ export default function PlanningPage() {
       return;
     }
 
+    invalidateCanonicalVehicles([vehicleId]);
+
     setLaneOrders((prev) =>
       assignJobsToLane(prev, selectedIds, vehicleId)
     );
@@ -1136,6 +1274,8 @@ export default function PlanningPage() {
       return;
     }
 
+    invalidateCanonicalVehicles([vehicleId]);
+
     setLaneOrders((prev) =>
       moveJobInLane(prev, vehicleId, jobId, offset)
     );
@@ -1152,10 +1292,13 @@ export default function PlanningPage() {
   }
 
   async function persistPlan(mode: "manual" | "auto"): Promise<boolean> {
-    if (saveInFlight.current || pendingUpdates.length === 0) return false;
+    if (saveInFlight.current || (!dirty && !hasCanonicalWork)) return false;
 
     const updates = pendingUpdates.map((update) => ({ ...update }));
     const snapshotJson = pendingUpdatesJson;
+    const invalidationSnapshot = [...itineraryInvalidations];
+    const canonicalSnapshot = Object.values(pendingItineraries);
+    const generationSnapshot = { ...canonicalMutationGeneration.current };
 
     const missingTenantUpdate = updates.find(
       (update) => !jobById.get(update.id)?.tenant_id
@@ -1202,6 +1345,123 @@ export default function PlanningPage() {
         }
       }
 
+      const activeTenantId =
+        tenant.status === "ready" &&
+        typeof tenant.activeTenantId === "string"
+          ? tenant.activeTenantId
+          : null;
+
+      if (!activeTenantId) {
+        throw new Error("active tenant is unavailable.");
+      }
+
+      const invalidations = invalidationSnapshot;
+
+      for (const vehicleId of invalidations) {
+        const { error } = await supabase.rpc(
+          "invalidate_planning_route_itinerary",
+          {
+            p_tenant_id: activeTenantId,
+            p_planning_date: date,
+            p_vehicle_id: vehicleId,
+          }
+        );
+
+        if (error) {
+          throw new Error(`canonical itinerary invalidation failed: ${error.message}`);
+        }
+      }
+
+      const pendingCanonical = canonicalSnapshot;
+
+      for (const itinerary of pendingCanonical) {
+        const rpcVisits = buildPlanningItineraryRpcVisits(
+          itinerary.orderedVisits,
+          itinerary.serviceStops
+        );
+
+        const { error } = await supabase.rpc(
+          "replace_planning_route_itinerary",
+          {
+            p_tenant_id: activeTenantId,
+            p_planning_date: date,
+            p_vehicle_id: itinerary.vehicleId,
+            p_driver_id: itinerary.driverId,
+            p_visits: rpcVisits,
+          }
+        );
+
+        if (error) {
+          throw new Error(`canonical itinerary save failed: ${error.message}`);
+        }
+      }
+
+      const completedInvalidations = invalidations.filter(
+        (vehicleId) =>
+          canonicalMutationGeneration.current[vehicleId] ===
+          generationSnapshot[vehicleId]
+      );
+
+      const completedCanonical = pendingCanonical.filter(
+        (itinerary) =>
+          canonicalMutationGeneration.current[itinerary.vehicleId] ===
+          generationSnapshot[itinerary.vehicleId]
+      );
+
+      if (completedInvalidations.length > 0) {
+        setItineraryInvalidations((previous) => {
+          const next = new Set(previous);
+
+          for (const vehicleId of completedInvalidations) {
+            next.delete(vehicleId);
+          }
+
+          return next;
+        });
+      }
+
+      if (completedCanonical.length > 0) {
+        setPersistedItineraries((previous) => {
+          const next = { ...previous };
+
+          for (const itinerary of completedCanonical) {
+            next[itinerary.vehicleId] = itinerary;
+          }
+
+          return next;
+        });
+
+        setPendingItineraries((previous) => {
+          const next = { ...previous };
+
+          for (const itinerary of completedCanonical) {
+            if (previous[itinerary.vehicleId] === itinerary) {
+              delete next[itinerary.vehicleId];
+            }
+          }
+
+          return next;
+        });
+      }
+
+      for (const vehicleId of completedInvalidations) {
+        if (
+          canonicalMutationGeneration.current[vehicleId] ===
+          generationSnapshot[vehicleId]
+        ) {
+          delete canonicalMutationGeneration.current[vehicleId];
+        }
+      }
+
+      for (const itinerary of completedCanonical) {
+        if (
+          canonicalMutationGeneration.current[itinerary.vehicleId] ===
+          generationSnapshot[itinerary.vehicleId]
+        ) {
+          delete canonicalMutationGeneration.current[itinerary.vehicleId];
+        }
+      }
+
       const savedByJobId = new Map(
         updates.map((update) => [update.id, update])
       );
@@ -1225,16 +1485,18 @@ export default function PlanningPage() {
       );
       setBaselineDiff("[]");
 
+      const newerCanonicalEditsExist = Object.entries(
+        canonicalMutationGeneration.current
+      ).some(
+        ([vehicleId, generation]) =>
+          generationSnapshot[vehicleId] !== generation
+      );
+
       const newerEditsExist =
-        latestPendingUpdatesJson.current !== snapshotJson;
+        latestPendingUpdatesJson.current !== snapshotJson ||
+        newerCanonicalEditsExist;
 
       if (!newerEditsExist) {
-        const activeTenantId =
-          tenant.status === "ready" &&
-          typeof tenant.activeTenantId === "string"
-            ? tenant.activeTenantId
-            : null;
-
         if (activeTenantId && typeof window !== "undefined") {
           try {
             window.localStorage.removeItem(
@@ -1279,7 +1541,7 @@ export default function PlanningPage() {
       tenant.activeTenantId.length === 0 ||
       loading ||
       recoveryDraft ||
-      !dirty
+      !hasUnsavedWork
     ) {
       return;
     }
@@ -1338,8 +1600,12 @@ export default function PlanningPage() {
     loading,
     recoveryDraft,
     dirty,
+    hasCanonicalWork,
+    hasUnsavedWork,
     saving,
     pendingUpdatesJson,
+    pendingItineraries,
+    itineraryInvalidations,
     laneOrders,
     laneDrivers,
     selectedVehicleId,
@@ -1348,6 +1614,7 @@ export default function PlanningPage() {
   function restoreRecoveryDraft() {
     if (!recoveryDraft) return;
 
+    invalidateCanonicalVehicles(Object.keys(recoveryDraft.laneOrders));
     setLaneOrders(recoveryDraft.laneOrders);
     setLaneDrivers(recoveryDraft.laneDrivers);
     setSelectedVehicleId(recoveryDraft.selectedVehicleId);
@@ -1394,7 +1661,9 @@ export default function PlanningPage() {
     }
 
     setOptimizing(true);
-    setMessage("");
+    setMessage(
+      "Smart Optimize is calculating the physical drop order from the van..."
+    );
 
     try {
       const vehicleReading = positions.get(selectedVehicleId) ?? null;
@@ -1432,6 +1701,11 @@ export default function PlanningPage() {
         return;
       }
 
+      const physicalItinerary = buildPlanningPhysicalItinerary(
+        selectedLaneJobs.filter(isRoutable),
+        optimized.orderedVisits
+      );
+
       const reordered = jobsInFastPlotOrder(
         selectedLaneJobs,
         optimized.route
@@ -1451,12 +1725,38 @@ export default function PlanningPage() {
         return;
       }
 
+      canonicalGeneration.current += 1;
+      canonicalMutationGeneration.current[selectedVehicleId] =
+        canonicalGeneration.current;
+
+      setPersistedItineraries((previous) => {
+        const next = { ...previous };
+        delete next[selectedVehicleId];
+        return next;
+      });
+
+      setItineraryInvalidations((previous) => {
+        const next = new Set(previous);
+        next.delete(selectedVehicleId);
+        return next;
+      });
+
+      setPendingItineraries((previous) => ({
+        ...previous,
+        [selectedVehicleId]: {
+          vehicleId: selectedVehicleId,
+          driverId: laneDrivers[selectedVehicleId] ?? null,
+          orderedVisits: optimized.orderedVisits,
+          serviceStops: physicalItinerary.serviceStops,
+        },
+      }));
+
       setLaneOrders((prev) => ({
         ...prev,
         [selectedVehicleId]: reordered,
       }));
       setMessage(
-        "Smart Optimize updated the proposed drop order. Autosave will persist it."
+        "Smart Optimize updated the canonical physical drop order. Autosave will persist it."
       );
 
       // The lane's order changed, so its cached route describes the old one.
@@ -1580,20 +1880,33 @@ export default function PlanningPage() {
     unassigned.length,
   ]);
 
-  /* Memoised: a fresh markers array on every parent render tears down and
-     rebuilds every TomTom marker, which flickers during a drag.
+  /* Canonical itineraries number every collection/delivery service occurrence
+     as a Drop. Shared physical locations therefore use a combined marker such
+     as "1/2". Without a canonical itinerary the legacy lane position remains
+     the manual-planning fallback. */
+  const markers: MapMarker[] = useMemo(() => {
+    const canonical = selectedVehicleId
+      ? pendingItineraries[selectedVehicleId] ??
+        persistedItineraries[selectedVehicleId]
+      : null;
 
-     The label is the job's position IN THE LANE, not its position among the
-     routable ones, so a pin always carries the same number as its card even
-     when an unroutable job sits between two routable ones. */
-  const markers: MapMarker[] = useMemo(
-    () =>
-      selectedLaneJobs.flatMap((job, index) => {
-        const position = jobRepresentativePoint(job);
-        return position ? [{ position, label: String(index + 1) }] : [];
-      }),
-    [selectedLaneJobs]
-  );
+    if (canonical) {
+      return buildPlanningDropMarkers(
+        canonical.orderedVisits,
+        canonical.serviceStops
+      );
+    }
+
+    return selectedLaneJobs.flatMap((job, index) => {
+      const position = jobRepresentativePoint(job);
+      return position ? [{ position, label: String(index + 1) }] : [];
+    });
+  }, [
+    selectedVehicleId,
+    selectedLaneJobs,
+    pendingItineraries,
+    persistedItineraries,
+  ]);
 
   function laneSummary(vehicleId: string): string | null {
     const route = routes[vehicleId];
@@ -1690,14 +2003,6 @@ export default function PlanningPage() {
             </p>
           </section>
 
-          <PlanningMap
-            markers={markers}
-            route={selectedRoute}
-            notice={mapNotice}
-            reading={selectedVehicleReading}
-            now={positionNow}
-          />
-
           <section
             aria-label="Planning actions"
             className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-2 p-3"
@@ -1775,13 +2080,16 @@ export default function PlanningPage() {
               onClick={optimize}
               loading={optimizing}
               disabled={
+                optimizing ||
                 !selectedVehicleId ||
                 selectedLaneJobs.filter(isRoutable).length < 2
               }
             >
-              {selectedVehicle
-                ? `Smart Optimize ${selectedVehicle.registration}`
-                : "Smart Optimize Route"}
+              {optimizing
+                ? "Optimizing..."
+                : selectedVehicle
+                  ? `Smart Optimize ${selectedVehicle.registration}`
+                  : "Smart Optimize Route"}
             </Button>
 
             <Button
@@ -1851,7 +2159,15 @@ export default function PlanningPage() {
                 onAcceptJob={openAcceptance}
                 onDropJob={(jobId) => moveJob(jobId, null, null)}
               />
-              <div className="flex flex-1 flex-col gap-3">
+              <div className="min-w-0 flex flex-1 flex-col gap-3">
+                <PlanningMap
+                  markers={markers}
+                  route={selectedRoute}
+                  notice={mapNotice}
+                  reading={selectedVehicleReading}
+                  now={positionNow}
+                />
+
                 {vehicles.length === 0 ? (
                   <p className="text-sm text-ink-3">No active vehicles. Add one under Fleet.</p>
                 ) : (
@@ -1862,6 +2178,16 @@ export default function PlanningPage() {
                       jobs={(laneOrders[v.id] ?? [])
                         .map((id) => jobById.get(id))
                         .filter((j): j is PlanJob => Boolean(j))}
+                      canonicalDropNumbersByJobId={
+                        pendingItineraries[v.id] ?? persistedItineraries[v.id]
+                          ? buildPlanningDropNumbersByJobId(
+                              (
+                                pendingItineraries[v.id] ??
+                                persistedItineraries[v.id]
+                              ).serviceStops
+                            )
+                          : undefined
+                      }
                       driverId={laneDrivers[v.id] ?? null}
                       drivers={drivers}
                       selected={v.id === selectedVehicleId}
@@ -1889,9 +2215,15 @@ export default function PlanningPage() {
                         setSelectedVehicleId(v.id);
                         setBulkVehicleId(v.id);
                       }}
-                      onDriverChange={(driverId) =>
-                        setLaneDrivers((prev) => ({ ...prev, [v.id]: driverId }))
-                      }
+                      onDriverChange={(driverId) => {
+                        invalidateCanonicalVehicles([v.id]);
+                        setLaneDrivers((prev) => ({ ...prev, [v.id]: driverId }));
+                        setRoutes((prev) => {
+                          const next = { ...prev };
+                          delete next[v.id];
+                          return next;
+                        });
+                      }}
                       onOpenJob={(jobId) =>
                         router.push(`/jobs?job=${encodeURIComponent(jobId)}`)
                       }

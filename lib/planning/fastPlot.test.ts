@@ -1094,8 +1094,95 @@ describe("Fast Plot V5", () => {
       expect(origins.length * destinations.length).toBeLessThanOrEqual(100);
     }
 
-    // Four 1x100-or-smaller anchor chunks plus the existing 32 sparse budget.
-    expect(loader.mock.calls.length).toBeLessThanOrEqual(36);
+    // Four 1x100-or-smaller anchor chunks plus the 8-call interactive
+    // sparse budget. Large lanes must not sit behind dozens of serial requests.
+    expect(loader.mock.calls.length).toBeLessThanOrEqual(12);
+  });
+
+  it("relocates a stranded large-lane collection without breaking precedence", async () => {
+    const jobs = Array.from({ length: 31 }, (_, index) => {
+      const collection =
+        index === 30
+          ? { lat: 50, lng: 0.2 }
+          : { lat: 50, lng: -index * 0.01 };
+
+      return job(`sweep-${index}`, [
+        stop(
+          `sweep-c-${index}`,
+          1,
+          "collection",
+          collection.lat,
+          collection.lng
+        ),
+        stop(
+          `sweep-d-${index}`,
+          2,
+          "delivery",
+          50,
+          -1 - index * 0.01
+        ),
+      ]);
+    });
+
+    const loader = vi.fn(
+      async (
+        origins: LatLng[],
+        destinations: LatLng[]
+      ) =>
+        origins.map((origin) =>
+          destinations.map((destination) =>
+            Math.round(
+              (
+                Math.abs(destination.lat - origin.lat) +
+                Math.abs(destination.lng - origin.lng)
+              ) * 100000
+            )
+          )
+        )
+    );
+
+    const result = await optimizeFastPlotOrderFromStart(
+      jobs,
+      { lat: 50, lng: 0.01 },
+      loader
+    );
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    const outlierCollectionIndex =
+      result.orderedVisits.findIndex(
+        (visit) =>
+          visit.requirements["sweep-30"]?.includes(0) === true
+      );
+
+    const outlierDeliveryIndex =
+      result.orderedVisits.findIndex(
+        (visit) =>
+          visit.requirements["sweep-30"]?.includes(1) === true
+      );
+
+    expect(outlierCollectionIndex).toBeGreaterThanOrEqual(0);
+    expect(outlierDeliveryIndex).toBeGreaterThanOrEqual(0);
+
+    // The TomTom-guided prefix stays fixed, but the geographic suffix must
+    // not leave the eastern collection until the end of the westbound sweep.
+    expect(outlierCollectionIndex).toBeLessThan(20);
+
+    // Relocation must never weaken collection-before-delivery precedence.
+    expect(outlierCollectionIndex).toBeLessThan(
+      outlierDeliveryIndex
+    );
+
+    // One <=100-cell anchored request plus the 8-call sparse budget.
+    expect(loader.mock.calls.length).toBeLessThanOrEqual(9);
+
+    expect(
+      result.orderedVisits.map((visit) => visit.point)
+    ).toEqual(result.route);
   });
 
   it("does not claim closest-first for a route requiring a physical revisit", async () => {
@@ -1118,4 +1205,122 @@ describe("Fast Plot V5", () => {
       reason: "unsupported_physical_route",
     });
   });
+
+  it("rejects anchored selection when any candidate chunk is unavailable", async () => {
+    const jobs = Array.from({ length: 101 }, (_, index) =>
+      job(`chunk-${index}`, [
+        stop(
+          `chunk-c-${index}`,
+          1,
+          "collection",
+          50 + index / 10000,
+          -4
+        ),
+        stop(
+          `chunk-d-${index}`,
+          2,
+          "delivery",
+          52 + index / 10000,
+          -4
+        ),
+      ])
+    );
+
+    let callNumber = 0;
+
+    const result = await optimizeFastPlotOrderFromStart(
+      jobs,
+      { lat: 49, lng: -4 },
+      async (origins, destinations) => {
+        callNumber += 1;
+
+        if (callNumber === 1) {
+          throw new Error("first anchor chunk unavailable");
+        }
+
+        return origins.map(() =>
+          destinations.map((destination) =>
+            Math.round((destination.lat - 49) * 1000)
+          )
+        );
+      }
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "start_cost_unavailable",
+    });
+    expect(callNumber).toBe(1);
+  });
+
+  it("rejects anchored selection when a later candidate chunk is malformed", async () => {
+    const jobs = Array.from({ length: 101 }, (_, index) =>
+      job(`malformed-${index}`, [
+        stop(
+          `malformed-c-${index}`,
+          1,
+          "collection",
+          50 + index / 10000,
+          -4
+        ),
+        stop(
+          `malformed-d-${index}`,
+          2,
+          "delivery",
+          52 + index / 10000,
+          -4
+        ),
+      ])
+    );
+
+    let callNumber = 0;
+
+    const result = await optimizeFastPlotOrderFromStart(
+      jobs,
+      { lat: 49, lng: -4 },
+      async (origins, destinations) => {
+        callNumber += 1;
+
+        if (callNumber === 2) {
+          return null;
+        }
+
+        return origins.map(() =>
+          destinations.map((destination) =>
+            Math.round((destination.lat - 49) * 1000)
+          )
+        );
+      }
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "start_cost_unavailable",
+    });
+    expect(callNumber).toBe(2);
+  });
+
+  it("reports no reachable first visit when a successful anchor chunk contains only unreachable cells", async () => {
+    const jobs = [
+      job("unreachable", [
+        stop("unreachable-c", 1, "collection", 50, -4),
+        stop("unreachable-d", 2, "delivery", 51, -4),
+      ]),
+    ];
+
+    const result = await optimizeFastPlotOrderFromStart(
+      jobs,
+      { lat: 49, lng: -4 },
+      async (origins, destinations) =>
+        origins.map(() =>
+          destinations.map(() => Number.POSITIVE_INFINITY)
+        )
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "no_reachable_first_visit",
+    });
+  });
+
 });

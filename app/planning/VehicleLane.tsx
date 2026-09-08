@@ -14,6 +14,7 @@ import { formatDuration } from "../../lib/planning/format";
 type Props = {
   vehicle: { id: string; registration: string };
   jobs: PlanJob[];
+  canonicalDropNumbersByJobId?: Record<string, number[]>;
   driverId: string | null;
   drivers: { id: string; name: string }[];
   selected: boolean;
@@ -35,7 +36,7 @@ type Props = {
 };
 
 export default function VehicleLane({
-  vehicle, jobs, driverId, drivers, selected, summary, regimeSummary,
+  vehicle, jobs, canonicalDropNumbersByJobId, driverId, drivers, selected, summary, regimeSummary,
   compliance,
   geocodeSettled, driverConflict, onSelect, onDriverChange, onOpenJob,
   onAcceptJob, onMoveJob, onDropJob,
@@ -197,6 +198,11 @@ export default function VehicleLane({
             key={job.id}
             job={job}
             sequence={index + 1}
+            dropNumbers={
+              canonicalDropNumbersByJobId === undefined
+                ? undefined
+                : canonicalDropNumbersByJobId[job.id] ?? []
+            }
             geocodeSettled={geocodeSettled}
             onOpen={onOpenJob}
             onAccept={onAcceptJob}

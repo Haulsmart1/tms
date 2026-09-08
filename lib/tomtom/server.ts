@@ -64,12 +64,16 @@ export async function requireOperator(client: TomTomClient): Promise<Operator | 
   return { userId: user.id, companyId: typeof data === "string" && data ? data : null };
 }
 
-/* RATE LIMIT, keyed by user id and shared across all three endpoints, because
-   the budget being protected is one TomTom account. Modelled on the limiter in
-   app/api/request-access/route.ts and inheriting its known limit: the map is
-   per serverless instance and resets on redeploy, so this is a speed bump
-   against a runaway client or a bored insider, not a hard quota. A real cap
-   needs a shared store (Redis/Upstash) or TomTom-side alerting. */
+/* RATE LIMIT, keyed by user id plus an optional traffic bucket.
+
+   Route and geocode retain the default shared bucket. Matrix optimization uses
+   its own bucket because one planning action legitimately performs several
+   bounded matrix requests and must not be starved by background map/geocode
+   traffic. Each bucket is still independently capped.
+
+   The map is per serverless instance and resets on redeploy, so this remains a
+   speed bump rather than a hard account quota. A real global cap needs a
+   shared store or TomTom-side alerting. */
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 60;
 const RATE_LIMIT_MAX_KEYS = 10_000;
@@ -77,8 +81,12 @@ const OVERFLOW_KEY = "__overflow__";
 const recentHits = new Map<string, number[]>();
 let lastPrune = 0;
 
-export function isRateLimited(userId: string): boolean {
+export function isRateLimited(
+  userId: string,
+  bucket = "shared"
+): boolean {
   const now = Date.now();
+  const rateLimitKey = `${bucket}:${userId}`;
 
   // Prune at most once per window: walking the whole map per request is
   // O(n^2) under a flood and turns the limiter into its own DoS vector.
@@ -92,16 +100,21 @@ export function isRateLimited(userId: string): boolean {
   // Hard cap on distinct keys so memory cannot grow without bound. Once full,
   // new keys share one overflow bucket, so the worst case is a global 429.
   const effectiveKey =
-    recentHits.has(userId) || recentHits.size < RATE_LIMIT_MAX_KEYS ? userId : OVERFLOW_KEY;
+    recentHits.has(rateLimitKey) || recentHits.size < RATE_LIMIT_MAX_KEYS
+      ? rateLimitKey
+      : OVERFLOW_KEY;
 
   const mine = (recentHits.get(effectiveKey) ?? []).filter(
     (t) => now - t < RATE_LIMIT_WINDOW_MS
   );
-  // Pushing past the threshold changes no decision; capping keeps one
-  // flooding key from growing its array without bound.
-  if (mine.length <= RATE_LIMIT_MAX) mine.push(now);
+  if (mine.length >= RATE_LIMIT_MAX) {
+    recentHits.set(effectiveKey, mine);
+    return true;
+  }
+
+  mine.push(now);
   recentHits.set(effectiveKey, mine);
-  return mine.length > RATE_LIMIT_MAX;
+  return false;
 }
 
 /** Coordinates out of these ranges are not a real place, so they are a bug or
