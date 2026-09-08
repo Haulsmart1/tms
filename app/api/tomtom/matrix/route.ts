@@ -106,18 +106,73 @@ export async function POST(request: Request) {
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (!response.ok) {
+      const upstreamBody = await response.json().catch(() => null);
+      const detailedError =
+        upstreamBody &&
+        typeof upstreamBody === "object" &&
+        "detailedError" in upstreamBody &&
+        upstreamBody.detailedError &&
+        typeof upstreamBody.detailedError === "object"
+          ? upstreamBody.detailedError
+          : null;
+      const wrappedError =
+        upstreamBody &&
+        typeof upstreamBody === "object" &&
+        "error" in upstreamBody &&
+        upstreamBody.error &&
+        typeof upstreamBody.error === "object"
+          ? upstreamBody.error
+          : null;
+      const upstreamCode =
+        detailedError &&
+        "code" in detailedError &&
+        typeof detailedError.code === "string"
+          ? detailedError.code
+          : wrappedError &&
+              "code" in wrappedError &&
+              typeof wrappedError.code === "string"
+            ? wrappedError.code
+            : null;
+      const trackingId =
+        response.headers.get("Tracking-ID") ??
+        response.headers.get("tracking-id");
+
+      console.error("tomtom/matrix upstream failed:", {
+        upstreamStatus: response.status,
+        upstreamCode,
+        trackingId,
+      });
+
       return NextResponse.json(
-        { error: `TomTom matrix failed (${response.status}).` },
+        {
+          error: `TomTom matrix upstream failed (${response.status}).`,
+          kind: "tomtom_upstream_error",
+          upstreamStatus: response.status,
+          upstreamCode,
+        },
         { status: 502 }
       );
     }
+
+    const upstreamBody = await response.json().catch(() => null);
     const travelSeconds = parseMatrix(
-      await response.json(),
+      upstreamBody,
       origins.length,
       destinations.length
     );
+
     if (!travelSeconds) {
-      return NextResponse.json({ error: "TomTom returned no matrix." }, { status: 502 });
+      console.error("tomtom/matrix invalid response:", {
+        upstreamStatus: response.status,
+      });
+
+      return NextResponse.json(
+        {
+          error: "TomTom returned an invalid matrix response.",
+          kind: "tomtom_invalid_response",
+        },
+        { status: 502 }
+      );
     }
     return NextResponse.json({ travelSeconds });
   } catch (error) {

@@ -1119,7 +1119,7 @@ describe("Fast Plot V5", () => {
     });
   });
 
-  it("continues anchored selection when an earlier 100-candidate chunk is unavailable", async () => {
+  it("rejects anchored selection when any candidate chunk is unavailable", async () => {
     const jobs = Array.from({ length: 101 }, (_, index) =>
       job(`chunk-${index}`, [
         stop(
@@ -1148,7 +1148,7 @@ describe("Fast Plot V5", () => {
         callNumber += 1;
 
         if (callNumber === 1) {
-          throw new Error("first anchor chunk temporarily unavailable");
+          throw new Error("first anchor chunk unavailable");
         }
 
         return origins.map(() =>
@@ -1159,29 +1159,25 @@ describe("Fast Plot V5", () => {
       }
     );
 
-    expect(result.ok).toBe(true);
-
-    if (result.ok) {
-      expect(result.orderedVisits[0].point).toEqual({
-        lat: 50.01,
-        lng: -4,
-      });
-      expect(result.firstTravelSeconds).toBe(1010);
-    }
+    expect(result).toEqual({
+      ok: false,
+      reason: "start_cost_unavailable",
+    });
+    expect(callNumber).toBe(1);
   });
 
-  it("reports start cost unavailable only when every anchor chunk is unavailable", async () => {
+  it("rejects anchored selection when a later candidate chunk is malformed", async () => {
     const jobs = Array.from({ length: 101 }, (_, index) =>
-      job(`all-fail-${index}`, [
+      job(`malformed-${index}`, [
         stop(
-          `all-fail-c-${index}`,
+          `malformed-c-${index}`,
           1,
           "collection",
           50 + index / 10000,
           -4
         ),
         stop(
-          `all-fail-d-${index}`,
+          `malformed-d-${index}`,
           2,
           "delivery",
           52 + index / 10000,
@@ -1190,11 +1186,23 @@ describe("Fast Plot V5", () => {
       ])
     );
 
+    let callNumber = 0;
+
     const result = await optimizeFastPlotOrderFromStart(
       jobs,
       { lat: 49, lng: -4 },
-      async () => {
-        throw new Error("matrix unavailable");
+      async (origins, destinations) => {
+        callNumber += 1;
+
+        if (callNumber === 2) {
+          return null;
+        }
+
+        return origins.map(() =>
+          destinations.map((destination) =>
+            Math.round((destination.lat - 49) * 1000)
+          )
+        );
       }
     );
 
@@ -1202,6 +1210,7 @@ describe("Fast Plot V5", () => {
       ok: false,
       reason: "start_cost_unavailable",
     });
+    expect(callNumber).toBe(2);
   });
 
   it("reports no reachable first visit when a successful anchor chunk contains only unreachable cells", async () => {
