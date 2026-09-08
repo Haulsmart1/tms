@@ -6,6 +6,7 @@ import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
 import Badge from "../../components/Badge";
+import Select from "../../components/Select";
 import Button from "../../components/Button";
 import MessageBanner from "../../components/MessageBanner";
 import Skeleton from "../../components/Skeleton";
@@ -28,9 +29,6 @@ const PLACEHOLDER_VEHICLE = { id: "skeleton" } as Vehicle;
 
 const inputClasses =
   "h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3";
-
-const selectClasses =
-  "h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink";
 
 const EMPTY_FORM = {
   registration: "",
@@ -859,30 +857,27 @@ export default function VehiclesPage() {
               <SectionTitle>Insurance</SectionTitle>
 
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <label className="grid gap-1.5">
-                  <span className="text-sm font-medium text-ink-2">Insurance Type</span>
-                  <select
-                    className={selectClasses}
-                    value={form.insurance_type}
-                    onChange={(event) =>
-                      setForm({
-                        ...form,
-                        insurance_type: event.target.value as
-                          | "individual"
-                          | "fleet",
-                      })
-                    }
-                  >
-                    <option value="individual">Individual Policy</option>
-                    <option value="fleet">Fleet Policy</option>
-                  </select>
-                </label>
+                <Select
+                  id="vehicle-insurance-type"
+                  label="Insurance Type"
+                  value={form.insurance_type}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      insurance_type: event.target.value as
+                        | "individual"
+                        | "fleet",
+                    })
+                  }
+                >
+                  <option value="individual">Individual Policy</option>
+                  <option value="fleet">Fleet Policy</option>
+                </Select>
 
                 {form.insurance_type === "fleet" ? (
-                  <label className="grid gap-1.5">
-                    <span className="text-sm font-medium text-ink-2">Fleet Insurance Policy</span>
-                    <select
-                      className={selectClasses}
+                  <Select
+                      id="vehicle-fleet-insurance-policy"
+                      label="Fleet Insurance Policy"
                       value={form.fleet_insurance_policy_id}
                       onChange={(event) =>
                         setForm({
@@ -899,8 +894,7 @@ export default function VehiclesPage() {
                           {policy.auto_renew ? " • auto renew" : ""}
                         </option>
                       ))}
-                    </select>
-                  </label>
+                    </Select>
                 ) : (
                   <>
                     <input

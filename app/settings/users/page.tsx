@@ -5,6 +5,8 @@ import type { FormEvent } from "react";
 import { useTenant } from "../../components/TenantProvider";
 import TenantGate from "../../components/TenantGate";
 import Button from "../../../components/Button";
+import MessageBanner from "../../../components/MessageBanner";
+import Select from "../../../components/Select";
 import { tenantDataView } from "../../../lib/loading/tenantDataView";
 import UserCard from "./UserCard";
 import type { TenantUser } from "./types";
@@ -258,18 +260,16 @@ export default function UsersPage() {
                   />
                 </label>
 
-                <label className="grid gap-1.5">
-                  <span className="text-sm font-medium text-ink-2">Role</span>
-                  <select
-                    value={role}
-                    onChange={(event) => setRole(event.target.value)}
-                    className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
-                  >
-                    <option value="staff">Staff</option>
-                    <option value="driver">Driver</option>
-                    <option value="admin">Admin</option>
-                  </select>
-                </label>
+                <Select
+                  id="invite-role"
+                  label="Role"
+                  value={role}
+                  onChange={(event) => setRole(event.target.value)}
+                >
+                  <option value="staff">Staff</option>
+                  <option value="driver">Driver</option>
+                  <option value="admin">Admin</option>
+                </Select>
 
                 <div>
                   <Button type="submit" disabled={inviting}>
@@ -280,11 +280,10 @@ export default function UsersPage() {
             </form>
           ) : null}
 
-          {message ? (
-            <div className="mb-4 rounded-lg border border-line bg-surface p-3 text-sm text-ink shadow-sm">
-              {message}
-            </div>
-          ) : null}
+          {/* tone="neutral" preserves this banner's existing look: it carries
+              both the invite-sent confirmation and any failure text, so it is
+              not a success-only region. */}
+          <MessageBanner tone="neutral">{message}</MessageBanner>
 
           <div className="grid gap-3" aria-busy={view === "loading"}>
             {view === "loading" ? (

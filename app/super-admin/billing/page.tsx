@@ -4,6 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../../../lib/supabase/browser";
 import { countBillableVehicles } from "../../../lib/billing/vehicleCount";
 import { computeChargeAmounts, formatPence } from "../../../lib/billing/money";
+import Badge from "../../../components/Badge";
+import Button from "../../../components/Button";
+import MessageBanner from "../../../components/MessageBanner";
+import Skeleton from "../../../components/Skeleton";
 
 type Company = {
     id: string;
@@ -175,146 +179,156 @@ export default function SuperAdminBillingPage() {
     }
 
     return (
-        <main
-            style={{
-                minHeight: "100vh",
-                padding: 30,
-                backgroundImage:
-                    "url('https://images.unsplash.com/photo-1553413077-190dd305871c')",
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-            }}
-        >
-            <div
-                style={{
-                    background: "rgba(0,0,0,0.65)",
-                    padding: 30,
-                    borderRadius: 20,
-                }}
-            >
-                <div style={{ color: "white", marginBottom: 24 }}>
-                    <h1 style={{ marginTop: 0, fontSize: 38 }}>Super Admin Billing</h1>
-                    <p style={{ opacity: 0.85, marginBottom: 0 }}>
-                        Billing is £10 per licensed vehicle per week, less per
-                        vehicle on larger fleets, charged every 4 weeks.
-                    </p>
-                </div>
+        /* Matches /super-admin/requests. The photo background and dark scrim
+           that used to live here are gone on purpose: the console has one
+           surface language and this area was the only thing outside it. */
+        <div className="ds min-h-screen bg-canvas px-4 py-8 font-sans text-ink md:px-8">
+            <div className="mx-auto w-full max-w-6xl">
+                <header className="mb-4">
+                    <div className="text-kicker uppercase text-ink-3">Platform</div>
 
-                {message ? (
-                    <div
-                        style={{
-                            background: "white",
-                            padding: 12,
-                            borderRadius: 10,
-                            marginBottom: 20,
-                        }}
-                    >
-                        {message}
-                    </div>
-                ) : null}
+                    <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">
+                        Super Admin Billing
+                    </h1>
+
+                    <p className="m-0 text-sm text-ink-3">
+                        Billing is £10 per licensed vehicle per week, less per vehicle on
+                        larger fleets, charged every 4 weeks.
+                    </p>
+                </header>
+
+                <MessageBanner tone="neutral">{message}</MessageBanner>
 
                 {loading ? (
-                    <div
-                        style={{
-                            background: "white",
-                            padding: 20,
-                            borderRadius: 14,
-                        }}
-                    >
-                        Loading...
-                    </div>
-                ) : null}
+                    <div aria-busy className="grid gap-3">
+                        <span className="sr-only" role="status">
+                            Loading billing
+                        </span>
 
-                <div style={{ display: "grid", gap: 16 }}>
-                    {billingRows.map((row) => (
-                        <div
-                            key={row.company.id}
-                            style={{
-                                background: "rgba(255,255,255,0.95)",
-                                padding: 20,
-                                borderRadius: 14,
-                                boxShadow: "0 8px 30px rgba(0,0,0,0.25)",
-                            }}
-                        >
-                            <h2 style={{ marginTop: 0, marginBottom: 8 }}>{row.company.name}</h2>
-
-                            <div style={{ opacity: 0.8, marginBottom: 6 }}>
-                                Total Vehicles: {row.totalVehicles}
-                            </div>
-
-                            <div style={{ opacity: 0.8, marginBottom: 6 }}>
-                                Billable Licensed Vehicles: {row.billableVehicleCount}
-                            </div>
-
-                            <div style={{ opacity: 0.8, marginBottom: 12 }}>
-                                4-Weekly Charge: {formatPence(row.cycleChargePounds * 100)} (ex VAT)
-                            </div>
-
-                            {(() => {
-                                const sub = subscriptionRows.find(
-                                    (s) => s.company_id === row.company.id
-                                );
-                                if (!sub) {
-                                    return (
-                                        <div style={{ opacity: 0.8, marginBottom: 12 }}>
-                                            Subscription: no card on file
-                                        </div>
-                                    );
-                                }
-                                const isPastDue = sub.status === "past_due";
-                                return (
-                                    <div
-                                        style={{
-                                            marginBottom: 12,
-                                            color: isPastDue ? "#b91c1c" : undefined,
-                                            fontWeight: isPastDue ? 700 : undefined,
-                                            opacity: isPastDue ? 1 : 0.8,
-                                        }}
-                                    >
-                                        Subscription: {sub.status}
-                                        {sub.card_last4 ? ` • card ****${sub.card_last4}` : ""}
-                                        {sub.next_charge_on
-                                            ? ` • next charge ${sub.next_charge_on}`
-                                            : ""}
-                                        {isPastDue
-                                            ? ` • ${sub.retry_count ?? 0} failed attempts`
-                                            : ""}
-                                    </div>
-                                );
-                            })()}
-
-                            <div style={{ opacity: 0.8, marginBottom: 12 }}>
-                                Latest Invoice:{" "}
-                                {row.latestInvoice
-                                    ? `£${row.latestInvoice.amount} • ${row.latestInvoice.status}`
-                                    : "None"}
-                            </div>
-
-                            <button
-                                type="button"
-                                onClick={() =>
-                                    createInvoice(
-                                        row.company.id,
-                                        row.billableVehicleCount,
-                                        row.cycleChargePounds
-                                    )
-                                }
-                                style={{
-                                    padding: "10px 14px",
-                                    borderRadius: 10,
-                                    border: "none",
-                                    background: "#111827",
-                                    color: "white",
-                                    fontWeight: 600,
-                                    cursor: "pointer",
-                                }}
+                        {[0, 1, 2].map((index) => (
+                            <div
+                                key={`billing-skeleton-${index}`}
+                                className="rounded-lg border border-line bg-surface p-4 shadow-sm"
                             >
-                                Create Invoice
-                            </button>
-                        </div>
-                    ))}
-                </div>
+                                <Skeleton w="16ch" h="1rem" />
+
+                                <div className="mt-2 grid gap-1">
+                                    <Skeleton w="18ch" h="0.75rem" />
+                                    <Skeleton w="22ch" h="0.75rem" />
+                                    <Skeleton w="20ch" h="0.75rem" />
+                                    <Skeleton w="26ch" h="0.75rem" />
+                                </div>
+
+                                <div className="mt-3">
+                                    <Skeleton w="7.5rem" h="2rem" />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                ) : billingRows.length === 0 ? (
+                    <div className="rounded-lg bg-surface-2 p-8 text-center text-sm text-ink-3">
+                        No companies found.
+                    </div>
+                ) : (
+                    <div className="grid gap-3">
+                        {billingRows.map((row) => {
+                            const sub = subscriptionRows.find(
+                                (s) => s.company_id === row.company.id
+                            );
+                            const isPastDue = sub?.status === "past_due";
+
+                            return (
+                                <div
+                                    key={row.company.id}
+                                    className="rounded-lg border border-line bg-surface p-4 shadow-sm"
+                                >
+                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                        <h2 className="m-0 text-md font-semibold text-ink">
+                                            {row.company.name}
+                                        </h2>
+
+                                        {/* past_due was the one thing this page coloured by
+                                            hand (a raw #b91c1c plus bold). A danger Badge is
+                                            the token-driven way to keep that emphasis. */}
+                                        {sub ? (
+                                            <Badge tone={isPastDue ? "danger" : "neutral"}>
+                                                {sub.status ?? "unknown"}
+                                            </Badge>
+                                        ) : (
+                                            <Badge tone="warning">no card on file</Badge>
+                                        )}
+                                    </div>
+
+                                    <div className="mt-2 grid gap-0.5 text-sm text-ink-3">
+                                        <div>
+                                            Total Vehicles:{" "}
+                                            <span className="text-ink-2">{row.totalVehicles}</span>
+                                        </div>
+
+                                        <div>
+                                            Billable Licensed Vehicles:{" "}
+                                            <span className="text-ink-2">
+                                                {row.billableVehicleCount}
+                                            </span>
+                                        </div>
+
+                                        <div>
+                                            4-Weekly Charge:{" "}
+                                            <span className="text-ink-2">
+                                                {formatPence(row.cycleChargePounds * 100)} (ex VAT)
+                                            </span>
+                                        </div>
+
+                                        {sub ? (
+                                            <div
+                                                className={
+                                                    isPastDue ? "text-danger-strong" : undefined
+                                                }
+                                            >
+                                                Subscription: {sub.status}
+                                                {sub.card_last4
+                                                    ? ` • card ****${sub.card_last4}`
+                                                    : ""}
+                                                {sub.next_charge_on
+                                                    ? ` • next charge ${sub.next_charge_on}`
+                                                    : ""}
+                                                {isPastDue
+                                                    ? ` • ${sub.retry_count ?? 0} failed attempts`
+                                                    : ""}
+                                            </div>
+                                        ) : null}
+
+                                        <div>
+                                            Latest Invoice:{" "}
+                                            <span className="text-ink-2">
+                                                {row.latestInvoice
+                                                    ? `£${row.latestInvoice.amount} • ${row.latestInvoice.status}`
+                                                    : "None"}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-3">
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            onClick={() =>
+                                                createInvoice(
+                                                    row.company.id,
+                                                    row.billableVehicleCount,
+                                                    row.cycleChargePounds
+                                                )
+                                            }
+                                        >
+                                            Create Invoice
+                                        </Button>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
             </div>
-        </main>
+        </div>
     );
 }

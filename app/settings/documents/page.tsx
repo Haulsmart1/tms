@@ -13,6 +13,9 @@ import Card from "../../../components/Card";
 
 
 import { useTenant } from "../../components/TenantProvider";
+import TenantGate from "../../components/TenantGate";
+import MessageBanner from "../../../components/MessageBanner";
+import Skeleton from "../../../components/Skeleton";
 
 type CompanyProfile = {
   tenant_id: string;
@@ -896,17 +899,50 @@ export default function DocumentsSettingsPage() {
 
   if (loading) {
     return (
-      <div className="ds min-h-screen bg-canvas font-sans text-ink">
-        <main className="mx-auto max-w-[1480px] px-6 py-8">
-          <Card>
-            Loading document settings...
-          </Card>
-        </main>
-      </div>
+      <TenantGate>
+        <div className="ds min-h-screen bg-canvas font-sans text-ink">
+          <main className="mx-auto max-w-[1480px] px-6 py-8" aria-busy>
+            <span className="sr-only" role="status">
+              Loading document settings
+            </span>
+
+            <div className="mb-5">
+              <Skeleton w="8ch" h="0.625rem" />
+              <div className="mt-1">
+                <Skeleton w="18ch" h="1.25rem" />
+              </div>
+              <div className="mt-1">
+                <Skeleton w="40ch" h="0.75rem" />
+              </div>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
+              {[0, 1].map((column) => (
+                <section
+                  key={`documents-skeleton-${column}`}
+                  className="rounded-lg border border-line bg-surface p-4 shadow-sm"
+                >
+                  <Skeleton w="12ch" h="1rem" />
+
+                  <div className="mt-3 grid gap-3">
+                    {[0, 1, 2, 3].map((row) => (
+                      <div key={row} className="grid gap-1.5">
+                        <Skeleton w="9ch" h="0.75rem" />
+                        <Skeleton w="100%" h="2.5rem" />
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </main>
+        </div>
+      </TenantGate>
     );
   }
 
   return (
+    <TenantGate>
     <div className="ds min-h-screen bg-canvas font-sans text-ink">
       <main className="mx-auto max-w-[1480px] px-6 py-8">
         <header className="mb-5">
@@ -923,11 +959,7 @@ export default function DocumentsSettingsPage() {
           </p>
         </header>
 
-        {error ? (
-          <div className="mb-4 rounded-lg border border-red-400/40 bg-red-950/20 p-3 text-sm text-red-200">
-            {error}
-          </div>
-        ) : null}
+        <MessageBanner tone="danger">{error}</MessageBanner>
 
         {message ? (
           <div className="mb-4 rounded-lg border border-line bg-surface p-3 text-sm text-ink">
@@ -1422,6 +1454,7 @@ export default function DocumentsSettingsPage() {
         </div>
       </main>
     </div>
+    </TenantGate>
   );
 }
 

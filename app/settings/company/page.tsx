@@ -10,6 +10,8 @@ import Select from "../../../components/Select";
 import Textarea from "../../../components/Textarea";
 import StripeConnectionPanel from "../../../components/settings/StripeConnectionPanel";
 import { useTenant } from "../../components/TenantProvider";
+import TenantGate from "../../components/TenantGate";
+import Skeleton from "../../../components/Skeleton";
 
 type CompanyProfile = {
   tenant_id: string;
@@ -482,6 +484,7 @@ export default function CompanySettingsPage() {
   }
 
   return (
+    <TenantGate>
     <div className="ds min-h-screen bg-canvas font-sans text-ink">
       <main className="mx-auto max-w-[1480px] px-6 py-8">
         <header className="mb-4">
@@ -500,7 +503,30 @@ export default function CompanySettingsPage() {
             {message || "No authenticated session found. Please sign in again."}
           </Card>
         ) : loading || !profile ? (
-          <Card className="font-medium">{message || "Loading..."}</Card>
+          /* The real form is a stack of titled sections holding a 3-up field
+             grid, so the skeleton is one such section. Reproducing all eight
+             would be a second layout definition to keep in sync for a state
+             that lasts one round trip. */
+          <div aria-busy className="grid gap-4">
+            <span className="sr-only" role="status">
+              Loading the company profile
+            </span>
+
+            <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+              <h2 className="mb-3 mt-0 text-md font-semibold text-ink">
+                <Skeleton display="inline-block" w="14ch" h="1rem" />
+              </h2>
+
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {[0, 1, 2, 3, 4, 5].map((index) => (
+                  <div key={`company-skeleton-${index}`} className="grid gap-1.5">
+                    <Skeleton w="9ch" h="0.75rem" />
+                    <Skeleton w="100%" h="2.5rem" />
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
         ) : (
           <>
           <form onSubmit={saveProfile} className="grid gap-4">
@@ -874,5 +900,6 @@ export default function CompanySettingsPage() {
         )}
       </main>
     </div>
+    </TenantGate>
   );
 }

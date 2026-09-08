@@ -77,10 +77,14 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
   never public URLs. The sibling `job-files` bucket is **not yet locked down** (see README roadmap); don't assume
   it has the same guarantees.
 
-### Two styling systems coexist — check which one a page is on before editing it
+### One styling system, plus three deliberately excluded public pages
 
-- **Legacy pages** (most of the app): inline styles, dark canvas, Inter font. Tailwind Preflight is disabled
-  globally so these are untouched by Tailwind resets.
+- **Every console page is on the design system.** The inline-styled legacy tier no longer exists; Tailwind
+  Preflight stays disabled globally, which is why the `ds` reset is still required rather than optional.
+- **Deliberately NOT tokenised**, and absent from `themeableRoutes.ts` on purpose: `/pod/share/[token]`,
+  `/quotation/share/[token]` and `/driver/jobs/[jobId]` — customer/driver-facing pages outside the console
+  shell with a fixed light palette. Do not "finish the job" on these without deciding a delivery-receipt
+  recipient should see the operator's theme.
 - **Design-system ("ds") pages**: opt in via `className="ds font-sans bg-canvas text-ink"` on the root element.
   `ds` re-applies a scoped CSS reset; `font-sans` switches to IBM Plex. Tokens live in `app/tokens.css`, consumed
   by `app/globals.css`. Forgetting `font-sans` silently falls back to Inter; forgetting `ds` breaks borders/layout
@@ -92,9 +96,10 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
   Theme preference is per-device (`localStorage["tms-theme"]`), not per-user, applied by a synchronous script in
   `<body>` before first paint (hence `suppressHydrationWarning` on `<html>`).
   There is no CSP today; adding one must allowlist that inline script (hash/nonce) or light mode silently breaks.
-- `lib/nav/themeableRoutes.ts` is the single allowlist controlling which pages follow the theme toggle. Moving a
-  legacy page onto the design system means: convert its color literals to tokens, add `ds ... bg-canvas` to its
-  root, then add its path here.
+- `lib/nav/themeableRoutes.ts` is the single allowlist controlling which pages follow the theme toggle. It now
+  lists every console route; a NEW page still defaults to pinned-dark until listed, which is the remaining
+  reason the mechanism exists. Adding a page means: tokens, `ds ... bg-canvas` on the root, then its path here.
+  `lib/nav/themeableRoutes.test.ts` asserts the exact list, so it fails if you add a route without listing it.
 - `lib/theme/contrast.test.ts` parses `app/tokens.css` directly and asserts contrast on every token pair in both
   themes on every `npm test` run — it documents a small number of pre-existing gaps as floors that must not
   regress. If you change a token value, run this test.

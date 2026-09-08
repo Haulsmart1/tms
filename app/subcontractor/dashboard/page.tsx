@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Skeleton from "../../../components/Skeleton";
 
 type PortalUser = {
   id: string;
@@ -195,13 +196,54 @@ export default function SubcontractorDashboardPage() {
   }
 
   if (loading) {
-    return <main style={styles.page}>Loading subcontractor portal...</main>;
+    return (
+      <main className={styles.page} aria-busy>
+        <div className={styles.container}>
+          <span className="sr-only" role="status">
+            Loading subcontractor portal
+          </span>
+
+          <header className={styles.header}>
+            <Skeleton w="9ch" h="0.625rem" />
+            <div className="mt-1">
+              <Skeleton w="18ch" h="1.25rem" />
+            </div>
+            <div className="mt-2">
+              <Skeleton w="26ch" h="0.75rem" />
+            </div>
+          </header>
+
+          <div className={styles.statGrid}>
+            {[0, 1, 2, 3].map((index) => (
+              <div key={`stat-skeleton-${index}`} className={styles.statCard}>
+                <Skeleton w="8ch" h="0.75rem" />
+                <Skeleton w="5ch" h="1.5rem" />
+              </div>
+            ))}
+          </div>
+
+          <section className={styles.card}>
+            <Skeleton w="12ch" h="1rem" />
+            <div className={styles.listGrid}>
+              {[0, 1, 2].map((index) => (
+                <div key={`list-skeleton-${index}`} className={styles.listCard}>
+                  <Skeleton w="11ch" h="0.875rem" />
+                  <div className="mt-2">
+                    <Skeleton w="16ch" h="0.75rem" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      </main>
+    );
   }
 
   if (!data) {
     return (
-      <main style={styles.page}>
-        <div style={styles.card}>
+      <main className={styles.page}>
+        <div className={styles.card}>
           <h1>Subcontractor Portal</h1>
           <p>{message || "Portal access unavailable."}</p>
         </div>
@@ -215,22 +257,22 @@ export default function SubcontractorDashboardPage() {
   );
 
   return (
-    <main style={styles.page}>
-      <div style={styles.container}>
-        <header style={styles.header}>
+    <main className={styles.page}>
+      <div className={styles.container}>
+        <header className={styles.header}>
           <div>
-            <p style={styles.eyebrow}>Subcontractor Portal</p>
-            <h1 style={styles.title}>{data.subcontractor.name}</h1>
-            <p style={styles.subtitle}>
+            <p className={styles.eyebrow}>Subcontractor Portal</p>
+            <h1 className={styles.title}>{data.subcontractor.name}</h1>
+            <p className={styles.subtitle}>
               Signed in as {data.employee.full_name} ·{" "}
               {formatRole(data.portalUser.role)}
             </p>
           </div>
         </header>
 
-        {message ? <div style={styles.message}>{message}</div> : null}
+        {message ? <div className={styles.message}>{message}</div> : null}
 
-        <section style={styles.statGrid}>
+        <section className={styles.statGrid}>
           <Stat label="Jobs" value={stats.total} />
           <Stat label="Awaiting" value={stats.awaiting} />
           <Stat label="In Progress" value={stats.inProgress} />
@@ -238,23 +280,23 @@ export default function SubcontractorDashboardPage() {
           <Stat label="POD Attention" value={stats.podRequired} />
         </section>
 
-        <section style={styles.card}>
-          <h2 style={styles.sectionTitle}>Assigned Jobs</h2>
+        <section className={styles.card}>
+          <h2 className={styles.sectionTitle}>Assigned Jobs</h2>
 
           {data.jobs.length === 0 ? (
-            <p style={styles.muted}>No jobs are currently assigned.</p>
+            <p className={styles.muted}>No jobs are currently assigned.</p>
           ) : (
-            <div style={styles.listGrid}>
+            <div className={styles.listGrid}>
               {data.jobs.map((job) => (
-                <article key={job.id} style={styles.listCard}>
-                  <div style={styles.rowBetween}>
+                <article key={job.id} className={styles.listCard}>
+                  <div className={styles.rowBetween}>
                     <strong>{job.reference || "Job"}</strong>
-                    <span style={styles.badge}>{job.status || "Pending"}</span>
+                    <span className={styles.badge}>{job.status || "Pending"}</span>
                   </div>
-                  <p style={styles.muted}>
+                  <p className={styles.muted}>
                     {job.customer_reference || job.external_reference || "No external reference"}
                   </p>
-                  <div style={styles.infoGrid}>
+                  <div className={styles.infoGrid}>
                     <Info label="Job Date" value={formatDate(job.job_date || job.scheduled_date)} />
                     <Info label="Priority" value={job.priority} />
                     <Info
@@ -273,10 +315,10 @@ export default function SubcontractorDashboardPage() {
           )}
         </section>
 
-        <section style={styles.card}>
-          <h2 style={styles.sectionTitle}>Vehicles</h2>
+        <section className={styles.card}>
+          <h2 className={styles.sectionTitle}>Vehicles</h2>
 
-          <div style={styles.listGrid}>
+          <div className={styles.listGrid}>
             {data.vehicles.map((vehicle) => {
               const compliance = mostUrgent([
                 getCompliance(vehicle.mot_expiry),
@@ -285,22 +327,22 @@ export default function SubcontractorDashboardPage() {
               ]);
 
               return (
-                <article key={vehicle.id} style={vehicleCard(compliance.level)}>
-                  <div style={styles.rowBetween}>
+                <article key={vehicle.id} className={vehicleCard(compliance.level)}>
+                  <div className={styles.rowBetween}>
                     <div>
                       <strong>{vehicle.registration}</strong>
-                      <div style={styles.muted}>
+                      <div className={styles.muted}>
                         {[vehicle.vehicle_type, vehicle.make, vehicle.model]
                           .filter(Boolean)
                           .join(" • ")}
                       </div>
                     </div>
-                    <span style={styles.badge}>
+                    <span className={styles.badge}>
                       {vehicle.vor ? "VOR" : compliance.label}
                     </span>
                   </div>
 
-                  <div style={styles.infoGrid}>
+                  <div className={styles.infoGrid}>
                     <Info label="MOT" value={formatDate(vehicle.mot_expiry)} />
                     <Info label="Tax" value={formatDate(vehicle.tax_expiry)} />
                     <Info label="Insurance" value={formatDate(vehicle.insurance_expiry)} />
@@ -313,17 +355,17 @@ export default function SubcontractorDashboardPage() {
         </section>
 
         {canManageUsers ? (
-          <section style={styles.card}>
-            <h2 style={styles.sectionTitle}>Portal Users</h2>
-            <p style={styles.muted}>
+          <section className={styles.card}>
+            <h2 className={styles.sectionTitle}>Portal Users</h2>
+            <p className={styles.muted}>
               Only active, directly employed people can be given portal access.
             </p>
 
-            <div style={styles.inviteGrid}>
-              <label style={styles.field}>
-                <span style={styles.label}>Employee</span>
+            <div className={styles.inviteGrid}>
+              <label className={styles.field}>
+                <span className={styles.label}>Employee</span>
                 <select
-                  style={styles.input}
+                  className={styles.input}
                   value={inviteEmployeeId}
                   onChange={(event) => setInviteEmployeeId(event.target.value)}
                 >
@@ -337,10 +379,10 @@ export default function SubcontractorDashboardPage() {
                 </select>
               </label>
 
-              <label style={styles.field}>
-                <span style={styles.label}>Portal Role</span>
+              <label className={styles.field}>
+                <span className={styles.label}>Portal Role</span>
                 <select
-                  style={styles.input}
+                  className={styles.input}
                   value={inviteRole}
                   onChange={(event) => setInviteRole(event.target.value)}
                 >
@@ -355,23 +397,23 @@ export default function SubcontractorDashboardPage() {
                 type="button"
                 onClick={() => void inviteEmployee()}
                 disabled={inviting}
-                style={styles.primaryButton}
+                className={styles.primaryButton}
               >
                 {inviting ? "Sending..." : "Invite to Portal"}
               </button>
             </div>
 
-            <div style={styles.listGrid}>
+            <div className={styles.listGrid}>
               {data.portalUsers.map((portalUser) => (
-                <article key={portalUser.id} style={styles.listCard}>
+                <article key={portalUser.id} className={styles.listCard}>
                   <strong>
                     {portalUser.employee?.full_name ||
                       portalUser.email ||
                       "Portal User"}
                   </strong>
-                  <div style={styles.muted}>{portalUser.email || "No email"}</div>
-                  <div style={{ marginTop: 8 }}>
-                    <span style={styles.badge}>{formatRole(portalUser.role)}</span>
+                  <div className={styles.muted}>{portalUser.email || "No email"}</div>
+                  <div className="mt-2">
+                    <span className={styles.badge}>{formatRole(portalUser.role)}</span>
                   </div>
                 </article>
               ))}
@@ -411,9 +453,9 @@ function mostUrgent(results: ComplianceResult[]) {
 
 function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div style={styles.statCard}>
-      <strong style={styles.statValue}>{value}</strong>
-      <span style={styles.muted}>{label}</span>
+    <div className={styles.statCard}>
+      <strong className={styles.statValue}>{value}</strong>
+      <span className={styles.muted}>{label}</span>
     </div>
   );
 }
@@ -427,8 +469,8 @@ function Info({
 }) {
   return (
     <div>
-      <span style={styles.smallLabel}>{label}</span>
-      <strong style={styles.infoValue}>{value || "—"}</strong>
+      <span className={styles.smallLabel}>{label}</span>
+      <strong className={styles.infoValue}>{value || "—"}</strong>
     </div>
   );
 }
@@ -445,129 +487,54 @@ function formatDate(value: string | null | undefined) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-GB");
 }
 
+/* Token classes, not inline styles: this page used to carry its own light
+   palette (#f8fafc canvas, #0f172a ink, #2563eb accent) which could not follow
+   the theme. Everything below is the same layout expressed in design-system
+   tokens, so the page now renders correctly in both themes and is listed in
+   lib/nav/themeableRoutes.ts. */
 function vehicleCard(level: "ok" | "amber" | "red") {
-  const border =
-    level === "red" ? "#dc2626" : level === "amber" ? "#f59e0b" : "#e2e8f0";
-  const background =
-    level === "red" ? "#fff1f2" : level === "amber" ? "#fffbeb" : "#f8fafc";
+  const tone =
+    level === "red"
+      ? "border-2 border-danger bg-danger-tint"
+      : level === "amber"
+        ? "border-2 border-warning bg-warning-tint"
+        : "border border-line bg-surface-2";
 
-  return {
-    ...styles.listCard,
-    border: `2px solid ${border}`,
-    background,
-  };
+  return `rounded-lg p-4 ${tone}`;
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  page: {
-    minHeight: "100vh",
-    padding: "32px 20px 60px",
-    background: "#f8fafc",
-    color: "#0f172a",
-  },
-  container: { maxWidth: 1450, margin: "0 auto" },
-  header: { marginBottom: 24 },
-  eyebrow: {
-    margin: "0 0 6px",
-    color: "#2563eb",
-    fontSize: 12,
-    fontWeight: 900,
-    textTransform: "uppercase",
-  },
-  title: { margin: 0, fontSize: 44 },
-  subtitle: { margin: "8px 0 0", color: "#64748b" },
-  message: {
-    marginBottom: 18,
-    padding: 12,
-    borderRadius: 10,
-    background: "#ffffff",
-    border: "1px solid #e2e8f0",
-  },
-  card: {
-    background: "#ffffff",
-    border: "1px solid #e2e8f0",
-    borderRadius: 18,
-    padding: 22,
-    marginBottom: 22,
-  },
-  sectionTitle: { marginTop: 0 },
-  statGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-    gap: 12,
-    marginBottom: 22,
-  },
-  statCard: {
-    background: "#ffffff",
-    border: "1px solid #e2e8f0",
-    borderRadius: 14,
-    padding: 18,
-    display: "grid",
-    gap: 4,
-  },
-  statValue: { fontSize: 30 },
-  listGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-    gap: 14,
-    marginTop: 16,
-  },
-  listCard: {
-    border: "1px solid #e2e8f0",
-    borderRadius: 14,
-    padding: 16,
-    background: "#f8fafc",
-  },
-  rowBetween: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: 12,
-    alignItems: "flex-start",
-  },
-  badge: {
-    borderRadius: 999,
-    padding: "5px 8px",
-    background: "#e2e8f0",
-    fontSize: 11,
-    fontWeight: 800,
-  },
-  muted: { color: "#64748b", fontSize: 12 },
-  infoGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-    gap: 10,
-    marginTop: 14,
-  },
-  smallLabel: {
-    display: "block",
-    color: "#64748b",
-    fontSize: 10,
-    fontWeight: 900,
-    textTransform: "uppercase",
-  },
-  infoValue: { display: "block", marginTop: 3, fontSize: 13 },
-  inviteGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-    gap: 12,
-    alignItems: "end",
-    marginTop: 16,
-  },
-  field: { display: "grid", gap: 6 },
-  label: { fontSize: 12, fontWeight: 800, color: "#475569" },
-  input: {
-    border: "1px solid #cbd5e1",
-    borderRadius: 10,
-    padding: "11px 12px",
-    background: "#ffffff",
-  },
-  primaryButton: {
-    border: "none",
-    borderRadius: 10,
-    background: "#2563eb",
-    color: "#ffffff",
-    padding: "12px 16px",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-};
+const styles = {
+  page: "ds min-h-screen bg-canvas px-5 pb-14 pt-8 font-sans text-ink",
+  container: "mx-auto max-w-[1450px]",
+  header: "mb-6",
+  eyebrow: "m-0 mb-1.5 text-kicker uppercase text-ink-3",
+  title: "m-0 text-xl font-semibold tracking-tight text-ink",
+  subtitle: "m-0 mt-2 text-sm text-ink-3",
+  message: "mb-4 rounded-lg border border-line bg-surface p-3 text-sm text-ink",
+  card: "mb-5 rounded-lg border border-line bg-surface p-5 shadow-sm",
+  sectionTitle: "m-0 mb-3 text-md font-semibold text-ink",
+  statGrid:
+    "mb-5 grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3",
+  statCard:
+    "grid gap-1 rounded-lg border border-line bg-surface p-4 shadow-sm",
+  statValue:
+    "font-mono text-2xl font-semibold tabular-nums slashed-zero text-ink",
+  listGrid:
+    "mt-4 grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-3.5",
+  listCard: "rounded-lg border border-line bg-surface-2 p-4",
+  rowBetween: "flex items-start justify-between gap-3",
+  badge:
+    "rounded-full border border-line bg-surface px-2 py-1 text-[11px] font-semibold text-ink-2",
+  muted: "m-0 text-xs text-ink-3",
+  infoGrid: "mt-3.5 grid grid-cols-2 gap-2.5",
+  smallLabel: "block text-kicker uppercase text-ink-3",
+  infoValue: "mt-0.5 block text-sm text-ink",
+  inviteGrid:
+    "mt-4 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] items-end gap-3",
+  field: "grid gap-1.5",
+  label: "text-sm font-medium text-ink-2",
+  input:
+    "h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3",
+  primaryButton:
+    "inline-flex h-10 cursor-pointer items-center justify-center rounded-md border-0 bg-primary px-4 text-sm font-semibold text-on-primary hover:bg-primary-hover active:bg-primary-active",
+} as const;

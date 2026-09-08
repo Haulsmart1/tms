@@ -43,12 +43,12 @@ The RLS design and migrations live under `docs/sql/` (`rls_01`..`rls_10`) and ar
 
 ## Design system
 
-The UI deliberately runs **two styling systems side by side**, and understanding the seam matters before editing any page.
+**Every console page is now on the design system.** The inline-styled "legacy" tier is gone: the last seven pages (`/driver/dashboard`, `/subcontractor/dashboard` and the five non-requests `/super-admin` pages, including the full-bleed truck photograph and dark overlay panel they shared) were converted to tokens, so `lib/nav/themeableRoutes.ts` now lists every console route and the light/dark toggle works everywhere it is offered.
 
-- **Legacy pages (most of the app):** plain inline styles on a dark canvas with Inter. A recurring pattern is a full-bleed truck photograph background with a dark translucent overlay panel and white rounded cards. Tailwind Preflight is disabled globally so these pages are not disturbed.
-- **Design-system ("ds") pages:** newer pages opt in by putting `className="ds font-sans bg-canvas text-ink"` on their root element. The `ds` class re-applies a scoped CSS reset (borders, box-sizing, control fonts) via `:where()` rules, and `font-sans` switches to IBM Plex. Semantic tokens (`bg-canvas`, `text-ink`, `border-line`, `bg-surface`, `text-primary`, tone classes) are defined in `app/tokens.css` and consumed by `app/globals.css`.
-- **The failure modes are intentional and asymmetric:** omit `font-sans` and a ds page silently falls back to Inter; omit `ds` and borders vanish and layouts overflow (because Preflight is off). This is documented inline in `app/layout.tsx` and `app/globals.css`.
-- **ds pages today:** the landing page, `/login`, `/dashboard`, `/jobs` and `/super-admin/requests`. Everything else is inline-styled.
+- **Design-system ("ds") pages:** a page opts in by putting `className="ds font-sans bg-canvas text-ink"` on its root element. The `ds` class re-applies a scoped CSS reset (borders, box-sizing, control fonts) via `:where()` rules, and `font-sans` switches to IBM Plex. Semantic tokens (`bg-canvas`, `text-ink`, `border-line`, `bg-surface`, `text-primary`, tone classes) are defined in `app/tokens.css` and consumed by `app/globals.css`.
+- **The failure modes are intentional and asymmetric:** omit `font-sans` and a ds page silently falls back to Inter; omit `ds` and borders vanish and layouts overflow (because Preflight is off, and it stays off). This is documented inline in `app/layout.tsx` and `app/globals.css`.
+- **Three pages are deliberately NOT tokenised**, and are absent from the theme allowlist on purpose: `/pod/share/[token]`, `/quotation/share/[token]` and `/driver/jobs/[jobId]`. These are customer- and driver-facing pages outside the console shell with a fixed light palette, so a recipient opening a delivery receipt does not inherit the operator's theme. The white "document preview" block inside `/settings/documents` is the same idea in miniature: it simulates printed paper and is meant to stay white.
+- **Shared UI lives in `components/`** and is the expected way to build a page: `Button`, `Field`, `Select`, `Textarea`, `Badge`, `Card`, `Stat`, `Modal`, `Tabs`, `MessageBanner` (an always-mounted `role="status"` live region) and `Skeleton`. Loading states go through `shouldShowSkeleton` in `lib/loading/skeletonVisibility.ts` rather than a bare `loading ? "Loading..."`.
 
 ### Theming: the default is inverted on purpose
 
@@ -99,12 +99,12 @@ Status tags: [OK] functional against live data, [PARTIAL] real data but view-onl
 - **`/settings`** [LAUNCHER]: settings hub cards.
 - **`/settings/company`** [OK]: the most complete form in the app; multi-section company profile with country-driven fields (GB VAT / EORI / O-licence vs US EIN / USDOT / MC / IFTA), currency / timezone defaults, validation.
 - **`/settings/users`** [OK]: invite users by magic link (admin action).
-- **`/settings/permissions`** [PARTIAL]: per-user, per-page access checkboxes writing to `user_permissions`. Grant path works; revoke path and controlled state are incomplete.
+- **`/settings/permissions`** [PARTIAL]: per-user, per-page access checkboxes writing to `user_permissions`. Grant path works; revoke path and controlled state are incomplete, and the page now says so on screen rather than implying the boxes reflect stored state.
 - **`/settings/invoices`** [PARTIAL]: this tenant's 4-weekly charge (active licensed vehicles priced on the graduated weekly bands).
 - **`/settings/billing`** [OK]: subscription payment method (Square card on file, 3DS verified) and charge history; company admins only (super_admin sees a notice linking to `/super-admin/billing`; staff see a notice).
 
 ### Super-admin (platform operator)
-- **`/super-admin`** [STUB]: overview with hardcoded KPI tiles (placeholder numbers).
+- **`/super-admin`** (stat tiles are hardcoded placeholders, labelled as such on the page, not live platform figures) [STUB]: overview with hardcoded KPI tiles (placeholder numbers).
 - **`/super-admin/companies`** [PARTIAL]: list of customer companies (read-only).
 - **`/super-admin/users`** [PARTIAL]: list of all platform users with tenant and role (read-only).
 - **`/super-admin/billing`** [OK]: per-company billing (billable vehicles priced on the graduated weekly bands) with invoice generation, plus each company's subscription status (card on file, next charge, past-due with failed attempts).

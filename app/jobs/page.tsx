@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import { createClient } from "../../lib/supabase/browser";
 import { JobPageValidation, CollectionStopValidation, DeliveryStopValidation } from "../../lib/supabase/validation/job";
 import { useTenant } from "../components/TenantProvider";
+import MessageBanner from "../../components/MessageBanner";
+import Skeleton from "../../components/Skeleton";
+import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
 import TenantGate from "../components/TenantGate";
 import JobForm from "./JobForm";
 import StopCard from "./StopCard";
@@ -44,7 +47,13 @@ export default function JobsPage() {
   const [customers, setCustomers] = useState<any[]>([]);
   const [subcontractors, setSubcontractors] = useState<any[]>([]);
   const [message, setMessage] = useState("");
+  /* `loading` is the SAVE flag, not a fetch flag: it guards the job form's
+     submit button. The table's first-load state is jobsLoading below, kept
+     separate so saving a job never blanks the list behind the form. */
   const [loading, setLoading] = useState(false);
+  const [jobsLoading, setJobsLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [podForms, setPodForms] = useState<Record<string, any>>({});
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; reference: string } | null>(null);
@@ -91,7 +100,16 @@ export default function JobsPage() {
     // Guard lives here, not in the effect: see TenantContextValue in lib/tenant/context.ts
     if (tenant.status !== "ready") return;
 
+    setJobsLoading(true);
     setMessage("");
+
+    /* settle() runs on every exit, including the five early error returns
+       below. Without it a failed lookup would leave the table skeleton on
+       screen for good, with no retry. */
+    const settle = () => {
+      setJobsLoading(false);
+      setHasLoaded(true);
+    };
     const jobsQuery = supabase.from("jobs").select(`
         id, tenant_id, reference, status, scheduled_date, planning_date, customer_id, vehicle_id, driver_id,
         customer_price, subcontractor_id, subcontractor_cost,
@@ -108,11 +126,11 @@ export default function JobsPage() {
     const { data: customerData, error: customerError } = await tenant.filterByTenant(supabase.from("customers").select("id, name")).eq("active", true).order("name", { ascending: true });
     const { data: subcontractorData, error: subcontractorError } = await tenant.filterByTenant(supabase.from("subcontractors").select("id, name, vehicle_reg, driver_name")).eq("active", true).order("name", { ascending: true });
 
-    if (jobsError) { setMessage(`Jobs load error: ${jobsError.message}`); return; }
-    if (vehicleError) { setMessage(`Vehicles load error: ${vehicleError.message}`); return; }
-    if (driverError) { setMessage(`Drivers load error: ${driverError.message}`); return; }
-    if (customerError) { setMessage(`Customers load error: ${customerError.message}`); return; }
-    if (subcontractorError) { setMessage(`Subcontractors load error: ${subcontractorError.message}`); return; }
+    if (jobsError) { setMessage(`Jobs load error: ${jobsError.message}`); settle(); return; }
+    if (vehicleError) { setMessage(`Vehicles load error: ${vehicleError.message}`); settle(); return; }
+    if (driverError) { setMessage(`Drivers load error: ${driverError.message}`); settle(); return; }
+    if (customerError) { setMessage(`Customers load error: ${customerError.message}`); settle(); return; }
+    if (subcontractorError) { setMessage(`Subcontractors load error: ${subcontractorError.message}`); settle(); return; }
 
     const normalizedJobs = (jobsData || []).map((job: any) => ({
       ...job,
@@ -124,9 +142,22 @@ export default function JobsPage() {
     setDrivers(driverData || []);
     setCustomers(customerData || []);
     setSubcontractors(subcontractorData || []);
+    setDataTenantId(tenant.activeTenantId);
+    settle();
   }
 
   useEffect(() => { loadData(); }, [tenant.status, tenant.activeTenantId]);
+
+  /* One region, one flag: the job table is the only thing here that renders
+     tenant data. The filter-bar selects feed form controls, which
+     skeletonVisibility excludes. */
+  const showSkeleton = shouldShowSkeleton({
+    tenantStatus: tenant.status,
+    fetching: jobsLoading,
+    hasData: hasLoaded,
+    activeTenantId: tenant.activeTenantId,
+    dataTenantId,
+  });
 
   useEffect(() => {
     if (jobs.length === 0) {
@@ -694,9 +725,11 @@ export default function JobsPage() {
           />
         </div>
 
-        {message ? (
-          <div className="mt-5 rounded-lg border border-line bg-surface p-3.5 text-sm text-ink">{message}</div>
-        ) : null}
+        {/* tone="neutral" preserves this banner's existing look: it carries
+            load failures and save feedback alike, so it is not success-only. */}
+        <MessageBanner tone="neutral" className="mt-5">
+          {message}
+        </MessageBanner>
 
         {(() => {
           const search = jobFilters.search.trim().toLowerCase();
@@ -1122,7 +1155,28 @@ export default function JobsPage() {
                     <div className="text-right">Actions</div>
                   </div>
 
-                  {filteredJobs.length === 0 ? (
+                  {showSkeleton ? (
+                    <div aria-busy>
+                      <span className="sr-only" role="status">
+                        Loading jobs
+                      </span>
+
+                      {[0, 1, 2, 3, 4, 5].map((index) => (
+                        <div
+                          key={`job-skeleton-${index}`}
+                          className="grid grid-cols-[minmax(120px,1fr)_minmax(140px,1.4fr)_110px_110px_minmax(110px,1fr)_minmax(110px,1fr)_auto] items-center gap-3 border-t border-line px-4 py-3"
+                        >
+                          <Skeleton w="10ch" h="0.875rem" />
+                          <Skeleton w="14ch" h="0.875rem" />
+                          <Skeleton w="6ch" h="1.375rem" pill />
+                          <Skeleton w="8ch" h="0.875rem" />
+                          <Skeleton w="8ch" h="0.875rem" />
+                          <Skeleton w="9ch" h="0.875rem" />
+                          <Skeleton w="4rem" h="1.75rem" />
+                        </div>
+                      ))}
+                    </div>
+                  ) : filteredJobs.length === 0 ? (
                     <div className="px-4 py-10 text-center text-sm text-ink-3">
                       No jobs match the current filters.
                     </div>

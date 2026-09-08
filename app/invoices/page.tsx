@@ -7,9 +7,12 @@ import {
   useState,
 } from "react";
 import { useTenant } from "../components/TenantProvider";
+import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
 import TenantGate from "../components/TenantGate";
 import Badge from "../../components/Badge";
 import Button from "../../components/Button";
+import Select from "../../components/Select";
+import Skeleton from "../../components/Skeleton";
 import Card from "../../components/Card";
 import MessageBanner from "../../components/MessageBanner";
 import Stat from "../../components/Stat";
@@ -258,6 +261,10 @@ export default function CustomerAccountsPage() {
   const [selectedJobs, setSelectedJobs] = useState<string[]>([]);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  // Stays true across refetches so a tab change or token refresh cannot flash a
+  // skeleton over content already on screen. See lib/loading/skeletonVisibility.ts.
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
   const [working, setWorking] = useState(false);
 
   const [invoicePoReference, setInvoicePoReference] = useState("");
@@ -407,7 +414,9 @@ export default function CustomerAccountsPage() {
 
   const loadTab = useCallback(async () => {
     if (!tenantId) {
+      setDataTenantId(tenantId);
       setLoading(false);
+      setHasLoaded(true);
       return;
     }
 
@@ -529,14 +538,26 @@ export default function CustomerAccountsPage() {
       setMessage(
         error instanceof Error ? error.message : "Unable to load accounts."
       );
+      setDataTenantId(tenantId);
     } finally {
       setLoading(false);
+      setHasLoaded(true);
     }
   }, [loadLookups, tab, tenantId]);
 
   useEffect(() => {
     void loadTab();
   }, [loadTab]);
+
+  /* One flag for the whole tab body: every tab renders the same fetched
+     bundle, so they are one region by skeletonVisibility's definition. */
+  const showSkeleton = shouldShowSkeleton({
+    tenantStatus: tenant.status,
+    fetching: loading,
+    hasData: hasLoaded,
+    activeTenantId: tenantId,
+    dataTenantId,
+  });
 
   useEffect(() => {
     if (tab !== "accounting" || !tenantId) {
@@ -2257,8 +2278,31 @@ export default function CustomerAccountsPage() {
 
           <MessageBanner tone="neutral">{message}</MessageBanner>
 
-          {loading ? (
-            <Card>Loading accounts...</Card>
+          {showSkeleton ? (
+            <div aria-busy className="grid gap-3">
+              <span className="sr-only" role="status">
+                Loading accounts
+              </span>
+
+              {/* Every tab renders a titled panel over a row list, so the
+                  skeleton is that shape rather than any one tab's columns. */}
+              <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+                <Skeleton w="16ch" h="1rem" />
+
+                <div className="mt-3 grid gap-2">
+                  {[0, 1, 2, 3, 4].map((index) => (
+                    <div
+                      key={`invoice-skeleton-${index}`}
+                      className="flex items-center justify-between gap-3 rounded-md border border-line bg-surface-2 px-3 py-2.5"
+                    >
+                      <Skeleton w="12ch" h="0.875rem" />
+                      <Skeleton w="9ch" h="0.875rem" />
+                      <Skeleton w="6ch" h="1.375rem" pill />
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
           ) : (
             <>
               {tab === "ready" ? (
@@ -2315,9 +2359,7 @@ export default function CustomerAccountsPage() {
                   <h2 className="m-0 mb-3 text-md font-semibold text-ink">Record Customer Payment</h2>
 
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    <Field label="Customer">
-                      <select
-                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                    <Select id="invoice-customer" label="Customer"
                         value={paymentCustomerId}
                         onChange={(event) => {
                           setPaymentCustomerId(event.target.value);
@@ -2330,12 +2372,9 @@ export default function CustomerAccountsPage() {
                             {customer.name}
                           </option>
                         ))}
-                      </select>
-                    </Field>
+                      </Select>
 
-                    <Field label="Allocate to Invoice">
-                      <select
-                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                    <Select id="invoice-allocate-to-invoice" label="Allocate to Invoice"
                         value={paymentInvoiceId}
                         onChange={(event) =>
                           setPaymentInvoiceId(event.target.value)
@@ -2358,8 +2397,7 @@ export default function CustomerAccountsPage() {
                               outstanding
                             </option>
                           ))}
-                      </select>
-                    </Field>
+                      </Select>
 
                     <Field label="Amount">
                       <input
@@ -2374,9 +2412,7 @@ export default function CustomerAccountsPage() {
                       />
                     </Field>
 
-                    <Field label="Method">
-                      <select
-                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                    <Select id="invoice-method" label="Method"
                         value={paymentMethod}
                         onChange={(event) =>
                           setPaymentMethod(event.target.value)
@@ -2388,8 +2424,7 @@ export default function CustomerAccountsPage() {
                         <option value="cheque">Cheque</option>
                         <option value="direct_debit">Direct Debit</option>
                         <option value="other">Other</option>
-                      </select>
-                    </Field>
+                      </Select>
 
                     <Field label="Reference">
                       <input
@@ -2449,9 +2484,7 @@ export default function CustomerAccountsPage() {
                     </div>
 
                     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                      <Field label="Original Invoice">
-                        <select
-                          className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                      <Select id="invoice-original-invoice" label="Original Invoice"
                           value={creditInvoiceId}
                           disabled={
                             working ||
@@ -2488,8 +2521,7 @@ export default function CustomerAccountsPage() {
                               </option>
                             )
                           )}
-                        </select>
-                      </Field>
+                        </Select>
 
                       <Field label="Issue Date">
                         <input
@@ -3082,9 +3114,7 @@ export default function CustomerAccountsPage() {
                   <h2 className="m-0 mb-3 text-md font-semibold text-ink">Generate Statement</h2>
 
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    <Field label="Customer">
-                      <select
-                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                    <Select id="invoice-statement-customer" label="Customer"
                         value={statementCustomerId}
                         onChange={(event) =>
                           setStatementCustomerId(event.target.value)
@@ -3096,8 +3126,7 @@ export default function CustomerAccountsPage() {
                             {customer.name}
                           </option>
                         ))}
-                      </select>
-                    </Field>
+                      </Select>
                   </div>
 
                   <div className="mt-3">
@@ -3122,9 +3151,7 @@ export default function CustomerAccountsPage() {
                   <h2 className="m-0 mb-3 text-md font-semibold text-ink">Create Chase Letter</h2>
 
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    <Field label="Customer">
-                      <select
-                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                    <Select id="invoice-chase-customer" label="Customer"
                         value={chaseCustomerId}
                         onChange={(event) =>
                           setChaseCustomerId(event.target.value)
@@ -3136,12 +3163,9 @@ export default function CustomerAccountsPage() {
                             {customer.name}
                           </option>
                         ))}
-                      </select>
-                    </Field>
+                      </Select>
 
-                    <Field label="Level">
-                      <select
-                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                    <Select id="invoice-level" label="Level"
                         value={chaseLevel}
                         onChange={(event) =>
                           setChaseLevel(event.target.value)
@@ -3151,8 +3175,7 @@ export default function CustomerAccountsPage() {
                         <option value="reminder_2">Reminder 2</option>
                         <option value="final_reminder">Final Reminder</option>
                         <option value="account_hold">Account Hold</option>
-                      </select>
-                    </Field>
+                      </Select>
 
                     <Field label="Subject">
                       <input
@@ -3197,9 +3220,7 @@ export default function CustomerAccountsPage() {
                   <h2 className="m-0 mb-3 text-md font-semibold text-ink">Customer Purchase Order</h2>
 
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    <Field label="Customer">
-                      <select
-                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                    <Select id="invoice-po-customer" label="Customer"
                         value={customerPoCustomerId}
                         onChange={(event) =>
                           setCustomerPoCustomerId(event.target.value)
@@ -3211,8 +3232,7 @@ export default function CustomerAccountsPage() {
                             {customer.name}
                           </option>
                         ))}
-                      </select>
-                    </Field>
+                      </Select>
 
                     <Field label="PO Number">
                       <input
@@ -3275,9 +3295,7 @@ export default function CustomerAccountsPage() {
                   <h2 className="m-0 mb-3 text-md font-semibold text-ink">Supplier / Subcontractor PO</h2>
 
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    <Field label="Subcontractor">
-                      <select
-                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                    <Select id="invoice-subcontractor" label="Subcontractor"
                         value={supplierPoSubcontractorId}
                         onChange={(event) =>
                           setSupplierPoSubcontractorId(event.target.value)
@@ -3292,8 +3310,7 @@ export default function CustomerAccountsPage() {
                             {subcontractor.name}
                           </option>
                         ))}
-                      </select>
-                    </Field>
+                      </Select>
 
                     <Field label="PO Number">
                       <input
@@ -3458,9 +3475,7 @@ export default function CustomerAccountsPage() {
                   </p>
 
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    <Field label="Provider">
-                      <select
-                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                    <Select id="invoice-provider" label="Provider"
                         value={provider}
                         onChange={(event) =>
                           setProvider(event.target.value)
@@ -3472,8 +3487,7 @@ export default function CustomerAccountsPage() {
                         <option value="freeagent">FreeAgent</option>
                         <option value="csv">CSV Export</option>
                         <option value="manual">Manual</option>
-                      </select>
-                    </Field>
+                      </Select>
 
                     <Field label="Display Name">
                       <input

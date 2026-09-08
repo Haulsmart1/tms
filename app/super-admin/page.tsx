@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { Building2, Truck, Users, Banknote, FileText, type LucideIcon } from "lucide-react";
+import Stat from "../../components/Stat";
 
 export default function SuperAdminPage() {
 
@@ -59,146 +61,64 @@ export default function SuperAdminPage() {
 
 
     return (
-        <main
-            style={{
-                minHeight: "100vh",
-                padding: 30,
-                backgroundImage:
-                    "url('https://images.unsplash.com/photo-1553413077-190dd305871c')",
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-            }}
-        >
+        /* Matches /super-admin/requests. The photo background and dark scrim
+           that used to live here are gone on purpose: the console has one
+           surface language and this area was the only thing outside it. */
+        <div className="ds min-h-screen bg-canvas px-4 py-8 font-sans text-ink md:px-8">
+            <div className="mx-auto w-full max-w-6xl">
+                <header className="mb-4">
+                    <div className="text-kicker uppercase text-ink-3">Platform</div>
 
-            <div
-                style={{
-                    background: "rgba(0,0,0,0.65)",
-                    padding: 30,
-                    borderRadius: 20,
-                }}
-            >
-
-                <div style={{ color: "white", marginBottom: 30 }}>
-                    <h1 style={{ marginTop: 0, fontSize: 38 }}>
+                    <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">
                         Super Admin Dashboard
                     </h1>
 
-                    <p style={{ opacity: 0.85 }}>
+                    <p className="m-0 text-sm text-ink-3">
                         Platform management, billing and company overview.
                     </p>
+                </header>
+
+                {/* The four figures below are HARDCODED placeholders, not live
+                    platform numbers, and they were before this page moved onto
+                    the design system. Saying so on screen matters more now than
+                    it did: dressed as real console stat tiles they read as
+                    authoritative. Making this page data-driven is on the README
+                    roadmap; until then the label is what keeps it honest. */}
+                <div className="mb-2 text-xs font-medium text-warning-strong">
+                    Sample figures, not live platform data.
                 </div>
 
-
-                <div
-                    style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                        gap: 20,
-                        marginBottom: 30,
-                    }}
-                >
-
+                <div className="mb-6 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
                     {stats.map((item) => (
-
-                        <div
+                        <Stat
                             key={item.title}
-                            style={{
-                                background: "rgba(255,255,255,0.95)",
-                                padding: 20,
-                                borderRadius: 14,
-                                boxShadow: "0 8px 30px rgba(0,0,0,0.25)",
-                            }}
-                        >
-
-                            <div style={{ marginBottom: 8, color: "#333" }}>
-                                <item.icon size={28} aria-hidden />
-                            </div>
-
-                            <h2 style={{ margin: 0 }}>
-                                {item.value}
-                            </h2>
-
-                            <p
-                                style={{
-                                    margin: "4px 0 0 0",
-                                    fontWeight: 600,
-                                }}
-                            >
-                                {item.title}
-                            </p>
-
-                            <p
-                                style={{
-                                    margin: 0,
-                                    color: "#555",
-                                    fontSize: 14,
-                                }}
-                            >
-                                {item.description}
-                            </p>
-
-                        </div>
-
+                            label={item.title}
+                            value={item.value}
+                            sub={item.description}
+                        />
                     ))}
-
                 </div>
 
-
-
-                <div
-                    style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-                        gap: 20,
-                    }}
-                >
-
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     {links.map((card) => (
-
-                        <a
+                        <Link
                             key={card.href}
                             href={card.href}
-                            style={{
-                                background: "rgba(255,255,255,0.95)",
-                                padding: 22,
-                                borderRadius: 14,
-                                textDecoration: "none",
-                                color: "#111",
-                                boxShadow: "0 8px 30px rgba(0,0,0,0.25)",
-                                display: "block",
-                            }}
+                            className="block rounded-lg border border-line bg-surface p-4 no-underline shadow-sm hover:border-primary-tint-border hover:shadow-md"
                         >
+                            <span className="mb-2 block text-ink-3">
+                                <card.icon size={28} aria-hidden />
+                            </span>
 
-                            <div style={{ marginBottom: 10, color: "#333" }}>
-                                <card.icon size={30} aria-hidden />
-                            </div>
-
-                            <h2
-                                style={{
-                                    marginTop: 0,
-                                    marginBottom: 6,
-                                }}
-                            >
+                            <h2 className="m-0 mb-1 text-md font-semibold text-ink">
                                 {card.title}
                             </h2>
 
-                            <p
-                                style={{
-                                    margin: 0,
-                                    color: "#555",
-                                }}
-                            >
-                                {card.description}
-                            </p>
-
-                        </a>
-
+                            <p className="m-0 text-sm text-ink-3">{card.description}</p>
+                        </Link>
                     ))}
-
                 </div>
-
             </div>
-
-        </main>
+        </div>
     );
 }
