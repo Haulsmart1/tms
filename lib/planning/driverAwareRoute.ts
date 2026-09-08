@@ -2,7 +2,12 @@ import {
   jobsInFastPlotOrder,
   optimizeFastPlotOrderFromStart,
   type FastPlotCostLoader,
+  type FastPlotVisit,
 } from "./fastPlot";
+import {
+  buildPlanningPhysicalItinerary,
+  type PlanningServiceStop,
+} from "./physicalItinerary";
 import type { LatLng, PlanJob, PlanStop } from "./types";
 import { isRoutable } from "./waypoints";
 
@@ -13,6 +18,8 @@ export type DriverAwareRouteResult =
       ok: true;
       jobs: PlanJob[];
       physicalRoute: LatLng[];
+      orderedVisits: FastPlotVisit[];
+      serviceStops: PlanningServiceStop[];
       firstJobId: string;
       firstTravelSeconds: number;
       totalServiceSeconds: number;
@@ -60,16 +67,6 @@ function orderedStops(job: PlanJob): PlanStop[] {
   });
 }
 
-function totalServiceSeconds(jobs: PlanJob[]): number {
-  return jobs.reduce(
-    (sum, job) =>
-      sum +
-      orderedStops(job).filter((stop) => stopPoint(stop) !== null).length *
-        DRIVER_STOP_SERVICE_SECONDS,
-    0,
-  );
-}
-
 export async function optimizeDriverAwareJobOrder(input: {
   jobs: PlanJob[];
   vanPosition: LatLng;
@@ -105,6 +102,19 @@ export async function optimizeDriverAwareJobOrder(input: {
     }
   }
 
+  const itinerary = buildPlanningPhysicalItinerary(
+    routableJobs,
+    optimized.orderedVisits,
+  );
+
+  const firstServiceStop = itinerary.serviceStops[0];
+
+  if (!firstServiceStop) {
+    return { ok: false, reason: "no_routable_jobs" };
+  }
+
+  // Keep the legacy job list for existing consumers only. The physical
+  // itinerary is the canonical source of route and service ordering.
   const orderedIds = jobsInFastPlotOrder(
     input.jobs,
     optimized.route,
@@ -116,19 +126,15 @@ export async function optimizeDriverAwareJobOrder(input: {
     .map((id) => jobsById.get(id))
     .filter((job): job is PlanJob => job !== undefined);
 
-  const firstJob = jobs.find(isRoutable);
-
-  if (!firstJob) {
-    return { ok: false, reason: "no_routable_jobs" };
-  }
-
   return {
     ok: true,
     jobs,
-    physicalRoute: optimized.route,
-    firstJobId: firstJob.id,
+    physicalRoute: itinerary.visits.map((visit) => visit.point),
+    orderedVisits: optimized.orderedVisits,
+    serviceStops: itinerary.serviceStops,
+    firstJobId: firstServiceStop.jobId,
     firstTravelSeconds: optimized.firstTravelSeconds,
-    totalServiceSeconds: totalServiceSeconds(jobs),
+    totalServiceSeconds: itinerary.totalServiceSeconds,
   };
 }
 
@@ -224,6 +230,109 @@ export function buildDriverScheduleStopTasksFromRoute(
       remainingStopIds.push(stop.id);
     }
   }
+
+  if (remainingStopIds.length > 0) {
+    return {
+      ok: false,
+      reason: "physical_route_mismatch",
+      remainingStopIds,
+    };
+  }
+
+  return { ok: true, tasks };
+}
+
+/**
+ * Build scheduler tasks directly from the canonical physical itinerary.
+ *
+ * Service order comes exclusively from serviceSequenceNumber. Job ordering is
+ * used only to resolve stop metadata and to detect omitted routable stops.
+ */
+export function buildDriverScheduleStopTasksFromItinerary(
+  jobs: PlanJob[],
+  orderedVisits: FastPlotVisit[],
+  serviceStops: PlanningServiceStop[],
+): DriverPhysicalTaskBuildResult {
+  const routableJobs = jobs.filter(isRoutable);
+  const jobsById = new Map(
+    routableJobs.map((job) => [job.id, job] as const),
+  );
+  const stopsById = new Map(
+    routableJobs.flatMap((job) =>
+      orderedStops(job).map((stop) => [
+        stop.id,
+        { jobId: job.id, stop },
+      ] as const),
+    ),
+  );
+
+  const seenStopIds = new Set<string>();
+  const tasks: DriverScheduleStopTask[] = [];
+  let previousTaskId: string | null = null;
+
+  for (const [index, service] of serviceStops.entries()) {
+    if (service.serviceSequenceNumber !== index + 1) {
+      throw new Error(
+        `Canonical service sequence is not contiguous at ${service.serviceSequenceNumber}.`,
+      );
+    }
+
+    const visit = orderedVisits[service.visitSequenceNumber - 1];
+    if (!visit) {
+      throw new Error(
+        `Canonical service ${service.stopId} references missing visit ${service.visitSequenceNumber}.`,
+      );
+    }
+
+    const job = jobsById.get(service.jobId);
+    if (!job) {
+      throw new Error(
+        `Canonical service ${service.stopId} references unknown routable job ${service.jobId}.`,
+      );
+    }
+
+    const resolved = stopsById.get(service.stopId);
+    if (!resolved || resolved.jobId !== service.jobId) {
+      throw new Error(
+        `Canonical service ${service.stopId} does not belong to job ${service.jobId}.`,
+      );
+    }
+
+    const stops = orderedStops(job);
+    if (stops[service.stopIndex]?.id !== service.stopId) {
+      throw new Error(
+        `Canonical service ${service.stopId} has invalid stop index ${service.stopIndex}.`,
+      );
+    }
+
+    if (seenStopIds.has(service.stopId)) {
+      throw new Error(
+        `Canonical service stop ${service.stopId} appears more than once.`,
+      );
+    }
+
+    const taskId = `stop:${service.stopId}`;
+    const point = visit.point;
+
+    tasks.push({
+      id: taskId,
+      jobId: service.jobId,
+      locationId: `location:${point.lat},${point.lng}`,
+      point,
+      type: resolved.stop.type ?? null,
+      serviceSeconds: service.serviceSeconds,
+      precedenceIds: previousTaskId ? [previousTaskId] : [],
+    });
+
+    seenStopIds.add(service.stopId);
+    previousTaskId = taskId;
+  }
+
+  const remainingStopIds = routableJobs.flatMap((job) =>
+    orderedStops(job)
+      .filter((stop) => !seenStopIds.has(stop.id))
+      .map((stop) => stop.id),
+  );
 
   if (remainingStopIds.length > 0) {
     return {

@@ -36,10 +36,6 @@ create table public.planning_route_visits (
     tenant_id uuid not null,
     itinerary_id uuid not null,
     sequence_number integer not null,
-    job_id uuid not null references public.jobs(id)
-        on delete cascade,
-    stop_id uuid not null references public.job_stops(id)
-        on delete cascade,
     lat double precision not null,
     lng double precision not null,
     created_at timestamptz not null default now(),
@@ -48,13 +44,22 @@ create table public.planning_route_visits (
         check (sequence_number >= 1),
 
     constraint planning_route_visits_lat_check
-        check (lat between -90 and 90),
+        check (
+            lat <> 'NaN'::double precision
+            and lat between -90 and 90
+        ),
 
     constraint planning_route_visits_lng_check
-        check (lng between -180 and 180),
+        check (
+            lng <> 'NaN'::double precision
+            and lng between -180 and 180
+        ),
 
     constraint planning_route_visits_itinerary_sequence_key
         unique (itinerary_id, sequence_number),
+
+    constraint planning_route_visits_tenant_itinerary_id_key
+        unique (tenant_id, itinerary_id, id),
 
     constraint planning_route_visits_tenant_itinerary_fkey
         foreign key (tenant_id, itinerary_id)
@@ -63,10 +68,61 @@ create table public.planning_route_visits (
 );
 
 comment on table public.planning_route_visits is
-    'Ordered physical collection/delivery service visits for a canonical planning itinerary.';
+    'Ordered physical travel locations in a canonical planning itinerary.';
 
 comment on column public.planning_route_visits.sequence_number is
-    'Authoritative physical visit order: 1 is the first collection/drop after the vehicle start.';
+    'Authoritative physical travel order; one visit may contain multiple service stops.';
+
+
+create table public.planning_route_visit_stops (
+    id uuid primary key default gen_random_uuid(),
+    tenant_id uuid not null,
+    itinerary_id uuid not null,
+    visit_id uuid not null,
+    service_sequence_number integer not null,
+    visit_service_order integer not null,
+    job_id uuid not null references public.jobs(id)
+        on delete cascade,
+    stop_id uuid not null references public.job_stops(id)
+        on delete cascade,
+    service_seconds integer not null default 600,
+    created_at timestamptz not null default now(),
+
+    constraint planning_route_visit_stops_service_sequence_positive
+        check (service_sequence_number >= 1),
+
+    constraint planning_route_visit_stops_visit_service_order_positive
+        check (visit_service_order >= 1),
+
+    constraint planning_route_visit_stops_service_seconds_check
+        check (service_seconds = 600),
+
+    constraint planning_route_visit_stops_itinerary_service_sequence_key
+        unique (itinerary_id, service_sequence_number),
+
+    constraint planning_route_visit_stops_itinerary_stop_key
+        unique (itinerary_id, stop_id),
+
+    constraint planning_route_visit_stops_visit_service_order_key
+        unique (visit_id, visit_service_order),
+
+    constraint planning_route_visit_stops_tenant_itinerary_visit_fkey
+        foreign key (tenant_id, itinerary_id, visit_id)
+        references public.planning_route_visits (tenant_id, itinerary_id, id)
+        on delete cascade
+);
+
+comment on table public.planning_route_visit_stops is
+    'Ordered collection/delivery services performed at physical planning route visits.';
+
+comment on column public.planning_route_visit_stops.service_sequence_number is
+    'Authoritative global service order across the itinerary.';
+
+comment on column public.planning_route_visit_stops.visit_service_order is
+    'Authoritative service order within one physical visit.';
+
+comment on column public.planning_route_visit_stops.service_seconds is
+    'Planning service duration for every actual collection/delivery; fixed at 600 seconds.';
 
 
 create index planning_route_itineraries_tenant_date_idx
@@ -78,15 +134,22 @@ create index planning_route_itineraries_vehicle_idx
 create index planning_route_visits_tenant_itinerary_idx
     on public.planning_route_visits (tenant_id, itinerary_id);
 
-create index planning_route_visits_job_idx
-    on public.planning_route_visits (job_id);
+create index planning_route_visit_stops_tenant_itinerary_idx
+    on public.planning_route_visit_stops (tenant_id, itinerary_id);
 
-create index planning_route_visits_stop_idx
-    on public.planning_route_visits (stop_id);
+create index planning_route_visit_stops_visit_idx
+    on public.planning_route_visit_stops (visit_id);
+
+create index planning_route_visit_stops_job_idx
+    on public.planning_route_visit_stops (job_id);
+
+create index planning_route_visit_stops_stop_idx
+    on public.planning_route_visit_stops (stop_id);
 
 
 alter table public.planning_route_itineraries enable row level security;
 alter table public.planning_route_visits enable row level security;
+alter table public.planning_route_visit_stops enable row level security;
 
 
 create policy planning_route_itineraries_select_tenant
@@ -101,9 +164,16 @@ create policy planning_route_visits_select_tenant
     to authenticated
     using (public.can_access_tenant(tenant_id));
 
+create policy planning_route_visit_stops_select_tenant
+    on public.planning_route_visit_stops
+    for select
+    to authenticated
+    using (public.can_access_tenant(tenant_id));
+
 
 revoke all on public.planning_route_itineraries from anon;
 revoke all on public.planning_route_visits from anon;
+revoke all on public.planning_route_visit_stops from anon;
 
 revoke insert, update, delete
     on public.planning_route_itineraries
@@ -111,6 +181,10 @@ revoke insert, update, delete
 
 revoke insert, update, delete
     on public.planning_route_visits
+    from authenticated;
+
+revoke insert, update, delete
+    on public.planning_route_visit_stops
     from authenticated;
 
 grant select
@@ -119,6 +193,10 @@ grant select
 
 grant select
     on public.planning_route_visits
+    to authenticated;
+
+grant select
+    on public.planning_route_visit_stops
     to authenticated;
 
 grant select, insert, update, delete
@@ -127,6 +205,10 @@ grant select, insert, update, delete
 
 grant select, insert, update, delete
     on public.planning_route_visits
+    to service_role;
+
+grant select, insert, update, delete
+    on public.planning_route_visit_stops
     to service_role;
 
 
@@ -144,10 +226,15 @@ set search_path = pg_catalog, public
 as $$
 declare
     v_itinerary_id uuid;
+    v_visit_id uuid;
     v_visit jsonb;
-    v_sequence integer;
+    v_service jsonb;
+    v_visit_sequence integer;
+    v_service_sequence integer;
+    v_visit_service_order integer;
     v_job_id uuid;
     v_stop_id uuid;
+    v_service_seconds integer;
     v_lat double precision;
     v_lng double precision;
 begin
@@ -200,42 +287,39 @@ begin
     end if;
 
     /*
-     * Validate every supplied physical service visit before replacing the
-     * previous itinerary. The entire function call is transactional.
+     * Validate the complete nested physical itinerary before replacing
+     * anything. A physical visit can contain multiple collection/delivery
+     * services, but every actual service is globally ordered and is 600s.
      */
-    v_sequence := 0;
+    v_visit_sequence := 0;
+    v_service_sequence := 0;
 
     for v_visit in
         select value
         from jsonb_array_elements(p_visits)
     loop
-        v_sequence := v_sequence + 1;
+        v_visit_sequence := v_visit_sequence + 1;
 
         if jsonb_typeof(v_visit) <> 'object' then
             raise exception 'Planning route visit % must be an object.',
-                v_sequence
+                v_visit_sequence
                 using errcode = '22023';
         end if;
 
         begin
-            v_job_id := nullif(btrim(v_visit ->> 'job_id'), '')::uuid;
-            v_stop_id := nullif(btrim(v_visit ->> 'stop_id'), '')::uuid;
             v_lat := nullif(btrim(v_visit ->> 'lat'), '')::double precision;
             v_lng := nullif(btrim(v_visit ->> 'lng'), '')::double precision;
         exception
             when invalid_text_representation
               or numeric_value_out_of_range then
                 raise exception 'Planning route visit % is malformed.',
-                    v_sequence
+                    v_visit_sequence
                     using errcode = '22023';
         end;
 
-        if v_job_id is null
-           or v_stop_id is null
-           or v_lat is null
-           or v_lng is null then
+        if v_lat is null or v_lng is null then
             raise exception 'Planning route visit % is incomplete.',
-                v_sequence
+                v_visit_sequence
                 using errcode = '22023';
         end if;
 
@@ -246,32 +330,97 @@ begin
            or v_lng < -180
            or v_lng > 180 then
             raise exception 'Planning route visit % has invalid coordinates.',
-                v_sequence
+                v_visit_sequence
                 using errcode = '22023';
         end if;
 
-        if not exists (
-            select 1
-            from public.jobs j
-            join public.job_stops s
-              on s.job_id = j.id
-             and s.tenant_id = p_tenant_id
-            where j.id = v_job_id
-              and j.tenant_id = p_tenant_id
-              and j.vehicle_id = p_vehicle_id
-              and s.id = v_stop_id
-        ) then
+        if not (v_visit ? 'service_stops')
+           or jsonb_typeof(v_visit -> 'service_stops') <> 'array'
+           or jsonb_array_length(v_visit -> 'service_stops') = 0 then
             raise exception
-                'Planning route visit % does not belong to this tenant, vehicle, job and stop.',
-                v_sequence
-                using errcode = '42501';
+                'Planning route visit % requires at least one service stop.',
+                v_visit_sequence
+                using errcode = '22023';
         end if;
+
+        v_visit_service_order := 0;
+
+        for v_service in
+            select value
+            from jsonb_array_elements(v_visit -> 'service_stops')
+        loop
+            v_visit_service_order := v_visit_service_order + 1;
+            v_service_sequence := v_service_sequence + 1;
+
+            if jsonb_typeof(v_service) <> 'object' then
+                raise exception
+                    'Planning service % at visit % must be an object.',
+                    v_visit_service_order,
+                    v_visit_sequence
+                    using errcode = '22023';
+            end if;
+
+            begin
+                v_job_id :=
+                    nullif(btrim(v_service ->> 'job_id'), '')::uuid;
+
+                v_stop_id :=
+                    nullif(btrim(v_service ->> 'stop_id'), '')::uuid;
+
+                v_service_seconds :=
+                    coalesce(
+                        nullif(
+                            btrim(v_service ->> 'service_seconds'),
+                            ''
+                        )::integer,
+                        600
+                    );
+            exception
+                when invalid_text_representation
+                  or numeric_value_out_of_range then
+                    raise exception
+                        'Planning service % at visit % is malformed.',
+                        v_visit_service_order,
+                        v_visit_sequence
+                        using errcode = '22023';
+            end;
+
+            if v_job_id is null or v_stop_id is null then
+                raise exception
+                    'Planning service % at visit % is incomplete.',
+                    v_visit_service_order,
+                    v_visit_sequence
+                    using errcode = '22023';
+            end if;
+
+            if v_service_seconds <> 600 then
+                raise exception
+                    'Planning service % at visit % must consume 600 seconds.',
+                    v_visit_service_order,
+                    v_visit_sequence
+                    using errcode = '22023';
+            end if;
+
+            if not exists (
+                select 1
+                from public.jobs j
+                join public.job_stops s
+                  on s.job_id = j.id
+                 and s.tenant_id = p_tenant_id
+                where j.id = v_job_id
+                  and j.tenant_id = p_tenant_id
+                  and j.vehicle_id = p_vehicle_id
+                  and s.id = v_stop_id
+            ) then
+                raise exception
+                    'Planning service % at visit % does not belong to this tenant, vehicle, job and stop.',
+                    v_visit_service_order,
+                    v_visit_sequence
+                    using errcode = '42501';
+            end if;
+        end loop;
     end loop;
 
-    /*
-     * Upsert the lane/date itinerary. The unique key ensures all replacements
-     * for one vehicle/date address the same parent row.
-     */
     insert into public.planning_route_itineraries (
         tenant_id,
         planning_date,
@@ -296,7 +445,7 @@ begin
     returning id into v_itinerary_id;
 
     /*
-     * Serialize concurrent replacements for this exact parent.
+     * Serialize replacements for this exact vehicle/date itinerary.
      */
     perform 1
     from public.planning_route_itineraries
@@ -304,20 +453,22 @@ begin
       and tenant_id = p_tenant_id
     for update;
 
+    /*
+     * Cascading visit deletion removes the previous nested service rows.
+     */
     delete from public.planning_route_visits
     where tenant_id = p_tenant_id
       and itinerary_id = v_itinerary_id;
 
-    v_sequence := 0;
+    v_visit_sequence := 0;
+    v_service_sequence := 0;
 
     for v_visit in
         select value
         from jsonb_array_elements(p_visits)
     loop
-        v_sequence := v_sequence + 1;
+        v_visit_sequence := v_visit_sequence + 1;
 
-        v_job_id := nullif(btrim(v_visit ->> 'job_id'), '')::uuid;
-        v_stop_id := nullif(btrim(v_visit ->> 'stop_id'), '')::uuid;
         v_lat := nullif(btrim(v_visit ->> 'lat'), '')::double precision;
         v_lng := nullif(btrim(v_visit ->> 'lng'), '')::double precision;
 
@@ -325,20 +476,63 @@ begin
             tenant_id,
             itinerary_id,
             sequence_number,
-            job_id,
-            stop_id,
             lat,
             lng
         )
         values (
             p_tenant_id,
             v_itinerary_id,
-            v_sequence,
-            v_job_id,
-            v_stop_id,
+            v_visit_sequence,
             v_lat,
             v_lng
-        );
+        )
+        returning id into v_visit_id;
+
+        v_visit_service_order := 0;
+
+        for v_service in
+            select value
+            from jsonb_array_elements(v_visit -> 'service_stops')
+        loop
+            v_visit_service_order := v_visit_service_order + 1;
+            v_service_sequence := v_service_sequence + 1;
+
+            v_job_id :=
+                nullif(btrim(v_service ->> 'job_id'), '')::uuid;
+
+            v_stop_id :=
+                nullif(btrim(v_service ->> 'stop_id'), '')::uuid;
+
+            v_service_seconds :=
+                coalesce(
+                    nullif(
+                        btrim(v_service ->> 'service_seconds'),
+                        ''
+                    )::integer,
+                    600
+                );
+
+            insert into public.planning_route_visit_stops (
+                tenant_id,
+                itinerary_id,
+                visit_id,
+                service_sequence_number,
+                visit_service_order,
+                job_id,
+                stop_id,
+                service_seconds
+            )
+            values (
+                p_tenant_id,
+                v_itinerary_id,
+                v_visit_id,
+                v_service_sequence,
+                v_visit_service_order,
+                v_job_id,
+                v_stop_id,
+                v_service_seconds
+            );
+        end loop;
     end loop;
 
     return v_itinerary_id;
@@ -436,7 +630,7 @@ comment on function public.replace_planning_route_itinerary(
     uuid,
     jsonb
 ) is
-    'Atomically validates and replaces one tenant vehicle/date physical planning itinerary.';
+    'Atomically validates and replaces one tenant vehicle/date canonical physical itinerary with nested ordered service stops.';
 
 comment on function public.invalidate_planning_route_itinerary(
     uuid,

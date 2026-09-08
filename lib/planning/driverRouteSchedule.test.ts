@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { DriverAwareRouteResult } from "./driverAwareRoute";
 import { scheduleDriverAwareRoute } from "./driverRouteSchedule";
 import type { DriverRuleProfile } from "./driverRules";
+import type { FastPlotVisit } from "./fastPlot";
+import type { PlanningServiceStop } from "./physicalItinerary";
 import type { LatLng, PlanJob } from "./types";
 
 const HOUR = 60 * 60;
@@ -49,14 +51,69 @@ function route(
   jobs: PlanJob[],
   physicalRoute: LatLng[],
 ): Extract<DriverAwareRouteResult, { ok: true }> {
+  const orderedVisits: FastPlotVisit[] = physicalRoute.map((point, index) => ({
+    key: `fixture:${index + 1}:${point.lat},${point.lng}`,
+    point,
+    requirements: {},
+  }));
+
+  const progress = new Map<string, number>(
+    jobs.map((value) => [value.id, 0] as const),
+  );
+  const serviceStops: PlanningServiceStop[] = [];
+
+  for (const [visitIndex, point] of physicalRoute.entries()) {
+    let advanced = true;
+    let visitServiceOrder = 0;
+
+    while (advanced) {
+      advanced = false;
+
+      for (const value of jobs) {
+        const stops = [...value.stops].sort(
+          (left, right) =>
+            left.stop_order - right.stop_order ||
+            left.id.localeCompare(right.id),
+        );
+        const stopIndex = progress.get(value.id) ?? 0;
+        const stop = stops[stopIndex];
+
+        if (
+          !stop ||
+          stop.lat !== point.lat ||
+          stop.lng !== point.lng
+        ) {
+          continue;
+        }
+
+        visitServiceOrder += 1;
+        serviceStops.push({
+          serviceSequenceNumber: serviceStops.length + 1,
+          visitSequenceNumber: visitIndex + 1,
+          visitServiceOrder,
+          jobId: value.id,
+          stopId: stop.id,
+          stopIndex,
+          stopOrder: stop.stop_order,
+          serviceSeconds: 600,
+        });
+
+        progress.set(value.id, stopIndex + 1);
+        advanced = true;
+      }
+    }
+  }
+
   return {
     ok: true,
     jobs,
     physicalRoute,
-    firstJobId: jobs[0].id,
+    orderedVisits,
+    serviceStops,
+    firstJobId: serviceStops[0]?.jobId ?? jobs[0]?.id ?? "",
     firstTravelSeconds: HOUR,
-    totalServiceSeconds: jobs.reduce(
-      (sum, value) => sum + value.stops.length * 600,
+    totalServiceSeconds: serviceStops.reduce(
+      (sum, service) => sum + service.serviceSeconds,
       0,
     ),
   };
@@ -127,6 +184,120 @@ describe("scheduleDriverAwareRoute", () => {
       expect(result.schedule.status).toBe("review_required");
       expect(result.schedule.planningAssumption).toBe(true);
     }
+  });
+
+  it("preserves canonical interleaved service order independently of job order", () => {
+    const a = job("a", [[1, 1], [4, 4]]);
+    const b = job("b", [[2, 2], [3, 3]]);
+
+    const canonical = route(
+      [a, b],
+      [
+        { lat: 1, lng: 1 },
+        { lat: 2, lng: 2 },
+        { lat: 3, lng: 3 },
+        { lat: 4, lng: 4 },
+      ],
+    );
+
+    canonical.serviceStops = [
+      {
+        serviceSequenceNumber: 1,
+        visitSequenceNumber: 2,
+        visitServiceOrder: 1,
+        jobId: "b",
+        stopId: "b-1",
+        stopIndex: 0,
+        stopOrder: 1,
+        serviceSeconds: 600,
+      },
+      {
+        serviceSequenceNumber: 2,
+        visitSequenceNumber: 1,
+        visitServiceOrder: 1,
+        jobId: "a",
+        stopId: "a-1",
+        stopIndex: 0,
+        stopOrder: 1,
+        serviceSeconds: 600,
+      },
+      {
+        serviceSequenceNumber: 3,
+        visitSequenceNumber: 3,
+        visitServiceOrder: 1,
+        jobId: "b",
+        stopId: "b-2",
+        stopIndex: 1,
+        stopOrder: 2,
+        serviceSeconds: 600,
+      },
+      {
+        serviceSequenceNumber: 4,
+        visitSequenceNumber: 4,
+        visitServiceOrder: 1,
+        jobId: "a",
+        stopId: "a-2",
+        stopIndex: 1,
+        stopOrder: 2,
+        serviceSeconds: 600,
+      },
+    ];
+
+    const result = scheduleDriverAwareRoute({
+      route: canonical,
+      planningProfile: "tramper",
+      ruleProfile: rules(),
+      startLocationId: "van",
+      baseLocationId: "base",
+      activityDataAvailable: false,
+      travelSecondsBetween: travel(),
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.schedule.completedTaskIds).toEqual([
+        "stop:b-1",
+        "stop:a-1",
+        "stop:b-2",
+        "stop:a-2",
+      ]);
+      expect(result.tasks.map((task) => task.point)).toEqual([
+        { lat: 2, lng: 2 },
+        { lat: 1, lng: 1 },
+        { lat: 3, lng: 3 },
+        { lat: 4, lng: 4 },
+      ]);
+      expect(result.tasks.every((task) => task.serviceSeconds === 600)).toBe(
+        true,
+      );
+    }
+  });
+
+  it("rejects canonical service stops supplied out of sequence", () => {
+    const a = job("a", [[1, 1], [2, 2]]);
+    const canonical = route(
+      [a],
+      [
+        { lat: 1, lng: 1 },
+        { lat: 2, lng: 2 },
+      ],
+    );
+
+    canonical.serviceStops = [
+      canonical.serviceStops[1],
+      canonical.serviceStops[0],
+    ];
+
+    expect(() =>
+      scheduleDriverAwareRoute({
+        route: canonical,
+        planningProfile: "tramper",
+        ruleProfile: rules(),
+        startLocationId: "van",
+        activityDataAvailable: false,
+        travelSecondsBetween: travel(),
+      }),
+    ).toThrow("Canonical service sequence is not contiguous");
   });
 
   it("passes missing directed travel through as unschedulable", () => {

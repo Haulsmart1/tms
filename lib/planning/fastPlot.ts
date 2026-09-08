@@ -24,6 +24,7 @@ export type AnchoredFastPlotResult =
   | {
       ok: true;
       route: LatLng[];
+      orderedVisits: FastPlotVisit[];
       firstTravelSeconds: number;
     }
   | {
@@ -723,7 +724,7 @@ async function beamSearchFastPlotOrder(
   counts: Map<string, number>,
   table: FastPlotCostTable,
   firstVisit: FastPlotVisit | null = null
-): Promise<LatLng[] | null> {
+): Promise<FastPlotVisit[] | null> {
   const clusters = buildFastPlotClusters(visits);
   const initialProgress = new Map<string, number>();
   const initialVisited = new Set<string>();
@@ -810,7 +811,7 @@ async function beamSearchFastPlotOrder(
 
   if (!best) return null;
 
-  return best.route.map((visit) => visit.point);
+  return best.route;
 }
 
 function sparseTransitionPenalty(
@@ -939,7 +940,7 @@ async function sparseFastPlotOrder(
   counts: Map<string, number>,
   loadCosts: FastPlotCostLoader,
   firstVisit: FastPlotVisit | null = null
-): Promise<LatLng[] | null> {
+): Promise<FastPlotVisit[] | null> {
   const clusters = buildFastPlotClusters(visits);
   const progress = new Map<string, number>();
   const visited = new Set<string>();
@@ -1069,7 +1070,7 @@ async function sparseFastPlotOrder(
     currentCluster = chosenCluster;
   }
 
-  return route.map((visit) => visit.point);
+  return route;
 }
 
 /** Build a low-cost physical route while enforcing every job's stop_order.
@@ -1183,14 +1184,15 @@ export async function optimizeFastPlotOrderFromStart(
     return {
       ok: true,
       route: [first.visit.point],
+      orderedVisits: [first.visit],
       firstTravelSeconds: first.travelSeconds,
     };
   }
 
-  let route: LatLng[] | null;
+  let orderedVisits: FastPlotVisit[] | null;
 
   if (visits.length > FAST_PLOT_COMPLETE_MATRIX_MAX_VISITS) {
-    route = await sparseFastPlotOrder(
+    orderedVisits = await sparseFastPlotOrder(
       visits,
       counts,
       loadCosts,
@@ -1206,7 +1208,7 @@ export async function optimizeFastPlotOrderFromStart(
       return { ok: false, reason: "route_cost_unavailable" };
     }
 
-    route = await beamSearchFastPlotOrder(
+    orderedVisits = await beamSearchFastPlotOrder(
       visits,
       counts,
       table,
@@ -1214,13 +1216,14 @@ export async function optimizeFastPlotOrderFromStart(
     );
   }
 
-  if (!route || route.length !== visits.length) {
+  if (!orderedVisits || orderedVisits.length !== visits.length) {
     return { ok: false, reason: "route_cost_unavailable" };
   }
 
   return {
     ok: true,
-    route,
+    route: orderedVisits.map((visit) => visit.point),
+    orderedVisits,
     firstTravelSeconds: first.travelSeconds,
   };
 }
@@ -1251,7 +1254,9 @@ export async function optimizeFastPlotOrder(
       loadCosts
     );
 
-    return optimized ?? fallbackFastPlotOrder(jobs);
+    return optimized
+      ? optimized.map((visit) => visit.point)
+      : fallbackFastPlotOrder(jobs);
   }
 
   const table = await loadFastPlotCostTable(
@@ -1269,5 +1274,7 @@ export async function optimizeFastPlotOrder(
     table
   );
 
-  return optimized ?? fallbackFastPlotOrder(jobs);
+  return optimized
+    ? optimized.map((visit) => visit.point)
+    : fallbackFastPlotOrder(jobs);
 }
