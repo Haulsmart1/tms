@@ -12,8 +12,11 @@ import PodLink from "../components/PodLink";
 import Badge, { type Tone } from "../../components/Badge";
 import Button from "../../components/Button";
 import Field from "../../components/Field";
+import MessageBanner from "../../components/MessageBanner";
+import Skeleton from "../../components/Skeleton";
 import Stat from "../../components/Stat";
 import Textarea from "../../components/Textarea";
+import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
 
 const POD_BUCKET = "pod-files";
 const MAX_FILE_SIZE = 15 * 1024 * 1024;
@@ -99,6 +102,10 @@ export default function PodPage() {
   const [savingStopId, setSavingStopId] = useState<string | null>(null);
   const [uploadingKey, setUploadingKey] = useState("");
   const [loading, setLoading] = useState(true);
+  // Stays true across refetches so a token refresh cannot flash a skeleton over
+  // POD rows already on screen. See lib/loading/skeletonVisibility.ts.
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
 
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<PodFilter>("all");
@@ -128,7 +135,9 @@ export default function PodPage() {
       setJobs([]);
       setEvidence([]);
       setForms({});
+      setDataTenantId(activeTenantId);
       setLoading(false);
+      setHasLoaded(true);
       return;
     }
 
@@ -223,18 +232,31 @@ export default function PodPage() {
       }
 
       setForms(nextForms);
+      setDataTenantId(activeTenantId);
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "Unable to load POD records."
       );
     } finally {
       setLoading(false);
+      setHasLoaded(true);
     }
   }, [activeTenantId, clearMessages, supabase]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  /* One region, one flag: the job list is the only thing here that renders
+     tenant data. The filter <select> feeds a form control, which
+     skeletonVisibility excludes. */
+  const showSkeleton = shouldShowSkeleton({
+    tenantStatus: tenant.status,
+    fetching: loading,
+    hasData: hasLoaded,
+    activeTenantId,
+    dataTenantId,
+  });
 
   function updateForm(
     stopId: string,
@@ -1047,17 +1069,9 @@ export default function PodPage() {
             />
           </section>
 
-          {errorMessage ? (
-            <div className="mb-4 rounded-lg border border-danger-border bg-danger-tint p-3 text-sm text-danger-strong">
-              {errorMessage}
-            </div>
-          ) : null}
+          <MessageBanner tone="danger">{errorMessage}</MessageBanner>
 
-          {message ? (
-            <div className="mb-4 rounded-lg border border-success-border bg-success-tint p-3 text-sm text-success-strong">
-              {message}
-            </div>
-          ) : null}
+          <MessageBanner tone="success">{message}</MessageBanner>
 
           <section className="mb-4 flex flex-wrap items-center gap-3">
             <input
@@ -1097,9 +1111,27 @@ export default function PodPage() {
             </label>
           </section>
 
-          {loading ? (
-            <div className="rounded-lg border border-line bg-surface p-8 text-center text-sm text-ink-3">
-              Loading POD records...
+          {showSkeleton ? (
+            <div aria-busy>
+              <span className="sr-only" role="status">
+                Loading POD records
+              </span>
+
+              {[0, 1, 2, 3, 4, 5].map((index) => (
+                <section
+                  key={`pod-skeleton-${index}`}
+                  className="mb-2 rounded-lg border border-line bg-surface px-3 py-2.5 shadow-sm"
+                >
+                  <div className="grid gap-3 md:grid-cols-[minmax(145px,1.1fr)_minmax(180px,1.5fr)_100px_115px_160px_auto] md:items-center">
+                    <Skeleton w="12ch" h="0.875rem" />
+                    <Skeleton w="16ch" h="0.875rem" />
+                    <Skeleton w="6ch" h="1.375rem" pill />
+                    <Skeleton w="7ch" h="0.875rem" />
+                    <Skeleton w="10ch" h="0.875rem" />
+                    <Skeleton w="5rem" h="2rem" />
+                  </div>
+                </section>
+              ))}
             </div>
           ) : filteredJobs.length === 0 ? (
             <div className="rounded-lg border border-line bg-surface p-8 text-center text-sm text-ink-3">

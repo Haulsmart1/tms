@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
+import Skeleton from "../../components/Skeleton";
 import TenantGate from "../components/TenantGate";
 import TrackingRail from "./TrackingRail";
 import TrackingHeader from "./TrackingHeader";
@@ -360,8 +361,45 @@ export default function TrackingPage() {
           </h1>
 
           {loading ? (
-            <div className="rounded-lg border border-line bg-surface p-6 shadow-sm">
-              <p className="text-sm text-ink-3">Loading jobs…</p>
+            /* Mirrors the loaded two-column shape (rail + detail) rather than a
+               single card, so the layout does not jump when the data lands.
+               `loading` is already the page's own first-load flag: it is set
+               only when load() is called with showSkeleton, so the 30s poll
+               refreshes in place without flashing this. */
+            <div
+              aria-busy
+              className="grid items-start gap-4 lg:grid-cols-[300px_minmax(0,1fr)]"
+            >
+              <span className="sr-only" role="status">
+                Loading jobs on the road
+              </span>
+
+              <div className="grid gap-2">
+                {[0, 1, 2, 3, 4].map((index) => (
+                  <div
+                    key={`rail-skeleton-${index}`}
+                    className="rounded-lg border border-line bg-surface p-3 shadow-sm"
+                  >
+                    <Skeleton w="11ch" h="0.875rem" />
+                    <div className="mt-1.5">
+                      <Skeleton w="15ch" h="0.75rem" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid min-w-0 gap-3">
+                <div className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+                  <Skeleton w="14ch" h="1rem" />
+                  <div className="mt-2">
+                    <Skeleton w="22ch" h="0.75rem" />
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-line bg-surface shadow-sm">
+                  <Skeleton w="100%" h="18rem" />
+                </div>
+              </div>
             </div>
           ) : refreshFailed && neverLoaded ? (
             <div className="rounded-lg border border-danger-border bg-danger-tint p-6 shadow-sm">

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "../../../lib/supabase/browser";
+import MessageBanner from "../../../components/MessageBanner";
+import Skeleton from "../../../components/Skeleton";
 
 type ProfileRow = {
     id: string;
@@ -67,61 +69,84 @@ export default function SuperAdminUsersPage() {
     }, []);
 
     return (
-        <main
-            style={{
-                minHeight: "100vh",
-                padding: 30,
-                backgroundImage:
-                    "url('https://images.unsplash.com/photo-1553413077-190dd305871c')",
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-            }}
-        >
-            <div
-                style={{
-                    background: "rgba(0,0,0,0.65)",
-                    padding: 30,
-                    borderRadius: 20,
-                }}
-            >
-                <h1 style={{ color: "white", marginTop: 0 }}>All Users</h1>
+        /* Matches /super-admin/requests. The photo background and dark scrim
+           that used to live here are gone on purpose: the console has one
+           surface language and this area was the only thing outside it. */
+        <div className="ds min-h-screen bg-canvas px-4 py-8 font-sans text-ink md:px-8">
+            <div className="mx-auto w-full max-w-6xl">
+                <header className="mb-4">
+                    <div className="text-kicker uppercase text-ink-3">Platform</div>
 
-                {message ? (
-                    <div style={{ background: "white", padding: 20, borderRadius: 14, marginBottom: 16 }}>
-                        {message}
-                    </div>
-                ) : null}
+                    <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">
+                        All Users
+                    </h1>
+
+                    <p className="m-0 text-sm text-ink-3">
+                        Every user profile across every tenant.
+                    </p>
+                </header>
+
+                <MessageBanner tone="danger">{message}</MessageBanner>
 
                 {loading ? (
-                    <div style={{ background: "white", padding: 20, borderRadius: 14, marginBottom: 16 }}>
-                        Loading...
-                    </div>
-                ) : null}
+                    <div aria-busy className="grid gap-3">
+                        <span className="sr-only" role="status">
+                            Loading users
+                        </span>
 
-                {!loading && users.length === 0 ? (
-                    <div style={{ background: "white", padding: 20, borderRadius: 14, marginBottom: 16 }}>
+                        {[0, 1, 2, 3].map((index) => (
+                            <div
+                                key={`user-skeleton-${index}`}
+                                className="rounded-lg border border-line bg-surface p-4 shadow-sm"
+                            >
+                                <Skeleton w="12ch" h="1rem" />
+
+                                <div className="mt-2 grid gap-1">
+                                    <Skeleton w="20ch" h="0.75rem" />
+                                    <Skeleton w="10ch" h="0.75rem" />
+                                    <Skeleton w="24ch" h="0.75rem" />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                ) : users.length === 0 ? (
+                    <div className="rounded-lg bg-surface-2 p-8 text-center text-sm text-ink-3">
                         No users found.
                     </div>
-                ) : null}
+                ) : (
+                    <div className="grid gap-3">
+                        {users.map((user) => (
+                            <div
+                                key={user.id}
+                                className="rounded-lg border border-line bg-surface p-4 shadow-sm"
+                            >
+                                <h3 className="m-0 text-md font-semibold text-ink">
+                                    {user.full_name || user.id}
+                                </h3>
 
-                <div style={{ display: "grid", gap: 16 }}>
-                    {users.map((user) => (
-                        <div
-                            key={user.id}
-                            style={{
-                                background: "white",
-                                padding: 20,
-                                borderRadius: 14,
-                            }}
-                        >
-                            <h3 style={{ marginTop: 0 }}>{user.full_name || user.id}</h3>
-                            <div style={{ opacity: 0.7 }}>Tenant: {user.tenant_id || "-"}</div>
-                            <div style={{ opacity: 0.7 }}>Role: {user.role || "-"}</div>
-                            <div style={{ opacity: 0.7 }}>User ID: {user.id}</div>
-                        </div>
-                    ))}
-                </div>
+                                <div className="mt-2 grid gap-0.5 text-sm text-ink-3">
+                                    <div>
+                                        Tenant:{" "}
+                                        <span className="font-mono text-ink-2">
+                                            {user.tenant_id || "-"}
+                                        </span>
+                                    </div>
+
+                                    <div>
+                                        Role:{" "}
+                                        <span className="text-ink-2">{user.role || "-"}</span>
+                                    </div>
+
+                                    <div>
+                                        User ID:{" "}
+                                        <span className="font-mono text-ink-2">{user.id}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
-        </main>
+        </div>
     );
 }

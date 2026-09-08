@@ -5,8 +5,10 @@ import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
 import { applyTenantFilter } from "../../lib/tenant/filter";
+import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
 import Button from "../../components/Button";
 import Card from "../../components/Card";
+import Skeleton from "../../components/Skeleton";
 import MessageBanner from "../../components/MessageBanner";
 import {
   Package, CircleCheck, Calendar, Banknote, Receipt, TrendingUp, Truck, MapPin,
@@ -313,6 +315,13 @@ export default function StatsPage() {
     "loading" | "ready"
   >("loading");
 
+  /* hasLoaded stays true across refetches so a period change or a token
+     refresh cannot flash a skeleton over figures already on screen;
+     dataTenantId is what still lets a TENANT switch show one. Both feed
+     shouldShowSkeleton. See lib/loading/skeletonVisibility.ts. */
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
+
   const [message, setMessage] = useState("");
   const [period, setPeriod] =
     useState<PeriodKey>("month");
@@ -566,7 +575,9 @@ export default function StatsPage() {
             []) as ActivityLog[]
         );
 
+        setDataTenantId(tenantId);
         setStatus("ready");
+        setHasLoaded(true);
       } catch (error) {
         setMessage(
           error instanceof Error
@@ -575,10 +586,19 @@ export default function StatsPage() {
         );
 
         setStatus("ready");
+        setHasLoaded(true);
       }
     },
     [supabase]
   );
+
+  const showSkeleton = shouldShowSkeleton({
+    tenantStatus: tenant.status,
+    fetching: status === "loading",
+    hasData: hasLoaded,
+    activeTenantId: tenant.activeTenantId,
+    dataTenantId,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -1042,10 +1062,35 @@ export default function StatsPage() {
             ) : null}
           </MessageBanner>
 
-          {status === "loading" ? (
-            <Card>
-              Loading statistics...
-            </Card>
+          {showSkeleton ? (
+            <div aria-busy>
+              <span className="sr-only" role="status">
+                Loading statistics
+              </span>
+
+              {/* The real view opens with a period button row and a KPI tile
+                  grid; those two are what the reader is waiting on. The
+                  leaderboards below them are left out rather than guessed at. */}
+              <div className="mb-4 flex flex-wrap gap-2">
+                {[0, 1, 2, 3].map((index) => (
+                  <Skeleton key={`period-skeleton-${index}`} w="5rem" h="2rem" />
+                ))}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+                {[0, 1, 2, 3, 4, 5, 6, 7].map((index) => (
+                  <div
+                    key={`stat-skeleton-${index}`}
+                    className="rounded-lg border border-line bg-surface p-4 shadow-sm"
+                  >
+                    <Skeleton w="8ch" h="0.75rem" />
+                    <div className="mt-2">
+                      <Skeleton w="6ch" h="1.5rem" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           ) : (
             <>
               <div className="mb-4 flex flex-wrap gap-2">

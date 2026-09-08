@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Skeleton from "../../../components/Skeleton";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isDriverJobForDate } from "../../../lib/driver/dashboardJobs";
 
@@ -102,13 +103,58 @@ export default function DriverDashboardPage() {
   }, [data]);
 
   if (loading) {
-    return <main style={styles.page}>Loading driver dashboard...</main>;
+    return (
+      <main className={styles.page} aria-busy>
+        <div className={styles.container}>
+          <span className="sr-only" role="status">
+            Loading driver dashboard
+          </span>
+
+          <header className={styles.header}>
+            <Skeleton w="9ch" h="0.625rem" />
+            <div className="mt-1">
+              <Skeleton w="14ch" h="1.25rem" />
+            </div>
+            <div className="mt-2">
+              <Skeleton w="12ch" h="0.75rem" />
+            </div>
+          </header>
+
+          <section className={styles.card}>
+            <Skeleton w="10ch" h="1rem" />
+
+            <div className={styles.complianceGrid}>
+              {[0, 1, 2, 3].map((index) => (
+                <div
+                  key={`compliance-skeleton-${index}`}
+                  className="grid gap-1.5 rounded-lg border border-line bg-surface-2 p-3.5"
+                >
+                  <Skeleton w="7ch" h="0.625rem" />
+                  <Skeleton w="9ch" h="0.875rem" />
+                </div>
+              ))}
+            </div>
+
+            <div className={styles.infoGrid}>
+              {[0, 1, 2, 3].map((index) => (
+                <div key={`info-skeleton-${index}`}>
+                  <Skeleton w="6ch" h="0.625rem" />
+                  <div className="mt-1">
+                    <Skeleton w="10ch" h="0.875rem" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      </main>
+    );
   }
 
   if (!data?.driver) {
     return (
-      <main style={styles.page}>
-        <div style={styles.card}>
+      <main className={styles.page}>
+        <div className={styles.card}>
           <h1>Driver Dashboard</h1>
           <p>{message || "Driver access unavailable."}</p>
         </div>
@@ -119,21 +165,21 @@ export default function DriverDashboardPage() {
   const driver = data.driver;
 
   return (
-    <main style={styles.page}>
-      <div style={styles.container}>
-        <header style={styles.header}>
+    <main className={styles.page}>
+      <div className={styles.container}>
+        <header className={styles.header}>
           <div>
-            <p style={styles.eyebrow}>Driver Portal</p>
-            <h1 style={styles.title}>{driver.name}</h1>
-            <p style={styles.subtitle}>
+            <p className={styles.eyebrow}>Driver Portal</p>
+            <h1 className={styles.title}>{driver.name}</h1>
+            <p className={styles.subtitle}>
               {todaysJobs.length} job{todaysJobs.length === 1 ? "" : "s"} today
             </p>
           </div>
         </header>
 
-        <section style={styles.card}>
-          <h2 style={styles.sectionTitle}>Compliance</h2>
-          <div style={styles.complianceGrid}>
+        <section className={styles.card}>
+          <h2 className={styles.sectionTitle}>Compliance</h2>
+          <div className={styles.complianceGrid}>
             <Compliance label="Licence" date={driver.licence_expiry} />
             <Compliance label="Licence Check" date={driver.licence_check_due} />
             <Compliance label="Tachograph" date={driver.tachograph_expiry} />
@@ -145,7 +191,7 @@ export default function DriverDashboardPage() {
             <Compliance label="ADR" date={driver.adr_expiry} />
           </div>
 
-          <div style={styles.infoGrid}>
+          <div className={styles.infoGrid}>
             <Info
               label="Licence Points"
               value={String(driver.points_total ?? driver.licence_points ?? 0)}
@@ -163,28 +209,28 @@ export default function DriverDashboardPage() {
           </div>
         </section>
 
-        <section style={styles.card}>
-          <h2 style={styles.sectionTitle}>Today's Jobs</h2>
+        <section className={styles.card}>
+          <h2 className={styles.sectionTitle}>Today's Jobs</h2>
 
           {todaysJobs.length === 0 ? (
-            <p style={styles.muted}>No jobs assigned for today.</p>
+            <p className={styles.muted}>No jobs assigned for today.</p>
           ) : (
-            <div style={styles.listGrid}>
+            <div className={styles.listGrid}>
               {todaysJobs.map((job) => (
                 <Link
                   key={job.id}
                   href={`/driver/jobs/${job.id}`}
-                  style={styles.jobLink}
+                  className={styles.jobLink}
                 >
-                  <article style={styles.listCard}>
-                    <div style={styles.rowBetween}>
+                  <article className={styles.listCard}>
+                    <div className={styles.rowBetween}>
                       <strong>{job.reference || "Job"}</strong>
-                      <span style={styles.badge}>
+                      <span className={styles.badge}>
                         {job.status || "Pending"}
                       </span>
                     </div>
 
-                    <div style={styles.infoGrid}>
+                    <div className={styles.infoGrid}>
                       <Info
                         label="Reference"
                         value={job.customer_reference}
@@ -208,12 +254,12 @@ export default function DriverDashboardPage() {
                     </div>
 
                     {job.notes ? (
-                      <p style={styles.muted}>
+                      <p className={styles.muted}>
                         {job.notes}
                       </p>
                     ) : null}
 
-                    <div style={styles.openJob}>
+                    <div className={styles.openJob}>
                       Open job →
                     </div>
                   </article>
@@ -223,31 +269,31 @@ export default function DriverDashboardPage() {
           )}
         </section>
 
-        <section style={styles.card}>
-          <h2 style={styles.sectionTitle}>Recent Assigned Jobs</h2>
-          <div style={styles.listGrid}>
+        <section className={styles.card}>
+          <h2 className={styles.sectionTitle}>Recent Assigned Jobs</h2>
+          <div className={styles.listGrid}>
             {data.jobs.slice(0, 20).map((job) => (
               <Link
                 key={job.id}
                 href={`/driver/jobs/${job.id}`}
-                style={styles.jobLink}
+                className={styles.jobLink}
               >
-                <article style={styles.listCard}>
-                  <div style={styles.rowBetween}>
+                <article className={styles.listCard}>
+                  <div className={styles.rowBetween}>
                     <strong>{job.reference || "Job"}</strong>
-                    <span style={styles.badge}>
+                    <span className={styles.badge}>
                       {job.status || "Pending"}
                     </span>
                   </div>
 
-                  <p style={styles.muted}>
+                  <p className={styles.muted}>
                     {formatDate(
                       job.job_date ||
                         job.scheduled_date,
                     )}
                   </p>
 
-                  <div style={styles.openJob}>
+                  <div className={styles.openJob}>
                     Open job →
                   </div>
                 </article>
@@ -270,10 +316,10 @@ function Compliance({
   const result = getCompliance(date);
 
   return (
-    <div style={complianceCard(result.level)}>
-      <span style={styles.smallLabel}>{label}</span>
+    <div className={complianceCard(result.level)}>
+      <span className={styles.smallLabel}>{label}</span>
       <strong>{formatDate(date)}</strong>
-      <span style={styles.muted}>{result.label}</span>
+      <span className={styles.muted}>{result.label}</span>
     </div>
   );
 }
@@ -301,8 +347,8 @@ function Info({
 }) {
   return (
     <div>
-      <span style={styles.smallLabel}>{label}</span>
-      <strong style={styles.infoValue}>{value || "—"}</strong>
+      <span className={styles.smallLabel}>{label}</span>
+      <strong className={styles.infoValue}>{value || "—"}</strong>
     </div>
   );
 }
@@ -313,107 +359,43 @@ function formatDate(value: string | null | undefined) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-GB");
 }
 
+/* Token classes, not inline styles: this page used to carry its own light
+   palette (#f8fafc canvas, #0f172a ink, #2563eb accent) which could not follow
+   the theme. Everything below is the same layout expressed in design-system
+   tokens, so the page now renders correctly in both themes and is listed in
+   lib/nav/themeableRoutes.ts. */
 function complianceCard(level: "ok" | "amber" | "red") {
-  return {
-    borderRadius: 12,
-    padding: 14,
-    border:
-      level === "red"
-        ? "2px solid #dc2626"
-        : level === "amber"
-          ? "2px solid #f59e0b"
-          : "1px solid #e2e8f0",
-    background:
-      level === "red"
-        ? "#fff1f2"
-        : level === "amber"
-          ? "#fffbeb"
-          : "#f8fafc",
-    display: "grid",
-    gap: 5,
-  } as React.CSSProperties;
+  const tone =
+    level === "red"
+      ? "border-2 border-danger bg-danger-tint"
+      : level === "amber"
+        ? "border-2 border-warning bg-warning-tint"
+        : "border border-line bg-surface-2";
+
+  return `grid gap-1.5 rounded-lg p-3.5 ${tone}`;
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  page: {
-    minHeight: "100vh",
-    padding: "32px 20px 60px",
-    background: "#f8fafc",
-    color: "#0f172a",
-  },
-  container: { maxWidth: 1200, margin: "0 auto" },
-  header: { marginBottom: 24 },
-  eyebrow: {
-    margin: "0 0 6px",
-    color: "#2563eb",
-    fontSize: 12,
-    fontWeight: 900,
-    textTransform: "uppercase",
-  },
-  title: { margin: 0, fontSize: 42 },
-  subtitle: { margin: "8px 0 0", color: "#64748b" },
-  card: {
-    background: "#ffffff",
-    border: "1px solid #e2e8f0",
-    borderRadius: 18,
-    padding: 22,
-    marginBottom: 22,
-  },
-  sectionTitle: { marginTop: 0 },
-  complianceGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-    gap: 12,
-    marginBottom: 18,
-  },
-  infoGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-    gap: 12,
-    marginTop: 14,
-  },
-  listGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-    gap: 14,
-  },
-  jobLink: {
-    display: "block",
-    color: "inherit",
-    textDecoration: "none",
-  },
-  openJob: {
-    marginTop: 14,
-    color: "#2563eb",
-    fontSize: 13,
-    fontWeight: 900,
-  },
-  listCard: {
-    border: "1px solid #e2e8f0",
-    borderRadius: 14,
-    padding: 16,
-    background: "#f8fafc",
-  },
-  rowBetween: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  badge: {
-    borderRadius: 999,
-    padding: "5px 8px",
-    background: "#e2e8f0",
-    fontSize: 11,
-    fontWeight: 800,
-  },
-  smallLabel: {
-    display: "block",
-    color: "#64748b",
-    fontSize: 10,
-    fontWeight: 900,
-    textTransform: "uppercase",
-  },
-  infoValue: { display: "block", marginTop: 4 },
-  muted: { color: "#64748b", fontSize: 12 },
-};
+const styles = {
+  page: "ds min-h-screen bg-canvas px-5 pb-14 pt-8 font-sans text-ink",
+  container: "mx-auto max-w-[1200px]",
+  header: "mb-6",
+  eyebrow: "m-0 mb-1.5 text-kicker uppercase text-ink-3",
+  title: "m-0 text-xl font-semibold tracking-tight text-ink",
+  subtitle: "m-0 mt-2 text-sm text-ink-3",
+  card: "mb-5 rounded-lg border border-line bg-surface p-5 shadow-sm",
+  sectionTitle: "m-0 mb-3 text-md font-semibold text-ink",
+  complianceGrid:
+    "mb-4 grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3",
+  infoGrid: "mt-3.5 grid grid-cols-2 gap-3",
+  listGrid: "grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-3.5",
+  jobLink: "block text-inherit no-underline",
+  openJob: "mt-3.5 text-xs font-semibold text-primary-deep",
+  listCard: "rounded-lg border border-line bg-surface-2 p-4",
+  rowBetween: "flex justify-between gap-3",
+  badge:
+    "rounded-full border border-line bg-surface px-2 py-1 text-[11px] font-semibold text-ink-2",
+  smallLabel: "block text-kicker uppercase text-ink-3",
+  infoValue: "mt-1 block text-ink",
+  muted: "m-0 text-xs text-ink-3",
+} as const;
 

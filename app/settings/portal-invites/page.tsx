@@ -5,6 +5,7 @@ import { useTenant } from "../../components/TenantProvider";
 import TenantGate from "../../components/TenantGate";
 import MessageBanner from "../../../components/MessageBanner";
 import Card from "../../../components/Card";
+import Select from "../../../components/Select";
 import Button from "../../../components/Button";
 import { tenantDataView } from "../../../lib/loading/tenantDataView";
 
@@ -213,8 +214,10 @@ export default function PortalInvitesPage() {
               <section className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm">
                 <h2 className="mb-3 text-md font-semibold text-ink">Invite Driver</h2>
 
-                <select
-                  className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink mb-3"
+                <Select
+                  id="portal-invite-driver"
+                  label="Driver"
+                  wrapperClassName="mb-3"
                   value={driverId}
                   onChange={(e) => setDriverId(e.target.value)}
                   disabled={!controlsEnabled}
@@ -233,7 +236,7 @@ export default function PortalInvitesPage() {
                           : ""}
                       </option>
                     ))}
-                </select>
+                </Select>
 
                 <Button
                   disabled={busy || !controlsEnabled || !driverId}
@@ -253,8 +256,9 @@ export default function PortalInvitesPage() {
                 <h2 className="mb-3 text-md font-semibold text-ink">Invite Subcontractor User</h2>
 
                 <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  <select
-                    className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                  <Select
+                    id="portal-invite-subcontractor"
+                    label="Subcontractor"
                     value={subcontractorId}
                     onChange={(e) => {
                       setSubcontractorId(e.target.value);
@@ -268,10 +272,11 @@ export default function PortalInvitesPage() {
                         {sub.name}
                       </option>
                     ))}
-                  </select>
+                  </Select>
 
-                  <select
-                    className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                  <Select
+                    id="portal-invite-employee"
+                    label="Directly-Employed Person"
                     value={employeeId}
                     onChange={(e) => setEmployeeId(e.target.value)}
                     disabled={!controlsEnabled || !subcontractorId}
@@ -288,10 +293,11 @@ export default function PortalInvitesPage() {
                           : ""}
                       </option>
                     ))}
-                  </select>
+                  </Select>
 
-                  <select
-                    className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                  <Select
+                    id="portal-invite-role"
+                    label="Role"
                     value={role}
                     onChange={(e) => setRole(e.target.value)}
                     disabled={!controlsEnabled}
@@ -300,7 +306,7 @@ export default function PortalInvitesPage() {
                     <option value="dispatcher">Dispatcher</option>
                     <option value="driver">Driver</option>
                     <option value="accounts">Accounts</option>
-                  </select>
+                  </Select>
                 </div>
 
                 <Button

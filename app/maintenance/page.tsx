@@ -3,10 +3,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { createClient } from "../../lib/supabase/browser";
+import { useTenant } from "../components/TenantProvider";
+import TenantGate from "../components/TenantGate";
 import Badge, { type Tone } from "../../components/Badge";
 import Button from "../../components/Button";
 import Field from "../../components/Field";
+import MessageBanner from "../../components/MessageBanner";
+import Select from "../../components/Select";
+import Skeleton from "../../components/Skeleton";
 import Textarea from "../../components/Textarea";
+import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
 
 type Vehicle = {
     id: string;
@@ -56,8 +62,7 @@ type MaintenanceRecordWithVehicle = MaintenanceRecord & {
 
 export default function MaintenancePage() {
     const supabase = useMemo(() => createClient(), []);
-
-    const [tenantId, setTenantId] = useState<string | null>(null);
+    const tenant = useTenant();
 
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
 
@@ -65,6 +70,12 @@ export default function MaintenancePage() {
     const [records, setRecords] = useState<MaintenanceRecordWithVehicle[]>([]);
 
     const [loading, setLoading] = useState(true);
+    // Stays true across refetches so a token refresh cannot flash a skeleton
+    // over records already on screen. See lib/loading/skeletonVisibility.ts.
+    const [hasLoaded, setHasLoaded] = useState(false);
+    const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(
+        undefined
+    );
     const [saving, setSaving] = useState(false);
     const [vorSaving, setVorSaving] = useState(false);
 
@@ -103,42 +114,21 @@ export default function MaintenancePage() {
         (vehicle) => vehicle.vor === true || vehicle.active === false
     );
 
-    const resolveTenantId = useCallback(async (): Promise<string | null> => {
-        const {
-            data: { user },
-            error: userError,
-        } = await supabase.auth.getUser();
-
-        if (userError) {
-            throw userError;
-        }
-
-        if (!user) {
-            window.location.href = "/";
-            return null;
-        }
-
-        const { data: profile, error: profileError } = await supabase
-            .from("profiles")
-            .select("tenant_id")
-            .eq("id", user.id)
-            .single();
-
-        if (profileError) {
-            throw profileError;
-        }
-
-        if (!profile?.tenant_id) {
-            throw new Error(
-                "Your account is not linked to a TMS Wizzard tenant."
-            );
-        }
-
-        return profile.tenant_id as string;
-    }, [supabase]);
+    /* One region, one flag. The vehicle and asset lists feed <select>s, which
+       skeletonVisibility excludes; the record list is the only thing on this
+       page that renders tenant data. */
+    const showSkeleton = shouldShowSkeleton({
+        tenantStatus: tenant.status,
+        fetching: loading,
+        hasData: hasLoaded,
+        activeTenantId: tenant.activeTenantId,
+        dataTenantId,
+    });
 
     const loadData = useCallback(
-        async (currentTenantId: string) => {
+        async () => {
+            if (tenant.status !== "ready") return;
+
             setLoading(true);
             setErrorMessage("");
 
@@ -159,10 +149,10 @@ export default function MaintenancePage() {
                     vehicleResult,
                     maintenanceResult,
                 ] = await Promise.all([
-                    supabase
-                        .from("vehicles")
-                        .select(
-                            `
+                    tenant
+                        .filterByTenant(
+                            supabase.from("vehicles").select(
+                                `
                             id,
                             tenant_id,
                             registration,
@@ -175,16 +165,16 @@ export default function MaintenancePage() {
                             vor_reason,
                             returned_to_service_at
                             `
+                            )
                         )
-                        .eq("tenant_id", currentTenantId)
                         .order("registration", {
                             ascending: true,
                         }),
 
-                    supabase
-                        .from("maintenance_records")
-                        .select(
-                            `
+                    tenant
+                        .filterByTenant(
+                            supabase.from("maintenance_records").select(
+                                `
                             id,
                             vehicle_id,
                             asset_id,
@@ -198,6 +188,7 @@ export default function MaintenancePage() {
                             notes,
                             created_at
                             `
+                            )
                         )
                         .order("created_at", {
                             ascending: false,
@@ -217,12 +208,14 @@ export default function MaintenancePage() {
                 const {
                     data: assetData,
                     error: assetError,
-                } = await supabase
-                    .from("assets")
-                    .select(
-                        "id, tenant_id, name, asset_type, asset_number, registration, barcode, mechanical, status"
+                } = await tenant
+                    .filterByTenant(
+                        supabase
+                            .from("assets")
+                            .select(
+                                "id, tenant_id, name, asset_type, asset_number, registration, barcode, mechanical, status"
+                            )
                     )
-                    .eq("tenant_id", currentTenantId)
                     .eq("mechanical", true)
                     .order("asset_number", {
                         ascending: true,
@@ -279,6 +272,7 @@ export default function MaintenancePage() {
                 setVehicles(tenantVehicles);
                 setAssets(tenantAssets);
                 setRecords(tenantMaintenance);
+                setDataTenantId(tenant.activeTenantId);
             } catch (error) {
                 setErrorMessage(
                     error instanceof Error
@@ -287,37 +281,18 @@ export default function MaintenancePage() {
                 );
             } finally {
                 setLoading(false);
+                setHasLoaded(true);
             }
         },
-        [supabase]
+        [supabase, tenant]
     );
 
     useEffect(() => {
-        async function initialise() {
-            try {
-                const resolvedTenantId =
-                    await resolveTenantId();
-
-                if (!resolvedTenantId) {
-                    return;
-                }
-
-                setTenantId(resolvedTenantId);
-
-                await loadData(resolvedTenantId);
-            } catch (error) {
-                setErrorMessage(
-                    error instanceof Error
-                        ? error.message
-                        : "Unable to initialise maintenance."
-                );
-
-                setLoading(false);
-            }
-        }
-
-        void initialise();
-    }, [resolveTenantId, loadData]);
+        void loadData();
+        // loadData is rebuilt on every tenant context change; depending on the
+        // two fields that actually matter keeps this to one fetch per switch.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [tenant.status, tenant.activeTenantId]);
 
     function resetForm() {
         setVehicleId("");
@@ -345,8 +320,18 @@ export default function MaintenancePage() {
 
         clearMessages();
 
-        if (!tenantId) {
+        if (tenant.status !== "ready") {
             setErrorMessage("Tenant not loaded.");
+            return;
+        }
+
+        /* An admin on "All tenants" has no write target, so a new record would
+           have nowhere to land. Editing an existing one is still fine: those
+           are matched by id and scoped by RLS. */
+        if (!tenant.writeTenantId) {
+            setErrorMessage(
+                "Select a single tenant before adding a maintenance record."
+            );
             return;
         }
         if (!vehicleId && !assetId) {
@@ -395,7 +380,7 @@ export default function MaintenancePage() {
             const payload = {
                 vehicle_id: vehicleId || null,
                 asset_id: assetId || null,
-                tenant_id: tenantId,
+                tenant_id: tenant.writeTenantId,
                 maintenance_type:
                     maintenanceType.trim(),
                 due_date: dueDate || null,
@@ -440,11 +425,7 @@ export default function MaintenancePage() {
                                 new Date().toISOString(),
                             vor_reason: reason,
                         })
-                        .eq("id", vehicleId)
-                        .eq(
-                            "tenant_id",
-                            tenantId
-                        );
+                        .eq("id", vehicleId);
 
                 if (vehicleError) {
                     throw new Error(
@@ -461,7 +442,7 @@ export default function MaintenancePage() {
 
             resetForm();
 
-            await loadData(tenantId);
+            await loadData();
         } catch (error) {
             setErrorMessage(
                 error instanceof Error
@@ -517,7 +498,7 @@ export default function MaintenancePage() {
     }
 
     async function saveEditRecord(recordId: string) {
-        if (!tenantId) {
+        if (tenant.status !== "ready") {
             setErrorMessage("Tenant not loaded.");
             return;
         }
@@ -586,14 +567,13 @@ export default function MaintenancePage() {
                     maintenance_hours: numericHours,
                     notes: editNotes.trim() || null,
                 })
-                .eq("id", recordId)
-                .eq("tenant_id", tenantId);
+                .eq("id", recordId);
 
             if (error) {
                 throw error;
             }
 
-            await loadData(tenantId);
+            await loadData();
 
             cancelEditRecord();
             setMessage("Maintenance record updated.");
@@ -612,7 +592,7 @@ export default function MaintenancePage() {
     async function placeVehicleVor(
         vehicle: Vehicle
     ) {
-        if (!tenantId) {
+        if (tenant.status !== "ready") {
             return;
         }
 
@@ -652,7 +632,7 @@ export default function MaintenancePage() {
                     vor_reason: reason,
                 })
                 .eq("id", vehicle.id)
-                .eq("tenant_id", tenantId);
+                .eq("tenant_id", vehicle.tenant_id);
 
             if (error) {
                 throw error;
@@ -664,7 +644,7 @@ export default function MaintenancePage() {
 
             setVorReason("");
 
-            await loadData(tenantId);
+            await loadData();
         } catch (error) {
             setErrorMessage(
                 error instanceof Error
@@ -679,7 +659,7 @@ export default function MaintenancePage() {
     async function returnVehicleToService(
         vehicle: Vehicle
     ) {
-        if (!tenantId) {
+        if (tenant.status !== "ready") {
             return;
         }
 
@@ -711,7 +691,7 @@ export default function MaintenancePage() {
                     returned_to_service_at: now,
                 })
                 .eq("id", vehicle.id)
-                .eq("tenant_id", tenantId);
+                .eq("tenant_id", vehicle.tenant_id);
 
             if (error) {
                 throw error;
@@ -721,7 +701,7 @@ export default function MaintenancePage() {
                 `${vehicle.registration ?? "Vehicle"} returned to service.`
             );
 
-            await loadData(tenantId);
+            await loadData();
         } catch (error) {
             setErrorMessage(
                 error instanceof Error
@@ -751,6 +731,7 @@ export default function MaintenancePage() {
     }
 
     return (
+        <TenantGate>
         <div className="ds min-h-screen bg-canvas font-sans text-ink">
             <main className="mx-auto max-w-[1480px] px-6 py-8">
                 <header className="mb-4 flex flex-wrap items-start justify-between gap-4">
@@ -802,17 +783,9 @@ export default function MaintenancePage() {
                     </section>
                 </header>
 
-                {errorMessage ? (
-                    <div className="mb-4 rounded-lg border border-danger-border bg-danger-tint p-3 text-sm text-danger-strong">
-                        {errorMessage}
-                    </div>
-                ) : null}
+                <MessageBanner tone="danger">{errorMessage}</MessageBanner>
 
-                {message ? (
-                    <div className="mb-4 rounded-lg border border-success-border bg-success-tint p-3 text-sm text-success-strong">
-                        {message}
-                    </div>
-                ) : null}
+                <MessageBanner tone="success">{message}</MessageBanner>
 
                 {vorVehicles.length > 0 ? (
                     <section
@@ -929,12 +902,9 @@ export default function MaintenancePage() {
                         onSubmit={createRecord}
                         className="grid gap-3"
                     >
-                        <label className="grid gap-1.5">
-                            <span className="text-sm font-medium text-ink-2">
-                                Maintenance Target
-                            </span>
-
-                            <select
+                            <Select
+                                id="maintenance-target"
+                                label="Maintenance Target"
                                 value={
                                     assetId
                                         ? `asset:${assetId}`
@@ -977,7 +947,6 @@ export default function MaintenancePage() {
                                     setVehicleId("");
                                     setAssetId("");
                                 }}
-                                className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                                 required
                             >
                                 <option value="">
@@ -1021,8 +990,7 @@ export default function MaintenancePage() {
                                         )}
                                     </optgroup>
                                 ) : null}
-                            </select>
-                        </label>
+                            </Select>
 
                         {selectedVehicle ? (
                             <div
@@ -1129,12 +1097,9 @@ export default function MaintenancePage() {
                                 required
                             />
 
-                            <label className="grid gap-1.5">
-                                <span className="text-sm font-medium text-ink-2">
-                                    Status
-                                </span>
-
-                                <select
+                                <Select
+                                    id="maintenance-status"
+                                    label="Status"
                                     value={status}
                                     onChange={(
                                         event
@@ -1144,7 +1109,6 @@ export default function MaintenancePage() {
                                                 .value
                                         )
                                     }
-                                    className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
                                 >
                                     <option value="due">
                                         Due
@@ -1169,8 +1133,7 @@ export default function MaintenancePage() {
                                     <option value="vor">
                                         VOR
                                     </option>
-                                </select>
-                            </label>
+                                </Select>
 
                             <Field
                                 id="maint-due-date"
@@ -1314,10 +1277,42 @@ export default function MaintenancePage() {
                         </p>
                     </div>
 
-                    {loading ? (
-                        <div className="rounded-lg bg-surface-2 p-8 text-center text-sm text-ink-3">
-                            Loading maintenance
-                            records...
+                    {showSkeleton ? (
+                        <div
+                            aria-busy
+                            className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-4"
+                        >
+                            <span className="sr-only" role="status">
+                                Loading maintenance records
+                            </span>
+
+                            {[0, 1, 2, 3, 4, 5].map((index) => (
+                                <article
+                                    key={`maintenance-skeleton-${index}`}
+                                    className="rounded-lg border border-line bg-surface-2 p-4"
+                                >
+                                    <div className="mb-3 flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <Skeleton w="11ch" h="1rem" />
+                                            <div className="mt-1">
+                                                <Skeleton w="8ch" h="0.75rem" />
+                                            </div>
+                                        </div>
+                                        <Skeleton w="4.5rem" h="1.375rem" pill />
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-3">
+                                        {[0, 1, 2, 3].map((cell) => (
+                                            <div key={cell} className="min-w-0">
+                                                <Skeleton w="6ch" h="0.625rem" />
+                                                <div className="mt-1">
+                                                    <Skeleton w="8ch" h="0.75rem" />
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </article>
+                            ))}
                         </div>
                     ) : records.length === 0 ? (
                         <div className="rounded-lg bg-surface-2 p-8 text-center text-sm text-ink-3">
@@ -1485,31 +1480,27 @@ export default function MaintenancePage() {
                                                 />
 
                                                 <div className="grid gap-3 sm:grid-cols-2">
-                                                    <label className="grid gap-1.5">
-                                                        <span className="text-sm font-medium text-ink-2">
-                                                            Status
-                                                        </span>
-                                                        <select
-                                                            value={editStatus}
-                                                            onChange={(event) =>
-                                                                setEditStatus(
-                                                                    event.target
-                                                                        .value
-                                                                )
-                                                            }
-                                                            className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
-                                                        >
-                                                            <option value="due">
-                                                                Due
-                                                            </option>
-                                                            <option value="completed">
-                                                                Completed
-                                                            </option>
-                                                            <option value="vor">
-                                                                VOR
-                                                            </option>
-                                                        </select>
-                                                    </label>
+                                                    <Select
+                                                        id={`maint-${record.id}-status`}
+                                                        label="Status"
+                                                        value={editStatus}
+                                                        onChange={(event) =>
+                                                            setEditStatus(
+                                                                event.target
+                                                                    .value
+                                                            )
+                                                        }
+                                                    >
+                                                        <option value="due">
+                                                            Due
+                                                        </option>
+                                                        <option value="completed">
+                                                            Completed
+                                                        </option>
+                                                        <option value="vor">
+                                                            VOR
+                                                        </option>
+                                                    </Select>
 
                                                     <Field
                                                         id={`maint-${record.id}-cost`}
@@ -1641,6 +1632,7 @@ export default function MaintenancePage() {
                 </section>
             </main>
         </div>
+        </TenantGate>
     );
 }
 

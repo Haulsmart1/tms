@@ -8,8 +8,14 @@ import {
 } from "react";
 import type { FormEvent } from "react";
 import { createClient } from "../../lib/supabase/browser";
+import { useTenant } from "../components/TenantProvider";
+import TenantGate from "../components/TenantGate";
 import Badge from "../../components/Badge";
 import Button from "../../components/Button";
+import MessageBanner from "../../components/MessageBanner";
+import Select from "../../components/Select";
+import Skeleton from "../../components/Skeleton";
+import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
 import { CircleCheck, TriangleAlert } from "lucide-react";
 
 type Driver = {
@@ -272,7 +278,7 @@ const EMPTY_FORM: DriverForm = {
 export default function DriversPage() {
   const supabase = useMemo(() => createClient(), []);
 
-  const [tenantId, setTenantId] = useState<string | null>(null);
+  const tenant = useTenant();
 
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -308,44 +314,28 @@ export default function DriversPage() {
 
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  // Stays true across refetches so a token refresh cannot flash a skeleton over
+  // driver cards already on screen. See lib/loading/skeletonVisibility.ts.
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
-  const resolveTenant = useCallback(async () => {
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-
-    if (userError) {
-      throw userError;
-    }
-
-    if (!user) {
-      window.location.href = "/";
-      return null;
-    }
-
-    const { data: profile, error } = await supabase
-      .from("profiles")
-      .select("tenant_id")
-      .eq("id", user.id)
-      .single();
-
-    if (error) {
-      throw error;
-    }
-
-    if (!profile?.tenant_id) {
-      throw new Error("User is not linked to a tenant.");
-    }
-
-    return profile.tenant_id as string;
-  }, [supabase]);
+  /* One region, one flag. The vehicle list feeds the assignment <select>, which
+     skeletonVisibility excludes; the driver roster is the rendered region. */
+  const showSkeleton = shouldShowSkeleton({
+    tenantStatus: tenant.status,
+    fetching: loading,
+    hasData: hasLoaded,
+    activeTenantId: tenant.activeTenantId,
+    dataTenantId,
+  });
 
   const loadData = useCallback(
-    async (currentTenantId: string) => {
+    async () => {
+      if (tenant.status !== "ready") return;
+
       setLoading(true);
       setErrorMessage("");
 
@@ -358,40 +348,32 @@ export default function DriversPage() {
           endorsementsResult,
           trainingResult,
         ] = await Promise.all([
-          supabase
-            .from("drivers")
-            .select("*")
-            .eq("tenant_id", currentTenantId)
-            .order("name"),
+          tenant.filterByTenant(supabase.from("drivers").select("*")).order("name"),
 
-          supabase
-            .from("vehicles")
-            .select("id, registration, make, model, active, vor")
-            .eq("tenant_id", currentTenantId)
+          tenant
+            .filterByTenant(
+              supabase
+                .from("vehicles")
+                .select("id, registration, make, model, active, vor")
+            )
             .order("registration"),
 
-          supabase
-            .from("vehicle_assignments")
-            .select("*")
-            .eq("tenant_id", currentTenantId)
+          tenant
+            .filterByTenant(supabase.from("vehicle_assignments").select("*"))
             .eq("active", true),
 
-          supabase
-            .from("driver_licence_checks")
-            .select("*")
-            .eq("tenant_id", currentTenantId)
+          tenant
+            .filterByTenant(supabase.from("driver_licence_checks").select("*"))
             .order("checked_at", { ascending: false }),
 
-          supabase
-            .from("driver_licence_endorsements")
-            .select("*")
-            .eq("tenant_id", currentTenantId)
+          tenant
+            .filterByTenant(
+              supabase.from("driver_licence_endorsements").select("*")
+            )
             .order("created_at", { ascending: false }),
 
-          supabase
-            .from("driver_training")
-            .select("*")
-            .eq("tenant_id", currentTenantId)
+          tenant
+            .filterByTenant(supabase.from("driver_training").select("*"))
             .order("created_at", { ascending: false }),
         ]);
 
@@ -417,6 +399,7 @@ export default function DriversPage() {
           (endorsementsResult.data ?? []) as Endorsement[]
         );
         setTraining((trainingResult.data ?? []) as Training[]);
+        setDataTenantId(tenant.activeTenantId);
       } catch (error) {
         setErrorMessage(
           error instanceof Error
@@ -425,34 +408,18 @@ export default function DriversPage() {
         );
       } finally {
         setLoading(false);
+        setHasLoaded(true);
       }
     },
-    [supabase]
+    [supabase, tenant]
   );
 
   useEffect(() => {
-    async function initialise() {
-      try {
-        const id = await resolveTenant();
-
-        if (!id) {
-          return;
-        }
-
-        setTenantId(id);
-        await loadData(id);
-      } catch (error) {
-        setErrorMessage(
-          error instanceof Error
-            ? error.message
-            : "Unable to initialise drivers."
-        );
-        setLoading(false);
-      }
-    }
-
-    void initialise();
-  }, [resolveTenant, loadData]);
+    void loadData();
+    // loadData is rebuilt on every tenant context change; depending on the two
+    // fields that actually matter keeps this to one fetch per switch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenant.status, tenant.activeTenantId]);
 
   function updateForm<K extends keyof DriverForm>(
     field: K,
@@ -554,7 +521,15 @@ export default function DriversPage() {
   async function saveDriver(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!tenantId) {
+    if (tenant.status !== "ready") {
+      return;
+    }
+
+    /* An admin on "All tenants" has no write target, so a new driver would have
+       nowhere to land. Editing an existing one is still fine: matched by id and
+       scoped by RLS. */
+    if (!editingId && !tenant.writeTenantId) {
+      setErrorMessage("Select a single tenant before adding a driver.");
       return;
     }
 
@@ -562,8 +537,9 @@ export default function DriversPage() {
     setSaving(true);
 
     try {
+      /* tenant_id is deliberately NOT in this payload: it is added on insert
+         only, so an edit can never repoint a driver at another tenant. */
       const payload = {
-        tenant_id: tenantId,
         name: form.name.trim(),
         phone: form.phone.trim() || null,
         email: form.email.trim() || null,
@@ -644,8 +620,7 @@ export default function DriversPage() {
         const { error } = await supabase
           .from("drivers")
           .update(payload)
-          .eq("id", editingId)
-          .eq("tenant_id", tenantId);
+          .eq("id", editingId);
 
         if (error) {
           throw error;
@@ -655,7 +630,7 @@ export default function DriversPage() {
       } else {
         const { data, error } = await supabase
           .from("drivers")
-          .insert(payload)
+          .insert({ ...payload, tenant_id: tenant.writeTenantId })
           .select("id")
           .single();
 
@@ -668,7 +643,7 @@ export default function DriversPage() {
       }
 
       resetForm();
-      await loadData(tenantId);
+      await loadData();
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -687,14 +662,14 @@ export default function DriversPage() {
     console.log("[vehicle-assignment] button handler started", {
       driverId,
       vehicleId,
-      tenantId,
+      tenantId: tenant.writeTenantId,
       assignmentNotes,
     });
 
     setAssignmentDebug(
       `CLICK RECEIVED\nDriver: ${driverId ?? "NONE"}\nVehicle: ${
         vehicleId || "NONE"
-      }\nTenant: ${tenantId ?? "NONE"}`
+      }\nTenant: ${tenant.writeTenantId ?? "NONE"}`
     );
 
     if (!driverId) {
@@ -715,7 +690,7 @@ export default function DriversPage() {
       return;
     }
 
-    if (!tenantId) {
+    if (tenant.status !== "ready") {
       const message = "Tenant has not loaded.";
       console.error("[vehicle-assignment]", message);
       setErrorMessage(message);
@@ -729,7 +704,7 @@ export default function DriversPage() {
 
     try {
       setAssignmentDebug(
-        `CALLING RPC\nDriver: ${driverId}\nVehicle: ${vehicleId}\nTenant: ${tenantId}`
+        `CALLING RPC\nDriver: ${driverId}\nVehicle: ${vehicleId}\nTenant: ${tenant.writeTenantId}`
       );
 
       console.log(
@@ -773,7 +748,7 @@ export default function DriversPage() {
 
       setMessage("Vehicle assigned successfully.");
 
-      await loadData(tenantId);
+      await loadData();
 
       setAssignmentDebug(
         `SUCCESS\nAssignment ID: ${String(
@@ -823,9 +798,7 @@ export default function DriversPage() {
 
       setMessage("Vehicle unassigned.");
 
-      if (tenantId) {
-        await loadData(tenantId);
-      }
+      await loadData();
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -836,7 +809,7 @@ export default function DriversPage() {
   }
 
   async function recordLicenceCheck(driver: Driver) {
-    if (!tenantId) {
+    if (tenant.status !== "ready") {
       return;
     }
 
@@ -850,7 +823,10 @@ export default function DriversPage() {
       const { error } = await supabase
         .from("driver_licence_checks")
         .insert({
-          tenant_id: tenantId,
+          /* Child rows inherit the DRIVER's tenant, not the active one. For an
+             admin on "All tenants" writeTenantId is null, and the driver being
+             actioned is the only correct answer here. */
+          tenant_id: driver.tenant_id,
           driver_id: driver.id,
           checked_at: checkedAt,
           next_check_due: nextDue,
@@ -875,8 +851,7 @@ export default function DriversPage() {
           licence_check_date: checkedAt,
           licence_check_due: nextDue,
         })
-        .eq("id", driver.id)
-        .eq("tenant_id", tenantId);
+        .eq("id", driver.id);
 
       if (updateError) {
         throw updateError;
@@ -886,7 +861,7 @@ export default function DriversPage() {
       setCheckNotes("");
       setMessage("Licence check recorded.");
 
-      await loadData(tenantId);
+      await loadData();
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -897,7 +872,13 @@ export default function DriversPage() {
   }
 
   async function addEndorsement() {
-    if (!tenantId || !selectedDriverId || !endorsementCode.trim()) {
+    if (tenant.status !== "ready" || !selectedDriverId || !endorsementCode.trim()) {
+      return;
+    }
+
+    const driver = drivers.find((item) => item.id === selectedDriverId);
+
+    if (!driver) {
       return;
     }
 
@@ -907,7 +888,7 @@ export default function DriversPage() {
       const { error } = await supabase
         .from("driver_licence_endorsements")
         .insert({
-          tenant_id: tenantId,
+          tenant_id: driver.tenant_id,
           driver_id: selectedDriverId,
           code: endorsementCode.trim().toUpperCase(),
           points,
@@ -933,8 +914,7 @@ export default function DriversPage() {
         .update({
           points_total: activePoints + points,
         })
-        .eq("id", selectedDriverId)
-        .eq("tenant_id", tenantId);
+        .eq("id", selectedDriverId);
 
       setEndorsementCode("");
       setEndorsementPoints("");
@@ -942,7 +922,7 @@ export default function DriversPage() {
       setEndorsementExpiry("");
       setMessage("Endorsement added.");
 
-      await loadData(tenantId);
+      await loadData();
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -953,7 +933,7 @@ export default function DriversPage() {
   }
 
   async function deleteEndorsement(endorsement: Endorsement) {
-    if (!tenantId) {
+    if (tenant.status !== "ready") {
       return;
     }
 
@@ -985,12 +965,11 @@ export default function DriversPage() {
         .update({
           points_total: remainingPoints,
         })
-        .eq("id", endorsement.driver_id)
-        .eq("tenant_id", tenantId);
+        .eq("id", endorsement.driver_id);
 
       setMessage("Endorsement removed.");
 
-      await loadData(tenantId);
+      await loadData();
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -1001,7 +980,13 @@ export default function DriversPage() {
   }
 
   async function addTraining() {
-    if (!tenantId || !selectedDriverId || !trainingType.trim()) {
+    if (tenant.status !== "ready" || !selectedDriverId || !trainingType.trim()) {
+      return;
+    }
+
+    const driver = drivers.find((item) => item.id === selectedDriverId);
+
+    if (!driver) {
       return;
     }
 
@@ -1009,7 +994,7 @@ export default function DriversPage() {
       const { error } = await supabase
         .from("driver_training")
         .insert({
-          tenant_id: tenantId,
+          tenant_id: driver.tenant_id,
           driver_id: selectedDriverId,
           training_type: trainingType.trim(),
           course_name: trainingCourse.trim() || null,
@@ -1034,7 +1019,7 @@ export default function DriversPage() {
 
       setMessage("Training record added.");
 
-      await loadData(tenantId);
+      await loadData();
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -1092,6 +1077,7 @@ export default function DriversPage() {
   );
 
   return (
+    <TenantGate>
     <div className="ds min-h-screen bg-canvas font-sans text-ink">
       <main className="mx-auto max-w-[1480px] px-6 py-8">
         <header className="mb-4">
@@ -1109,17 +1095,9 @@ export default function DriversPage() {
           </div>
         </header>
 
-        {errorMessage ? (
-          <div className="mb-4 rounded-lg border border-danger-border bg-danger-tint p-3 text-sm text-danger-strong">
-            {errorMessage}
-          </div>
-        ) : null}
+        <MessageBanner tone="danger">{errorMessage}</MessageBanner>
 
-        {message ? (
-          <div className="mb-4 rounded-lg border border-success-border bg-success-tint p-3 text-sm text-success-strong">
-            {message}
-          </div>
-        ) : null}
+        <MessageBanner tone="success">{message}</MessageBanner>
 
         <form
           onSubmit={saveDriver}
@@ -1602,8 +1580,43 @@ export default function DriversPage() {
             />
           </div>
 
-          {loading ? (
-            <div className="py-10 text-center text-sm text-ink-3">Loading drivers...</div>
+          {showSkeleton ? (
+            <div
+              aria-busy
+              className="mt-4 grid gap-3 grid-cols-[repeat(auto-fit,minmax(300px,1fr))]"
+            >
+              <span className="sr-only" role="status">
+                Loading drivers
+              </span>
+
+              {[0, 1, 2, 3, 4, 5].map((index) => (
+                <article
+                  key={`driver-skeleton-${index}`}
+                  className="rounded-lg border border-line bg-surface-2 p-3"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <Skeleton w="10ch" h="1rem" />
+                      <div className="mt-1">
+                        <Skeleton w="7ch" h="0.75rem" />
+                      </div>
+                    </div>
+                    <Skeleton w="4rem" h="1.375rem" pill />
+                  </div>
+
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    {[0, 1, 2, 3].map((cell) => (
+                      <div key={cell} className="min-w-0">
+                        <Skeleton w="6ch" h="0.625rem" />
+                        <div className="mt-1">
+                          <Skeleton w="8ch" h="0.75rem" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
           ) : (
             <div className="mt-4 grid gap-3 grid-cols-[repeat(auto-fit,minmax(300px,1fr))]">
               {filteredDrivers.map((driver) => {
@@ -1967,6 +1980,7 @@ export default function DriversPage() {
         ) : null}
       </main>
     </div>
+    </TenantGate>
   );
 }
 
@@ -2016,6 +2030,10 @@ function TextField({
   );
 }
 
+/* A thin adapter over the shared Select, kept because this page's call sites
+   pass `options` as tuples and take a bare string in onChange. The id is derived
+   from the label so every control still gets the label/aria wiring Select
+   provides; labels are unique within this form. */
 function SelectField({
   label,
   value,
@@ -2028,21 +2046,18 @@ function SelectField({
   options: [string, string][];
 }) {
   return (
-    <label className="grid gap-1.5">
-      <span className="text-sm font-medium text-ink-2">{label}</span>
-
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
-      >
-        {options.map(([optionValue, text]) => (
-          <option key={optionValue} value={optionValue}>
-            {text}
-          </option>
-        ))}
-      </select>
-    </label>
+    <Select
+      id={`driver-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+      label={label}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    >
+      {options.map(([optionValue, text]) => (
+        <option key={optionValue} value={optionValue}>
+          {text}
+        </option>
+      ))}
+    </Select>
   );
 }
 

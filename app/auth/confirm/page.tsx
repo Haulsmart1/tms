@@ -85,7 +85,7 @@ export default async function AuthConfirmPage({
 
               <button
                 type="submit"
-                className="w-full rounded-md bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700"
+                className="w-full rounded-md bg-primary px-4 py-3 text-sm font-semibold text-on-primary hover:bg-primary-hover"
               >
                 Continue to TMS Wizzard
               </button>
@@ -104,7 +104,7 @@ export default async function AuthConfirmPage({
 
             <Link
               href="/login"
-              className="mt-5 inline-block text-sm font-semibold text-blue-600 underline"
+              className="mt-5 inline-block text-sm font-semibold text-primary-deep underline"
             >
               Request a new login link
             </Link>

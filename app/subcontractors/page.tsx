@@ -7,6 +7,7 @@ import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
 import Badge from "../../components/Badge";
 import Button from "../../components/Button";
+import Select from "../../components/Select";
 import MessageBanner from "../../components/MessageBanner";
 import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
 import SubcontractorCard from "./SubcontractorCard";
@@ -1399,20 +1400,18 @@ function SelectField({
   options: [string, string][];
 }) {
   return (
-    <label className="grid gap-1.5">
-      <span className="text-sm font-medium text-ink-2">{label}</span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
-      >
-        {options.map(([valueOption, labelOption]) => (
-          <option key={valueOption} value={valueOption}>
-            {labelOption}
-          </option>
-        ))}
-      </select>
-    </label>
+    <Select
+      id={`subcontractor-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+      label={label}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    >
+      {options.map(([valueOption, labelOption]) => (
+        <option key={valueOption} value={valueOption}>
+          {labelOption}
+        </option>
+      ))}
+    </Select>
   );
 }
 

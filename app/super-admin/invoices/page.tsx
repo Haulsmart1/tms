@@ -2,149 +2,183 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "../../../lib/supabase/browser";
+import Badge, { type Tone } from "../../../components/Badge";
+import Button from "../../../components/Button";
+import MessageBanner from "../../../components/MessageBanner";
+import Skeleton from "../../../components/Skeleton";
+
+type Invoice = {
+  id: string;
+  company_id: string | null;
+  vehicle_count: number | null;
+  amount: number | null;
+  status: string | null;
+};
+
+function statusTone(status: string | null): Tone {
+  switch ((status ?? "").toLowerCase()) {
+    case "paid":
+      return "success";
+    case "overdue":
+      return "danger";
+    case "pending":
+      return "warning";
+    default:
+      return "neutral";
+  }
+}
 
 export default function SuperAdminInvoicesPage() {
-    const supabase = createClient();
+  const supabase = createClient();
 
-    const [invoices, setInvoices] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [message, setMessage] = useState("");
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
 
-    async function loadInvoices() {
-        setLoading(true);
+  async function loadInvoices() {
+    setLoading(true);
 
-        const { data, error } = await supabase
-            .from("invoices")
-            .select("*")
-            .order("created_at", { ascending: false });
+    const { data, error } = await supabase
+      .from("invoices")
+      .select("id, company_id, vehicle_count, amount, status")
+      .order("created_at", { ascending: false });
 
-        if (error) {
-            setMessage(error.message);
-        }
-
-        setInvoices(data || []);
-        setLoading(false);
+    if (error) {
+      setErrorMessage(error.message);
     }
 
-    useEffect(() => {
-        loadInvoices();
-    }, []);
+    setInvoices((data as Invoice[]) ?? []);
+    setLoading(false);
+  }
 
-    async function markStatus(id: string, status: string) {
-        const { error } = await supabase
-            .from("invoices")
-            .update({ status })
-            .eq("id", id);
+  useEffect(() => {
+    loadInvoices();
+  }, []);
 
-        if (error) {
-            setMessage(error.message);
-            return;
-        }
+  async function markStatus(id: string, status: string) {
+    setMessage("");
+    setErrorMessage("");
 
-        setMessage(`Invoice marked ${status}.`);
-        await loadInvoices();
+    const { error } = await supabase.from("invoices").update({ status }).eq("id", id);
+
+    if (error) {
+      setErrorMessage(error.message);
+      return;
     }
 
-    return (
-        <main
-            style={{
-                minHeight: "100vh",
-                padding: 30,
-                backgroundImage:
-                    "url('https://images.unsplash.com/photo-1553413077-190dd305871c')",
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-            }}
-        >
-            <div
-                style={{
-                    background: "rgba(0,0,0,0.65)",
-                    padding: 30,
-                    borderRadius: 20,
-                }}
-            >
-                <h1 style={{ color: "white", marginTop: 0 }}>Invoices</h1>
+    setMessage(`Invoice marked ${status}.`);
+    await loadInvoices();
+  }
 
-                {message ? (
-                    <div
-                        style={{
-                            background: "white",
-                            padding: 12,
-                            borderRadius: 10,
-                            marginBottom: 20,
-                        }}
-                    >
-                        {message}
-                    </div>
-                ) : null}
+  return (
+    /* Matches /super-admin/requests. The photo background and dark scrim that
+       used to live here are gone on purpose: the console has one surface
+       language and this area was the only thing outside it. */
+    <div className="ds min-h-screen bg-canvas px-4 py-8 font-sans text-ink md:px-8">
+      <div className="mx-auto w-full max-w-6xl">
+        <header className="mb-4">
+          <div className="text-kicker uppercase text-ink-3">Platform</div>
 
-                {loading ? (
-                    <div style={{ background: "white", padding: 20, borderRadius: 14 }}>
-                        Loading...
-                    </div>
-                ) : null}
+          <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">
+            Invoices
+          </h1>
 
-                <div style={{ display: "grid", gap: 16 }}>
-                    {invoices.map((invoice) => (
-                        <div
-                            key={invoice.id}
-                            style={{
-                                background: "white",
-                                padding: 20,
-                                borderRadius: 14,
-                            }}
-                        >
-                            <h3 style={{ marginTop: 0 }}>Invoice #{invoice.id.slice(0, 8)}</h3>
+          <p className="m-0 text-sm text-ink-3">
+            Platform invoices across every company.
+          </p>
+        </header>
 
-                            <div style={{ opacity: 0.8, marginBottom: 6 }}>
-                                Company ID: {invoice.company_id}
-                            </div>
-                            <div style={{ opacity: 0.8, marginBottom: 6 }}>
-                                Vehicles: {invoice.vehicle_count}
-                            </div>
-                            <div style={{ opacity: 0.8, marginBottom: 6 }}>
-                                Amount: £{invoice.amount}
-                            </div>
-                            <div style={{ opacity: 0.8, marginBottom: 12 }}>
-                                Status: {invoice.status}
-                            </div>
+        <MessageBanner tone="danger">{errorMessage}</MessageBanner>
 
-                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                <button
-                                    type="button"
-                                    onClick={() => markStatus(invoice.id, "paid")}
-                                    style={{
-                                        padding: "10px 14px",
-                                        borderRadius: 10,
-                                        border: "none",
-                                        background: "#111827",
-                                        color: "white",
-                                        fontWeight: 600,
-                                        cursor: "pointer",
-                                    }}
-                                >
-                                    Mark Paid
-                                </button>
+        <MessageBanner tone="success">{message}</MessageBanner>
 
-                                <button
-                                    type="button"
-                                    onClick={() => markStatus(invoice.id, "pending")}
-                                    style={{
-                                        padding: "10px 14px",
-                                        borderRadius: 10,
-                                        border: "1px solid #d1d5db",
-                                        background: "white",
-                                        cursor: "pointer",
-                                        fontWeight: 600,
-                                    }}
-                                >
-                                    Mark Pending
-                                </button>
-                            </div>
-                        </div>
-                    ))}
+        {loading ? (
+          <div aria-busy className="grid gap-3">
+            <span className="sr-only" role="status">
+              Loading invoices
+            </span>
+
+            {[0, 1, 2, 3].map((index) => (
+              <div
+                key={`invoice-skeleton-${index}`}
+                className="rounded-lg border border-line bg-surface p-4 shadow-sm"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <Skeleton w="14ch" h="1rem" />
+                  <Skeleton w="4.5rem" h="1.375rem" pill />
                 </div>
-            </div>
-        </main>
-    );
+
+                <div className="mt-2 grid gap-1">
+                  <Skeleton w="22ch" h="0.75rem" />
+                  <Skeleton w="10ch" h="0.75rem" />
+                  <Skeleton w="12ch" h="0.75rem" />
+                </div>
+
+                <div className="mt-3 flex gap-2">
+                  <Skeleton w="6.5rem" h="2rem" />
+                  <Skeleton w="7.5rem" h="2rem" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : invoices.length === 0 ? (
+          <div className="rounded-lg bg-surface-2 p-8 text-center text-sm text-ink-3">
+            No invoices found.
+          </div>
+        ) : (
+          <div className="grid gap-3">
+            {invoices.map((invoice) => (
+              <div
+                key={invoice.id}
+                className="rounded-lg border border-line bg-surface p-4 shadow-sm"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <h3 className="m-0 text-md font-semibold text-ink">
+                    Invoice #{invoice.id.slice(0, 8)}
+                  </h3>
+
+                  <Badge tone={statusTone(invoice.status)}>{invoice.status ?? "unknown"}</Badge>
+                </div>
+
+                <div className="mt-2 grid gap-0.5 text-sm text-ink-3">
+                  <div>
+                    Company ID:{" "}
+                    <span className="font-mono text-ink-2">{invoice.company_id ?? "-"}</span>
+                  </div>
+
+                  <div>
+                    Vehicles: <span className="text-ink-2">{invoice.vehicle_count ?? "-"}</span>
+                  </div>
+
+                  <div>
+                    Amount: <span className="text-ink-2">£{invoice.amount ?? "-"}</span>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => markStatus(invoice.id, "paid")}
+                  >
+                    Mark Paid
+                  </Button>
+
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => markStatus(invoice.id, "pending")}
+                  >
+                    Mark Pending
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }

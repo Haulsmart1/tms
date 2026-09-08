@@ -1,15 +1,17 @@
 /* THE ACTIVATION SWITCH.
 
    A route on this list follows the light/dark theme and shows the theme toggle.
-   A route not on it is pinned dark by ThemeScope, because the remaining legacy
-   pages are styled with hardcoded inline colour literals that cannot respond to
-   a theme class. Letting them follow the theme would put their dark-tuned text
-   on a light background: /super-admin would render white-on-white.
+   A route not on it is pinned dark by ThemeScope. That existed because the
+   legacy pages were styled with hardcoded inline colour literals that cannot
+   respond to a theme class: letting them follow the theme would have put their
+   dark-tuned text on a light background, and /super-admin would have rendered
+   white-on-white. Every console route is now tokenised, so the mechanism is
+   still load-bearing only for NEW pages, which default to pinned-dark until
+   someone lists them.
 
-   SEVEN LEGACY PAGES ARE LEFT, all of them deliberately absent below:
-   /driver/dashboard, /subcontractor/dashboard, and the five non-requests
-   /super-admin pages. Every other route in the app has been converted and is
-   listed here.
+   NO LEGACY CONSOLE PAGES ARE LEFT. The seven that used to be excluded
+   (/driver/dashboard, /subcontractor/dashboard and the five non-requests
+   /super-admin pages) have all been converted to tokens and are listed below.
 
    TO ACTIVATE A LEGACY PAGE: convert its inline colour literals to tokens, give
    its root element `className="ds ... bg-canvas text-ink"` the way the pages
@@ -17,15 +19,24 @@
    first page converted this way after the switch existed, and it took exactly
    those three steps.
 
+   WHAT IS STILL NOT LISTED, and why: the two share-token pages
+   (/pod/share/[token], /quotation/share/[token]) and /driver/jobs/[jobId] are
+   customer- and driver-facing pages outside the console shell, styled with a
+   fixed light palette on purpose. They are not "legacy" in the sense this file
+   used to mean; do not add them without deciding that a recipient opening a
+   delivery receipt should see the operator's theme.
+
    This is an allowlist, not a denylist, so a brand new page defaults to
    pinned-dark and legacy-safe rather than half-themed.
 
-   THREE ENTRIES BELOW DO NOT SHOW A TOGGLE, and that is correct. AppShell is
+   EIGHT ENTRIES BELOW DO NOT SHOW A TOGGLE, and that is correct. AppShell is
    what renders the toggle, and shouldShowShell() hides AppShell entirely on
-   "/", "/login" and every "/super-admin/*" path. Those three still need to be
-   listed, because this list ALSO decides whether ThemeScope pins a route dark,
-   and pinning the landing page or /login dark would be wrong. Every other
-   route here offers the control.
+   "/", "/login" and every "/super-admin/*" path, which is now six routes rather
+   than one. They all still need listing, because this list ALSO decides whether
+   ThemeScope pins a route dark, and pinning the landing page or /login dark
+   would be wrong. The two portal dashboards (/driver, /subcontractor) DO offer
+   the control, so converting them is the one part of this change a user can
+   actually see a toggle for.
 
    "/" is a further special case: it self-pins `.light` on its own root element
    (see app/page.tsx), because the public marketing page stays light whatever
@@ -43,7 +54,15 @@
 export const THEMEABLE_ROUTES: readonly string[] = [
   "/",                        // app/page.tsx                      (self-pins .light)
   "/login",                   // app/login/page.tsx                (no shell, no toggle)
+  "/super-admin",             // app/super-admin/page.tsx           (no shell, no toggle)
   "/super-admin/requests",    // app/super-admin/requests/page.tsx (no shell, no toggle)
+  "/super-admin/billing",     // app/super-admin/billing/page.tsx  (no shell, no toggle)
+  "/super-admin/companies",   // app/super-admin/companies/page.tsx (no shell, no toggle)
+  "/super-admin/invoices",    // app/super-admin/invoices/page.tsx (no shell, no toggle)
+  "/super-admin/users",       // app/super-admin/users/page.tsx    (no shell, no toggle)
+  "/auth/confirm",            // app/auth/confirm/page.tsx
+  "/driver/dashboard",        // app/driver/dashboard/page.tsx
+  "/subcontractor/dashboard", // app/subcontractor/dashboard/page.tsx
   "/dashboard",               // app/dashboard/page.tsx
   "/jobs",                    // app/jobs/page.tsx
   "/planning",                // app/planning/page.tsx
@@ -67,12 +86,14 @@ export const THEMEABLE_ROUTES: readonly string[] = [
   "/settings/licences",       // app/settings/licences/page.tsx
   "/settings/company",        // app/settings/company/page.tsx
   "/settings/billing",        // app/settings/billing/page.tsx
+  "/settings/documents",      // app/settings/documents/page.tsx
 ];
 
 export function isThemeableRoute(pathname: string): boolean {
-  // Exact match, not prefix: "/super-admin/requests" is tokenised but its
-  // siblings under /super-admin are not, so a prefix match would wrongly theme
-  // the whole area.
+  // Exact match, not prefix. Every /super-admin route is tokenised now, so that
+  // area no longer motivates it, but /driver does: /driver/dashboard is listed
+  // while /driver/jobs/[jobId] is deliberately not, and a prefix match would
+  // theme the driver job page along with it.
   const normalized =
     pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
   return THEMEABLE_ROUTES.includes(normalized);

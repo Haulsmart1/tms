@@ -17,10 +17,28 @@ describe("isThemeableRoute", () => {
     expect(isThemeableRoute("/settings/company")).toBe(true);
   });
 
-  it("returns false for the legacy inline-styled pages, which pin themselves dark", () => {
-    expect(isThemeableRoute("/driver/dashboard")).toBe(false);
-    expect(isThemeableRoute("/subcontractor/dashboard")).toBe(false);
-    expect(isThemeableRoute("/super-admin/companies")).toBe(false);
+  /* This used to assert the opposite for these three. They were the last
+     inline-styled pages; converting them to tokens was the point of the change
+     that edited this test, so the expectations flipped with them. The guard
+     against a NEW page being half-themed lives in the "unknown route" case
+     below, which is the one that must never flip. */
+  it("returns true for the converted portal and super-admin pages", () => {
+    expect(isThemeableRoute("/driver/dashboard")).toBe(true);
+    expect(isThemeableRoute("/subcontractor/dashboard")).toBe(true);
+    expect(isThemeableRoute("/super-admin/companies")).toBe(true);
+    expect(isThemeableRoute("/super-admin")).toBe(true);
+    expect(isThemeableRoute("/super-admin/billing")).toBe(true);
+  });
+
+  /* The share-token pages and the driver job page are customer- and
+     driver-facing, outside the console shell, and styled with a fixed light
+     palette on purpose. They are deliberately absent from the allowlist, so a
+     recipient opening a delivery receipt does not inherit the operator's
+     theme. */
+  it("returns false for the public share pages, which keep a fixed palette", () => {
+    expect(isThemeableRoute("/pod/share/some-token")).toBe(false);
+    expect(isThemeableRoute("/quotation/share/some-token")).toBe(false);
+    expect(isThemeableRoute("/driver/jobs/some-job-id")).toBe(false);
   });
 
   it("returns false for an unknown route, so a new page is legacy-safe by default rather than half-themed", () => {
@@ -28,10 +46,9 @@ describe("isThemeableRoute", () => {
   });
 
   it("matches exactly and does not treat a sibling as themeable", () => {
-    // "/super-admin/requests" is themeable but "/super-admin/billing" is not,
-    // so a prefix match here would wrongly theme the whole super-admin area.
-    expect(isThemeableRoute("/super-admin/billing")).toBe(false);
-    expect(isThemeableRoute("/super-admin")).toBe(false);
+    // "/driver/dashboard" is themeable but "/driver/jobs/[jobId]" is not, so a
+    // prefix match here would wrongly theme the driver job page along with it.
+    expect(isThemeableRoute("/driver/jobs/abc123")).toBe(false);
     expect(isThemeableRoute("/jobsomething")).toBe(false);
   });
 
@@ -45,7 +62,15 @@ describe("isThemeableRoute", () => {
       [
         "/",
         "/login",
+        "/auth/confirm",
+        "/super-admin",
         "/super-admin/requests",
+        "/super-admin/billing",
+        "/super-admin/companies",
+        "/super-admin/invoices",
+        "/super-admin/users",
+        "/driver/dashboard",
+        "/subcontractor/dashboard",
         "/dashboard",
         "/jobs",
         "/planning",
@@ -69,6 +94,7 @@ describe("isThemeableRoute", () => {
         "/settings/licences",
         "/settings/company",
         "/settings/billing",
+        "/settings/documents",
       ].sort(),
     );
   });
