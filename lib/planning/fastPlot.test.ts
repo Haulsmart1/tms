@@ -1094,8 +1094,9 @@ describe("Fast Plot V5", () => {
       expect(origins.length * destinations.length).toBeLessThanOrEqual(100);
     }
 
-    // Four 1x100-or-smaller anchor chunks plus the existing 32 sparse budget.
-    expect(loader.mock.calls.length).toBeLessThanOrEqual(36);
+    // Four 1x100-or-smaller anchor chunks plus the 8-call interactive
+    // sparse budget. Large lanes must not sit behind dozens of serial requests.
+    expect(loader.mock.calls.length).toBeLessThanOrEqual(12);
   });
 
   it("does not claim closest-first for a route requiring a physical revisit", async () => {

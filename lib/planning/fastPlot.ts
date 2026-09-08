@@ -301,7 +301,17 @@ const FAST_PLOT_BEAM_WIDTH = 96;
  * builder. That stays below the 40-request optimization budget.
  */
 const FAST_PLOT_COMPLETE_MATRIX_MAX_VISITS = 60;
-const FAST_PLOT_SPARSE_REQUEST_BUDGET = 32;
+
+/**
+ * Large planning lanes run interactively in the browser. Each sparse route
+ * step depends on the previous TomTom-selected visit, so those requests cannot
+ * safely be parallelised. Keep a small sequential TomTom budget, then finish
+ * with the existing deterministic precedence-safe geographic/cluster ranking.
+ *
+ * Drop 1 is NOT governed by this budget: chooseAnchoredFirstVisit separately
+ * compares every eligible first physical visit from the van using TomTom.
+ */
+const FAST_PLOT_SPARSE_REQUEST_BUDGET = 8;
 const FAST_PLOT_SPARSE_CANDIDATE_LIMIT = 100;
 
 /**
@@ -930,10 +940,11 @@ function validSparseCosts(
  * It deliberately avoids an all-to-all TomTom matrix. At each route step the
  * currently legal physical visits are ranked geographically, then at most 100
  * candidates are evaluated in one directed 1xN TomTom request. Loading stops
- * after a hard request budget. Missing/unavailable TomTom data never becomes
- * invented travel seconds: once loading is unavailable/exhausted, deterministic
- * geographic ordering is used while the same precedence and cluster rules
- * continue to apply.
+ * after a small interactive request budget because each next request depends
+ * on the visit chosen by the previous response. Missing/unavailable TomTom data
+ * never becomes invented travel seconds: once loading is unavailable/exhausted,
+ * deterministic geographic ordering is used while the same precedence and
+ * cluster rules continue to apply.
  */
 async function sparseFastPlotOrder(
   visits: FastPlotVisit[],

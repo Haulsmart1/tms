@@ -1661,7 +1661,9 @@ export default function PlanningPage() {
     }
 
     setOptimizing(true);
-    setMessage("");
+    setMessage(
+      "Smart Optimize is calculating the physical drop order from the van..."
+    );
 
     try {
       const vehicleReading = positions.get(selectedVehicleId) ?? null;
@@ -2086,13 +2088,16 @@ export default function PlanningPage() {
               onClick={optimize}
               loading={optimizing}
               disabled={
+                optimizing ||
                 !selectedVehicleId ||
                 selectedLaneJobs.filter(isRoutable).length < 2
               }
             >
-              {selectedVehicle
-                ? `Smart Optimize ${selectedVehicle.registration}`
-                : "Smart Optimize Route"}
+              {optimizing
+                ? "Optimizing..."
+                : selectedVehicle
+                  ? `Smart Optimize ${selectedVehicle.registration}`
+                  : "Smart Optimize Route"}
             </Button>
 
             <Button
