@@ -25,7 +25,7 @@ export const dynamic = "force-dynamic";
 
 const MAX_MATRIX_CELLS = 100;
 const MAX_JOBS = 10;
-const TIMEOUT_MS = 10000;
+const TIMEOUT_MS = 20000;
 
 function pointList(value: unknown) {
   return parsePoints({ points: value });
@@ -43,7 +43,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "You do not have console access." }, { status: 403 });
     }
 
-    if (isRateLimited(operator.userId)) {
+    if (isRateLimited(operator.userId, "matrix")) {
       return NextResponse.json(
         { error: "Too many requests. Please try again shortly." },
         { status: 429 }

@@ -462,6 +462,7 @@ async function chooseAnchoredFirstVisit(
 
   let bestVisit: FastPlotVisit | null = null;
   let bestTravelSeconds = Number.POSITIVE_INFINITY;
+  let successfulChunkCount = 0;
 
   for (
     let offset = 0;
@@ -481,7 +482,7 @@ async function chooseAnchoredFirstVisit(
         candidates.map((candidate) => candidate.point)
       );
     } catch {
-      return { ok: false, reason: "start_cost_unavailable" };
+      continue;
     }
 
     if (
@@ -490,8 +491,10 @@ async function chooseAnchoredFirstVisit(
       !Array.isArray(loaded[0]) ||
       loaded[0].length !== candidates.length
     ) {
-      return { ok: false, reason: "start_cost_unavailable" };
+      continue;
     }
+
+    successfulChunkCount += 1;
 
     for (let index = 0; index < candidates.length; index++) {
       const raw = loaded[0][index];
@@ -520,7 +523,13 @@ async function chooseAnchoredFirstVisit(
   }
 
   if (!bestVisit) {
-    return { ok: false, reason: "no_reachable_first_visit" };
+    return {
+      ok: false,
+      reason:
+        successfulChunkCount === 0
+          ? "start_cost_unavailable"
+          : "no_reachable_first_visit",
+    };
   }
 
   // Defensive assertion: an initial visit must be legal at progress zero.
