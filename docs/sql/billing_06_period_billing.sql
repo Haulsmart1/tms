@@ -2,12 +2,22 @@
 -- Apply manually in the Supabase SQL editor, like the rls_* and billing_*
 -- series. Safe to re-run: every statement is guarded.
 --
--- THIS FILE IS ADDITIVE AND SAFE TO APPLY AT ANY TIME. It creates new tables
--- and adds nullable-or-defaulted columns to company_billing. Nothing here is
--- read or written by the code currently in production, because every v2 code
--- path is gated on company_billing.billing_model, which this file defaults to
--- 'v1_immediate' for every existing row. Compare billing_03 and billing_04,
--- whose ordering warnings are about live payment code; this one has none.
+-- APPLY THIS BEFORE DEPLOYING THE CODE.
+--
+-- The file itself is additive and safe to apply against the CURRENT code at any
+-- time: it creates new tables and adds defaulted columns to company_billing,
+-- and nothing deployed reads any of them. The hazard runs the other way.
+--
+-- resolveActivation (lib/billing/periodServer.ts) selects billing_model on
+-- EVERY licence activation. Against a database without this file, PostgREST
+-- answers 42703 ("column does not exist"). The code tolerates exactly that
+-- code and falls back to v1, so a deploy that lands first is survivable rather
+-- than an outage, but the tolerance is a safety net and not a plan: it means
+-- every activation does a wasted round trip and any company you have already
+-- switched silently bills on the wrong model.
+--
+-- Not a money hazard in either order. Compare billing_04, where a missing
+-- function threw AFTER Square had taken the money.
 --
 -- The dangerous file is billing_07, which alters vehicle_licences. Apply this
 -- one first: billing_07's backfill reads nothing from here, but the close job
@@ -463,7 +473,16 @@ commit;
 --    select company_id, id, 'vehicle', 100, 'no vehicle id' from public.billing_periods limit 1;
 --    rollback;
 --
--- WHAT BREAKS IF THIS IS NOT APPLIED. Nothing, until a company is switched to
--- v2_period. Every v2 code path checks billing_model first, and no company can
--- carry that value before this file adds the column. The failure mode of
--- skipping it is a feature that cannot be turned on, not a billing error.
+-- WHAT BREAKS IF THIS IS NOT APPLIED.
+--
+-- With the OLD code deployed: nothing at all.
+--
+-- With the NEW code deployed: every licence activation and every estimate
+-- takes the 42703 fallback described at the top, so they still work and every
+-- company reads as v1. No company can be switched to v2 (there is no column to
+-- set), and nothing is mis-billed. The cost is a wasted query per activation
+-- and a feature that cannot be turned on.
+--
+-- The close job is unaffected either way: billing_periods does not exist, the
+-- query throws, and app/api/billing/run/route.ts catches it per run and
+-- reports it in the response while the v1 charge run continues normally.

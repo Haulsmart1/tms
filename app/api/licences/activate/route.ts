@@ -172,7 +172,7 @@ export async function POST(request: NextRequest) {
     } else {
       const licenceRes = await admin
         .from("vehicle_licences")
-        .select("id, vehicle_id, tenant_id, active, activated_at, deactivated_at")
+        .select("id, vehicle_id, tenant_id")
         .eq("id", body.licenceId)
         .maybeSingle();
       if (licenceRes.error) {
@@ -257,7 +257,23 @@ export async function POST(request: NextRequest) {
         .select("id, active, activated_at, deactivated_at")
         .eq("id", body.licenceId)
         .single();
-      if (licence.error) throw new Error(licence.error.message);
+
+      // 42703 means billing_07 STEP 1 has not been applied, so the lifecycle
+      // columns do not exist yet. In that world billing_03's reasoning still
+      // holds (a delete can only reduce a prepaid bill) and the browser was
+      // allowed to delete, so permitting it is the status quo rather than a
+      // new hole. Narrow on purpose: any other error is a real failure.
+      if (licence.error && licence.error.code !== "42703") {
+        throw new Error(licence.error.message);
+      }
+      if (licence.error) {
+        const removedLegacy = await admin
+          .from("vehicle_licences")
+          .delete()
+          .eq("id", body.licenceId);
+        if (removedLegacy.error) throw new Error(removedLegacy.error.message);
+        return NextResponse.json({ ok: true, charged: false, reason: "deleted" });
+      }
 
       const neverActivated =
         licence.data.active !== true &&

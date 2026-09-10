@@ -514,6 +514,25 @@ async function closeOnePeriod(
   };
 }
 
+
+// PostgREST answers 42703 ("column does not exist") when billing_06 has not
+// been applied yet. That is not an error to propagate: the flag lives on the
+// column, so a database without it has no v2 company by definition, and
+// `legacy` is the only correct answer.
+//
+// Narrow on purpose. A blanket catch here would hide a real outage behind
+// silent v1 behaviour, and the one thing worse than a broken deploy is a
+// deploy that looks fine while billing the wrong model. 42703 is unambiguous;
+// nothing else is tolerated.
+//
+// This exists because resolveActivation runs on EVERY licence activation. A
+// hard failure would mean nobody can add a vehicle until the SQL is applied,
+// which is an outage of the kind billing_03's header warns about, and it would
+// arrive on the deploy rather than on the migration.
+function isMissingColumn(error: { code?: string } | null): boolean {
+  return error?.code === "42703";
+}
+
 export type ResolvedActivation = {
   action: ActivationAction;
   settings: CompanyBillingSettings | null;
@@ -537,7 +556,12 @@ export async function resolveActivation(
     )
     .eq("company_id", companyId)
     .maybeSingle();
-  if (settingsRes.error) throw new Error(settingsRes.error.message);
+  if (settingsRes.error) {
+    if (isMissingColumn(settingsRes.error)) {
+      return { action: { kind: "legacy" }, settings: null };
+    }
+    throw new Error(settingsRes.error.message);
+  }
 
   const settings = settingsRes.data as
     | (CompanyBillingSettings & {
@@ -753,7 +777,10 @@ export async function quoteVehicleAddition(
     )
     .eq("company_id", companyId)
     .maybeSingle();
-  if (settingsRes.error) throw new Error(settingsRes.error.message);
+  if (settingsRes.error) {
+    if (isMissingColumn(settingsRes.error)) return { model: "v1_immediate" };
+    throw new Error(settingsRes.error.message);
+  }
 
   const settings = settingsRes.data as CompanyBillingSettings | null;
   if (!settings || settings.billing_model !== "v2_period") {
