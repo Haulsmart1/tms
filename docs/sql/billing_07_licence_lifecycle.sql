@@ -36,12 +36,22 @@
 --
 -- ============================ PRE-FLIGHT ==================================
 --
--- 1. IS billing_03 APPLIED? This file does not depend on it, but what it
---    means for security differs. billing_03 STEP 2 replaces the browser's
---    table-level UPDATE with an allowlist of four columns, which would
---    already prevent writes to the columns added below. If it was never
---    applied, `authenticated` still holds table-level UPDATE and the ONLY
---    thing protecting the new billing columns is the trigger in STEP 1c.
+-- 1. billing_01 through billing_05 are APPLIED (confirmed by Ethan,
+--    2026-09-10). Two things follow, and both are load-bearing.
+--
+--    The browser has no INSERT on vehicle_licences at all, and UPDATE only on
+--    (licence_type, issue_date, expiry_date, notes). So the columns added
+--    below are already unwritable from a browser the moment they exist: a
+--    column added after an allowlist grant is not covered by it. The trigger
+--    in STEP 1c is therefore the SECOND layer, which is what it was designed
+--    to be, not the only one.
+--
+--    Every licence write already goes through /api/licences/activate on the
+--    service role. That is why the sync trigger below can assume `active` is
+--    only ever moved by a trusted caller.
+--
+--    Re-confirm before applying if any time has passed, since the grant state
+--    is the thing that makes the paragraph above true:
 --
 --      select grantee, privilege_type, count(*)
 --      from information_schema.column_privileges
@@ -49,9 +59,8 @@
 --        and grantee in ('authenticated', 'PUBLIC')
 --      group by grantee, privilege_type;
 --
---    Either way STEP 1c installs its own trigger, which does not depend on
---    the grant state. That is deliberate: the grants are one careless
---    `grant all` away from gone.
+--    Expect UPDATE against authenticated on exactly four columns, and nothing
+--    at all against PUBLIC.
 --
 -- 2. DO NOT ADD THE BRIEF'S ONE-ACTIVE-LICENCE-PER-VEHICLE INDEX.
 --    The brief specified
