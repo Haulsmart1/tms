@@ -335,21 +335,41 @@ export default function VehicleLicencesPage() {
         writeInFlight.current = true;
         setSaving(true);
 
-        /* Straight at the table, unlike create and toggle: billing_03 keeps
-           the browser's DELETE grant because removing a licence can only
-           reduce a bill, so there is no money for the server to settle first. */
-        const { error } = await supabase
-            .from("vehicle_licences")
-            .delete()
-            .eq("id", id);
+        /* Through the route now, like create and toggle. billing_03 used to
+           keep the browser's DELETE grant on the reasoning that removing a
+           licence can only reduce a bill; under arrears billing the invoice is
+           computed at period close FROM these rows, so deleting one that was
+           ever live destroys the evidence and a vehicle silently disappears
+           from an invoice it belonged on. billing_07 STEP 2 revokes the grant,
+           and the route allows a delete only for a licence that was never
+           activated, which is the case that actually happens: a typo. */
+        try {
+            const response = await fetch("/api/licences/activate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "delete", licenceId: id }),
+            });
+            const payload = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                writeInFlight.current = false;
+                setSaving(false);
+                setMessage(
+                    typeof payload?.error === "string"
+                        ? payload.error
+                        : "The licence could not be deleted."
+                );
+                return;
+            }
+        } catch {
+            writeInFlight.current = false;
+            setSaving(false);
+            setMessage("The licence could not be deleted. Check your connection and try again.");
+            return;
+        }
 
         writeInFlight.current = false;
         setSaving(false);
-
-        if (error) {
-            setMessage(error.message);
-            return;
-        }
 
         await loadData();
 

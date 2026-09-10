@@ -30,6 +30,16 @@ const CANNOT_MANAGE_TITLE =
 const CANNOT_DELETE_TITLE =
     "Only company admins can delete a licence, because it changes what the company is billed for.";
 
+/* An ACTIVE licence is on the current invoice, and under period billing the
+   invoice is computed at close from these rows, so deleting one would remove a
+   vehicle from a bill it belongs on. Deactivate is the operation: it stops the
+   licence renewing and leaves the record intact. Disabled with an explanation
+   rather than hidden, for the same reason as the title above: a button that
+   vanishes answers nothing. The route enforces this too, and more precisely,
+   since it can also see licences that were active in the past. */
+const CANNOT_DELETE_ACTIVE_TITLE =
+    "Deactivate this licence first. An active licence is part of the current bill, so it cannot be deleted.";
+
 /* ONE layout definition for both states, per the batch 1 decision: a separate
    skeleton component mirroring these class names drifts the first time anyone
    edits the real card, and no test in this repo would catch it.
@@ -96,8 +106,16 @@ export default function LicenceCard({ licence, loading = false, canManage = true
 
                 <Button
                     variant="danger"
-                    disabled={loading || !canManage}
-                    title={!loading && !canManage ? CANNOT_DELETE_TITLE : undefined}
+                    disabled={loading || !canManage || licence.active === true}
+                    title={
+                        loading
+                            ? undefined
+                            : !canManage
+                              ? CANNOT_DELETE_TITLE
+                              : licence.active === true
+                                ? CANNOT_DELETE_ACTIVE_TITLE
+                                : undefined
+                    }
                     onClick={() => onDelete(licence.id)}
                 >
                     Delete

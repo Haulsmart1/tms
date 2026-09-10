@@ -61,6 +61,10 @@ const BodySchema = z.discriminatedUnion("action", [
     licenceId: z.string().uuid(),
     active: z.boolean(),
   }),
+  z.object({
+    action: z.literal("delete"),
+    licenceId: z.string().uuid(),
+  }),
 ]);
 
 // Every blocked reason needs its own line here. A missing key would render
@@ -168,7 +172,7 @@ export async function POST(request: NextRequest) {
     } else {
       const licenceRes = await admin
         .from("vehicle_licences")
-        .select("id, vehicle_id, tenant_id")
+        .select("id, vehicle_id, tenant_id, active, activated_at, deactivated_at")
         .eq("id", body.licenceId)
         .maybeSingle();
       if (licenceRes.error) {
@@ -229,6 +233,65 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // DELETE is only available for a licence that was NEVER activated.
+    //
+    // billing_03 kept the browser's delete grant on the reasoning that removing
+    // a licence can only reduce a bill under prepayment. Under arrears that
+    // inverts: the invoice is computed at close from these rows, so deleting
+    // one that was ever live destroys the evidence and a vehicle silently
+    // vanishes from an invoice it belonged on. billing_07 STEP 2 revokes the
+    // grant for that reason, and this is the replacement.
+    //
+    // Not a blanket ban, because the case that actually happens is a typo. A
+    // licence created inactive has bought nothing and can go. One that was ever
+    // active is deactivated instead and stays as a record, which is also the
+    // right answer for a compliance document.
+    //
+    // The test is deactivated_at = activated_at exactly, which is the shape the
+    // sync trigger and the billing_07 backfill both produce for a row that was
+    // never live. Anything that ran for even a second has deactivated_at
+    // strictly greater.
+    if (body.action === "delete") {
+      const licence = await admin
+        .from("vehicle_licences")
+        .select("id, active, activated_at, deactivated_at")
+        .eq("id", body.licenceId)
+        .single();
+      if (licence.error) throw new Error(licence.error.message);
+
+      const neverActivated =
+        licence.data.active !== true &&
+        licence.data.deactivated_at !== null &&
+        licence.data.activated_at !== null &&
+        new Date(licence.data.deactivated_at as string).getTime() <=
+          new Date(licence.data.activated_at as string).getTime();
+
+      if (!neverActivated) {
+        return NextResponse.json(
+          {
+            error:
+              "This licence has been active, so it is part of a bill and cannot be deleted. Deactivate it instead; it stays on the current invoice and will not renew.",
+          },
+          { status: 409 }
+        );
+      }
+
+      const removed = await admin
+        .from("vehicle_licences")
+        .delete()
+        .eq("id", body.licenceId);
+      if (removed.error) throw new Error(removed.error.message);
+
+      return NextResponse.json({ ok: true, charged: false, reason: "deleted" });
+    }
+
+    // `delete` has returned by here, so what remains is the write path.
+    // Narrowed into its own const because TypeScript does not carry
+    // control-flow narrowing into the closures declared below: `writeLicence`
+    // could in principle be called later, so inside it `body` is still the
+    // full union and `body.active` does not exist on the delete member.
+    const writeBody: Exclude<typeof body, { action: "delete" }> = body;
+
     // The single place in this file where a licence can become active. Called
     // only once every money question has been settled.
     // Under v2, reactivating an existing licence must create a NEW row rather
@@ -268,15 +331,15 @@ export async function POST(request: NextRequest) {
     }
 
     async function writeLicence(graceUntil: string | null = null) {
-      if (body.action === "create") {
+      if (writeBody.action === "create") {
         const { error } = await admin.from("vehicle_licences").insert({
-          tenant_id: body.tenantId,
-          vehicle_id: body.vehicleId,
-          licence_type: body.licenceType,
-          issue_date: body.issueDate,
-          expiry_date: body.expiryDate,
-          active: body.active,
-          notes: body.notes,
+          tenant_id: writeBody.tenantId,
+          vehicle_id: writeBody.vehicleId,
+          licence_type: writeBody.licenceType,
+          issue_date: writeBody.issueDate,
+          expiry_date: writeBody.expiryDate,
+          active: writeBody.active,
+          notes: writeBody.notes,
           // Rule 7. Null for every v1 company and for any vehicle whose
           // registration has been licensed here before, which is what stops
           // grace being recycled by deleting and re-adding a vehicle.
@@ -288,8 +351,8 @@ export async function POST(request: NextRequest) {
       } else {
         const { error } = await admin
           .from("vehicle_licences")
-          .update({ active: body.active })
-          .eq("id", body.licenceId);
+          .update({ active: writeBody.active })
+          .eq("id", writeBody.licenceId);
         if (error) {
           throw new Error(error.message);
         }
@@ -300,18 +363,18 @@ export async function POST(request: NextRequest) {
     // fresh row, see above). Reaching here with active false is impossible:
     // the deactivation branch below returns before the v2 block runs.
     async function writeV2Licence(graceUntil: string | null) {
-      if (body.action === "create") {
+      if (writeBody.action === "create") {
         await writeLicence(graceUntil);
         return;
       }
-      await writeLicenceAsNewActivation(body.licenceId, graceUntil);
+      await writeLicenceAsNewActivation(writeBody.licenceId, graceUntil);
     }
 
     // Deactivations and inactive drafts cannot make a vehicle billable, so
     // there is nothing to charge. Removals get no refund and no credit: the
     // cycle is already paid for, and the coverage row stays behind, so putting
     // the vehicle back before the next charge is free.
-    if (!body.active) {
+    if (!writeBody.active) {
       await writeLicence();
       return NextResponse.json({
         ok: true,
