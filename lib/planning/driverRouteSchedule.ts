@@ -10,6 +10,10 @@ import {
   type DriverTravelResolver,
 } from "./driverSchedule";
 import type { DriverRuleProfile } from "./driverRules";
+import {
+  ASSIMILATED_DRIVER_HOURS_LIMITS,
+  type DriverHoursState,
+} from "./driverHoursState";
 
 type SuccessfulDriverAwareRoute = Extract<
   DriverAwareRouteResult,
@@ -24,6 +28,7 @@ export type DriverAwareScheduleInput = {
   startLocationId: string;
   baseLocationId?: string | null;
   activityDataAvailable: boolean;
+  driverHoursState?: DriverHoursState | null;
   travelSecondsBetween: DriverTravelResolver;
 };
 
@@ -66,7 +71,25 @@ export function scheduleDriverAwareRoute(
     startTimeSeconds: input.startTimeSeconds,
     startLocationId: input.startLocationId,
     baseLocationId: input.baseLocationId,
-    activityDataAvailable: input.activityDataAvailable,
+    activityDataAvailable:
+      input.activityDataAvailable &&
+      (input.driverHoursState?.complete ?? false),
+    initialDrivingState: input.driverHoursState
+      ? {
+          continuousDrivingSeconds:
+            input.driverHoursState.continuousDrivingSeconds,
+          dailyDrivingSeconds:
+            input.driverHoursState.dailyDrivingSeconds,
+          weeklyDrivingSeconds:
+            input.driverHoursState.currentWeekDrivingSeconds,
+          fortnightDrivingSeconds:
+            input.driverHoursState.fortnightDrivingSeconds,
+          maxWeeklyDrivingSeconds:
+            ASSIMILATED_DRIVER_HOURS_LIMITS.weeklyDrivingSeconds,
+          maxFortnightDrivingSeconds:
+            ASSIMILATED_DRIVER_HOURS_LIMITS.fortnightDrivingSeconds,
+        }
+      : undefined,
     tasks: taskResult.tasks.map((task) => ({
       id: task.id,
       locationId: task.locationId,

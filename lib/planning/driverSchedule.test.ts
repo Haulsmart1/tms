@@ -424,4 +424,132 @@ describe("scheduleDriverRoute", () => {
         .some((entry) => entry.kind === "break"),
     ).toBe(false);
   });
+  it("seeds continuous driving from actual driver history", () => {
+    const result = scheduleDriverRoute(
+      input({
+        initialDrivingState: {
+          continuousDrivingSeconds: 3 * HOUR,
+          dailyDrivingSeconds: 3 * HOUR,
+        },
+        tasks: [
+          task("a", {
+            serviceSeconds: 0,
+          }),
+        ],
+        travelSecondsBetween: travelTable({
+          "base->location-a": 2 * HOUR,
+        }),
+      }),
+    );
+
+    expect(
+      result.events.map((entry) => entry.kind),
+    ).toEqual(["break", "drive"]);
+  });
+
+  it("seeds daily driving and rolls into daily rest before more work", () => {
+    const result = scheduleDriverRoute(
+      input({
+        initialDrivingState: {
+          continuousDrivingSeconds: 0,
+          dailyDrivingSeconds: 7 * HOUR,
+        },
+        tasks: [
+          task("a", {
+            serviceSeconds: 0,
+          }),
+        ],
+        travelSecondsBetween: travelTable({
+          "base->location-a": 2 * HOUR,
+        }),
+      }),
+    );
+
+    expect(result.events[0]?.kind).toBe("daily_rest");
+    expect(result.events[1]?.kind).toBe("drive");
+  });
+
+  it("refuses work beyond the supplied weekly driving allowance", () => {
+    const result = scheduleDriverRoute(
+      input({
+        initialDrivingState: {
+          continuousDrivingSeconds: 0,
+          dailyDrivingSeconds: 0,
+          weeklyDrivingSeconds: 55 * HOUR,
+          fortnightDrivingSeconds: 70 * HOUR,
+          maxWeeklyDrivingSeconds: 56 * HOUR,
+          maxFortnightDrivingSeconds: 90 * HOUR,
+        },
+        tasks: [
+          task("a", {
+            serviceSeconds: 0,
+          }),
+        ],
+        travelSecondsBetween: travelTable({
+          "base->location-a": 2 * HOUR,
+        }),
+      }),
+    );
+
+    expect(result.status).toBe("unschedulable");
+    expect(result.completedTaskIds).toEqual([]);
+
+    expect(
+      result.warnings.some((warning) =>
+        warning.includes("weekly driving allowance"),
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses work beyond the supplied fortnight driving allowance", () => {
+    const result = scheduleDriverRoute(
+      input({
+        initialDrivingState: {
+          continuousDrivingSeconds: 0,
+          dailyDrivingSeconds: 0,
+          weeklyDrivingSeconds: 20 * HOUR,
+          fortnightDrivingSeconds: 89 * HOUR,
+          maxWeeklyDrivingSeconds: 56 * HOUR,
+          maxFortnightDrivingSeconds: 90 * HOUR,
+        },
+        tasks: [
+          task("a", {
+            serviceSeconds: 0,
+          }),
+        ],
+        travelSecondsBetween: travelTable({
+          "base->location-a": 2 * HOUR,
+        }),
+      }),
+    );
+
+    expect(result.status).toBe("unschedulable");
+    expect(result.completedTaskIds).toEqual([]);
+
+    expect(
+      result.warnings.some((warning) =>
+        warning.includes("fortnight driving allowance"),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects impossible initial driver-hours state", () => {
+    const result = scheduleDriverRoute(
+      input({
+        initialDrivingState: {
+          continuousDrivingSeconds: 5 * HOUR,
+          dailyDrivingSeconds: 5 * HOUR,
+        },
+      }),
+    );
+
+    expect(result.status).toBe("unschedulable");
+
+    expect(
+      result.warnings.some((warning) =>
+        warning.includes("Initial continuous driving"),
+      ),
+    ).toBe(true);
+  });
+
 });

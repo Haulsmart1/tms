@@ -51,6 +51,15 @@ export type DriverScheduleStatus =
   | "review_required"
   | "unschedulable";
 
+export type DriverScheduleInitialDrivingState = {
+  continuousDrivingSeconds: number;
+  dailyDrivingSeconds: number;
+  weeklyDrivingSeconds?: number;
+  fortnightDrivingSeconds?: number;
+  maxWeeklyDrivingSeconds?: number;
+  maxFortnightDrivingSeconds?: number;
+};
+
 export type DriverScheduleInput = {
   planningProfile: DriverPlanningProfile;
   ruleProfile: DriverRuleProfile;
@@ -58,6 +67,7 @@ export type DriverScheduleInput = {
   startLocationId: string;
   baseLocationId?: string | null;
   activityDataAvailable: boolean;
+  initialDrivingState?: DriverScheduleInitialDrivingState;
   tasks: DriverScheduleTask[];
   travelSecondsBetween: DriverTravelResolver;
 };
@@ -88,6 +98,10 @@ type State = {
   locationId: string;
   continuousDriving: number;
   dailyDriving: number;
+  weeklyDriving: number;
+  fortnightDriving: number;
+  maxWeeklyDriving: number | null;
+  maxFortnightDriving: number | null;
   dutyStart: number;
   currentDay: MutableDay;
 };
@@ -175,6 +189,8 @@ function addDrive(
   state.locationId = locationId;
   state.continuousDriving += seconds;
   state.dailyDriving += seconds;
+  state.weeklyDriving += seconds;
+  state.fortnightDriving += seconds;
   state.currentDay.drivingSeconds += seconds;
 }
 
@@ -324,6 +340,31 @@ function planDrive(
     return null;
   }
 
+  const plannedDrivingSeconds =
+    driveSeconds + reserveAfterDriveSeconds;
+
+  if (
+    state.maxWeeklyDriving !== null &&
+    !durationFits(
+      state.weeklyDriving,
+      plannedDrivingSeconds,
+      state.maxWeeklyDriving,
+    )
+  ) {
+    return null;
+  }
+
+  if (
+    state.maxFortnightDriving !== null &&
+    !durationFits(
+      state.fortnightDriving,
+      plannedDrivingSeconds,
+      state.maxFortnightDriving,
+    )
+  ) {
+    return null;
+  }
+
   if (
     dutyWouldExceed(
       state,
@@ -468,6 +509,92 @@ export function scheduleDriverRoute(
     taskErrors.push("travelSecondsBetween is required");
   }
 
+  const initialDriving = input.initialDrivingState;
+
+  if (initialDriving) {
+    const values: Array<[string, number | undefined]> = [
+      [
+        "initialDrivingState.continuousDrivingSeconds",
+        initialDriving.continuousDrivingSeconds,
+      ],
+      [
+        "initialDrivingState.dailyDrivingSeconds",
+        initialDriving.dailyDrivingSeconds,
+      ],
+      [
+        "initialDrivingState.weeklyDrivingSeconds",
+        initialDriving.weeklyDrivingSeconds,
+      ],
+      [
+        "initialDrivingState.fortnightDrivingSeconds",
+        initialDriving.fortnightDrivingSeconds,
+      ],
+      [
+        "initialDrivingState.maxWeeklyDrivingSeconds",
+        initialDriving.maxWeeklyDrivingSeconds,
+      ],
+      [
+        "initialDrivingState.maxFortnightDrivingSeconds",
+        initialDriving.maxFortnightDrivingSeconds,
+      ],
+    ];
+
+    for (const [name, value] of values) {
+      if (
+        value !== undefined &&
+        !isNonNegativeFinite(value)
+      ) {
+        taskErrors.push(
+          `${name} must be a non-negative finite number`,
+        );
+      }
+    }
+
+    if (
+      isNonNegativeFinite(
+        initialDriving.continuousDrivingSeconds,
+      ) &&
+      initialDriving.continuousDrivingSeconds >
+        input.ruleProfile.maxContinuousDrivingSeconds
+    ) {
+      taskErrors.push(
+        "Initial continuous driving exceeds the supplied continuous-driving limit",
+      );
+    }
+
+    if (
+      isNonNegativeFinite(initialDriving.dailyDrivingSeconds) &&
+      initialDriving.dailyDrivingSeconds >
+        input.ruleProfile.maxDailyDrivingSeconds
+    ) {
+      taskErrors.push(
+        "Initial daily driving exceeds the supplied daily-driving limit",
+      );
+    }
+
+    if (
+      initialDriving.weeklyDrivingSeconds !== undefined &&
+      initialDriving.maxWeeklyDrivingSeconds !== undefined &&
+      initialDriving.weeklyDrivingSeconds >
+        initialDriving.maxWeeklyDrivingSeconds
+    ) {
+      taskErrors.push(
+        "Initial weekly driving exceeds the supplied weekly-driving limit",
+      );
+    }
+
+    if (
+      initialDriving.fortnightDrivingSeconds !== undefined &&
+      initialDriving.maxFortnightDrivingSeconds !== undefined &&
+      initialDriving.fortnightDrivingSeconds >
+        initialDriving.maxFortnightDrivingSeconds
+    ) {
+      taskErrors.push(
+        "Initial fortnight driving exceeds the supplied fortnight-driving limit",
+      );
+    }
+  }
+
   if (taskErrors.length > 0) {
     return {
       status: "unschedulable",
@@ -502,8 +629,18 @@ export function scheduleDriverRoute(
     now: start,
     day: 1,
     locationId: input.startLocationId,
-    continuousDriving: 0,
-    dailyDriving: 0,
+    continuousDriving:
+      initialDriving?.continuousDrivingSeconds ?? 0,
+    dailyDriving:
+      initialDriving?.dailyDrivingSeconds ?? 0,
+    weeklyDriving:
+      initialDriving?.weeklyDrivingSeconds ?? 0,
+    fortnightDriving:
+      initialDriving?.fortnightDrivingSeconds ?? 0,
+    maxWeeklyDriving:
+      initialDriving?.maxWeeklyDrivingSeconds ?? null,
+    maxFortnightDriving:
+      initialDriving?.maxFortnightDrivingSeconds ?? null,
     dutyStart: start,
     currentDay: {
       day: 1,
@@ -592,6 +729,31 @@ export function scheduleDriverRoute(
     if (!taskCanFitFreshDay) {
       warnings.push(
         `Task ${task.id} cannot fit within the supplied planning rules`,
+      );
+      break;
+    }
+
+    const requiredDrivingSeconds =
+      travelSeconds + returnSeconds;
+
+    if (
+      state.maxWeeklyDriving !== null &&
+      state.weeklyDriving + requiredDrivingSeconds >
+        state.maxWeeklyDriving
+    ) {
+      warnings.push(
+        `Task ${task.id} would exceed the supplied weekly driving allowance`,
+      );
+      break;
+    }
+
+    if (
+      state.maxFortnightDriving !== null &&
+      state.fortnightDriving + requiredDrivingSeconds >
+        state.maxFortnightDriving
+    ) {
+      warnings.push(
+        `Task ${task.id} would exceed the supplied fortnight driving allowance`,
       );
       break;
     }
