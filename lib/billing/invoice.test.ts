@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fleetPeriodPence, PERIOD_MINIMUM_PENCE, PERIOD_VEHICLE_PENCE } from "./rateCard";
-import { assembleInvoice } from "./invoice";
+import { assembleInvoice, estimateVehicleAddition } from "./invoice";
 import type { InvoiceVehicle } from "./invoice";
 
 const PERIOD_START = "2026-03-21";
@@ -324,5 +324,76 @@ describe("assembleInvoice included allowance", () => {
     expect(invoice(vehicles(3), { includedVehicles: 0 }).netPence).toBe(
       invoice(vehicles(3)).netPence
     );
+  });
+});
+
+describe("estimateVehicleAddition", () => {
+  function estimate(
+    existing: readonly InvoiceVehicle[],
+    newCoverageStartISO: string,
+    overrides: Record<string, unknown> = {}
+  ) {
+    return estimateVehicleAddition({
+      periodStartISO: PERIOD_START,
+      periodEndISO: PERIOD_END,
+      existingVehicles: existing,
+      newVehicle: {
+        vehicleId: "new-vehicle",
+        tenantId: "tenant-1",
+        vrnNormalised: "NE00WNE",
+        coverageStartISO: newCoverageStartISO,
+      },
+      minBillDays: 1,
+      unitAmountPence: PERIOD_VEHICLE_PENCE,
+      minimumPence: PERIOD_MINIMUM_PENCE,
+      includedVehicles: 0,
+      vatRatePercent: 20,
+      ...overrides,
+    });
+  }
+
+  // The honest answer to "what will this vehicle add to my next invoice" is
+  // the difference between the invoice with it and the invoice without, not
+  // the vehicle's own prorated line. Those differ wherever the discount, the
+  // cap or the floor is involved, which is most of the interesting cases.
+  it("costs the vehicle's prorated line in the ordinary case", () => {
+    expect(estimate(vehicles(2), "2026-04-09")).toEqual({
+      netPence: 2073,
+      vatPence: 415,
+      grossPence: 2488,
+      billableDays: 9,
+    });
+  });
+
+  // Under the minimum, an extra vehicle is genuinely free, and telling a
+  // customer it will cost GBP 20.73 when their bill will not move is the kind
+  // of small dishonesty that erodes trust in the whole invoice.
+  it("costs nothing while the fleet is under the minimum", () => {
+    expect(estimate(vehicles(1), "2026-04-09").netPence).toBe(0);
+  });
+
+  // The cap reaches the estimate: the 20th vehicle really is free, so the page
+  // should say so.
+  it("costs nothing for the vehicle a discount threshold makes free", () => {
+    expect(estimate(vehicles(19), PERIOD_START).netPence).toBe(0);
+  });
+
+  it("costs the threshold step for the vehicle that reaches a band", () => {
+    expect(estimate(vehicles(18), PERIOD_START).netPence).toBe(4515);
+  });
+
+  it("reports the days the vehicle will actually be billed", () => {
+    expect(estimate(vehicles(3), "2026-04-16", { minBillDays: 7 })).toMatchObject(
+      { billableDays: 7 }
+    );
+  });
+
+  it("costs nothing for a vehicle whose grace outlasts the period", () => {
+    expect(estimate(vehicles(3), "2026-05-01")).toEqual({
+      netPence: 0,
+      vatPence: 0,
+      grossPence: 0,
+      billableDays: 0,
+    });
   });
 });

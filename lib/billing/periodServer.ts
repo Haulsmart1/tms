@@ -9,7 +9,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { assembleInvoice } from "./invoice";
+import { assembleInvoice, estimateVehicleAddition } from "./invoice";
 import type { AssembledLine } from "./invoice";
 import {
   collectPeriodVehicles,
@@ -710,3 +710,125 @@ export async function computeGraceUntil(
 }
 
 export { fetchCompanyVehicleIds };
+
+export type AdditionQuote =
+  /** Not a v2 company; the caller has nothing to show from this model. */
+  | { model: "v1_immediate" }
+  /** No period is open, so this vehicle would open one and pay the minimum. */
+  | {
+      model: "v2_period";
+      kind: "opens_period";
+      netPence: number;
+      vatPence: number;
+      grossPence: number;
+      periodStartISO: string;
+      periodEndISO: string;
+    }
+  | {
+      model: "v2_period";
+      kind: "joins_period";
+      netPence: number;
+      vatPence: number;
+      grossPence: number;
+      billableDays: number;
+      periodStartISO: string;
+      periodEndISO: string;
+    };
+
+/**
+ * What adding this vehicle would cost, for the UI to show BEFORE the click.
+ *
+ * Read-only. Charges nothing, writes nothing, and opens no period.
+ */
+export async function quoteVehicleAddition(
+  admin: SupabaseClient,
+  companyId: string,
+  vehicleId: string,
+  todayISO: string
+): Promise<AdditionQuote> {
+  const settingsRes = await admin
+    .from("company_billing")
+    .select(
+      "company_id, billing_model, status, currency, unit_amount_pence, min_invoice_pence, included_vehicles, grace_days, min_bill_days"
+    )
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (settingsRes.error) throw new Error(settingsRes.error.message);
+
+  const settings = settingsRes.data as CompanyBillingSettings | null;
+  if (!settings || settings.billing_model !== "v2_period") {
+    return { model: "v1_immediate" };
+  }
+
+  const vatRate = settings.vat_rate ?? 20;
+
+  const openRes = await admin
+    .from("billing_periods")
+    .select("id, period_start, period_end")
+    .eq("company_id", companyId)
+    .eq("status", "open")
+    .maybeSingle();
+  if (openRes.error) throw new Error(openRes.error.message);
+
+  // No open period: this vehicle would open one and the minimum falls due up
+  // front. Quoting the minimum rather than a prorated line is the honest
+  // answer, and it is the number that will actually leave their card today.
+  if (!openRes.data) {
+    const bounds = nextPeriodBounds(todayISO);
+    const vatPence = Math.floor(
+      (settings.min_invoice_pence * vatRate + 50) / 100
+    );
+    return {
+      model: "v2_period",
+      kind: "opens_period",
+      netPence: settings.min_invoice_pence,
+      vatPence,
+      grossPence: settings.min_invoice_pence + vatPence,
+      periodStartISO: bounds.periodStartISO,
+      periodEndISO: bounds.periodEndISO,
+    };
+  }
+
+  const periodStartISO = openRes.data.period_start as string;
+  const periodEndISO = openRes.data.period_end as string;
+
+  const vehicleIds = await fetchCompanyVehicleIds(admin, companyId);
+  const licences = await fetchCompanyLicences(admin, vehicleIds);
+  const existing = collectPeriodVehicles({
+    periodStartISO,
+    periodEndISO,
+    licences,
+  }).filter((v) => v.vehicleId !== vehicleId);
+
+  const estimate = estimateVehicleAddition({
+    periodStartISO,
+    periodEndISO,
+    existingVehicles: existing,
+    newVehicle: {
+      vehicleId,
+      tenantId: "",
+      vrnNormalised: vehicleId,
+      // Coverage would start today. Grace is not applied here: grace_days is 0
+      // for every company, and quoting a free window that a concurrent
+      // activation on the same registration could consume would be a quote we
+      // cannot honour.
+      coverageStartISO: todayISO,
+    },
+    minBillDays: settings.min_bill_days,
+    unitAmountPence: settings.unit_amount_pence,
+    minimumPence: settings.min_invoice_pence,
+    includedVehicles: settings.included_vehicles,
+    vatRatePercent: vatRate,
+  });
+
+  return {
+    model: "v2_period",
+    kind: "joins_period",
+    netPence: estimate.netPence,
+    vatPence: estimate.vatPence,
+    grossPence: estimate.grossPence,
+    billableDays: estimate.billableDays,
+    periodStartISO,
+    periodEndISO,
+  };
+}

@@ -265,3 +265,81 @@ export function assembleInvoice(
     grossPence: netPence + vatPence,
   };
 }
+
+export type AdditionEstimate = {
+  netPence: number;
+  vatPence: number;
+  grossPence: number;
+  /** Days the new vehicle would be billed for, after the minimum and cap. */
+  billableDays: number;
+};
+
+/**
+ * What adding one more vehicle would add to the period's invoice.
+ *
+ * The DIFFERENCE between the invoice with it and the invoice without, not the
+ * vehicle's own prorated line. Those two answers diverge wherever the volume
+ * discount, the threshold cap or the minimum is involved, which covers most of
+ * the cases a customer is actually curious about:
+ *
+ *   under the minimum   the extra vehicle is free, because the floor was
+ *                       already carrying the bill
+ *   at a capped size    the 20th vehicle is free, because 19 was already
+ *                       paying the 20 price
+ *   crossing a band     the vehicle costs LESS than its own line, because it
+ *                       drags the whole fleet into a discount
+ *
+ * Quoting the vehicle's own line in any of those cases tells a customer their
+ * bill will move when it will not, which is the kind of small dishonesty that
+ * makes people distrust the whole invoice.
+ *
+ * VAT is applied to the difference rather than differenced from the two VAT
+ * figures, matching balanceDue: one rounding, on the number the customer is
+ * being quoted.
+ */
+export function estimateVehicleAddition(args: {
+  periodStartISO: string;
+  periodEndISO: string;
+  existingVehicles: readonly InvoiceVehicle[];
+  newVehicle: InvoiceVehicle;
+  minBillDays: number;
+  unitAmountPence: number;
+  minimumPence: number;
+  includedVehicles: number;
+  vatRatePercent: number;
+}): AdditionEstimate {
+  const common = {
+    periodStartISO: args.periodStartISO,
+    periodEndISO: args.periodEndISO,
+    minBillDays: args.minBillDays,
+    unitAmountPence: args.unitAmountPence,
+    minimumPence: args.minimumPence,
+    includedVehicles: args.includedVehicles,
+    vatRatePercent: args.vatRatePercent,
+  };
+
+  const without = assembleInvoice({ ...common, vehicles: args.existingVehicles });
+  const with_ = assembleInvoice({
+    ...common,
+    vehicles: [...args.existingVehicles, args.newVehicle],
+  });
+
+  // Floored at zero. A negative estimate is arithmetically possible only if a
+  // future rate card were non-monotonic, and "adding this vehicle will REDUCE
+  // your bill" is not something to render even if the maths allowed it: it is
+  // an invitation to add phantom vehicles. fleetPeriodPence's cap exists to
+  // make that impossible; this is the second layer.
+  const netPence = Math.max(0, with_.netPence - without.netPence);
+  const vatPence = roundHalfUpDiv(netPence * args.vatRatePercent, 100);
+
+  const addedLine = with_.lines.find(
+    (line) => line.vehicleId === args.newVehicle.vehicleId
+  );
+
+  return {
+    netPence,
+    vatPence,
+    grossPence: netPence + vatPence,
+    billableDays: addedLine?.billableDays ?? 0,
+  };
+}
