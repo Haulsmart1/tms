@@ -78,7 +78,7 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
   **v2** (`v2_period`) bills in ARREARS: adding a vehicle is an insert and moves no money, and the invoice
   is computed when a 28-day period closes. It writes no coverage rows; `lib/billing/close.ts`,
   `invoice.ts`, `rateCard.ts` and `periodServer.ts` are its equivalents, and the periods and lines live in
-  `billing_periods` / `invoice_lines` (`docs/sql/billing_06`, `billing_07`). v2 pricing is GBP 64.50 per
+  `billing_periods` / `period_invoice_lines` (`docs/sql/billing_06`, `billing_07`). v2 pricing is GBP 64.50 per
   vehicle per period with a GBP 129.00 floor and WHOLE-FLEET volume discounts, which is a different shape
   from v1's graduated per-week bands: do not reuse `lib/billing/money.ts` for a v2 company or the other way
   round. Full rationale in `docs/superpowers/specs/2026-09-10-period-billing-design.md`.

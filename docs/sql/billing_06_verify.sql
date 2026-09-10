@@ -55,9 +55,9 @@ begin
                   then 'PASS' else 'FAIL: RLS is off, so its policy is inert' end;
   return next;
 
-  probe := 'invoice_lines RLS enabled';
+  probe := 'period_invoice_lines RLS enabled';
   outcome := case when (select relrowsecurity from pg_class
-                        where oid = 'public.invoice_lines'::regclass)
+                        where oid = 'public.period_invoice_lines'::regclass)
                   then 'PASS' else 'FAIL: RLS is off, so its policy is inert' end;
   return next;
 
@@ -73,7 +73,7 @@ begin
   probe := 'no browser write grants on the billing tables';
   select count(*) into n
   from (
-    select unnest(array['public.billing_periods','public.invoice_lines','public.period_charges']) as rel
+    select unnest(array['public.billing_periods','public.period_invoice_lines','public.period_charges']) as rel
   ) t
   where has_table_privilege('authenticated', t.rel, 'INSERT')
      or has_table_privilege('authenticated', t.rel, 'UPDATE')
@@ -87,7 +87,7 @@ begin
 
   probe := 'authenticated can still READ the billing tables';
   outcome := case when has_table_privilege('authenticated','public.billing_periods','SELECT')
-                   and has_table_privilege('authenticated','public.invoice_lines','SELECT')
+                   and has_table_privilege('authenticated','public.period_invoice_lines','SELECT')
                    and has_table_privilege('authenticated','public.period_charges','SELECT')
                   then 'PASS'
                   else 'FAIL: a policy without a grant reads as an EMPTY TABLE, not an error, so the billing page would silently show nothing' end;
@@ -113,7 +113,7 @@ begin
     -- RULE 5, and the two non-vehicle lines that must not collide with it.
     probe := 'discount and minimum lines coexist in one period';
     begin
-      insert into public.invoice_lines (company_id, billing_period_id, kind, net_pence, description)
+      insert into public.period_invoice_lines (company_id, billing_period_id, kind, net_pence, description)
       values (v_company, v_period, 'volume_discount', -100, 'probe discount'),
              (v_company, v_period, 'minimum_adjustment', 100, 'probe minimum');
       outcome := 'PASS';
@@ -125,9 +125,9 @@ begin
     if v_vehicle is not null then
       probe := 'one line per vehicle per period';
       begin
-        insert into public.invoice_lines (company_id, billing_period_id, kind, vehicle_id, net_pence, description)
+        insert into public.period_invoice_lines (company_id, billing_period_id, kind, vehicle_id, net_pence, description)
         values (v_company, v_period, 'vehicle', v_vehicle, 6450, 'probe one');
-        insert into public.invoice_lines (company_id, billing_period_id, kind, vehicle_id, net_pence, description)
+        insert into public.period_invoice_lines (company_id, billing_period_id, kind, vehicle_id, net_pence, description)
         values (v_company, v_period, 'vehicle', v_vehicle, 6450, 'probe two');
         outcome := 'FAIL: the same vehicle was billed twice in one period';
       exception when unique_violation then
@@ -141,7 +141,7 @@ begin
     -- for any vehicle ever billed.
     probe := 'a vehicle line survives its vehicle being deleted';
     begin
-      insert into public.invoice_lines (company_id, billing_period_id, kind, net_pence, description)
+      insert into public.period_invoice_lines (company_id, billing_period_id, kind, net_pence, description)
       values (v_company, v_period, 'vehicle', 100, 'probe orphaned by delete');
       outcome := 'PASS';
     exception when others then
@@ -152,7 +152,7 @@ begin
     probe := 'a discount line must NOT carry a vehicle_id';
     if v_vehicle is not null then
       begin
-        insert into public.invoice_lines (company_id, billing_period_id, kind, vehicle_id, net_pence, description)
+        insert into public.period_invoice_lines (company_id, billing_period_id, kind, vehicle_id, net_pence, description)
         values (v_company, v_period, 'volume_discount', v_vehicle, -100, 'probe mislabelled');
         outcome := 'FAIL: any query summing a vehicle cost would pick this up';
       exception when check_violation then
@@ -222,7 +222,7 @@ drop function if exists public.billing_period_verify();
 -- devtools; every one must come back empty, NOT an error:
 --
 --   await supabase.from('billing_periods').select('id, company_id')
---   await supabase.from('invoice_lines').select('id, company_id')
+--   await supabase.from('period_invoice_lines').select('id, company_id')
 --   await supabase.from('period_charges').select('id, company_id')
 --
 -- Then confirm the rows a company SHOULD see are visible: seed one period for

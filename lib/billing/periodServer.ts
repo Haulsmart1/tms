@@ -412,7 +412,7 @@ async function computePeriodInvoice(
   // Regenerating means REPLACING, never appending.
   if (args.regenerateLines) {
     const cleared = await admin
-      .from("invoice_lines")
+      .from("period_invoice_lines")
       .delete()
       .eq("billing_period_id", period.id);
     if (cleared.error) throw new Error(cleared.error.message);
@@ -461,7 +461,7 @@ async function computePeriodInvoice(
       description: line.description,
     }));
 
-    const insertLines = await admin.from("invoice_lines").insert(rows);
+    const insertLines = await admin.from("period_invoice_lines").insert(rows);
     if (insertLines.error) throw new Error(insertLines.error.message);
   }
 

@@ -78,7 +78,7 @@
 --
 --    Rule 5 (one invoice line per vehicle per period) does not need it.
 --    collectPeriodVehicles groups licence rows by vehicle, and
---    invoice_lines_one_per_vehicle in billing_06 enforces the result.
+--    period_invoice_lines_one_per_vehicle in billing_06 enforces the result.
 --
 --    Run this to see how many vehicles would have been broken by it:
 --

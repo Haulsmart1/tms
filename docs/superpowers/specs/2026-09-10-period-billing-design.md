@@ -35,7 +35,7 @@ Company grain it is. Vehicles still resolve through tenants exactly as
 `lib/billing/vehicleCount.ts` does it, and for the same reason recorded there: there is no
 `vehicles.company_id` column and nothing may look for one.
 
-`invoice_lines` carries `tenant_id` anyway, for reporting only. A multi-depot operator gets one
+`period_invoice_lines` carries `tenant_id` anyway, for reporting only. A multi-depot operator gets one
 bill that can still be broken down by depot.
 
 ### Arrears, and `vehicle_cycle_coverage` is retired for v2

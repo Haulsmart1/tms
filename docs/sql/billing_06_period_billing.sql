@@ -30,14 +30,35 @@
 -- period closes. Adding a vehicle stops moving money. The GBP 129 period
 -- minimum is collected once, up front, at first vehicle activation.
 --
--- PRE-FLIGHT. The new tables take foreign keys on companies(id), tenants(id)
--- and vehicles(id). Confirm all three are uuid before applying, or the create
--- fails on a type mismatch:
+-- PRE-FLIGHT 1: NAME COLLISIONS. `create table if not exists` on a name that
+-- is already taken does NOTHING and says nothing. Every statement AFTER it
+-- then applies to somebody else's table, which for this file means an RLS
+-- policy and a `revoke insert, update, delete` landing on a table that has
+-- nothing to do with billing.
+--
+-- This is not hypothetical. The table below was originally called
+-- `invoice_lines`, which is the CUSTOMER invoicing table (accounts, credit
+-- notes, Xero sync). Applying it created nothing, and only the partial index
+-- on a column that table lacks failed the transaction and rolled the whole
+-- thing back before the grants were touched. It is now
+-- `period_invoice_lines`. Confirm nothing else clashes before applying:
+--
+--   select tablename from pg_tables
+--   where schemaname = 'public'
+--     and tablename in ('billing_periods', 'period_invoice_lines',
+--                       'period_charges');
+--
+-- Expect ZERO rows on a first apply. On a re-run, expect exactly the tables
+-- this file created.
+--
+-- PRE-FLIGHT 2. The new tables take foreign keys on companies(id) and
+-- vehicles(id). Confirm both are uuid before applying, or the create fails on
+-- a type mismatch:
 --
 --   select table_name, column_name, data_type
 --   from information_schema.columns
 --   where table_schema = 'public' and column_name = 'id'
---     and table_name in ('companies', 'tenants', 'vehicles');
+--     and table_name in ('companies', 'vehicles');
 
 begin;
 
@@ -237,7 +258,7 @@ create unique index if not exists billing_periods_one_open
 -- amounts, because a whole-fleet discount does not divide evenly across them.
 -- Folding it in would need a largest-remainder allocation and the per-vehicle
 -- amounts would stop matching the rate the customer was quoted.
-create table if not exists public.invoice_lines (
+create table if not exists public.period_invoice_lines (
   id uuid primary key default gen_random_uuid(),
   company_id uuid not null references public.companies(id) on delete cascade,
   billing_period_id uuid not null
@@ -292,7 +313,7 @@ create table if not exists public.invoice_lines (
   -- record what was billed, and the partial unique index below simply stops
   -- covering a row that no longer names a vehicle. Rule 5 is unaffected: it
   -- constrains lines for vehicles that still exist.
-  constraint invoice_lines_vehicle_kind_agrees check (
+  constraint period_invoice_lines_vehicle_kind_agrees check (
     kind = 'vehicle' or vehicle_id is null
   )
 );
@@ -300,15 +321,15 @@ create table if not exists public.invoice_lines (
 -- RULE 5: one line per vehicle per period. Partial, because the discount and
 -- minimum lines share a null vehicle_id and a plain unique constraint would
 -- let only one of them exist per period.
-create unique index if not exists invoice_lines_one_per_vehicle
-  on public.invoice_lines (billing_period_id, vehicle_id)
+create unique index if not exists period_invoice_lines_one_per_vehicle
+  on public.period_invoice_lines (billing_period_id, vehicle_id)
   where vehicle_id is not null;
 
-create index if not exists invoice_lines_period_idx
-  on public.invoice_lines (billing_period_id);
+create index if not exists period_invoice_lines_period_idx
+  on public.period_invoice_lines (billing_period_id);
 
-create index if not exists invoice_lines_company_created_idx
-  on public.invoice_lines (company_id, created_at desc);
+create index if not exists period_invoice_lines_company_created_idx
+  on public.period_invoice_lines (company_id, created_at desc);
 
 -- ===========================================================================
 -- Period charges.
@@ -396,7 +417,7 @@ create index if not exists period_charges_pending_idx
 -- ===========================================================================
 
 alter table public.billing_periods enable row level security;
-alter table public.invoice_lines enable row level security;
+alter table public.period_invoice_lines enable row level security;
 alter table public.period_charges enable row level security;
 
 drop policy if exists billing_periods_select on public.billing_periods;
@@ -408,8 +429,8 @@ create policy billing_periods_select on public.billing_periods
         and company_id = public.get_my_company_id())
   );
 
-drop policy if exists invoice_lines_select on public.invoice_lines;
-create policy invoice_lines_select on public.invoice_lines
+drop policy if exists period_invoice_lines_select on public.period_invoice_lines;
+create policy period_invoice_lines_select on public.period_invoice_lines
   for select to authenticated
   using (
     public.get_my_role() = 'super_admin'
@@ -430,7 +451,7 @@ create policy period_charges_select on public.period_charges
 -- depend on which role runs this file. A policy without a grant reads as an
 -- empty table, not as an error, so the billing page would silently show
 -- nothing. Same reasoning as billing_03.
-grant select on public.billing_periods, public.invoice_lines,
+grant select on public.billing_periods, public.period_invoice_lines,
   public.period_charges to authenticated;
 
 -- No INSERT/UPDATE/DELETE policies on purpose. All writes come from server
@@ -442,7 +463,7 @@ grant select on public.billing_periods, public.invoice_lines,
 -- privilege is their sum. Omitting it is the mistake billing_03 documents.
 revoke insert, update, delete on public.billing_periods
   from authenticated, anon, public;
-revoke insert, update, delete on public.invoice_lines
+revoke insert, update, delete on public.period_invoice_lines
   from authenticated, anon, public;
 revoke insert, update, delete on public.period_charges
   from authenticated, anon, public;
@@ -465,7 +486,7 @@ commit;
 --
 --    select relname, relacl from pg_class
 --    where oid in ('public.billing_periods'::regclass,
---                  'public.invoice_lines'::regclass,
+--                  'public.period_invoice_lines'::regclass,
 --                  'public.period_charges'::regclass);
 --
 -- 3. RLS is actually ON, not merely policied. A policy on a table with RLS
@@ -473,7 +494,7 @@ commit;
 --
 --    select relname, relrowsecurity from pg_class
 --    where oid in ('public.billing_periods'::regclass,
---                  'public.invoice_lines'::regclass,
+--                  'public.period_invoice_lines'::regclass,
 --                  'public.period_charges'::regclass);
 --
 --    All three must be true.
@@ -485,10 +506,10 @@ commit;
 --    begin;
 --    insert into public.billing_periods (company_id, period_start, period_end)
 --    select id, date '2000-01-01', date '2000-01-29' from public.companies limit 1;
---    insert into public.invoice_lines (company_id, billing_period_id, kind, net_pence, description)
+--    insert into public.period_invoice_lines (company_id, billing_period_id, kind, net_pence, description)
 --    select company_id, id, 'volume_discount', -100, 'x' from public.billing_periods
 --    where period_start = date '2000-01-01';
---    insert into public.invoice_lines (company_id, billing_period_id, kind, net_pence, description)
+--    insert into public.period_invoice_lines (company_id, billing_period_id, kind, net_pence, description)
 --    select company_id, id, 'minimum_adjustment', 100, 'y' from public.billing_periods
 --    where period_start = date '2000-01-01';
 --    -- both of the above must succeed: two null vehicle_ids in one period
@@ -497,7 +518,7 @@ commit;
 -- 5. The kind/vehicle_id agreement check bites. This must FAIL with 23514:
 --
 --    begin;
---    insert into public.invoice_lines (company_id, billing_period_id, kind, net_pence, description)
+--    insert into public.period_invoice_lines (company_id, billing_period_id, kind, net_pence, description)
 --    select company_id, id, 'vehicle', 100, 'no vehicle id' from public.billing_periods limit 1;
 --    rollback;
 --

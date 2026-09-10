@@ -100,7 +100,7 @@ Status tags: [OK] functional against live data, [PARTIAL] real data but view-onl
 - **`/settings/company`** [OK]: the most complete form in the app; multi-section company profile with country-driven fields (GB VAT / EORI / O-licence vs US EIN / USDOT / MC / IFTA), currency / timezone defaults, validation.
 - **`/settings/users`** [OK]: invite users by magic link (admin action).
 - **`/settings/permissions`** [PARTIAL]: per-user, per-page access checkboxes writing to `user_permissions`. Grant path works; revoke path and controlled state are incomplete, and the page now says so on screen rather than implying the boxes reflect stored state.
-- **`/settings/invoices`** [PARTIAL]: this tenant's 4-weekly charge (active licensed vehicles priced on the graduated weekly bands). Shows the v1 model only; a v2 company's charges live in `billing_periods` / `invoice_lines` and are not surfaced here yet.
+- **`/settings/invoices`** [PARTIAL]: this tenant's 4-weekly charge (active licensed vehicles priced on the graduated weekly bands). Shows the v1 model only; a v2 company's charges live in `billing_periods` / `period_invoice_lines` and are not surfaced here yet.
 - **`/settings/billing`** [OK]: subscription payment method (Square card on file, 3DS verified) and charge history; company admins only (super_admin sees a notice linking to `/super-admin/billing`; staff see a notice).
 
 ### Super-admin (platform operator)
