@@ -1239,3 +1239,29 @@ async function markCancelled(
     .eq("company_id", companyId);
   if (error) throw new Error(error.message);
 }
+
+/**
+ * Is this company on period billing?
+ *
+ * A narrow question, asked where the fuller resolveActivation would be
+ * wasteful or wrong: a delete must not be refused because the company is
+ * past_due, so it needs the model and nothing else.
+ *
+ * Tolerates 42703 the same way, so a deploy ahead of billing_06 reads every
+ * company as v1 rather than throwing.
+ */
+export async function isPeriodBillingCompany(
+  admin: SupabaseClient,
+  companyId: string
+): Promise<boolean> {
+  const { data, error } = await admin
+    .from("company_billing")
+    .select("billing_model")
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (error) {
+    if (isMissingColumn(error)) return false;
+    throw new Error(error.message);
+  }
+  return data?.billing_model === "v2_period";
+}

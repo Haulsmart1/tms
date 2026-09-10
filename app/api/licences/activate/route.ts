@@ -29,10 +29,12 @@ import { londonDateISO } from "../../../../lib/billing/schedule";
 import {
   computeGraceUntil,
   fetchCompanyVehicleIds,
+  isPeriodBillingCompany,
   openPeriodAndChargeMinimum,
   resolveActivation,
 } from "../../../../lib/billing/periodServer";
 import { createSquarePeriodPaymentProvider } from "../../../../lib/billing/periodPaymentServer";
+import { selectLicenceDeleteAction } from "../../../../lib/billing/licenceDelete";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -255,6 +257,8 @@ export async function POST(request: NextRequest) {
     // never live. Anything that ran for even a second has deactivated_at
     // strictly greater.
     if (body.action === "delete") {
+      const isPeriodBilling = await isPeriodBillingCompany(admin, companyId);
+
       const licence = await admin
         .from("vehicle_licences")
         .select("id, active, activated_at, deactivated_at")
@@ -262,34 +266,26 @@ export async function POST(request: NextRequest) {
         .single();
 
       // 42703 means billing_07 STEP 1 has not been applied, so the lifecycle
-      // columns do not exist yet. In that world billing_03's reasoning still
-      // holds (a delete can only reduce a prepaid bill) and the browser was
-      // allowed to delete, so permitting it is the status quo rather than a
-      // new hole. Narrow on purpose: any other error is a real failure.
+      // columns do not exist yet. No company can be on v2 in that world
+      // either, so the v1 rule applies and the delete stands.
       if (licence.error && licence.error.code !== "42703") {
         throw new Error(licence.error.message);
       }
-      if (licence.error) {
-        const removedLegacy = await admin
-          .from("vehicle_licences")
-          .delete()
-          .eq("id", body.licenceId);
-        if (removedLegacy.error) throw new Error(removedLegacy.error.message);
-        return NextResponse.json({ ok: true, charged: false, reason: "deleted" });
-      }
 
-      const neverActivated =
-        licence.data.active !== true &&
-        licence.data.deactivated_at !== null &&
-        licence.data.activated_at !== null &&
-        new Date(licence.data.deactivated_at as string).getTime() <=
-          new Date(licence.data.activated_at as string).getTime();
+      const decision = licence.error
+        ? ({ kind: "delete" } as const)
+        : selectLicenceDeleteAction({
+            isPeriodBilling,
+            active: licence.data.active as boolean | null,
+            activatedAtISO: licence.data.activated_at as string | null,
+            deactivatedAtISO: licence.data.deactivated_at as string | null,
+          });
 
-      if (!neverActivated) {
+      if (decision.kind === "blocked") {
         return NextResponse.json(
           {
             error:
-              "This licence has been active, so it is part of a bill and cannot be deleted. Deactivate it instead; it stays on the current invoice and will not renew.",
+              "This licence has been active, so it is part of the current period's invoice and cannot be deleted. Deactivate it instead: it stays on this invoice and will not renew.",
           },
           { status: 409 }
         );
