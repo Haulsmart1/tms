@@ -9,6 +9,7 @@
 // boundary is what keeps the arithmetic here free of BST.
 
 import type { InvoiceVehicle } from "./invoice";
+import { MAX_ATTEMPTS } from "./schedule";
 
 export type PeriodLicence = {
   vehicleId: string;
@@ -220,30 +221,48 @@ export function highWaterMark(args: {
 export type PeriodStatus = "open" | "closing" | "closed" | "invoiced" | "failed";
 
 export type CloseAction =
-  | { kind: "close"; regenerateLines: boolean }
-  | { kind: "skip"; reason: "not_due" | "already_closed" | "in_progress" };
+  /** Build the invoice from licence rows. */
+  | { kind: "compute"; regenerateLines: boolean }
+  /** The lines already exist and are durable; only the payment is outstanding. */
+  | { kind: "collect"; attempt: number }
+  | {
+      kind: "skip";
+      reason:
+        | "not_due"
+        | "already_invoiced"
+        | "in_progress"
+        | "awaiting_retry"
+        | "dunning_exhausted";
+    };
 
 /**
- * Whether this run should close the period, and whether it must clear the
- * lines already there first.
+ * What this run should do with a period.
  *
- * Idempotence has three separate cases and they are not interchangeable:
+ * COMPUTING AND COLLECTING ARE SEPARATE, and conflating them lost money. The
+ * earlier version marked a period `closed` before charging and treated
+ * `closed` as finished, so any exit other than a clean decline (an
+ * indeterminate answer from Square, a missing env var, a failed status write)
+ * left the period out of the due query permanently and its invoice was never
+ * collected. Only `invoiced` means finished now:
  *
- *   closed / invoiced  Finished. Re-running must be a no-op, or a cron that
- *                      fires twice would rewrite an invoice the customer has
- *                      already been sent.
- *   failed             The payment failed but the lines were deliberately
- *                      kept, so the close is not recomputed from licence rows
- *                      that have moved on since. A re-run must therefore
- *                      REPLACE them rather than append a second set.
- *   closing            Either a run holds this right now, or one crashed
- *                      holding it. The claim itself is a conditional UPDATE
- *                      in Postgres (set closing where status = open), which
- *                      is what actually makes concurrent runs safe; this only
- *                      decides how long a claim may sit before it is treated
- *                      as abandoned. Too eager and two runs write lines for
- *                      one period; too patient and a crash wedges the period
- *                      until someone notices.
+ *   open       no lines yet: compute them
+ *   closing    a run holds this, or one crashed holding it. The claim itself
+ *              is a conditional UPDATE in Postgres, which is what actually
+ *              makes concurrent runs safe; this only decides how long a claim
+ *              may sit before it is treated as abandoned. A reclaim DOES
+ *              recompute, because a crashed run may have written half its
+ *              lines.
+ *   closed     lines are written, payment is outstanding. Collect, and do NOT
+ *              recompute: the lines are the invoice the customer incurred, and
+ *              the licence rows behind them have moved on since.
+ *   failed     a payment was declined. Collect again, but only on the dunning
+ *              ladder, and never past exhaustion.
+ *   invoiced   done.
+ *
+ * The ladder is the same one v1 uses (nextRetryOn: attempts on days 1, 3, 5
+ * and 7 from the close date). Without it a `failed` period was re-selected on
+ * every daily run, so a declining card took a fresh real Square attempt every
+ * 24 hours indefinitely and the company was never suspended.
  */
 export function selectCloseAction(args: {
   status: PeriodStatus;
@@ -252,11 +271,15 @@ export function selectCloseAction(args: {
   closingSinceISO: string | null;
   nowISO: string;
   staleClosingMinutes: number;
+  /** Settled payment attempts against this period so far. */
+  attemptCount: number;
+  /** When the next dunning attempt is due, or null for "now". */
+  retryOnISO: string | null;
 }): CloseAction {
-  // Before the due check on purpose. A closed period is finished whatever its
+  // Before the due check on purpose: a paid period is finished whatever its
   // dates say, and reporting it as "not due" would be misleading in the log.
-  if (args.status === "closed" || args.status === "invoiced") {
-    return { kind: "skip", reason: "already_closed" };
+  if (args.status === "invoiced") {
+    return { kind: "skip", reason: "already_invoiced" };
   }
 
   if (args.periodEndISO > args.todayISO) {
@@ -265,16 +288,29 @@ export function selectCloseAction(args: {
 
   if (args.status === "closing") {
     if (args.closingSinceISO === null) {
-      return { kind: "close", regenerateLines: true };
+      return { kind: "compute", regenerateLines: true };
     }
     const heldForMs =
       Date.parse(args.nowISO) - Date.parse(args.closingSinceISO);
-    const staleAfterMs = args.staleClosingMinutes * 60_000;
-    if (heldForMs >= staleAfterMs) {
-      return { kind: "close", regenerateLines: true };
+    if (heldForMs >= args.staleClosingMinutes * 60_000) {
+      return { kind: "compute", regenerateLines: true };
     }
     return { kind: "skip", reason: "in_progress" };
   }
 
-  return { kind: "close", regenerateLines: args.status === "failed" };
+  if (args.status === "open") {
+    return { kind: "compute", regenerateLines: false };
+  }
+
+  // closed or failed: the lines exist, so this is a collection question.
+  if (args.status === "failed") {
+    if (args.attemptCount >= MAX_ATTEMPTS) {
+      return { kind: "skip", reason: "dunning_exhausted" };
+    }
+    if (args.retryOnISO !== null && args.retryOnISO > args.todayISO) {
+      return { kind: "skip", reason: "awaiting_retry" };
+    }
+  }
+
+  return { kind: "collect", attempt: args.attemptCount + 1 };
 }

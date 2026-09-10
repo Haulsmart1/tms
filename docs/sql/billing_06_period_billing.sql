@@ -192,6 +192,16 @@ create table if not exists public.billing_periods (
   gross_pence bigint,
   vat_rate numeric not null default 20.0,
 
+  -- The dunning ladder, per period. Mirrors company_billing.retry_at /
+  -- retry_count, which drive v1, and uses the same nextRetryOn schedule
+  -- (attempts on days 1, 3, 5 and 7 from the close date).
+  --
+  -- Without these a `failed` period is re-selected by the due query on EVERY
+  -- daily run, so a declining card is hit with a fresh real Square attempt
+  -- once every 24 hours indefinitely, and the company is never suspended.
+  attempt_count int not null default 0 check (attempt_count >= 0),
+  retry_on date,
+
   provider_invoice_id text,
   created_at timestamptz not null default now(),
 
@@ -244,7 +254,16 @@ create table if not exists public.invoice_lines (
 
   -- Reporting only. Billing is at company grain, but a multi-depot operator
   -- gets one bill that can still be broken down by depot.
-  tenant_id uuid references public.tenants(id) on delete set null,
+  --
+  -- DELIBERATELY NO FOREIGN KEY. This codebase has rows that carry a COMPANY
+  -- id in tenant_id, from before tenants existed, which is exactly why
+  -- fetchCompanyVehicleIds puts companyId into its `in.(...)` list. A licence
+  -- on such a vehicle yields tenant_id = the company id, and an FK to
+  -- tenants(id) rejects the insert with 23503. That throw lands AFTER the
+  -- period has been claimed as `closing`, so the stale-claim path retries it
+  -- every 15 minutes and fails identically forever: that company is never
+  -- billed and nothing says why.
+  tenant_id uuid,
 
   vrn_normalised text,
   coverage_start date,
@@ -262,13 +281,19 @@ create table if not exists public.invoice_lines (
   description text not null,
   created_at timestamptz not null default now(),
 
-  -- vehicle_id is required on a vehicle line and forbidden on the others. A
-  -- vehicle line without one could not be traced back to what it billed, and a
-  -- discount line WITH one would be counted by any query that sums a vehicle's
-  -- cost.
+  -- A discount or minimum line must NOT carry a vehicle_id, or any query that
+  -- sums a vehicle's cost would pick it up.
+  --
+  -- A vehicle line MAY have a null vehicle_id, and only because the vehicle was
+  -- later deleted: the FK above nulls it. Requiring non-null here instead made
+  -- `delete from vehicles` fail with a check violation for any vehicle ever
+  -- billed under v2, which breaks app/vehicles/page.tsx outright. The line
+  -- stays readable without it, since vrn_normalised and description both
+  -- record what was billed, and the partial unique index below simply stops
+  -- covering a row that no longer names a vehicle. Rule 5 is unaffected: it
+  -- constrains lines for vehicles that still exist.
   constraint invoice_lines_vehicle_kind_agrees check (
-    (kind = 'vehicle' and vehicle_id is not null)
-    or (kind <> 'vehicle' and vehicle_id is null)
+    kind = 'vehicle' or vehicle_id is null
   )
 );
 

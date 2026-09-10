@@ -67,17 +67,24 @@ async function chargePeriod(
   // settled record rather than an absence someone later reads as "we forgot",
   // matching how runChargeCycle handles a zero-vehicle cycle.
   if (charge.grossPence <= 0) {
-    await admin.from("period_charges").insert({
+    // The attempt is DERIVED, not hardcoded to 1. A balance attempt 1 that
+    // declines and later recomputes to nothing owed would otherwise collide
+    // with the settled attempt-1 row on unique (billing_period_id, kind,
+    // attempt), and the error was discarded, so the settled record this
+    // branch exists to leave was silently not written.
+    const attempt = await nextAttemptNumber(admin, charge);
+    const { error } = await admin.from("period_charges").insert({
       company_id: charge.companyId,
       billing_period_id: charge.periodId,
       kind: charge.kind,
-      attempt: 1,
+      attempt,
       net_pence: 0,
       vat_pence: 0,
       gross_pence: 0,
       currency: charge.currency,
       status: "succeeded",
     });
+    if (error) throw new Error(error.message);
     return { status: "skipped" };
   }
 
@@ -228,21 +235,7 @@ async function claimAttempt(
   if (existingError) throw new Error(existingError.message);
   if (existing) return existing as PendingRow;
 
-  // Attempt numbers count settled attempts, so a decline advances the key and
-  // a crash does not. Derived from the table rather than held in memory,
-  // because the crash case is exactly when memory is gone.
-  const { data: settled, error: settledError } = await admin
-    .from("period_charges")
-    .select("attempt")
-    .eq("billing_period_id", charge.periodId)
-    .eq("kind", charge.kind)
-    .order("attempt", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (settledError) throw new Error(settledError.message);
-
-  const attempt = (settled?.attempt ?? 0) + 1;
+  const attempt = await nextAttemptNumber(admin, charge);
 
   const { data: inserted, error: insertError } = await admin
     .from("period_charges")
@@ -267,8 +260,50 @@ async function claimAttempt(
     )
     .single();
 
-  if (insertError) throw new Error(insertError.message);
+  if (insertError) {
+    // 23505 on unique (billing_period_id, kind, attempt) means a concurrent
+    // caller claimed this attempt first. Read theirs rather than minting a new
+    // attempt number: a new number is a new idempotency key, and two keys
+    // against one intended charge is how a card gets debited twice.
+    if (insertError.code === "23505") {
+      const raced = await admin
+        .from("period_charges")
+        .select(
+          "id, attempt, net_pence, vat_pence, gross_pence, currency, square_card_id, square_customer_id"
+        )
+        .eq("billing_period_id", charge.periodId)
+        .eq("kind", charge.kind)
+        .eq("attempt", attempt)
+        .single();
+      if (raced.error) throw new Error(raced.error.message);
+      return raced.data as PendingRow;
+    }
+    throw new Error(insertError.message);
+  }
   return inserted as PendingRow;
+}
+
+/**
+ * The next attempt number for this period and kind.
+ *
+ * Counts SETTLED attempts, so a decline advances the idempotency key and a
+ * crash does not. Derived from the table rather than held in memory, because
+ * the crash case is exactly when memory is gone.
+ */
+async function nextAttemptNumber(
+  admin: SupabaseClient,
+  charge: PeriodCharge
+): Promise<number> {
+  const { data, error } = await admin
+    .from("period_charges")
+    .select("attempt")
+    .eq("billing_period_id", charge.periodId)
+    .eq("kind", charge.kind)
+    .order("attempt", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data?.attempt ?? 0) + 1;
 }
 
 async function settle(

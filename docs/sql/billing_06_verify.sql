@@ -136,13 +136,16 @@ begin
       return next;
     end if;
 
-    probe := 'a vehicle line requires a vehicle_id';
+    -- A vehicle line MAY have a null vehicle_id: the FK nulls it when the
+    -- vehicle is deleted, and rejecting that made `delete from vehicles` fail
+    -- for any vehicle ever billed.
+    probe := 'a vehicle line survives its vehicle being deleted';
     begin
       insert into public.invoice_lines (company_id, billing_period_id, kind, net_pence, description)
-      values (v_company, v_period, 'vehicle', 100, 'probe orphan');
-      outcome := 'FAIL: a vehicle line with no vehicle cannot be traced to what it billed';
-    exception when check_violation then
+      values (v_company, v_period, 'vehicle', 100, 'probe orphaned by delete');
       outcome := 'PASS';
+    exception when others then
+      outcome := 'FAIL: ' || sqlerrm || ' (deleting a billed vehicle would fail)';
     end;
     return next;
 

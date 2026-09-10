@@ -128,6 +128,20 @@ alter table public.vehicle_licences
 alter table public.vehicle_licences
   add column if not exists created_by uuid;
 
+-- Set on a licence that has been REPLACED by a newer activation row.
+--
+-- v2 reactivation inserts a fresh row rather than clearing deactivated_at,
+-- because clearing it destroys the history an invoice is computed from. That
+-- left the old row sitting in the list looking like a duplicate, and worse,
+-- still toggleable: toggling it again inserted a third row, and so on without
+-- bound. Pointing it at its successor lets the licences page hide it while
+-- keeping every activation in the table.
+alter table public.vehicle_licences
+  add column if not exists superseded_by uuid references public.vehicle_licences(id) on delete set null;
+
+comment on column public.vehicle_licences.superseded_by is
+  'Newer activation row that replaced this one. Non-null rows are history: hide them in the UI, keep them for billing.';
+
 comment on column public.vehicle_licences.activated_at is
   'When this licence became billable. Server-only; see guard_vehicle_licence_lifecycle.';
 comment on column public.vehicle_licences.deactivated_at is
@@ -354,6 +368,7 @@ begin
     if new.activated_at is distinct from old.activated_at
        or new.deactivated_at is distinct from old.deactivated_at
        or new.grace_until is distinct from old.grace_until
+       or new.superseded_by is distinct from old.superseded_by
        or new.vrn_normalised is distinct from old.vrn_normalised then
       raise exception 'vehicle_licences billing columns are server-only; use /api/licences/activate'
         using errcode = '42501';

@@ -21,8 +21,9 @@ import { nextPeriodBounds } from "./period";
 import { selectActivationAction } from "./activation";
 import type { ActivationAction } from "./activation";
 import { balanceDue } from "./periodPayment";
+import { roundHalfUpDiv } from "./pence";
 import type { PeriodPaymentProvider } from "./periodPayment";
-import { londonDateISO } from "./schedule";
+import { londonDateISO, nextRetryOn } from "./schedule";
 
 // Mirrors lib/billing/server.ts. PostgREST caps an unscoped select at 1000
 // rows by default, and a truncated result here would silently under-bill, so
@@ -54,6 +55,12 @@ export type PeriodRow = {
   status: PeriodStatus;
   closing_since: string | null;
   prepaid_pence: number;
+  net_pence: number | null;
+  vat_pence: number | null;
+  gross_pence: number | null;
+  attempt_count: number;
+  retry_on: string | null;
+  closed_reason: string | null;
 };
 
 /**
@@ -158,12 +165,12 @@ export async function ensureOpenPeriod(
 ): Promise<PeriodRow> {
   const existing = await admin
     .from("billing_periods")
-    .select("id, company_id, period_start, period_end, status, closing_since, prepaid_pence")
+    .select(PERIOD_SELECT)
     .eq("company_id", companyId)
     .eq("status", "open")
     .maybeSingle();
   if (existing.error) throw new Error(existing.error.message);
-  if (existing.data) return existing.data as PeriodRow;
+  if (existing.data) return existing.data as unknown as PeriodRow;
 
   const bounds = nextPeriodBounds(startISO);
   const inserted = await admin
@@ -175,7 +182,7 @@ export async function ensureOpenPeriod(
       status: "open",
       prepaid_pence: prepaidPence,
     })
-    .select("id, company_id, period_start, period_end, status, closing_since, prepaid_pence")
+    .select(PERIOD_SELECT)
     .single();
 
   if (inserted.error) {
@@ -185,53 +192,53 @@ export async function ensureOpenPeriod(
     if (inserted.error.code === "23505") {
       const raced = await admin
         .from("billing_periods")
-        .select("id, company_id, period_start, period_end, status, closing_since, prepaid_pence")
+        .select(PERIOD_SELECT)
         .eq("company_id", companyId)
         .eq("status", "open")
         .single();
       if (raced.error) throw new Error(raced.error.message);
-      return raced.data as PeriodRow;
+      return raced.data as unknown as PeriodRow;
     }
     throw new Error(inserted.error.message);
   }
 
-  return inserted.data as PeriodRow;
+  return inserted.data as unknown as PeriodRow;
 }
 
 export type CloseOutcome = {
   periodId: string;
   companyId: string;
   result:
-    | "closed"
+    | "invoiced"
+    | "declined"
+    | "suspended"
     | "skipped_not_due"
-    | "skipped_already_closed"
+    | "skipped_already_invoiced"
     | "skipped_in_progress"
+    | "skipped_awaiting_retry"
+    | "skipped_dunning_exhausted"
     | "skipped_not_v2"
     | "skipped_claim_lost"
-    | "failed";
+    | "error";
   netPence?: number;
   grossPence?: number;
-  vehicleCount?: number;
+  attempt?: number;
   error?: string;
 };
 
+const PERIOD_SELECT =
+  "id, company_id, period_start, period_end, status, closing_since, prepaid_pence, net_pence, vat_pence, gross_pence, attempt_count, retry_on, closed_reason";
+
 /**
- * Close every period whose end has arrived, then take the balance.
+ * Close and collect every period whose end has arrived.
  *
- * Called from the daily cron alongside the v1 charge run. Ordering inside one
- * period is deliberate and not interchangeable:
- *
- *   1. CLAIM with a compare-and-set. This, not selectCloseAction, is what
- *      makes concurrent runs safe: `update ... where id = ? and status = ?`
- *      either updates one row or none, and a run that updates none had the
- *      period taken from under it and must not proceed.
- *   2. WRITE THE LINES, and only then charge. The amount therefore comes from
- *      rows that are already durable, so a retry rebuilds a byte-identical
- *      request body. billing_05 exists because the add-on path could not do
- *      this; here it falls out of the ordering for free.
- *   3. Mark the period closed BEFORE paying. A payment failure must leave the
- *      lines in place and the period `failed`, so the close is never
- *      recomputed from licence rows that have moved on since.
+ * COMPUTING AND COLLECTING ARE SEPARATE STEPS, and that separation is the
+ * correction. Writing the lines is idempotent and cheap to redo; charging a
+ * card is neither. So the invoice is computed, made durable, and only then
+ * collected, and a period that has been computed but not paid stays in the due
+ * query until it is. Marking a period finished before the charge meant any
+ * exit other than a clean decline lost the invoice permanently: an
+ * indeterminate answer from Square, a missing env var, a failed status write.
  */
 export async function closeDuePeriods(
   admin: SupabaseClient,
@@ -242,13 +249,24 @@ export async function closeDuePeriods(
 
   const dueRes = await admin
     .from("billing_periods")
-    .select("id, company_id, period_start, period_end, status, closing_since, prepaid_pence")
+    .select(PERIOD_SELECT)
     .lte("period_end", opts.todayISO)
-    .in("status", ["open", "closing", "failed"])
+    .in("status", ["open", "closing", "closed", "failed"])
     .order("period_end", { ascending: true });
-  if (dueRes.error) throw new Error(dueRes.error.message);
 
-  const due = (dueRes.data ?? []) as PeriodRow[];
+  // 42P01 (no such table) and 42703 (no such column) both mean billing_06 has
+  // not been applied. There is no v2 company in that world, so there is
+  // nothing to close, and reporting it as a run failure would make the nightly
+  // cron cry wolf every night between the deploy and the migration while all
+  // v1 charging succeeded. Narrow on purpose: any other error is real.
+  if (dueRes.error) {
+    if (dueRes.error.code === "42P01" || dueRes.error.code === "42703") {
+      return [];
+    }
+    throw new Error(dueRes.error.message);
+  }
+
+  const due = (dueRes.data ?? []) as unknown as PeriodRow[];
   if (due.length >= POSTGREST_ROW_CAP) {
     throw new Error(
       `Billing refused: due-period query hit the ${POSTGREST_ROW_CAP}-row cap; some companies would be silently skipped`
@@ -271,14 +289,21 @@ export async function closeDuePeriods(
     ])
   );
 
+  const SKIP_RESULT = {
+    not_due: "skipped_not_due",
+    already_invoiced: "skipped_already_invoiced",
+    in_progress: "skipped_in_progress",
+    awaiting_retry: "skipped_awaiting_retry",
+    dunning_exhausted: "skipped_dunning_exhausted",
+  } as const;
+
   const outcomes: CloseOutcome[] = [];
 
   for (const period of due) {
     const settings = settingsByCompany.get(period.company_id);
 
     // No settings row cannot be a v2 company: the flag lives on it. Skipping
-    // rather than defaulting is the fail-closed direction, since defaulting
-    // would invoice a company nobody has opted in.
+    // rather than defaulting is the fail-closed direction.
     if (!settings || settings.billing_model !== "v2_period") {
       outcomes.push({
         periodId: period.id,
@@ -295,39 +320,57 @@ export async function closeDuePeriods(
       closingSinceISO: period.closing_since,
       nowISO: opts.nowISO,
       staleClosingMinutes,
+      attemptCount: period.attempt_count ?? 0,
+      retryOnISO: period.retry_on,
     });
 
     if (action.kind === "skip") {
       outcomes.push({
         periodId: period.id,
         companyId: period.company_id,
-        result:
-          action.reason === "not_due"
-            ? "skipped_not_due"
-            : action.reason === "in_progress"
-              ? "skipped_in_progress"
-              : "skipped_already_closed",
+        result: SKIP_RESULT[action.reason],
       });
       continue;
     }
 
     try {
-      outcomes.push(
-        await closeOnePeriod(admin, provider, {
+      let current = period;
+
+      if (action.kind === "compute") {
+        const computed = await computePeriodInvoice(admin, {
           period,
           settings,
           regenerateLines: action.regenerateLines,
           nowISO: opts.nowISO,
+        });
+        if (computed === null) {
+          outcomes.push({
+            periodId: period.id,
+            companyId: period.company_id,
+            result: "skipped_claim_lost",
+          });
+          continue;
+        }
+        current = computed;
+      }
+
+      outcomes.push(
+        await collectPeriod(admin, provider, {
+          period: current,
+          settings,
+          attempt: action.kind === "collect" ? action.attempt : 1,
+          nowISO: opts.nowISO,
         })
       );
     } catch (error) {
-      // One company's failure must not stop the run. The period is left in
-      // whatever state it reached; selectCloseAction's stale-claim rule brings
-      // it back on a later run.
+      // One company's failure must not stop the run. The period keeps whatever
+      // state it reached, and because only `invoiced` leaves the due query, a
+      // period computed but not collected is picked up next run rather than
+      // lost.
       outcomes.push({
         periodId: period.id,
         companyId: period.company_id,
-        result: "failed",
+        result: "error",
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -336,20 +379,24 @@ export async function closeDuePeriods(
   return outcomes;
 }
 
-async function closeOnePeriod(
+/**
+ * Claim the period, build its invoice, and make it durable.
+ *
+ * Returns null when the claim was lost to a concurrent run. The claim is a
+ * compare-and-set on the status that was read, so it updates one row or none,
+ * and a run that updated none must stand down.
+ */
+async function computePeriodInvoice(
   admin: SupabaseClient,
-  provider: PeriodPaymentProvider,
   args: {
     period: PeriodRow;
     settings: CompanyBillingSettings;
     regenerateLines: boolean;
     nowISO: string;
   }
-): Promise<CloseOutcome> {
+): Promise<PeriodRow | null> {
   const { period, settings } = args;
 
-  // THE CLAIM. Compare-and-set on the status we read, so a concurrent run that
-  // already moved this period updates zero rows here and this one stands down.
   const claim = await admin
     .from("billing_periods")
     .update({ status: "closing", closing_since: args.nowISO })
@@ -358,17 +405,9 @@ async function closeOnePeriod(
     .select("id")
     .maybeSingle();
   if (claim.error) throw new Error(claim.error.message);
-  if (!claim.data) {
-    return {
-      periodId: period.id,
-      companyId: period.company_id,
-      result: "skipped_claim_lost",
-    };
-  }
+  if (!claim.data) return null;
 
-  // Regenerating means REPLACING, never appending. A failed period kept its
-  // lines so the close would not be recomputed; a deliberate re-run must clear
-  // them or the invoice doubles.
+  // Regenerating means REPLACING, never appending.
   if (args.regenerateLines) {
     const cleared = await admin
       .from("invoice_lines")
@@ -404,7 +443,11 @@ async function closeOnePeriod(
       billing_period_id: period.id,
       kind: line.kind,
       vehicle_id: line.vehicleId,
-      tenant_id: line.tenantId,
+      // No foreign key on this column: legacy rows carry a COMPANY id here,
+      // and an FK to tenants(id) rejected them with 23503 forever. Null rather
+      // than the empty string a missing value used to become, which would be a
+      // 22P02 invalid-uuid insert.
+      tenant_id: line.tenantId === "" ? null : line.tenantId,
       vrn_normalised: line.vrnNormalised,
       coverage_start: line.coverageStartISO,
       coverage_end: line.coverageEndISO,
@@ -420,12 +463,14 @@ async function closeOnePeriod(
     if (insertLines.error) throw new Error(insertLines.error.message);
   }
 
+  // `closed` means the invoice exists and has NOT been paid. It stays in the
+  // due query until it is.
   const closed = await admin
     .from("billing_periods")
     .update({
       status: "closed",
       closed_at: args.nowISO,
-      closed_reason: CLOSE_REASON_SCHEDULED,
+      closed_reason: period.closed_reason ?? CLOSE_REASON_SCHEDULED,
       high_water_mark: highWaterMark({
         periodStartISO: period.period_start,
         periodEndISO: period.period_end,
@@ -437,32 +482,42 @@ async function closeOnePeriod(
       vat_rate: vatRate,
     })
     .eq("id", period.id)
-    .select("id")
+    .select(PERIOD_SELECT)
     .single();
   if (closed.error) throw new Error(closed.error.message);
 
-  // The next period opens only while the company still runs something. A
-  // company with nothing active gets no period, so it accrues nothing and sees
-  // no zero-pound invoice; its next activation opens one and takes the minimum,
-  // exactly as a first activation does.
-  //
-  // prepaid_pence is 0 on a rollover. The minimum is collected up front only
-  // when a period is opened by an ACTIVATION, where it buys card proof on a
-  // customer who has never paid. By the time a period rolls over the card has
-  // settled at least once, and charging the minimum here would put two
-  // transactions on the customer's statement on the same day.
-  const stillActive = licences.some((l) => l.deactivatedOnISO === null);
-  if (stillActive) {
-    await ensureOpenPeriod(admin, period.company_id, period.period_end, 0);
-  }
+  return closed.data as unknown as PeriodRow;
+}
 
-  const balance = balanceDue(invoice.netPence, period.prepaid_pence, vatRate);
+/**
+ * Charge what is outstanding on an already-computed period.
+ *
+ * The successor opens only AFTER a successful collection, and only while the
+ * company still runs something. Opening it before the charge meant a transient
+ * error there discarded the invoice; opening it regardless of outcome let a
+ * non-payer's debt compound period after period, which is the exposure cap
+ * this model was described as having and did not.
+ */
+async function collectPeriod(
+  admin: SupabaseClient,
+  provider: PeriodPaymentProvider,
+  args: {
+    period: PeriodRow;
+    settings: CompanyBillingSettings;
+    attempt: number;
+    nowISO: string;
+  }
+): Promise<CloseOutcome> {
+  const { period, settings } = args;
+  const vatRate = settings.vat_rate ?? 20;
+  const invoiceNet = period.net_pence ?? 0;
+  const balance = balanceDue(invoiceNet, period.prepaid_pence, vatRate);
 
   const payment = await provider.charge({
     companyId: period.company_id,
     periodId: period.id,
     kind: "balance",
-    attempt: 1,
+    attempt: args.attempt,
     netPence: balance.netPence,
     vatPence: balance.vatPence,
     grossPence: balance.grossPence,
@@ -472,48 +527,81 @@ async function closeOnePeriod(
   });
 
   if (payment.status === "failed") {
-    // The lines stay. `failed` is what stops the close being recomputed later
-    // from licence rows that have moved on, so the customer is chased for the
-    // invoice they actually incurred.
-    await admin
+    // The dunning ladder, shared with v1: attempts on days 1, 3, 5 and 7 from
+    // the close date. Null means exhausted, so the company goes past_due,
+    // which is what selectActivationAction's gate reads and what stops it
+    // adding vehicles. No successor period opens either, so the debt stops
+    // compounding at one period.
+    const retryOn = nextRetryOn(period.period_end, args.attempt);
+
+    const marked = await admin
       .from("billing_periods")
-      .update({ status: "failed" })
+      .update({
+        status: "failed",
+        attempt_count: args.attempt,
+        retry_on: retryOn,
+      })
       .eq("id", period.id);
+    if (marked.error) throw new Error(marked.error.message);
+
+    if (retryOn === null) {
+      const suspended = await admin
+        .from("company_billing")
+        .update({ status: "past_due" })
+        .eq("company_id", period.company_id);
+      if (suspended.error) throw new Error(suspended.error.message);
+    }
 
     return {
       periodId: period.id,
       companyId: period.company_id,
-      result: "failed",
+      result: retryOn === null ? "suspended" : "declined",
       error: payment.failureCode,
-      netPence: invoice.netPence,
-      grossPence: invoice.grossPence,
-      vehicleCount: invoice.vehicleCount,
+      attempt: args.attempt,
+      netPence: invoiceNet,
+      grossPence: balance.grossPence,
     };
   }
 
-  if (payment.status === "succeeded") {
-    await admin
-      .from("billing_periods")
-      .update({
-        status: "invoiced",
-        provider_invoice_id: payment.providerPaymentId,
-      })
-      .eq("id", period.id);
+  // `skipped` means nothing was owed, or no provider is configured. Both leave
+  // the period settled: there is no outstanding amount either way.
+  const settled = await admin
+    .from("billing_periods")
+    .update({
+      status: "invoiced",
+      attempt_count: args.attempt,
+      retry_on: null,
+      provider_invoice_id:
+        payment.status === "succeeded" ? payment.providerPaymentId : null,
+    })
+    .eq("id", period.id);
+  if (settled.error) throw new Error(settled.error.message);
+
+  // A failure here must not discard a payment that has already succeeded, so
+  // it is reported rather than thrown. The next activation self-heals it.
+  let successorError: string | undefined;
+  try {
+    const vehicleIds = await fetchCompanyVehicleIds(admin, period.company_id);
+    const licences = await fetchCompanyLicences(admin, vehicleIds);
+    if (licences.some((l) => l.deactivatedOnISO === null)) {
+      await ensureOpenPeriod(admin, period.company_id, period.period_end, 0);
+    }
+  } catch (error) {
+    successorError =
+      "payment settled but the next period could not be opened: " +
+      (error instanceof Error ? error.message : String(error));
   }
 
-  // `skipped` leaves the period `closed`, not `invoiced`. Nothing was owed, or
-  // no provider is configured; either way claiming it was invoiced would make
-  // an unpaid period look settled.
   return {
     periodId: period.id,
     companyId: period.company_id,
-    result: "closed",
-    netPence: invoice.netPence,
-    grossPence: invoice.grossPence,
-    vehicleCount: invoice.vehicleCount,
+    result: "invoiced",
+    attempt: args.attempt,
+    netPence: invoiceNet,
+    grossPence: balance.grossPence,
+    error: successorError,
   };
 }
-
 
 // PostgREST answers 42703 ("column does not exist") when billing_06 has not
 // been applied yet. That is not an error to propagate: the flag lives on the
@@ -627,19 +715,21 @@ export async function resolveActivation(
 /**
  * Open the company's period and take the minimum up front.
  *
- * ORDER, and it is the same rule the v1 route follows for the same reason:
- * take the money FIRST, write the licence LAST. The caller writes the licence
- * only on a true return here, so a decline leaves no billable vehicle behind.
+ * ORDER: take the money FIRST, write the licence LAST, so a decline leaves no
+ * billable vehicle behind. The caller writes the licence only on `ok`.
  *
- * On a decline the period is DELETED. Leaving it would be worse than useless:
- * the next attempt would find an open period, take the join branch, let the
- * vehicle in without charging, and leave prepaid_pence at 0 so the customer is
- * billed the whole period at close on top of a minimum they never paid.
+ * THE RACE THIS GUARDS. `ensureOpenPeriod` returns an EXISTING open period
+ * rather than opening one, by design. Two activations that both saw no open
+ * period (a double click across two tabs is enough; the page's writeInFlight
+ * guard is per tab) would otherwise both arrive here, the second would find
+ * the first's period, mint a fresh attempt because the first had already
+ * settled, and charge the card a second GBP 129. Worse, prepaid_pence would
+ * then record one payment, so only one would ever be netted off at close.
  *
- * An indeterminate payment throws out of here with the period intact and a
- * pending charge row, which is exactly the state selectActivationAction blocks
- * on. That is deliberate: the money may have moved, and guessing either way is
- * worse than telling the customer it is still settling.
+ * So the charge is conditional on there being no minimum charge for this
+ * period already. A succeeded one means the race was lost and the money is
+ * collected; a pending one means the outcome is unknown, and the caller must
+ * block rather than guess.
  */
 export async function openPeriodAndChargeMinimum(
   admin: SupabaseClient,
@@ -650,7 +740,10 @@ export async function openPeriodAndChargeMinimum(
     settings: CompanyBillingSettings;
     minimumPence: number;
   }
-): Promise<{ ok: true; periodId: string } | { ok: false; failureCode: string }> {
+): Promise<
+  | { ok: true; periodId: string; charged: boolean }
+  | { ok: false; failureCode: string }
+> {
   const vatRate = args.settings.vat_rate ?? 20;
   const period = await ensureOpenPeriod(
     admin,
@@ -659,7 +752,34 @@ export async function openPeriodAndChargeMinimum(
     0
   );
 
-  const vatPence = Math.floor((args.minimumPence * vatRate + 50) / 100);
+  const existing = await admin
+    .from("period_charges")
+    .select("id, status, net_pence")
+    .eq("billing_period_id", period.id)
+    .eq("kind", "minimum")
+    .in("status", ["pending", "succeeded"])
+    .order("attempt", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (existing.error) throw new Error(existing.error.message);
+
+  if (existing.data?.status === "pending") {
+    // A Square call was made whose outcome was never recorded. The card may
+    // well have been charged, so charging again is not available and neither
+    // is proceeding.
+    return { ok: false, failureCode: "PAYMENT_SETTLING" };
+  }
+
+  if (existing.data?.status === "succeeded") {
+    // The race was lost, or a previous attempt charged the card and then
+    // failed to record prepaid_pence. Repair it either way: leaving it at 0
+    // would net nothing off at close and bill the customer for the whole
+    // period on top of a minimum they have already paid.
+    await recordPrepaid(admin, period.id, existing.data.net_pence as number);
+    return { ok: true, periodId: period.id, charged: false };
+  }
+
+  const vatPence = roundHalfUpDiv(args.minimumPence * vatRate, 100);
 
   const payment = await provider.charge({
     companyId: args.companyId,
@@ -675,21 +795,56 @@ export async function openPeriodAndChargeMinimum(
   });
 
   if (payment.status === "failed") {
-    await admin.from("billing_periods").delete().eq("id", period.id);
+    // The period is removed, not left behind. Leaving it would let the next
+    // attempt take the join branch, add the vehicle free, and bill the whole
+    // period at close on top of a minimum that was never paid.
+    const removed = await admin
+      .from("billing_periods")
+      .delete()
+      .eq("id", period.id);
+    if (removed.error) throw new Error(removed.error.message);
     return { ok: false, failureCode: payment.failureCode };
   }
 
-  // `skipped` means no provider is configured, or the minimum is zero. The
-  // period stands and records what it actually collected, which for a skipped
-  // charge is nothing: prepaid_pence must never claim money that did not move,
-  // or the close job would net it off a real invoice.
-  const collected = payment.status === "succeeded" ? args.minimumPence : 0;
-  await admin
-    .from("billing_periods")
-    .update({ prepaid_pence: collected })
-    .eq("id", period.id);
+  // `skipped` means no provider is configured, or the minimum is zero.
+  // prepaid_pence must never claim money that did not move, or the close job
+  // would net it off a real invoice.
+  await recordPrepaid(
+    admin,
+    period.id,
+    payment.status === "succeeded" ? args.minimumPence : 0
+  );
 
-  return { ok: true, periodId: period.id };
+  return {
+    ok: true,
+    periodId: period.id,
+    charged: payment.status === "succeeded",
+  };
+}
+
+/**
+ * Record what a period actually collected up front.
+ *
+ * Checked, unlike the fire-and-forget write this replaces. If it silently
+ * failed after a successful charge, the card had been debited GBP 129 while
+ * the period recorded nothing prepaid, so balanceDue would net nothing off and
+ * the customer would be billed the full period on top of it. Throwing surfaces
+ * it, and the succeeded-charge branch above repairs it on the next attempt.
+ */
+async function recordPrepaid(
+  admin: SupabaseClient,
+  periodId: string,
+  netPence: number
+): Promise<void> {
+  const { error } = await admin
+    .from("billing_periods")
+    .update({ prepaid_pence: netPence })
+    .eq("id", periodId);
+  if (error) {
+    throw new Error(
+      `The minimum was collected for period ${periodId} but prepaid_pence could not be recorded: ${error.message}`
+    );
+  }
 }
 
 /**

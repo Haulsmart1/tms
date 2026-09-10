@@ -290,12 +290,14 @@ describe("selectCloseAction", () => {
       closingSinceISO: null,
       nowISO: NOW,
       staleClosingMinutes: 15,
+      attemptCount: 0,
+      retryOnISO: null,
       ...overrides,
     });
   }
 
-  it("closes an open period whose end has arrived", () => {
-    expect(action({})).toEqual({ kind: "close", regenerateLines: false });
+  it("computes the invoice for an open period whose end has arrived", () => {
+    expect(action({})).toEqual({ kind: "compute", regenerateLines: false });
   });
 
   it("leaves an open period alone before its end", () => {
@@ -305,24 +307,67 @@ describe("selectCloseAction", () => {
     });
   });
 
-  // Re-running close on a finished period is a no-op, so a cron that runs
-  // twice in a day cannot rewrite an invoice a customer has already been sent.
-  it("skips a period that has already closed", () => {
-    expect(action({ status: "closed" }).kind).toBe("skip");
-    expect(action({ status: "invoiced" }).kind).toBe("skip");
-  });
-
-  // A failed period kept its lines so the close would not be recomputed, but
-  // a deliberate re-run must regenerate them rather than append a second set.
-  it("regenerates the lines of a failed period", () => {
-    expect(action({ status: "failed" })).toEqual({
-      kind: "close",
-      regenerateLines: true,
+  // Only `invoiced` is finished. A cron that fires twice cannot rewrite an
+  // invoice already paid.
+  it("skips a period that has been paid", () => {
+    expect(action({ status: "invoiced" })).toEqual({
+      kind: "skip",
+      reason: "already_invoiced",
     });
   });
 
-  // A concurrent run has claimed it seconds ago. Two runs writing lines for
-  // one period would double the invoice.
+  // THE FIX FOR THE LOST-MONEY BUG. `closed` means the lines are written and
+  // the payment has NOT settled: an indeterminate Square answer, a missing env
+  // var, a failed status write. Treating it as finished left the period out of
+  // the due query forever and the invoice was never collected. It must be
+  // picked back up, and it must NOT recompute: the lines are durable and the
+  // licence rows behind them have moved on.
+  it("collects a closed period rather than treating it as finished", () => {
+    expect(action({ status: "closed" })).toEqual({ kind: "collect", attempt: 1 });
+  });
+
+  it("does not recompute the lines of a closed period", () => {
+    expect(action({ status: "closed" }).kind).not.toBe("compute");
+  });
+
+  // A declined period retries on the dunning ladder, not on every cron run.
+  // Without this a failing card was hit with a fresh real Square attempt every
+  // 24 hours, forever.
+  it("retries a failed period only when its retry date arrives", () => {
+    expect(
+      action({ status: "failed", attemptCount: 1, retryOnISO: "2026-04-20" })
+    ).toEqual({ kind: "skip", reason: "awaiting_retry" });
+
+    expect(
+      action({
+        status: "failed",
+        attemptCount: 1,
+        retryOnISO: "2026-04-20",
+        todayISO: "2026-04-20",
+      })
+    ).toEqual({ kind: "collect", attempt: 2 });
+  });
+
+  it("advances the attempt number so a retry mints a new idempotency key", () => {
+    expect(
+      action({ status: "failed", attemptCount: 3, retryOnISO: PERIOD_END })
+    ).toEqual({ kind: "collect", attempt: 4 });
+  });
+
+  // Exhaustion stops the ladder. The company goes past_due and is suspended;
+  // continuing to retry would hammer a dead card indefinitely.
+  it("stops retrying once the ladder is exhausted", () => {
+    expect(
+      action({ status: "failed", attemptCount: 4, retryOnISO: PERIOD_END })
+    ).toEqual({ kind: "skip", reason: "dunning_exhausted" });
+  });
+
+  it("collects a failed period with no retry date recorded", () => {
+    expect(
+      action({ status: "failed", attemptCount: 0, retryOnISO: null })
+    ).toEqual({ kind: "collect", attempt: 1 });
+  });
+
   it("skips a period another run is closing right now", () => {
     expect(
       action({
@@ -332,31 +377,28 @@ describe("selectCloseAction", () => {
     ).toEqual({ kind: "skip", reason: "in_progress" });
   });
 
-  // But a claim that has sat there for an hour is a crashed run, not a live
-  // one, and leaving it would wedge the period forever.
-  it("reclaims a stale closing period", () => {
+  // A claim held for an hour is a crashed run. Its lines may be half written,
+  // so this one DOES recompute.
+  it("reclaims and recomputes a stale closing period", () => {
     expect(
       action({
         status: "closing",
         closingSinceISO: "2026-04-18T05:00:00.000Z",
       })
-    ).toEqual({ kind: "close", regenerateLines: true });
+    ).toEqual({ kind: "compute", regenerateLines: true });
   });
 
   it("reclaims a closing period with no claim timestamp", () => {
     expect(action({ status: "closing", closingSinceISO: null })).toEqual({
-      kind: "close",
+      kind: "compute",
       regenerateLines: true,
     });
   });
 
-  // The closed check comes first on purpose: a closed period is finished
-  // whatever its dates say, and reporting "not due" for one would be
-  // misleading in the cron's log.
-  it("reports an already-closed period as closed rather than not due", () => {
-    expect(action({ status: "closed", todayISO: "2026-04-01" })).toEqual({
+  it("reports a paid period as paid rather than not due", () => {
+    expect(action({ status: "invoiced", todayISO: "2026-04-01" })).toEqual({
       kind: "skip",
-      reason: "already_closed",
+      reason: "already_invoiced",
     });
   });
 });

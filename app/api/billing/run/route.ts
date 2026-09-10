@@ -52,6 +52,7 @@ export async function GET(request: NextRequest) {
   let failed = 0;
   let skipped = 0;
   let conflicts = 0;
+  let v2Companies = 0;
 
   for (const raw of rows ?? []) {
     // A company on v2 is billed by the period close below, NOT here. Without
@@ -61,7 +62,10 @@ export async function GET(request: NextRequest) {
     // begins. Filtered in the loop rather than in the query because the
     // 1000-row cap check above must see every row, migrated or not.
     if (raw.billing_model === "v2_period") {
-      skipped += 1;
+      // Counted separately. Folding these into `skipped` made that number
+      // unusable for reconciliation: it conflated "no v1 charge was due" with
+      // "this company is not on v1 at all".
+      v2Companies += 1;
       continue;
     }
 
@@ -180,11 +184,14 @@ export async function GET(request: NextRequest) {
     console.error("billing cron: period close run failed:", periodError);
   }
 
-  const periodsClosed = periodOutcomes.filter(
-    (o) => o.result === "closed"
+  const periodsInvoiced = periodOutcomes.filter(
+    (o) => o.result === "invoiced"
   ).length;
-  const periodsFailed = periodOutcomes.filter(
-    (o) => o.result === "failed"
+  const periodsDeclined = periodOutcomes.filter(
+    (o) => o.result === "declined" || o.result === "suspended"
+  ).length;
+  const periodsErrored = periodOutcomes.filter(
+    (o) => o.result === "error"
   ).length;
 
   return NextResponse.json({
@@ -196,9 +203,11 @@ export async function GET(request: NextRequest) {
     skipped,
     conflicts,
     results,
+    v2Companies,
     periods: {
-      closed: periodsClosed,
-      failed: periodsFailed,
+      invoiced: periodsInvoiced,
+      declined: periodsDeclined,
+      errored: periodsErrored,
       error: periodError,
       outcomes: periodOutcomes,
     },

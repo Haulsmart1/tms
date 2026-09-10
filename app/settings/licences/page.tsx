@@ -168,6 +168,13 @@ export default function VehicleLicencesPage() {
                 .filterByTenant(
                     supabase
                         .from("vehicle_licences")
+                        /* superseded_by filters out rows a later activation
+                           replaced. v2 reactivation inserts a new row rather
+                           than clearing deactivated_at, because clearing it
+                           destroys the history the invoice is computed from;
+                           without this filter the replaced row sits here
+                           looking like a duplicate and can be toggled again,
+                           minting another. */
                         .select(`
           id,
           tenant_id,
@@ -189,6 +196,7 @@ export default function VehicleLicencesPage() {
           )
         `)
                 )
+                .is("superseded_by", null)
                 .order("created_at", { ascending: false }),
         ]);
 
