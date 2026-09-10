@@ -1,0 +1,322 @@
+# Period billing: arrears, prorated, per vehicle per period
+
+Date: 2026-09-10
+Status: approved (Ethan, 2026-09-10)
+
+## Problem
+
+Platform billing today charges in ADVANCE and charges at the moment of the click. The cron
+takes a 4-weekly payment on `company_billing.next_charge_on` for the 28 days that follow, and
+`/api/licences/activate` takes a pro-rata payment the instant a vehicle is added mid-cycle.
+
+That second half is where the complexity lives. Because adding a vehicle has to move money
+synchronously, the code has to survive Square refusing a replayed idempotency key on a request
+body that is not naturally stable (the amount moves with the days remaining and with the
+baseline fleet size). `billing_05` records payment intent first for exactly this reason, and
+`vehicle_cycle_coverage` exists to stop a customer being billed twice for a vehicle they have
+already paid for in the running cycle. Roughly a thousand lines of code and migration header
+exist to make a mid-cycle charge safe.
+
+The brief is to stop charging mid-period. Licences are billed for time active, in arrears,
+when the period closes. Adding a vehicle becomes an insert.
+
+## Decisions
+
+Each of these was a real fork. They are recorded here because none of them is recoverable from
+the code.
+
+### Billing stays at COMPANY grain
+
+The original brief keyed every table on `tenant_id`. All existing platform billing is keyed on
+`company_id`: one card, one Square customer, one cycle per company. A company owns many
+tenants, so tenant grain would mean a separate card and a separate cycle per depot.
+
+Company grain it is. Vehicles still resolve through tenants exactly as
+`lib/billing/vehicleCount.ts` does it, and for the same reason recorded there: there is no
+`vehicles.company_id` column and nothing may look for one.
+
+`period_invoice_lines` carries `tenant_id` anyway, for reporting only. A multi-depot operator gets one
+bill that can still be broken down by depot.
+
+### Arrears, and `vehicle_cycle_coverage` is retired for v2
+
+Periods close, then invoice. Coverage was a prepayment concept: it recorded what a payment had
+already bought so a later mid-cycle addition would not be billed twice. With no mid-cycle
+charges there is nothing to double-bill, so v2 writes no coverage rows. The table stays for v1
+companies and for history.
+
+### Periods are a fixed 28 days, anchored at FIRST VEHICLE ACTIVATION
+
+Not calendar months. `billing_02` deleted `company_billing.anchor_day` on revenue grounds: four
+weeks billed per calendar month collects 48 weeks a year, thirteen 28-day cycles collect 52.
+Reintroducing a monthly anchor would reverse that.
+
+Anchoring at first vehicle activation rather than at signup solves three things at once. The
+gap between creating an account and adding a first vehicle is simply not a billing period, so
+there are no zero-pound invoices and no question about whether to bill a dormant account. The
+minimum is collected at that moment, which proves the card with a real settled payment. And
+period one starts when the customer starts, which is what they expect.
+
+Dormant accounts (no vehicle ever activated) get no billing period, no invoice, and an
+onboarding email instead.
+
+### The minimum is collected UP FRONT, once per period, at activation
+
+This is a deliberate, scoped exception to "nothing is ever charged mid-period".
+
+Exactly one charge, at the start of the relationship, for `PERIOD_MINIMUM_PENCE`, which is an
+amount the customer owes for that period regardless of what they do next. It is not a
+proration charge and it does not reintroduce any of the machinery arrears exists to remove:
+no per-addition charges, no coverage rows, no unstable request body, no replay problem. The
+body is a fixed amount keyed on `(company_id, period_id)`.
+
+It buys two things. The card is proven with a settled payment rather than the AVS/CVV
+verification `square.cards.create` already performs at card storage, and credit exposure drops
+by the floor.
+
+Reactivation after suspension is treated as first activation, so the floor is taken again
+before service resumes. A company that has already failed to pay once re-proves the card.
+
+### Pricing: whole-fleet discounts, capped so the total never falls
+
+The v1 rate card (`lib/billing/money.ts`) is GRADUATED per-week bands. v2 replaces it with
+whole-fleet discounts per period:
+
+| Fleet | Discount | Price at the threshold |
+|---|---|---|
+| 1 to 9 | 0% | £64.50 |
+| 10 to 14 | 10% | £580.50 |
+| 15 to 19 | 15% | £822.38 |
+| 20 to 29 | 20% | £1,032.00 |
+| 30 or more | 22% | £1,509.30 |
+
+A whole-fleet discount can only step so far at a threshold before the fleet gets CHEAPER by
+growing. The extra vehicle at the threshold has to pay for the discount the whole fleet just
+gained:
+
+```
+(T - 1) x (1 - d_before)  <=  T x (1 - d_after)
+```
+
+The constraint tightens as the threshold rises, because one more vehicle is a smaller share of
+a bigger fleet. Solving it for a ten-point step gives T <= 9, so the originally requested
+"10% at 10 then 20% at 20" cannot be made monotonic at ANY threshold above nine: 19 vehicles at
+10% off is £1,102.95 while 20 at 20% off is £1,032.00, so the bill fell by £70.95 at the 20th
+vehicle and the cap flattened 18, 19 and 20 to one price. Moving the 20% threshold higher makes
+it worse, not better.
+
+The 15% band splits that jump into two steps that each fit. What remains is one free vehicle
+rather than three. No integer percentage removes it entirely: only a value between 15.79% and
+16% makes both the 15 and the 20 threshold rise strictly, so the choice is which single vehicle
+comes free. At 15% the 15 threshold rises properly (the 15th vehicle costs £9.68) and 19 is
+capped down to the 20 price. At 16% it would be the other way round. 10% at 10 is separately
+the largest possible first step from zero, so the 10th vehicle is always free.
+
+The fix is a threshold cap. The price for a fleet of N is the cheapest of pretending to be any
+band's threshold:
+
+```
+price(N) = min over bands B of ( max(N, threshold_B) x rate x (100 - discount_B) / 100 )
+```
+
+Every term is non-decreasing in N, so their minimum is too, and monotonicity is provable rather
+than spot-checked. `rateCard.test.ts` asserts it across 0 to 200 vehicles.
+
+Banded pricing was the alternative. It is monotonic for free and matches the existing code, but
+a customer told "20% off at 20 vehicles" who then finds only vehicle 20 and up discounted has
+been sold a different deal.
+
+### The minimum is a floor, never a base fee
+
+The discount applies to the WHOLE fleet from vehicle one, and `PERIOD_MINIMUM_PENCE` only ever
+lifts an invoice that came out below it. It is not added on top.
+
+Below ten vehicles this is indistinguishable from "£129 plus £64.50 from vehicle three", because
+the floor is exactly two vehicles: three vehicles cost £193.50 either way. The two readings
+diverge only once a discount applies, since a base fee would exclude the first two vehicles
+from it. The floor reading is £12.90 a period cheaper at ten vehicles, £25.80 at twenty and
+£28.38 at thirty.
+
+The floor was chosen because the discount a customer is advertised is then the discount they
+can verify on their own invoice.
+
+### Invoice presentation
+
+Whole-fleet discounts do not divide evenly across per-vehicle lines, so the discount is not
+folded into them. An invoice reads:
+
+1. One line per vehicle at the full rate, prorated by `billable_days / 28`.
+2. One volume discount line, band chosen by the period's line count.
+3. One minimum charge adjustment line, if the result is under the floor.
+4. VAT on the total.
+
+The discount and adjustment lines carry no `vehicle_id`, so that column is nullable and the
+`unique (billing_period_id, vehicle_id)` constraint from the brief becomes a partial unique
+index `where vehicle_id is not null`. Rule 5 (one line per vehicle per period) is unaffected:
+it only ever concerned real vehicles.
+
+Prorating the full rate and discounting the subtotal also gives an invariant worth testing:
+when every vehicle covers the whole period, the invoice total equals the rate card exactly.
+
+### Days are Europe/London calendar days
+
+The brief said UTC. `lib/billing/schedule.ts` deliberately uses `YYYY-MM-DD` London strings and
+`vitest.config.ts` pins `TZ=Europe/London`, because billing days are UK business days and a
+timestamp arithmetic model meets a 23-hour day twice a year. v2 keeps London dates. Every
+period is exactly 28 days, so the proration denominator is a constant.
+
+The partial first day rounds up: a vehicle activated at 23:00 counts that whole day.
+
+### Failure, suspension and recovery
+
+A failed period invoice does NOT suspend service immediately. `nextRetryOn` puts attempts on
+days 1, 3, 5 and 7 from the close date, and only when that ladder is exhausted does the company
+go `past_due` and lose service. A single decline is usually a fraud block or an expired card,
+and cutting off a haulier's dispatch and POD capture over it would cost far more than the debt.
+
+While suspended:
+
+- No new billing period is opened. Exposure is capped at one period plus the dunning tail
+  rather than compounding. This is a condition in `ensure_open_billing_period`.
+- The outstanding invoice stands. `selectRecoveryAction` already answers "a new card was just
+  stored, is there an outstanding cycle to retry now" and ports over with the amount source
+  changed.
+- On payment, the floor is taken again and a NEW period opens dated from that day. The
+  suspended time and the six days of dunning are not billed. That is a bounded giveaway and it
+  is the price of not suspending on the first decline.
+
+Suspension means no new operational work: no job creation, no vehicle addition, no driver app,
+no POD capture, no invoicing out. Read access and export stay open. An O-licence holder has
+statutory retention duties (tachograph records 12 months, maintenance records 15), and locking
+a suspended operator out of their own compliance records over an unpaid card would make us part
+of their DVSA problem. A customer who can still see their data is also likelier to come back
+and pay.
+
+### Cancellation closes the period early
+
+Cancellation is the customer leaving. It is a different path from suspension, which is us
+cutting off a non-payer and freezing everything in place.
+
+`period_end` is set to the cancellation date plus one day, the period goes straight to
+`closing`, the close job runs immediately rather than waiting for the scheduled date, and
+`ensure_open_billing_period` opens no successor.
+
+**The cancellation day counts in full**, symmetric with the activation day. A vehicle activated
+at 23:00 buys that whole day, so a cancellation at 09:00 pays for that whole day too. The
+alternative needs a rule for which end of the day wins, and an asymmetry there produces a
+one-day discrepancy nobody can explain two years later.
+
+Rule 4 (no refund on removal) is deliberately NOT applied to cancellation. That rule exists to
+make add-and-remove churn pointless, which is an anti-gaming rule about the vehicle count. A
+company leaving outright is not gaming anything, and an invoice covering two weeks after they
+stopped using the product is the one that becomes a chargeback. Collection is also better while
+the card is live and consent is fresh.
+
+Because the floor is collected up front, most cancellations settle to nothing. Cancelling on
+day 11 of a period:
+
+- **Two vehicles.** Lines total £50.68, below the floor, so the floor applies. £129 already
+  collected. Nothing owed, nothing refunded.
+- **Twenty vehicles.** Lines total £506.80, less the 20% band, so £405.44. £129 already
+  collected. £276.44 plus VAT charged to the card that day.
+
+`billing_periods.closed_reason` records `scheduled`, `cancellation` or `cooling_off`, so a
+short period reads as a customer leaving rather than as a bug in the close job.
+
+### Accidental signups get 48 hours
+
+A customer who activates and cancels the same day has paid £129 for one day. That is the
+minimum working as designed and it is defensible, but it is also the most likely complaint the
+billing model will ever generate, and the population it affects is people who signed up by
+mistake.
+
+Within 48 hours of FIRST vehicle activation, cancellation refunds the £129 in full, closes the
+period and raises no invoice. **Once per company**, or signup-refund-repeat becomes a free
+trial generator. B2B means no statutory right of withdrawal applies, so this is goodwill rather
+than compliance.
+
+### A cancelled operator keeps read access for 90 days
+
+Then export on request for the balance of 15 months, then deletion.
+
+Not a courtesy. An O-licence holder has statutory retention duties over records held in this
+system: tachograph and working-time data for 12 months, maintenance records for 15. Locking a
+cancelled operator out of their own compliance history over an unpaid card would make us part of
+their DVSA problem, and 90 days is long enough for anyone who left deliberately to get their
+data out.
+
+Read and export only. No new operational work, same as suspension.
+
+### The minimum is NOT collected again when a period rolls over
+
+Only a period opened by an ACTIVATION collects it. A period opened by the close job rolling over
+has `prepaid_pence = 0` and is billed purely in arrears.
+
+The tempting argument for charging it every period is credit exposure, and the numbers do not
+support it. The saving is a flat £129 against an exposure that scales with the fleet, so it is
+worth 67% to a three-vehicle customer and 5% to a fifty-vehicle one: most where the loss is
+smallest, least where it hurts.
+
+The decisive argument is different, and it is about timing. A rollover happens at the same
+instant as the previous period's close, so the two charges would land on the same day. The
+balance charge at close is already at least £129 for any active company, because the floor
+guarantees it, so the card is already proven every 28 days by a charge of at least that size.
+A rollover minimum would test nothing the balance charge has not just tested.
+
+It would also create a suspension question with no good answer: if the balance succeeds and the
+rollover minimum fails, the customer has paid everything they owe and failed only to prepay
+something not yet incurred. Suspending for that is indefensible, and not suspending makes the
+charge decorative.
+
+If exposure does become a real problem, the levers that actually move it are the dunning ladder
+(34 days of service before cutoff today) and the rule already implemented in
+`ensure_open_billing_period` that refuses to open a new period while one is `failed`, which is
+what stops it compounding.
+
+### Licence deletion becomes deactivation
+
+`billing_03` deliberately kept the browser's DELETE grant on `vehicle_licences`, reasoning that
+removing a licence can only reduce a bill under prepayment. Under arrears a delete destroys the
+evidence the invoice is computed from. The grant goes, and the licences page deactivates
+instead.
+
+## Migration
+
+Both models run side by side, routed on `company_billing.billing_model`
+(`v1_immediate` default, `v2_period` opt-in per company).
+
+The seam is `next_charge_on`. v1 is prepaid, so a company has already paid up to that date; v2
+is arrears, so their first v2 period starts there. Nobody pays twice for the same days and
+nobody gets a free window. Existing licences are backfilled with `activated_at` set to that
+date and `grace_until` null, so no one is charged proration for time already bought.
+
+The backfill is a one-off script in `scripts/`, not run automatically.
+
+## Suspension is billing-side only
+
+The dunning ladder, `past_due`, and the block on adding vehicles are implemented. What is NOT
+implemented is the service-level suspension described above: no new job creation, no driver app,
+no POD capture, read and export still open. That is a change to the edge auth gate in `proxy.ts`
+and touches every route in the product, so it is deliberately a separate piece of work.
+
+Until it lands, a `past_due` v2 company keeps full use of the platform and simply cannot add
+vehicles. That is a weaker position than this spec describes, and it is the remaining half of
+the credit-exposure story.
+
+## Not doing
+
+- **Grace days, included vehicles and minimum bill days.** The brief specified 14 free days per
+  VRN, 2 included vehicles and a 7-day minimum. The columns exist and the logic is implemented
+  and tested, but they default to 0, 0 and 1, so nobody's price moves. They are commercial
+  levers to turn on per company, not launch terms. `vrn_normalised` is still computed and the
+  first-licence-per-VRN rule still sets `grace_until`, so turning grace on later is a config
+  change.
+- **A new-customer fleet growth cap.** Speculative until someone abuses it.
+- **v1 cancellation.** `/api/billing/cancel` refuses a v1 company outright rather than
+  pretending. Doing nothing while answering ok would leave someone believing they had cancelled
+  while the 4-weekly cron kept charging them.
+- **A DB test harness.** `vitest.config.ts` covers `lib/` only. The RLS, concurrent-close and
+  double-close tests from the brief are a hand-run `docs/sql/billing_06_verify.sql` in the
+  style of `rls_09_verify.sql`, and are marked unrun in the PR.
+- **Stripe.** `stripe` is in `package.json` but it is Stripe Connect, for operators collecting
+  from their own customers. Platform billing is Square.
