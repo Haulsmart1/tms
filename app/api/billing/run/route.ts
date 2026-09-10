@@ -54,6 +54,17 @@ export async function GET(request: NextRequest) {
   let conflicts = 0;
 
   for (const raw of rows ?? []) {
+    // A company on v2 is billed by the period close below, NOT here. Without
+    // this the two models both charge it: selectDueAction reads next_charge_on,
+    // which the switch-over deliberately leaves in place, so a migrated company
+    // would be charged a full v1 cycle on the very day its first v2 period
+    // begins. Filtered in the loop rather than in the query because the
+    // 1000-row cap check above must see every row, migrated or not.
+    if (raw.billing_model === "v2_period") {
+      skipped += 1;
+      continue;
+    }
+
     const row: CompanyBillingRow = {
       company_id: raw.company_id,
       status: raw.status,
