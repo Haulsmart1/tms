@@ -372,7 +372,10 @@ create table if not exists public.period_charges (
   square_customer_id text,
   receipt_url text,
 
-  status text not null check (status in ('pending', 'succeeded', 'failed')),
+  -- 'refunded' is the cooling-off outcome: the charge succeeded and was
+  -- then given back in full. Kept distinct from 'failed' so a refunded
+  -- period is never mistaken for one that never collected.
+  status text not null check (status in ('pending', 'succeeded', 'failed', 'refunded')),
   failure_code text,
   created_at timestamptz not null default now(),
 

@@ -24,6 +24,7 @@ import { classifySquareThrow } from "./squareThrow";
 import {
   periodChargeIdempotencyKey,
   periodChargeNote,
+  periodRefundIdempotencyKey,
 } from "./periodPayment";
 import type {
   PeriodCharge,
@@ -324,4 +325,78 @@ async function settle(
       `Square answered for period charge ${chargeRowId} but the outcome could not be recorded: ${error.message}`
     );
   }
+}
+
+
+export type RefundResult =
+  | { status: "refunded"; refundedPence: number }
+  /** Nothing was collected, so there is nothing to give back. */
+  | { status: "nothing_to_refund" };
+
+/**
+ * Give back a period's up-front minimum, in full.
+ *
+ * Used only by the cooling-off path. It refunds the SETTLED charge row rather
+ * than an amount the caller supplies, so a refund can never exceed what Square
+ * actually took, and it reads the gross (including VAT) because that is what
+ * left the customer's account.
+ *
+ * An indeterminate answer throws rather than being recorded either way, on the
+ * same rule the charge path follows: only positive evidence that Square
+ * refused a request may be recorded as a refusal. A refund whose outcome is
+ * unknown must not be retried blindly, because a second refund is a second
+ * transfer of real money.
+ */
+export async function refundPeriodMinimum(
+  admin: SupabaseClient,
+  periodId: string
+): Promise<RefundResult> {
+  const charge = await admin
+    .from("period_charges")
+    .select("id, gross_pence, square_payment_id, currency")
+    .eq("billing_period_id", periodId)
+    .eq("kind", "minimum")
+    .eq("status", "succeeded")
+    .order("attempt", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (charge.error) throw new Error(charge.error.message);
+
+  const grossPence = Number(charge.data?.gross_pence ?? 0);
+  if (!charge.data?.square_payment_id || grossPence <= 0) {
+    return { status: "nothing_to_refund" };
+  }
+
+  const square = getSquare();
+
+  try {
+    await square.refunds.refundPayment({
+      idempotencyKey: periodRefundIdempotencyKey(periodId),
+      paymentId: charge.data.square_payment_id as string,
+      amountMoney: {
+        amount: BigInt(grossPence),
+        currency: (charge.data.currency as string) === "GBP" ? "GBP" : "GBP",
+      },
+      reason: "TMS Wizzard cooling-off cancellation",
+    });
+  } catch (error) {
+    const thrown = classifySquareThrow(error);
+    throw new Error(
+      `REFUND_FAILED: Square would not refund the minimum for period ${periodId}: ${
+        thrown.kind === "declined" ? thrown.failureCode : thrown.reason
+      }; reconcile by hand before retrying, a second refund moves real money`
+    );
+  }
+
+  const recorded = await admin
+    .from("period_charges")
+    .update({ status: "refunded" })
+    .eq("id", charge.data.id);
+  if (recorded.error) {
+    throw new Error(
+      `The minimum for period ${periodId} was refunded at Square but the outcome could not be recorded: ${recorded.error.message}`
+    );
+  }
+
+  return { status: "refunded", refundedPence: grossPence };
 }

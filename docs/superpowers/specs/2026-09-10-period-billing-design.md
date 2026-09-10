@@ -292,6 +292,17 @@ date and `grace_until` null, so no one is charged proration for time already bou
 
 The backfill is a one-off script in `scripts/`, not run automatically.
 
+## Suspension is billing-side only
+
+The dunning ladder, `past_due`, and the block on adding vehicles are implemented. What is NOT
+implemented is the service-level suspension described above: no new job creation, no driver app,
+no POD capture, read and export still open. That is a change to the edge auth gate in `proxy.ts`
+and touches every route in the product, so it is deliberately a separate piece of work.
+
+Until it lands, a `past_due` v2 company keeps full use of the platform and simply cannot add
+vehicles. That is a weaker position than this spec describes, and it is the remaining half of
+the credit-exposure story.
+
 ## Not doing
 
 - **Grace days, included vehicles and minimum bill days.** The brief specified 14 free days per
@@ -301,6 +312,9 @@ The backfill is a one-off script in `scripts/`, not run automatically.
   first-licence-per-VRN rule still sets `grace_until`, so turning grace on later is a config
   change.
 - **A new-customer fleet growth cap.** Speculative until someone abuses it.
+- **v1 cancellation.** `/api/billing/cancel` refuses a v1 company outright rather than
+  pretending. Doing nothing while answering ok would leave someone believing they had cancelled
+  while the 4-weekly cron kept charging them.
 - **A DB test harness.** `vitest.config.ts` covers `lib/` only. The RLS, concurrent-close and
   double-close tests from the brief are a hand-run `docs/sql/billing_06_verify.sql` in the
   style of `rls_09_verify.sql`, and are marked unrun in the PR.

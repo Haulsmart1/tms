@@ -167,3 +167,17 @@ export function balanceDue(
   const vatPence = roundHalfUpDiv(netPence * vatRatePercent, 100);
   return { netPence, vatPence, grossPence: netPence + vatPence };
 }
+
+
+/**
+ * Idempotency key for the cooling-off refund of a period's minimum.
+ *
+ * Distinct prefix from the charge keys, because a refund and a payment are
+ * different requests and reusing a spent key would be refused. One refund per
+ * period is all this model allows, so no attempt number is needed: the
+ * cooling-off refund happens once per company, guarded by
+ * company_billing.cooling_off_refunded_at.
+ */
+export function periodRefundIdempotencyKey(periodId: string): string {
+  return `${periodId.replace(/-/g, "")}_r`;
+}

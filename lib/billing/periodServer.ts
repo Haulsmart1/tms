@@ -20,7 +20,9 @@ import type { PeriodLicence, PeriodStatus } from "./close";
 import { nextPeriodBounds } from "./period";
 import { selectActivationAction } from "./activation";
 import type { ActivationAction } from "./activation";
+import { selectCancellationAction } from "./cancellation";
 import { balanceDue } from "./periodPayment";
+import { refundPeriodMinimum } from "./periodPaymentServer";
 import { roundHalfUpDiv } from "./pence";
 import type { PeriodPaymentProvider } from "./periodPayment";
 import { londonDateISO, nextRetryOn } from "./schedule";
@@ -1013,4 +1015,227 @@ export async function quoteVehicleAddition(
     periodStartISO,
     periodEndISO,
   };
+}
+
+
+export type CancellationOutcome =
+  | { model: "v1_immediate" }
+  | { model: "v2_period"; result: "blocked"; reason: string }
+  | {
+      model: "v2_period";
+      result: "cancelled";
+      /** Refunded in full under the 48-hour cooling-off window. */
+      refundedPence?: number;
+      /** Charged for the days used, when the period was cut short. */
+      finalNetPence?: number;
+      finalGrossPence?: number;
+      note?: string;
+    };
+
+const CLOSE_REASON_CANCELLATION = "cancellation";
+const CLOSE_REASON_COOLING_OFF = "cooling_off";
+
+/**
+ * End a company's subscription.
+ *
+ * Cancellation is the customer leaving, and it is NOT suspension. Suspension
+ * freezes a non-payer in place and waits; cancellation settles up and stops.
+ *
+ * Rule 4 (no refund on removal) is deliberately NOT applied here. That rule
+ * exists to make add-and-remove churn pointless, which is an anti-gaming rule
+ * about the vehicle count. A company leaving outright is not gaming anything,
+ * and an invoice covering two weeks after they stopped using the product is
+ * the one that becomes a chargeback. Collection is also better while the card
+ * is live and consent is fresh.
+ */
+export async function cancelCompany(
+  admin: SupabaseClient,
+  provider: PeriodPaymentProvider,
+  companyId: string,
+  opts: { nowISO: string; todayISO: string }
+): Promise<CancellationOutcome> {
+  const billingRes = await admin
+    .from("company_billing")
+    .select(
+      "company_id, billing_model, status, currency, unit_amount_pence, min_invoice_pence, included_vehicles, grace_days, min_bill_days, cooling_off_refunded_at"
+    )
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (billingRes.error) {
+    if (isMissingColumn(billingRes.error)) return { model: "v1_immediate" };
+    throw new Error(billingRes.error.message);
+  }
+
+  const settings = billingRes.data as
+    | (CompanyBillingSettings & { cooling_off_refunded_at: string | null })
+    | null;
+  if (!settings || settings.billing_model !== "v2_period") {
+    return { model: "v1_immediate" };
+  }
+
+  const openRes = await admin
+    .from("billing_periods")
+    .select(PERIOD_SELECT + ", created_at")
+    .eq("company_id", companyId)
+    .eq("status", "open")
+    .maybeSingle();
+  if (openRes.error) throw new Error(openRes.error.message);
+
+  const openRow = openRes.data as (PeriodRow & { created_at: string }) | null;
+
+  let minimumChargePending = false;
+  if (openRow) {
+    const pendingRes = await admin
+      .from("period_charges")
+      .select("id")
+      .eq("billing_period_id", openRow.id)
+      .eq("kind", "minimum")
+      .eq("status", "pending")
+      .maybeSingle();
+    if (pendingRes.error) throw new Error(pendingRes.error.message);
+    minimumChargePending = Boolean(pendingRes.data);
+  }
+
+  const action = selectCancellationAction({
+    billingRow: {
+      billingModel: "v2_period",
+      status: settings.status as "active" | "past_due" | "canceled",
+      coolingOffRefundedAt: settings.cooling_off_refunded_at,
+    },
+    openPeriod: openRow
+      ? {
+          id: openRow.id,
+          periodStartISO: openRow.period_start,
+          periodEndISO: openRow.period_end,
+          openedAtISO: openRow.created_at,
+          prepaidPence: openRow.prepaid_pence,
+          minimumChargePending,
+        }
+      : null,
+    nowISO: opts.nowISO,
+    todayISO: opts.todayISO,
+  });
+
+  if (action.kind === "legacy") return { model: "v1_immediate" };
+  if (action.kind === "blocked") {
+    return { model: "v2_period", result: "blocked", reason: action.reason };
+  }
+
+  if (action.kind === "cancel_only") {
+    await markCancelled(admin, companyId, null);
+    return { model: "v2_period", result: "cancelled" };
+  }
+
+  if (action.kind === "cooling_off") {
+    // Refund BEFORE anything is marked, so a refund that does not go through
+    // leaves the company cancellable again rather than cancelled with their
+    // money still taken.
+    const refund = await refundPeriodMinimum(admin, action.periodId);
+
+    // The period is kept rather than deleted: it is the record that a company
+    // signed up and left, and closed_reason distinguishes it from ordinary
+    // churn. prepaid_pence goes to 0 because the money went back.
+    const closed = await admin
+      .from("billing_periods")
+      .update({
+        status: "invoiced",
+        closed_at: opts.nowISO,
+        closed_reason: CLOSE_REASON_COOLING_OFF,
+        prepaid_pence: 0,
+        net_pence: 0,
+        vat_pence: 0,
+        gross_pence: 0,
+      })
+      .eq("id", action.periodId);
+    if (closed.error) throw new Error(closed.error.message);
+
+    await markCancelled(admin, companyId, opts.nowISO);
+
+    return {
+      model: "v2_period",
+      result: "cancelled",
+      refundedPence:
+        refund.status === "refunded" ? refund.refundedPence : 0,
+    };
+  }
+
+  // close_early: cut the period short, invoice what was used, take the
+  // balance while the card is still live.
+  const shortened = await admin
+    .from("billing_periods")
+    .update({
+      period_end: action.periodEndISO,
+      closed_reason: CLOSE_REASON_CANCELLATION,
+    })
+    .eq("id", action.periodId)
+    .eq("status", "open")
+    .select(PERIOD_SELECT)
+    .maybeSingle();
+  if (shortened.error) throw new Error(shortened.error.message);
+  if (!shortened.data) {
+    // The close job claimed it first. It will invoice the full period; the
+    // subscription still ends here.
+    await markCancelled(admin, companyId, null);
+    return {
+      model: "v2_period",
+      result: "cancelled",
+      note: "the period was already being closed by the billing run",
+    };
+  }
+
+  const period = shortened.data as unknown as PeriodRow;
+
+  const computed = await computePeriodInvoice(admin, {
+    period,
+    settings,
+    regenerateLines: true,
+    nowISO: opts.nowISO,
+  });
+
+  // Cancelling is not a race we can lose harmlessly, but if the close job did
+  // claim it between the two statements above, its invoice stands.
+  if (computed === null) {
+    await markCancelled(admin, companyId, null);
+    return {
+      model: "v2_period",
+      result: "cancelled",
+      note: "the period was already being closed by the billing run",
+    };
+  }
+
+  const collected = await collectPeriod(admin, provider, {
+    period: computed,
+    settings,
+    attempt: 1,
+    nowISO: opts.nowISO,
+  });
+
+  await markCancelled(admin, companyId, null);
+
+  return {
+    model: "v2_period",
+    result: "cancelled",
+    finalNetPence: collected.netPence,
+    finalGrossPence: collected.grossPence,
+    note:
+      collected.result === "invoiced"
+        ? undefined
+        : `the final charge did not settle (${collected.error ?? collected.result})`,
+  };
+}
+
+async function markCancelled(
+  admin: SupabaseClient,
+  companyId: string,
+  coolingOffRefundedAtISO: string | null
+): Promise<void> {
+  const fields: Record<string, unknown> = { status: "canceled" };
+  if (coolingOffRefundedAtISO !== null) {
+    fields.cooling_off_refunded_at = coolingOffRefundedAtISO;
+  }
+  const { error } = await admin
+    .from("company_billing")
+    .update(fields)
+    .eq("company_id", companyId);
+  if (error) throw new Error(error.message);
 }
