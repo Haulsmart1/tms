@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  balanceDue,
   periodChargeIdempotencyKey,
   periodChargeNote,
 } from "./periodPayment";
@@ -77,5 +78,64 @@ describe("periodChargeNote", () => {
     expect(periodChargeNote("balance", "2026-03-21", "2026-04-18")).not.toContain(
       "18 Apr"
     );
+  });
+});
+
+describe("balanceDue", () => {
+  // The worked example from the design discussion: twenty vehicles, eleven
+  // days, cancelled. GBP 405.44 net for the period, GBP 129.00 already taken
+  // when it opened.
+  it("charges the period net less what was already collected", () => {
+    expect(balanceDue(40544, 12900, 20)).toEqual({
+      netPence: 27644,
+      vatPence: 5529,
+      grossPence: 33173,
+    });
+  });
+
+  // A small fleet whose whole period is covered by the minimum. This is the
+  // common cancellation case and the reason a two-vehicle customer leaving
+  // mid-period gets no final bill at all.
+  it("charges nothing when the minimum already covered the period", () => {
+    expect(balanceDue(12900, 12900, 20)).toEqual({
+      netPence: 0,
+      vatPence: 0,
+      grossPence: 0,
+    });
+  });
+
+  // No refunds. A period that came in UNDER what was prepaid settles to zero,
+  // never to a credit: the minimum is owed for the period regardless of how
+  // little of it was used.
+  it("never returns a negative balance", () => {
+    expect(balanceDue(6450, 12900, 20).netPence).toBe(0);
+    expect(balanceDue(0, 12900, 20).grossPence).toBe(0);
+  });
+
+  it("charges the whole invoice when nothing was prepaid", () => {
+    expect(balanceDue(19350, 0, 20)).toEqual({
+      netPence: 19350,
+      vatPence: 3870,
+      grossPence: 23220,
+    });
+  });
+
+  // THE INVARIANT. VAT is charged twice against one period, once on the
+  // minimum and once on the balance, and the two must sum to VAT on the whole
+  // period or the customer's receipts will not reconcile with their invoice.
+  // This holds because 20 per cent of the GBP 129.00 floor is exact; a floor
+  // whose VAT rounds would let the two differ by a penny.
+  it("splits VAT without losing a penny against the whole period", () => {
+    for (const invoiceNet of [12900, 19350, 40544, 58050, 103200, 251550]) {
+      const prepaidVat = Math.floor((12900 * 20 + 50) / 100);
+      const balance = balanceDue(invoiceNet, 12900, 20);
+      const wholePeriodVat = Math.floor((invoiceNet * 20 + 50) / 100);
+
+      expect(prepaidVat + balance.vatPence).toBe(wholePeriodVat);
+    }
+  });
+
+  it("rejects a negative prepayment", () => {
+    expect(() => balanceDue(1000, -1, 20)).toThrow(/non-negative integer/);
   });
 });

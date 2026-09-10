@@ -3,6 +3,7 @@
 // the customer-facing note. The Square implementation lives in
 // periodPaymentServer.ts.
 
+import { roundHalfUpDiv } from "./pence";
 import { addDays } from "./schedule";
 
 /**
@@ -121,4 +122,48 @@ export function periodChargeNote(
   return kind === "minimum"
     ? `TMS Wizzard minimum charge, ${span}`
     : `TMS Wizzard, ${span}`;
+}
+
+export type BalanceDue = {
+  netPence: number;
+  vatPence: number;
+  grossPence: number;
+};
+
+/**
+ * What is still owed at close, given what the period cost and what was already
+ * collected when it opened.
+ *
+ * Netted BEFORE VAT rather than after. VAT is then charged twice against one
+ * period, once on the minimum and once on the balance, and the two receipts
+ * must sum to the VAT on the invoice or a customer reconciling their records
+ * finds a discrepancy they cannot explain. Doing it this way they do sum,
+ * because 20 per cent of the GBP 129.00 floor is exact; a floor whose VAT
+ * rounds would let them differ by a penny, which is worth knowing before
+ * anyone changes the floor to a number like GBP 130.01.
+ *
+ * NEVER NEGATIVE. A period that came in under what was prepaid settles to
+ * zero, not to a credit. The minimum is owed for the period regardless of how
+ * little of it was used, and this is the arithmetic half of "no refunds": a
+ * two-vehicle company cancelling on day 11 simply gets no final bill.
+ */
+export function balanceDue(
+  invoiceNetPence: number,
+  prepaidNetPence: number,
+  vatRatePercent: number
+): BalanceDue {
+  if (!Number.isInteger(prepaidNetPence) || prepaidNetPence < 0) {
+    throw new Error(
+      `prepaidNetPence must be a non-negative integer, got ${prepaidNetPence}`
+    );
+  }
+  if (!Number.isInteger(invoiceNetPence) || invoiceNetPence < 0) {
+    throw new Error(
+      `invoiceNetPence must be a non-negative integer, got ${invoiceNetPence}`
+    );
+  }
+
+  const netPence = Math.max(0, invoiceNetPence - prepaidNetPence);
+  const vatPence = roundHalfUpDiv(netPence * vatRatePercent, 100);
+  return { netPence, vatPence, grossPence: netPence + vatPence };
 }
