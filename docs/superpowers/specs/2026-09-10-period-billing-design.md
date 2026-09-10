@@ -235,6 +235,44 @@ period and raises no invoice. **Once per company**, or signup-refund-repeat beco
 trial generator. B2B means no statutory right of withdrawal applies, so this is goodwill rather
 than compliance.
 
+### A cancelled operator keeps read access for 90 days
+
+Then export on request for the balance of 15 months, then deletion.
+
+Not a courtesy. An O-licence holder has statutory retention duties over records held in this
+system: tachograph and working-time data for 12 months, maintenance records for 15. Locking a
+cancelled operator out of their own compliance history over an unpaid card would make us part of
+their DVSA problem, and 90 days is long enough for anyone who left deliberately to get their
+data out.
+
+Read and export only. No new operational work, same as suspension.
+
+### The minimum is NOT collected again when a period rolls over
+
+Only a period opened by an ACTIVATION collects it. A period opened by the close job rolling over
+has `prepaid_pence = 0` and is billed purely in arrears.
+
+The tempting argument for charging it every period is credit exposure, and the numbers do not
+support it. The saving is a flat £129 against an exposure that scales with the fleet, so it is
+worth 67% to a three-vehicle customer and 5% to a fifty-vehicle one: most where the loss is
+smallest, least where it hurts.
+
+The decisive argument is different, and it is about timing. A rollover happens at the same
+instant as the previous period's close, so the two charges would land on the same day. The
+balance charge at close is already at least £129 for any active company, because the floor
+guarantees it, so the card is already proven every 28 days by a charge of at least that size.
+A rollover minimum would test nothing the balance charge has not just tested.
+
+It would also create a suspension question with no good answer: if the balance succeeds and the
+rollover minimum fails, the customer has paid everything they owe and failed only to prepay
+something not yet incurred. Suspending for that is indefensible, and not suspending makes the
+charge decorative.
+
+If exposure does become a real problem, the levers that actually move it are the dunning ladder
+(34 days of service before cutoff today) and the rule already implemented in
+`ensure_open_billing_period` that refuses to open a new period while one is `failed`, which is
+what stops it compounding.
+
 ### Licence deletion becomes deactivation
 
 `billing_03` deliberately kept the browser's DELETE grant on `vehicle_licences`, reasoning that
