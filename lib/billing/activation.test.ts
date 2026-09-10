@@ -20,6 +20,7 @@ function action(overrides: Partial<Parameters<typeof selectActivationAction>[0]>
   return selectActivationAction({
     billingRow: V2_ACTIVE,
     openPeriod: null,
+    openPeriodMinimumPending: false,
     todayISO: TODAY,
     minimumPence: 12900,
     ...overrides,
@@ -108,6 +109,37 @@ describe("selectActivationAction inside an open period", () => {
         todayISO: "2026-03-30",
       })
     ).toEqual({ kind: "join_open_period", periodId: "period-1" });
+  });
+});
+
+describe("selectActivationAction with an unsettled minimum", () => {
+  // A pending period_charges row means a Square call was made whose outcome
+  // was never recorded. The card may well have been charged.
+  //
+  // Without this the hole is real and expensive: the period exists, so an
+  // ordinary retry would take the join_open_period branch, let the vehicle in
+  // without charging, and leave prepaid_pence at 0, so at close the customer
+  // is billed the whole period again on top of a minimum they may already
+  // have paid. Blocking is the honest answer, and the situation resolves the
+  // moment the pending row is reconciled against Square.
+  it("blocks rather than joining a period whose minimum is still settling", () => {
+    expect(
+      action({ openPeriod: OPEN, openPeriodMinimumPending: true })
+    ).toEqual({ kind: "blocked", reason: "payment_settling" });
+  });
+
+  it("joins normally once the minimum has settled", () => {
+    expect(
+      action({ openPeriod: OPEN, openPeriodMinimumPending: false })
+    ).toEqual({ kind: "join_open_period", periodId: "period-1" });
+  });
+
+  // Meaningless without a period, and must not block a first activation: there
+  // is no period yet, so there is no unsettled charge against one.
+  it("ignores the flag when there is no open period", () => {
+    expect(
+      action({ openPeriod: null, openPeriodMinimumPending: true }).kind
+    ).toBe("open_period_and_charge");
   });
 });
 

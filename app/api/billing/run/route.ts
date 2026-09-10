@@ -4,6 +4,8 @@ import { runChargeCycle } from "../../../../lib/billing/server";
 import { applyChargeOutcome, selectDueAction } from "../../../../lib/billing/run";
 import type { CompanyBillingRow } from "../../../../lib/billing/run";
 import { londonDateISO } from "../../../../lib/billing/schedule";
+import { closeDuePeriods } from "../../../../lib/billing/periodServer";
+import { createSquarePeriodPaymentProvider } from "../../../../lib/billing/periodPaymentServer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -139,8 +141,43 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // v2 (period billing) runs AFTER the v1 cycle charges, in its own try. The
+  // two are independent: a company is on exactly one model, so neither can
+  // charge the other's customers, and a failure in one must not stop the
+  // other's run. Sequencing v2 second means a v1 outage cannot delay it past
+  // the day's window.
+  //
+  // Every v2 period is closed by this same daily cron rather than by pg_cron
+  // or an Edge Function, because neither exists in this project and the
+  // Vercel cron in vercel.json is already authenticated, already has
+  // maxDuration raised, and is already the thing an operator looks at when
+  // billing has not run.
+  let periodOutcomes: Awaited<ReturnType<typeof closeDuePeriods>> = [];
+  let periodError: string | null = null;
+
+  try {
+    periodOutcomes = await closeDuePeriods(
+      admin,
+      createSquarePeriodPaymentProvider(admin),
+      { todayISO: today, nowISO: new Date().toISOString() }
+    );
+  } catch (error) {
+    // A throw here is a whole-run failure (a row cap hit, a query error), not
+    // one company's. Reported rather than swallowed: the response is what the
+    // cron's own alerting reads.
+    periodError = error instanceof Error ? error.message : String(error);
+    console.error("billing cron: period close run failed:", periodError);
+  }
+
+  const periodsClosed = periodOutcomes.filter(
+    (o) => o.result === "closed"
+  ).length;
+  const periodsFailed = periodOutcomes.filter(
+    (o) => o.result === "failed"
+  ).length;
+
   return NextResponse.json({
-    ok: true,
+    ok: periodError === null,
     date: today,
     processed: (rows ?? []).length,
     charged: succeeded,
@@ -148,5 +185,11 @@ export async function GET(request: NextRequest) {
     skipped,
     conflicts,
     results,
+    periods: {
+      closed: periodsClosed,
+      failed: periodsFailed,
+      error: periodError,
+      outcomes: periodOutcomes,
+    },
   });
 }

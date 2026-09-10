@@ -26,6 +26,13 @@ import {
 import type { AddonBillingRow } from "../../../../lib/billing/addon";
 import { chargeVehicleAddon } from "../../../../lib/billing/addonServer";
 import { londonDateISO } from "../../../../lib/billing/schedule";
+import {
+  computeGraceUntil,
+  fetchCompanyVehicleIds,
+  openPeriodAndChargeMinimum,
+  resolveActivation,
+} from "../../../../lib/billing/periodServer";
+import { createSquarePeriodPaymentProvider } from "../../../../lib/billing/periodPaymentServer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -72,6 +79,37 @@ const BLOCKED_MESSAGE: Record<
   inactive_subscription:
     "Your subscription is not active, so vehicles cannot be added. Contact support.",
 };
+
+// Every v2 blocked reason needs its own line, same discipline as
+// BLOCKED_MESSAGE above: a missing key renders `undefined` to a customer who
+// has just been refused.
+const PERIOD_BLOCKED_MESSAGE: Record<
+  "past_due" | "canceled" | "inactive_subscription" | "no_payment_method" | "payment_settling",
+  string
+> = {
+  past_due:
+    "Your subscription is past due, so vehicles cannot be added. Update your payment card on the billing page and try again.",
+  canceled:
+    "Your subscription has been canceled, so vehicles cannot be added. Contact support to reactivate it.",
+  inactive_subscription:
+    "Your subscription is not active, so vehicles cannot be added. Contact support.",
+  no_payment_method:
+    "Add a payment card on the billing page before adding your first vehicle.",
+  payment_settling:
+    "A payment on your account is still settling, so vehicles cannot be added yet. Try again shortly, and contact support if this persists.",
+};
+
+// upper(replace(registration, ' ', '')), with the vehicle id as the fallback
+// for a vehicle with no plate recorded. Mirrors the backfill and the trigger
+// in docs/sql/billing_07_licence_lifecycle.sql; if the three ever disagree,
+// grace stops matching its own history.
+function normaliseVrn(
+  registration: string | null,
+  vehicleId: string
+): string {
+  const normalised = (registration ?? "").toUpperCase().replace(/ /g, "");
+  return normalised.length > 0 ? normalised : vehicleId;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -157,7 +195,7 @@ export async function POST(request: NextRequest) {
 
     const vehicleRes = await admin
       .from("vehicles")
-      .select("id, tenant_id")
+      .select("id, tenant_id, registration")
       .eq("id", vehicleId)
       .maybeSingle();
     if (vehicleRes.error) {
@@ -193,7 +231,43 @@ export async function POST(request: NextRequest) {
 
     // The single place in this file where a licence can become active. Called
     // only once every money question has been settled.
-    async function writeLicence() {
+    // Under v2, reactivating an existing licence must create a NEW row rather
+    // than clear deactivated_at on the old one.
+    //
+    // In-place reactivation destroys the history the invoice is computed from.
+    // A licence active in January, off in February and back in March would end
+    // up as one row reading "activated 1 Jan, still active", which overlaps
+    // February and bills the customer for a month they ran nothing. The brief's
+    // "one row per activation" is not a stylistic preference; it is what makes
+    // a gap in service representable at all.
+    //
+    // v1 companies keep the in-place toggle: they bill from `active`, never
+    // from the lifecycle columns, so a row with no history costs them nothing.
+    async function writeLicenceAsNewActivation(
+      licenceId: string,
+      graceUntil: string | null
+    ) {
+      const source = await admin
+        .from("vehicle_licences")
+        .select("tenant_id, vehicle_id, licence_type, issue_date, expiry_date, notes")
+        .eq("id", licenceId)
+        .single();
+      if (source.error) throw new Error(source.error.message);
+
+      const { error } = await admin.from("vehicle_licences").insert({
+        tenant_id: source.data.tenant_id,
+        vehicle_id: source.data.vehicle_id,
+        licence_type: source.data.licence_type,
+        issue_date: source.data.issue_date,
+        expiry_date: source.data.expiry_date,
+        notes: source.data.notes,
+        active: true,
+        grace_until: graceUntil,
+      });
+      if (error) throw new Error(error.message);
+    }
+
+    async function writeLicence(graceUntil: string | null = null) {
       if (body.action === "create") {
         const { error } = await admin.from("vehicle_licences").insert({
           tenant_id: body.tenantId,
@@ -203,6 +277,10 @@ export async function POST(request: NextRequest) {
           expiry_date: body.expiryDate,
           active: body.active,
           notes: body.notes,
+          // Rule 7. Null for every v1 company and for any vehicle whose
+          // registration has been licensed here before, which is what stops
+          // grace being recycled by deleting and re-adding a vehicle.
+          grace_until: graceUntil,
         });
         if (error) {
           throw new Error(error.message);
@@ -216,6 +294,17 @@ export async function POST(request: NextRequest) {
           throw new Error(error.message);
         }
       }
+    }
+
+    // A v2 write is a create (insert, as usual) or a reactivation (insert a
+    // fresh row, see above). Reaching here with active false is impossible:
+    // the deactivation branch below returns before the v2 block runs.
+    async function writeV2Licence(graceUntil: string | null) {
+      if (body.action === "create") {
+        await writeLicence(graceUntil);
+        return;
+      }
+      await writeLicenceAsNewActivation(body.licenceId, graceUntil);
     }
 
     // Deactivations and inactive drafts cannot make a vehicle billable, so
@@ -241,6 +330,103 @@ export async function POST(request: NextRequest) {
         ok: true,
         charged: false,
         reason: "already_billable",
+      });
+    }
+
+    // ---------------------------------------------------------------------
+    // v2: period billing.
+    // ---------------------------------------------------------------------
+    //
+    // Placed AFTER the already_billable check on purpose. A vehicle that is
+    // already paid for can always take another compliance document (an ADR
+    // certificate alongside its O-licence), and routing that through the
+    // suspension gates would refuse a change that costs nothing.
+    //
+    // resolveActivation returns `legacy` for any company that is not on
+    // v2_period, so everything below this block is untouched for them.
+    const todayISO = londonDateISO(new Date());
+    const activation = await resolveActivation(admin, companyId, todayISO);
+
+    if (activation.action.kind === "blocked") {
+      return NextResponse.json(
+        { error: PERIOD_BLOCKED_MESSAGE[activation.action.reason] },
+        { status: 402 }
+      );
+    }
+
+    // RULE 10. Inside a running period a vehicle addition moves no money at
+    // all: no Square call, no coverage row, no pro-rata arithmetic. It is an
+    // insert, and the vehicle is billed when the period closes.
+    if (activation.action.kind === "join_open_period") {
+      const settings = activation.settings!;
+      const vehicleIds = await fetchCompanyVehicleIds(admin, companyId);
+      const graceUntil = await computeGraceUntil(admin, {
+        companyId,
+        vehicleIds,
+        vrnNormalised: normaliseVrn(
+          vehicleRes.data.registration as string | null,
+          vehicleId
+        ),
+        graceDays: settings.grace_days,
+        nowISO: new Date().toISOString(),
+      });
+
+      await writeV2Licence(graceUntil);
+      return NextResponse.json({
+        ok: true,
+        charged: false,
+        reason: "period_billing",
+        periodId: activation.action.periodId,
+      });
+    }
+
+    if (activation.action.kind === "open_period_and_charge") {
+      const settings = activation.settings!;
+
+      // Same ordering rule as the v1 path below, for the same reason: take the
+      // money FIRST, write the licence LAST, so a decline can never leave a
+      // billable vehicle behind.
+      const charged = await openPeriodAndChargeMinimum(
+        admin,
+        createSquarePeriodPaymentProvider(admin),
+        {
+          companyId,
+          periodStartISO: activation.action.periodStartISO,
+          settings,
+          minimumPence: activation.action.amountPence,
+        }
+      );
+
+      if (!charged.ok) {
+        return NextResponse.json(
+          {
+            error:
+              "Your card was declined, so the vehicle was not added. Update your payment card on the billing page and try again.",
+            failureCode: charged.failureCode,
+          },
+          { status: 402 }
+        );
+      }
+
+      const vehicleIds = await fetchCompanyVehicleIds(admin, companyId);
+      const graceUntil = await computeGraceUntil(admin, {
+        companyId,
+        vehicleIds,
+        vrnNormalised: normaliseVrn(
+          vehicleRes.data.registration as string | null,
+          vehicleId
+        ),
+        graceDays: settings.grace_days,
+        nowISO: new Date().toISOString(),
+      });
+
+      await writeV2Licence(graceUntil);
+      return NextResponse.json({
+        ok: true,
+        charged: true,
+        reason: "period_opened",
+        periodId: charged.periodId,
+        grossPence: activation.action.amountPence,
       });
     }
 

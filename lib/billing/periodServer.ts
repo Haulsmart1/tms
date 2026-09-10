@@ -18,6 +18,8 @@ import {
 } from "./close";
 import type { PeriodLicence, PeriodStatus } from "./close";
 import { nextPeriodBounds } from "./period";
+import { selectActivationAction } from "./activation";
+import type { ActivationAction } from "./activation";
 import { balanceDue } from "./periodPayment";
 import type { PeriodPaymentProvider } from "./periodPayment";
 import { londonDateISO } from "./schedule";
@@ -511,3 +513,200 @@ async function closeOnePeriod(
     vehicleCount: invoice.vehicleCount,
   };
 }
+
+export type ResolvedActivation = {
+  action: ActivationAction;
+  settings: CompanyBillingSettings | null;
+};
+
+/**
+ * Load everything selectActivationAction needs and ask it what to do.
+ *
+ * Returns `legacy` for any company that is not on v2, which is what lets the
+ * caller fall straight through to the path that exists today.
+ */
+export async function resolveActivation(
+  admin: SupabaseClient,
+  companyId: string,
+  todayISO: string
+): Promise<ResolvedActivation> {
+  const settingsRes = await admin
+    .from("company_billing")
+    .select(
+      "company_id, billing_model, status, currency, unit_amount_pence, min_invoice_pence, included_vehicles, grace_days, min_bill_days, square_card_id, square_customer_id"
+    )
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (settingsRes.error) throw new Error(settingsRes.error.message);
+
+  const settings = settingsRes.data as
+    | (CompanyBillingSettings & {
+        square_card_id: string | null;
+        square_customer_id: string | null;
+      })
+    | null;
+
+  if (!settings || settings.billing_model !== "v2_period") {
+    return { action: { kind: "legacy" }, settings: null };
+  }
+
+  const openRes = await admin
+    .from("billing_periods")
+    .select("id, period_start, period_end")
+    .eq("company_id", companyId)
+    .eq("status", "open")
+    .maybeSingle();
+  if (openRes.error) throw new Error(openRes.error.message);
+
+  const openPeriod = openRes.data
+    ? {
+        id: openRes.data.id as string,
+        periodStartISO: openRes.data.period_start as string,
+        periodEndISO: openRes.data.period_end as string,
+      }
+    : null;
+
+  // A pending minimum means a Square call whose outcome was never recorded.
+  // Only asked when there IS an open period, since that is the only case the
+  // answer changes.
+  let openPeriodMinimumPending = false;
+  if (openPeriod) {
+    const pendingRes = await admin
+      .from("period_charges")
+      .select("id")
+      .eq("billing_period_id", openPeriod.id)
+      .eq("kind", "minimum")
+      .eq("status", "pending")
+      .maybeSingle();
+    if (pendingRes.error) throw new Error(pendingRes.error.message);
+    openPeriodMinimumPending = Boolean(pendingRes.data);
+  }
+
+  return {
+    action: selectActivationAction({
+      billingRow: {
+        billingModel: "v2_period",
+        status: settings.status as "active" | "past_due" | "canceled",
+        hasPaymentMethod: Boolean(
+          settings.square_card_id && settings.square_customer_id
+        ),
+      },
+      openPeriod,
+      openPeriodMinimumPending,
+      todayISO,
+      minimumPence: settings.min_invoice_pence,
+    }),
+    settings,
+  };
+}
+
+/**
+ * Open the company's period and take the minimum up front.
+ *
+ * ORDER, and it is the same rule the v1 route follows for the same reason:
+ * take the money FIRST, write the licence LAST. The caller writes the licence
+ * only on a true return here, so a decline leaves no billable vehicle behind.
+ *
+ * On a decline the period is DELETED. Leaving it would be worse than useless:
+ * the next attempt would find an open period, take the join branch, let the
+ * vehicle in without charging, and leave prepaid_pence at 0 so the customer is
+ * billed the whole period at close on top of a minimum they never paid.
+ *
+ * An indeterminate payment throws out of here with the period intact and a
+ * pending charge row, which is exactly the state selectActivationAction blocks
+ * on. That is deliberate: the money may have moved, and guessing either way is
+ * worse than telling the customer it is still settling.
+ */
+export async function openPeriodAndChargeMinimum(
+  admin: SupabaseClient,
+  provider: PeriodPaymentProvider,
+  args: {
+    companyId: string;
+    periodStartISO: string;
+    settings: CompanyBillingSettings;
+    minimumPence: number;
+  }
+): Promise<{ ok: true; periodId: string } | { ok: false; failureCode: string }> {
+  const vatRate = args.settings.vat_rate ?? 20;
+  const period = await ensureOpenPeriod(
+    admin,
+    args.companyId,
+    args.periodStartISO,
+    0
+  );
+
+  const vatPence = Math.floor((args.minimumPence * vatRate + 50) / 100);
+
+  const payment = await provider.charge({
+    companyId: args.companyId,
+    periodId: period.id,
+    kind: "minimum",
+    attempt: 1,
+    netPence: args.minimumPence,
+    vatPence,
+    grossPence: args.minimumPence + vatPence,
+    currency: args.settings.currency,
+    periodStartISO: period.period_start,
+    periodEndISO: period.period_end,
+  });
+
+  if (payment.status === "failed") {
+    await admin.from("billing_periods").delete().eq("id", period.id);
+    return { ok: false, failureCode: payment.failureCode };
+  }
+
+  // `skipped` means no provider is configured, or the minimum is zero. The
+  // period stands and records what it actually collected, which for a skipped
+  // charge is nothing: prepaid_pence must never claim money that did not move,
+  // or the close job would net it off a real invoice.
+  const collected = payment.status === "succeeded" ? args.minimumPence : 0;
+  await admin
+    .from("billing_periods")
+    .update({ prepaid_pence: collected })
+    .eq("id", period.id);
+
+  return { ok: true, periodId: period.id };
+}
+
+/**
+ * When this vehicle's free window ends, or null for no grace.
+ *
+ * RULE 7. Grace is granted only on the FIRST ever licence for a registration
+ * within the company, matched on the normalised VRN, so deleting and re-adding
+ * a vehicle cannot recycle it. Returns null the moment any prior licence
+ * exists for that registration, whatever its state.
+ *
+ * grace_days is 0 for every company at launch, so this returns `now` and
+ * changes nothing. It exists so switching grace on is a config change.
+ */
+export async function computeGraceUntil(
+  admin: SupabaseClient,
+  args: {
+    companyId: string;
+    vehicleIds: readonly string[];
+    vrnNormalised: string;
+    graceDays: number;
+    nowISO: string;
+  }
+): Promise<string | null> {
+  if (args.graceDays <= 0) return null;
+  if (args.vehicleIds.length === 0) return null;
+
+  // Scoped to the company's own vehicles, so one company's history cannot deny
+  // grace to another's identically-plated vehicle.
+  const priorRes = await admin
+    .from("vehicle_licences")
+    .select("id")
+    .in("vehicle_id", args.vehicleIds as string[])
+    .eq("vrn_normalised", args.vrnNormalised)
+    .limit(1)
+    .maybeSingle();
+  if (priorRes.error) throw new Error(priorRes.error.message);
+  if (priorRes.data) return null;
+
+  const until = new Date(args.nowISO);
+  until.setUTCDate(until.getUTCDate() + args.graceDays);
+  return until.toISOString();
+}
+
+export { fetchCompanyVehicleIds };

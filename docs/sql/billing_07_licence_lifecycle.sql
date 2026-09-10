@@ -251,6 +251,16 @@ create trigger set_vehicle_licence_vrn
 -- This does not attempt to reconstruct one-row-per-activation history for v1
 -- rows, and it does not need to: the switch-over script resets activated_at
 -- to the company's first v2 period start anyway.
+--
+-- THE UPDATE BRANCH BELOW IS V1-ONLY IN PRACTICE. Clearing deactivated_at on
+-- a false-to-true toggle would destroy the history a v2 invoice is computed
+-- from: a licence active in January, off in February and back in March would
+-- become one row reading "activated 1 Jan, still active", which overlaps
+-- February and bills a month the customer ran nothing. So the v2 branch of
+-- /api/licences/activate never toggles a row back on; it inserts a fresh
+-- activation row and leaves the old one closed. v1 companies bill from
+-- `active` alone and never read these columns, so the toggle costs them
+-- nothing.
 create or replace function public.sync_vehicle_licence_lifecycle()
 returns trigger
 language plpgsql

@@ -39,12 +39,15 @@ export type ActivationAction =
         | "past_due"
         | "canceled"
         | "inactive_subscription"
-        | "no_payment_method";
+        | "no_payment_method"
+        | "payment_settling";
     };
 
 export function selectActivationAction(args: {
   billingRow: ActivationBillingRow | null;
   openPeriod: OpenPeriod | null;
+  /** True when the open period's up-front minimum has a `pending` charge row. */
+  openPeriodMinimumPending: boolean;
   todayISO: string;
   minimumPence: number;
 }): ActivationAction {
@@ -87,6 +90,18 @@ export function selectActivationAction(args: {
   // next one. Opening a second period instead would collide with the
   // one-open-period-per-company index in billing_06.
   if (args.openPeriod) {
+    // A pending charge row means a Square call was made whose outcome was
+    // never recorded, so the card may well have been charged. Joining anyway
+    // would be expensive in a way that is hard to spot: the vehicle goes in
+    // free, prepaid_pence stays 0, and at close the customer is billed for the
+    // whole period on top of a minimum they may already have paid.
+    //
+    // Blocking is the honest answer and it resolves as soon as the pending row
+    // is reconciled against Square, which is the same operational step
+    // billing_05 documents for a stuck add-on.
+    if (args.openPeriodMinimumPending) {
+      return { kind: "blocked", reason: "payment_settling" };
+    }
     return { kind: "join_open_period", periodId: args.openPeriod.id };
   }
 
