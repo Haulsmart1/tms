@@ -108,10 +108,18 @@ export const DISCOUNT_BANDS: readonly DiscountBand[] = [
  * intended. It is the honest form of the promise, and it fails toward the
  * customer.
  */
-export function fleetPeriodPence(vehicleCount: number): number {
+export function fleetPeriodPence(
+  vehicleCount: number,
+  unitAmountPence: number = PERIOD_VEHICLE_PENCE
+): number {
   if (!Number.isInteger(vehicleCount) || vehicleCount < 0) {
     throw new Error(
       `vehicleCount must be a non-negative integer, got ${vehicleCount}`
+    );
+  }
+  if (!Number.isInteger(unitAmountPence) || unitAmountPence < 0) {
+    throw new Error(
+      `unitAmountPence must be a non-negative integer, got ${unitAmountPence}`
     );
   }
 
@@ -119,14 +127,52 @@ export function fleetPeriodPence(vehicleCount: number): number {
   // at least 1, so max(0, threshold) would price an empty fleet as one vehicle.
   if (vehicleCount === 0) return 0;
 
-  return Math.min(
-    ...DISCOUNT_BANDS.map((band) =>
-      roundHalfUpDiv(
-        Math.max(vehicleCount, band.threshold) *
-          PERIOD_VEHICLE_PENCE *
-          (100 - band.discountPercent),
-        100
-      )
+  return Math.min(...pricedBands(vehicleCount, unitAmountPence));
+}
+
+/**
+ * The band that actually produced the price, which is NOT always the band the
+ * fleet size nominally sits in: wherever the cap fires, a fleet buys a higher
+ * band by pretending to be its threshold. A fleet of 19 is priced at the 20
+ * band.
+ *
+ * The invoice needs this to describe its discount line. Labelling a capped
+ * discount with the nominal band would print a percentage that does not match
+ * the amount on the same line, which is exactly the kind of thing a customer
+ * checking their bill will notice and nobody internally will be able to
+ * explain.
+ *
+ * Ties go to the earlier (smaller) band, which matters at 9 vehicles, where 0%
+ * of 9 and 10% of 10 are both 58050. Reporting "no discount" there is right:
+ * the customer is not yet getting one, the tenth vehicle is simply free when
+ * they reach it.
+ */
+export function fleetDiscountBand(
+  vehicleCount: number,
+  unitAmountPence: number = PERIOD_VEHICLE_PENCE
+): DiscountBand {
+  if (vehicleCount === 0) return DISCOUNT_BANDS[0];
+
+  const priced = pricedBands(vehicleCount, unitAmountPence);
+  let bestIndex = 0;
+  for (let index = 1; index < priced.length; index += 1) {
+    if (priced[index] < priced[bestIndex]) bestIndex = index;
+  }
+  return DISCOUNT_BANDS[bestIndex];
+}
+
+// One evaluation of every band, shared so the price and the band that explains
+// it can never be computed by two different routes and disagree.
+function pricedBands(
+  vehicleCount: number,
+  unitAmountPence: number
+): number[] {
+  return DISCOUNT_BANDS.map((band) =>
+    roundHalfUpDiv(
+      Math.max(vehicleCount, band.threshold) *
+        unitAmountPence *
+        (100 - band.discountPercent),
+      100
     )
   );
 }

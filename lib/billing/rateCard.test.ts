@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DISCOUNT_BANDS,
+  fleetDiscountBand,
   fleetPeriodPence,
   PERIOD_MINIMUM_PENCE,
   PERIOD_VEHICLE_PENCE,
@@ -116,11 +117,68 @@ describe("fleetPeriodPence", () => {
     }
   });
 
+  // The invoice assembly prorates lines at a rate it is handed and then scales
+  // the subtotal by the whole-fleet discount. If the discount were always
+  // computed at the standard rate, a company on any other rate would have its
+  // lines and its discount priced off different numbers, and the invoice would
+  // stop summing to the rate card.
+  it("prices at a supplied rate instead of the standard one", () => {
+    expect(fleetPeriodPence(1, 1000)).toBe(1000);
+    expect(fleetPeriodPence(10, 1000)).toBe(9000);
+    expect(fleetPeriodPence(30, 1000)).toBe(23400);
+  });
+
+  it("defaults to the standard rate", () => {
+    expect(fleetPeriodPence(10, PERIOD_VEHICLE_PENCE)).toBe(
+      fleetPeriodPence(10)
+    );
+  });
+
+  it("rejects a negative rate", () => {
+    expect(() => fleetPeriodPence(1, -1)).toThrow(
+      /unitAmountPence must be a non-negative integer/
+    );
+  });
+
   it("rejects a negative fleet size", () => {
     expect(() => fleetPeriodPence(-1)).toThrow(/non-negative integer/);
   });
 
   it("rejects a fractional fleet size", () => {
     expect(() => fleetPeriodPence(2.5)).toThrow(/non-negative integer/);
+  });
+});
+
+describe("fleetDiscountBand", () => {
+  // The invoice needs the band that actually won, not the band the fleet size
+  // nominally sits in, because they differ wherever the cap fires. Describing
+  // a capped discount by its nominal band would print a percentage that does
+  // not match the amount on the same line.
+  it("reports no discount below the first threshold", () => {
+    expect(fleetDiscountBand(1).discountPercent).toBe(0);
+    expect(fleetDiscountBand(9).discountPercent).toBe(0);
+  });
+
+  it("reports the band a fleet sits in", () => {
+    expect(fleetDiscountBand(10).discountPercent).toBe(10);
+    expect(fleetDiscountBand(15).discountPercent).toBe(15);
+    expect(fleetDiscountBand(20).discountPercent).toBe(20);
+    expect(fleetDiscountBand(30).discountPercent).toBe(22);
+  });
+
+  // 19 is priced as 20, so the band that won is the 20 one even though the
+  // fleet has not reached it.
+  it("reports the higher band for a capped fleet", () => {
+    expect(fleetDiscountBand(19).threshold).toBe(20);
+  });
+
+  it("agrees with the price it explains", () => {
+    for (let count = 1; count <= 60; count += 1) {
+      const band = fleetDiscountBand(count);
+      const atBand = Math.max(count, band.threshold) * PERIOD_VEHICLE_PENCE;
+      expect(fleetPeriodPence(count)).toBe(
+        Math.floor((atBand * (100 - band.discountPercent) + 50) / 100)
+      );
+    }
   });
 });
