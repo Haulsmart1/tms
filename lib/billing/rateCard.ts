@@ -11,6 +11,24 @@
 // fleet size reaches. That is what a customer hears in "20% off at 20
 // vehicles", and it is why the cap below has to exist.
 
+import { roundHalfUpDiv } from "./pence";
+
+/**
+ * Length of one billing period, and the denominator every proration divides
+ * by, so a day always costs 1/28 of the rate.
+ *
+ * Deliberately NOT derived from v1's CYCLE_DAYS, which is
+ * WEEKS_PER_CYCLE x 7 and describes how long four weeks of a per-WEEK rate
+ * last. This is a per-PERIOD rate, and the two facts are independent even
+ * though both are 28 today. Deriving one from the other would mean changing
+ * v1's cycle length silently reprices v2 while PERIOD_VEHICLE_PENCE stays put.
+ *
+ * A period shortened by cancellation caps how many days can be billed. It does
+ * NOT change this denominator: cancelling on day 11 must cost eleven days,
+ * not a full period.
+ */
+export const PERIOD_DAYS = 28;
+
 /** Full price of one vehicle for one 28-day period, before any discount. */
 export const PERIOD_VEHICLE_PENCE = 6450;
 
@@ -37,13 +55,6 @@ export const DISCOUNT_BANDS: readonly DiscountBand[] = [
   { threshold: 20, discountPercent: 20 },
   { threshold: 30, discountPercent: 22 },
 ];
-
-// Round half up on a positive integer division. Written out rather than using
-// Math.round(a / b) because that goes through a float, and the whole point of
-// this file is that money never does.
-function roundHalfUp(numerator: number, denominator: number): number {
-  return Math.floor((numerator + Math.floor(denominator / 2)) / denominator);
-}
 
 /**
  * What a fleet of `vehicleCount` costs for one full period, net of VAT, before
@@ -87,7 +98,7 @@ export function fleetPeriodPence(vehicleCount: number): number {
 
   return Math.min(
     ...DISCOUNT_BANDS.map((band) =>
-      roundHalfUp(
+      roundHalfUpDiv(
         Math.max(vehicleCount, band.threshold) *
           PERIOD_VEHICLE_PENCE *
           (100 - band.discountPercent),
