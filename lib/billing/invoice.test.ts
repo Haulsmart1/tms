@@ -29,6 +29,7 @@ function invoice(
     minBillDays: 1,
     unitAmountPence: PERIOD_VEHICLE_PENCE,
     minimumPence: PERIOD_MINIMUM_PENCE,
+    includedVehicles: 0,
     vatRatePercent: 20,
     ...overrides,
   });
@@ -239,5 +240,89 @@ describe("assembleInvoice VAT", () => {
     expect(result.netPence).toBe(461);
     expect(result.vatPence).toBe(92);
     expect(result.grossPence).toBe(553);
+  });
+});
+
+describe("assembleInvoice included allowance", () => {
+  // Rule 8. Off by default (includedVehicles is 0 for every company at
+  // launch), because the GBP 129 floor was chosen over an allowance. The
+  // logic exists so turning it on later is a config change rather than a
+  // build, and it is tested with the minimum disabled because otherwise the
+  // floor masks it entirely: three vehicles with two included come to GBP
+  // 64.50, which the floor lifts straight back to GBP 129.
+  it("zeroes the first N lines", () => {
+    const result = invoice(vehicles(3), {
+      includedVehicles: 2,
+      minimumPence: 0,
+    });
+
+    expect(result.lines.map((line) => line.netPence)).toEqual([0, 0, 6450]);
+    expect(result.netPence).toBe(6450);
+  });
+
+  it("labels an included line", () => {
+    const [line] = invoice(vehicles(3), {
+      includedVehicles: 2,
+      minimumPence: 0,
+    }).lines;
+
+    expect(line.includedInPlan).toBe(true);
+    expect(line.description).toMatch(/included in plan/i);
+  });
+
+  it("leaves charged lines unlabelled", () => {
+    const lines = invoice(vehicles(3), {
+      includedVehicles: 2,
+      minimumPence: 0,
+    }).lines;
+
+    expect(lines[2].includedInPlan).toBe(false);
+  });
+
+  // The allowance takes the EARLIEST coverage, matching the line order, so a
+  // customer's longest-held vehicles are the free ones rather than whichever
+  // rows Postgres happened to return first.
+  it("gives the allowance to the earliest coverage", () => {
+    const result = invoice(
+      [
+        { vehicleId: "late", tenantId: "t", vrnNormalised: "ZZ99ZZZ", coverageStartISO: "2026-04-09" },
+        { vehicleId: "early", tenantId: "t", vrnNormalised: "AA11AAA", coverageStartISO: PERIOD_START },
+      ],
+      { includedVehicles: 1, minimumPence: 0 }
+    );
+
+    expect(result.lines[0].vehicleId).toBe("early");
+    expect(result.lines[0].netPence).toBe(0);
+    expect(result.lines[1].netPence).toBe(2073);
+  });
+
+  // An included vehicle is still a vehicle. Excluding them from the count
+  // would push a 10-vehicle fleet with 2 included back into the undiscounted
+  // band, so growing the allowance would RAISE the price of the rest.
+  it("still counts included vehicles toward the discount band", () => {
+    const result = invoice(vehicles(10), {
+      includedVehicles: 2,
+      minimumPence: 0,
+    });
+
+    expect(result.discountPercent).toBe(10);
+    expect(result.subtotalPence).toBe(51600);
+    expect(result.netPence).toBe(46440);
+  });
+
+  it("charges nothing when the allowance covers the whole fleet", () => {
+    const result = invoice(vehicles(2), {
+      includedVehicles: 5,
+      minimumPence: 0,
+    });
+
+    expect(result.netPence).toBe(0);
+    expect(result.vatPence).toBe(0);
+  });
+
+  it("changes nothing when the allowance is zero", () => {
+    expect(invoice(vehicles(3), { includedVehicles: 0 }).netPence).toBe(
+      invoice(vehicles(3)).netPence
+    );
   });
 });

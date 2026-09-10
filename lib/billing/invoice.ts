@@ -47,6 +47,8 @@ export type AssembledLine = {
   unitAmountPence: number;
   /** Negative on the discount line. */
   netPence: number;
+  /** True on a vehicle line zeroed by the plan allowance. */
+  includedInPlan: boolean;
   description: string;
 };
 
@@ -59,6 +61,14 @@ export type AssembleInvoiceInput = {
   /** Snapshotted onto every line, so a later reprice cannot rewrite history. */
   unitAmountPence: number;
   minimumPence: number;
+  /**
+   * Vehicles zeroed by the base plan. 0 for every company at launch: the
+   * GBP 129 floor was chosen over an allowance, and the two mostly cancel
+   * out anyway (three vehicles with two included come to GBP 64.50, which the
+   * floor lifts straight back to GBP 129). Implemented so switching it on is
+   * a config change rather than a build.
+   */
+  includedVehicles: number;
   vatRatePercent: number;
 };
 
@@ -85,6 +95,7 @@ export function assembleInvoice(
     minBillDays,
     unitAmountPence,
     minimumPence,
+    includedVehicles,
     vatRatePercent,
   } = input;
 
@@ -137,21 +148,31 @@ export function assembleInvoice(
       return a.vehicle.vrnNormalised.localeCompare(b.vehicle.vrnNormalised);
     });
 
-  const lines: AssembledLine[] = priced.map((entry) => ({
-    kind: "vehicle",
-    vehicleId: entry.vehicle.vehicleId,
-    tenantId: entry.vehicle.tenantId,
-    vrnNormalised: entry.vehicle.vrnNormalised,
-    coverageStartISO: entry.coverageStartISO,
-    coverageEndISO: periodEndISO,
-    actualDays: entry.prorated.actualDays,
-    billableDays: entry.prorated.billableDays,
-    unitAmountPence,
-    netPence: entry.prorated.amountPence,
-    description: `${entry.vehicle.vrnNormalised}, ${entry.prorated.billableDays} day${
-      entry.prorated.billableDays === 1 ? "" : "s"
-    }`,
-  }));
+  const lines: AssembledLine[] = priced.map((entry, index) => {
+    // Rule 8. The allowance goes to the EARLIEST coverage, which is the order
+    // the lines are already in, so a customer's longest-held vehicles are the
+    // free ones rather than whichever rows Postgres happened to return first.
+    const includedInPlan = index < includedVehicles;
+
+    return {
+      kind: "vehicle",
+      vehicleId: entry.vehicle.vehicleId,
+      tenantId: entry.vehicle.tenantId,
+      vrnNormalised: entry.vehicle.vrnNormalised,
+      coverageStartISO: entry.coverageStartISO,
+      coverageEndISO: periodEndISO,
+      actualDays: entry.prorated.actualDays,
+      billableDays: entry.prorated.billableDays,
+      unitAmountPence,
+      netPence: includedInPlan ? 0 : entry.prorated.amountPence,
+      includedInPlan,
+      description: includedInPlan
+        ? `${entry.vehicle.vrnNormalised}, included in plan`
+        : `${entry.vehicle.vrnNormalised}, ${entry.prorated.billableDays} day${
+            entry.prorated.billableDays === 1 ? "" : "s"
+          }`,
+    };
+  });
 
   const vehicleCount = lines.length;
   const subtotalPence = lines.reduce((sum, line) => sum + line.netPence, 0);
@@ -200,6 +221,7 @@ export function assembleInvoice(
         billableDays: 0,
         unitAmountPence: 0,
         netPence: discounted - subtotalPence,
+        includedInPlan: false,
         // Only labelled with a percentage when the fleet has actually reached
         // the band. A capped fleet is priced AS a larger one, so its discount
         // is not that percentage of its own subtotal and printing it would put
@@ -225,6 +247,7 @@ export function assembleInvoice(
       billableDays: 0,
       unitAmountPence: 0,
       netPence: minimumPence - netPence,
+      includedInPlan: false,
       description: "Minimum charge adjustment",
     });
     netPence = minimumPence;
