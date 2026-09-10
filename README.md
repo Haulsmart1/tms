@@ -1,6 +1,6 @@
 # TMS Wizzard
 
-A multi-tenant Transport Management System (TMS) for UK and EU road-haulage operators. TMS Wizzard runs the day-to-day of a haulage business in one place: booking jobs, capturing proof of delivery, invoicing, managing the fleet and drivers, and staying on top of compliance (tachograph / working-time, vehicle licences, maintenance and VOR). It is a SaaS product priced per vehicle per week on graduated volume bands (from GBP 10 down to GBP 5) and billed every 4 weeks, deployed at tmswizzard.cloud.
+A multi-tenant Transport Management System (TMS) for UK and EU road-haulage operators. TMS Wizzard runs the day-to-day of a haulage business in one place: booking jobs, capturing proof of delivery, invoicing, managing the fleet and drivers, and staying on top of compliance (tachograph / working-time, vehicle licences, maintenance and VOR). It is a SaaS product billed every 4 weeks, deployed at tmswizzard.cloud. Two pricing models are live at once during a migration: v1 charges in advance on graduated per-week bands (GBP 10 down to GBP 5), v2 bills in arrears at GBP 64.50 per vehicle per 4-week period with a GBP 129.00 minimum and whole-fleet volume discounts. Each company is on exactly one, set by `company_billing.billing_model`.
 
 > Status: active development. The core operational pages are functional against a live Supabase backend; some analytics and admin-management pages are still launchers or read-only views (see the Page Inventory status tags). A multi-tenant Row Level Security overhaul and a storage-bucket lockdown were recently completed and are in rollout.
 
@@ -100,7 +100,7 @@ Status tags: [OK] functional against live data, [PARTIAL] real data but view-onl
 - **`/settings/company`** [OK]: the most complete form in the app; multi-section company profile with country-driven fields (GB VAT / EORI / O-licence vs US EIN / USDOT / MC / IFTA), currency / timezone defaults, validation.
 - **`/settings/users`** [OK]: invite users by magic link (admin action).
 - **`/settings/permissions`** [PARTIAL]: per-user, per-page access checkboxes writing to `user_permissions`. Grant path works; revoke path and controlled state are incomplete, and the page now says so on screen rather than implying the boxes reflect stored state.
-- **`/settings/invoices`** [PARTIAL]: this tenant's 4-weekly charge (active licensed vehicles priced on the graduated weekly bands).
+- **`/settings/invoices`** [PARTIAL]: this tenant's 4-weekly charge (active licensed vehicles priced on the graduated weekly bands). Shows the v1 model only; a v2 company's charges live in `billing_periods` / `invoice_lines` and are not surfaced here yet.
 - **`/settings/billing`** [OK]: subscription payment method (Square card on file, 3DS verified) and charge history; company admins only (super_admin sees a notice linking to `/super-admin/billing`; staff see a notice).
 
 ### Super-admin (platform operator)

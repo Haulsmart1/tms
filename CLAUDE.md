@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-TMS Wizzard: a multi-tenant Transport Management System (SaaS, from GBP 10/vehicle/week billed 4-weekly) for UK/EU road-haulage
+TMS Wizzard: a multi-tenant Transport Management System (SaaS, billed every 4 weeks) for UK/EU road-haulage
 operators — jobs, proof of delivery, invoicing, fleet/driver/compliance tracking, telematics. Next.js 16 (App
 Router) + React 19 + TypeScript, backed by Supabase (Postgres, Auth, Storage), deployed on Vercel.
 
@@ -72,6 +72,20 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
   active licence. What a cycle actually paid for is a separate fact, recorded per vehicle in
   `vehicle_cycle_coverage`; `lib/billing/addon.ts` charges a mid-cycle addition only when the current cycle
   has no coverage row for it. Keep those two ideas distinct, and do not add a second billable-count rule.
+- **Two billing models run side by side**, routed on `company_billing.billing_model`. Everything above
+  describes **v1** (`v1_immediate`): charge in advance every 28 days, charge pro-rata the moment a vehicle
+  is added, `vehicle_cycle_coverage` records what a payment bought.
+  **v2** (`v2_period`) bills in ARREARS: adding a vehicle is an insert and moves no money, and the invoice
+  is computed when a 28-day period closes. It writes no coverage rows; `lib/billing/close.ts`,
+  `invoice.ts`, `rateCard.ts` and `periodServer.ts` are its equivalents, and the periods and lines live in
+  `billing_periods` / `invoice_lines` (`docs/sql/billing_06`, `billing_07`). v2 pricing is GBP 64.50 per
+  vehicle per period with a GBP 129.00 floor and WHOLE-FLEET volume discounts, which is a different shape
+  from v1's graduated per-week bands: do not reuse `lib/billing/money.ts` for a v2 company or the other way
+  round. Full rationale in `docs/superpowers/specs/2026-09-10-period-billing-design.md`.
+- `vehicle_licences` holds **compliance documents**, not billing seats: one vehicle legitimately carries an
+  O-licence, a waste carrier licence and an ADR certificate at once. Billing reads the set as "billable if
+  ANY licence is active". Never add a one-active-licence-per-vehicle constraint, and never count licence
+  rows where you mean vehicles.
 - POD (proof-of-delivery) files live in a private `pod-files` Storage bucket, tenant-scoped via the storage
   path's tenant segment, served through short-lived signed URLs (`lib/pod/podUrl.ts`, `lib/pod/shareToken.ts`) —
   never public URLs. The sibling `job-files` bucket is **not yet locked down** (see README roadmap); don't assume
