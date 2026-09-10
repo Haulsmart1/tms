@@ -6,6 +6,7 @@ import {
 import {
   buildPlanningDriverHoursState,
   planningDriverHoursBoundaries,
+  planningStartForLocalDate,
   type PlanningDriverActivityRow,
 } from "./planningDriverActivity";
 
@@ -26,6 +27,76 @@ function row(
     duration_minutes: durationMinutes,
   };
 }
+
+describe("planningStartForLocalDate", () => {
+  it("resolves a winter London planning start", () => {
+    expect(
+      planningStartForLocalDate(
+        "2026-01-15",
+        "07:30:00",
+        "Europe/London"
+      )?.toISOString()
+    ).toBe("2026-01-15T07:30:00.000Z");
+  });
+
+  it("resolves a summer London planning start using BST", () => {
+    expect(
+      planningStartForLocalDate(
+        "2026-07-15",
+        "07:30:00",
+        "Europe/London"
+      )?.toISOString()
+    ).toBe("2026-07-15T06:30:00.000Z");
+  });
+
+  it("rejects a nonexistent spring-forward local time", () => {
+    expect(
+      planningStartForLocalDate(
+        "2026-03-29",
+        "01:30:00",
+        "Europe/London"
+      )
+    ).toBeNull();
+  });
+
+  it("chooses the earlier occurrence during the autumn overlap", () => {
+    expect(
+      planningStartForLocalDate(
+        "2026-10-25",
+        "01:30:00",
+        "Europe/London"
+      )?.toISOString()
+    ).toBe("2026-10-25T00:30:00.000Z");
+  });
+
+  it("does not manufacture a start when driver preference is missing", () => {
+    expect(
+      planningStartForLocalDate(
+        "2026-09-10",
+        null,
+        "Europe/London"
+      )
+    ).toBeNull();
+  });
+
+  it("rejects invalid planning dates and times", () => {
+    expect(
+      planningStartForLocalDate(
+        "2026-02-30",
+        "07:30:00",
+        "Europe/London"
+      )
+    ).toBeNull();
+
+    expect(
+      planningStartForLocalDate(
+        "2026-09-10",
+        "25:00:00",
+        "Europe/London"
+      )
+    ).toBeNull();
+  });
+});
 
 describe("planningDriverHoursBoundaries", () => {
   it("uses Monday midnight in the operator timezone", () => {
@@ -49,7 +120,7 @@ describe("planningDriverHoursBoundaries", () => {
 });
 
 describe("buildPlanningDriverHoursState", () => {
-  it("seeds daily, weekly and fortnight driving", () => {
+  it("seeds current daily, weekly and fortnight driving", () => {
     const state = buildPlanningDriverHoursState(
       [
         row(
@@ -88,21 +159,25 @@ describe("buildPlanningDriverHoursState", () => {
     );
 
     expect(state.complete).toBe(true);
+
     expect(state.previousWeekDrivingSeconds).toBe(
       2 * 60 * 60
     );
+
     expect(state.currentWeekDrivingSeconds).toBe(
       3 * 60 * 60
     );
+
     expect(state.fortnightDrivingSeconds).toBe(
       5 * 60 * 60
     );
+
     expect(state.dailyDrivingSeconds).toBe(
       3 * 60 * 60
     );
   });
 
-  it("keeps empty bounded history incomplete", () => {
+  it("does not treat an empty bounded query as complete history", () => {
     const state = buildPlanningDriverHoursState(
       [],
       new Date("2026-09-10T12:00:00Z"),
@@ -113,7 +188,7 @@ describe("buildPlanningDriverHoursState", () => {
     expect(state.currentStateBoundaryKnown).toBe(false);
   });
 
-  it("marks duration mismatches incomplete", () => {
+  it("marks imported duration mismatches incomplete", () => {
     const state = buildPlanningDriverHoursState(
       [
         row(

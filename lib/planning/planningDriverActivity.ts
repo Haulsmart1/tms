@@ -32,22 +32,88 @@ export type PlanningDriverHoursBoundaries = {
   currentWeekStart: Date;
 };
 
-function parseLocalDay(value: string): {
+type LocalDateParts = {
   year: number;
   month: number;
   day: number;
-} {
+};
+
+type LocalDateTimeParts = LocalDateParts & {
+  hour: number;
+  minute: number;
+  second: number;
+};
+
+function parseLocalDay(value: string): LocalDateParts {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
 
   if (!match) {
     throw new RangeError(`Invalid local calendar day: ${value}`);
   }
 
-  return {
+  const result = {
     year: Number(match[1]),
     month: Number(match[2]),
     day: Number(match[3]),
   };
+
+  const validation = new Date(
+    Date.UTC(
+      result.year,
+      result.month - 1,
+      result.day
+    )
+  );
+
+  if (
+    validation.getUTCFullYear() !== result.year ||
+    validation.getUTCMonth() !== result.month - 1 ||
+    validation.getUTCDate() !== result.day
+  ) {
+    throw new RangeError(`Invalid local calendar day: ${value}`);
+  }
+
+  return result;
+}
+
+function parseLocalTime(
+  value: string | null
+): {
+  hour: number;
+  minute: number;
+  second: number;
+} | null {
+  if (!value) {
+    return null;
+  }
+
+  const match =
+    /^(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/.exec(
+      value.trim()
+    );
+
+  if (!match) {
+    return null;
+  }
+
+  const result = {
+    hour: Number(match[1]),
+    minute: Number(match[2]),
+    second: Number(match[3] ?? "0"),
+  };
+
+  if (
+    result.hour < 0 ||
+    result.hour > 23 ||
+    result.minute < 0 ||
+    result.minute > 59 ||
+    result.second < 0 ||
+    result.second > 59
+  ) {
+    return null;
+  }
+
+  return result;
 }
 
 function addCalendarDays(value: string, days: number): string {
@@ -75,14 +141,7 @@ function localWeekday(value: string): number {
 function zonedParts(
   instant: Date,
   timeZone: string
-): {
-  year: number;
-  month: number;
-  day: number;
-  hour: number;
-  minute: number;
-  second: number;
-} {
+): LocalDateTimeParts {
   const formatter = new Intl.DateTimeFormat("en-GB", {
     timeZone,
     year: "numeric",
@@ -111,27 +170,54 @@ function zonedParts(
   };
 }
 
-function zonedMidnight(value: string, timeZone: string): Date {
-  const target = parseLocalDay(value);
+function sameLocalDateTime(
+  left: LocalDateTimeParts,
+  right: LocalDateTimeParts
+): boolean {
+  return (
+    left.year === right.year &&
+    left.month === right.month &&
+    left.day === right.day &&
+    left.hour === right.hour &&
+    left.minute === right.minute &&
+    left.second === right.second
+  );
+}
 
+/**
+ * Resolve a local wall-clock date/time into an absolute instant.
+ *
+ * A DST gap has no valid result and returns null.
+ * A DST overlap has two valid instants; the earlier occurrence is selected.
+ */
+function resolveZonedDateTime(
+  target: LocalDateTimeParts,
+  timeZone: string
+): Date | null {
   const targetAsUtc = Date.UTC(
     target.year,
     target.month - 1,
-    target.day
+    target.day,
+    target.hour,
+    target.minute,
+    target.second
   );
 
   let candidate = targetAsUtc;
 
-  for (let iteration = 0; iteration < 4; iteration += 1) {
-    const parts = zonedParts(new Date(candidate), timeZone);
+  for (let iteration = 0; iteration < 6; iteration += 1) {
+    const represented = zonedParts(
+      new Date(candidate),
+      timeZone
+    );
 
     const representedAsUtc = Date.UTC(
-      parts.year,
-      parts.month - 1,
-      parts.day,
-      parts.hour,
-      parts.minute,
-      parts.second
+      represented.year,
+      represented.month - 1,
+      represented.day,
+      represented.hour,
+      represented.minute,
+      represented.second
     );
 
     const offset = representedAsUtc - candidate;
@@ -144,9 +230,95 @@ function zonedMidnight(value: string, timeZone: string): Date {
     candidate = next;
   }
 
-  const result = new Date(candidate);
+  /*
+   * Search around the calculated instant in 15-minute offset increments.
+   * This covers modern IANA zones whose offsets use whole, half or
+   * quarter-hours, and lets us deliberately choose the earlier occurrence
+   * during an overlap.
+   */
+  const matches: number[] = [];
 
-  if (!Number.isFinite(result.getTime())) {
+  for (
+    let offsetMinutes = -180;
+    offsetMinutes <= 180;
+    offsetMinutes += 15
+  ) {
+    const instantMs =
+      candidate + offsetMinutes * 60 * 1000;
+
+    const parts = zonedParts(
+      new Date(instantMs),
+      timeZone
+    );
+
+    if (sameLocalDateTime(parts, target)) {
+      matches.push(instantMs);
+    }
+  }
+
+  if (matches.length === 0) {
+    return null;
+  }
+
+  return new Date(Math.min(...matches));
+}
+
+/**
+ * Turn the selected Planning day plus the driver's configured normal start
+ * time into the absolute scheduling instant in the operator timezone.
+ *
+ * normal_start_time is a planning preference. It is not evidence of actual
+ * driver work or rest.
+ */
+export function planningStartForLocalDate(
+  localDate: string,
+  normalStartTime: string | null,
+  timeZone: string
+): Date | null {
+  if (!isValidIanaTimeZone(timeZone)) {
+    return null;
+  }
+
+  let day: LocalDateParts;
+
+  try {
+    day = parseLocalDay(localDate);
+  } catch {
+    return null;
+  }
+
+  const time = parseLocalTime(normalStartTime);
+
+  if (!time) {
+    return null;
+  }
+
+  return resolveZonedDateTime(
+    {
+      ...day,
+      ...time,
+    },
+    timeZone
+  );
+}
+
+function zonedMidnight(
+  value: string,
+  timeZone: string
+): Date {
+  const target = parseLocalDay(value);
+
+  const result = resolveZonedDateTime(
+    {
+      ...target,
+      hour: 0,
+      minute: 0,
+      second: 0,
+    },
+    timeZone
+  );
+
+  if (!result) {
     throw new RangeError(
       `Unable to resolve ${value} in timezone ${timeZone}`
     );
@@ -173,6 +345,8 @@ export function planningDriverHoursBoundaries(
   );
 
   const weekday = localWeekday(localDay);
+
+  // JavaScript Sunday=0; convert to days since Monday.
   const daysSinceMonday = (weekday + 6) % 7;
 
   const currentWeekLocalStart = addCalendarDays(
@@ -229,7 +403,10 @@ export function buildPlanningDriverHoursState(
       durationMinutes: row.duration_minutes,
     };
 
-    const result = normalizeDriverActivity(raw, timeZone);
+    const result = normalizeDriverActivity(
+      raw,
+      timeZone
+    );
 
     if (!result.ok) {
       normalizationWarnings.push(
@@ -246,8 +423,15 @@ export function buildPlanningDriverHoursState(
     planningStart,
     historyCoverageStart:
       boundaries.historyCoverageStart,
-    previousWeekStart: boundaries.previousWeekStart,
-    currentWeekStart: boundaries.currentWeekStart,
+    previousWeekStart:
+      boundaries.previousWeekStart,
+    currentWeekStart:
+      boundaries.currentWeekStart,
+
+    /*
+     * A bounded database query is not itself proof that history started
+     * immediately after qualifying rest.
+     */
     historyStartsAfterKnownRest: false,
   });
 

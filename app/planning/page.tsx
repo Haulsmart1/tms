@@ -36,6 +36,7 @@ import { buildPlanningPhysicalItinerary } from "../../lib/planning/physicalItine
 import {
   buildPlanningDriverHoursState,
   planningDriverHoursBoundaries,
+  planningStartForLocalDate,
   PLANNING_DRIVER_ACTIVITY_ROW_LIMIT,
   type PlanningDriverActivityRow,
 } from "../../lib/planning/planningDriverActivity";
@@ -91,7 +92,10 @@ type Vehicle = {
 type VehicleRow = Vehicle & {
   active: boolean;
 };
-type Driver = PlanningComplianceDriver;
+type Driver = PlanningComplianceDriver & {
+  planning_profile: "day" | "tramper";
+  normal_start_time: string | null;
+};
 
 /* The geocode endpoint caps a batch at 100 stop ids and rejects anything
    larger with a 400 (it does not truncate), so the client chunks. */
@@ -370,7 +374,9 @@ export default function PlanningPage() {
           tachograph_next_download_due,
           cpc_required,
           cpc_qualified,
-          cpc_expiry
+          cpc_expiry,
+          planning_profile,
+          normal_start_time
         `)
       )
       .eq("active", true)
@@ -1831,7 +1837,7 @@ export default function PlanningPage() {
       return;
     }
 
-    const driverIds = [
+    const assignedDriverIds = [
       ...new Set(
         Object.values(laneDrivers).filter(
           (value): value is string =>
@@ -1840,22 +1846,51 @@ export default function PlanningPage() {
       ),
     ];
 
-    if (driverIds.length === 0) {
+    if (assignedDriverIds.length === 0) {
       setDriverHoursById({});
       return;
     }
 
-    const planningStart = new Date();
-    const boundaries = planningDriverHoursBoundaries(
-      planningStart,
-      planningTimeZone
+    const driversById = new Map(
+      drivers.map((driver) => [driver.id, driver])
     );
+
+    /*
+     * Activity can only establish legal state up to an instant that has
+     * actually happened. A future planning start necessarily contains an
+     * unknown interval of future activity, so it remains incomplete.
+     */
+    const activityKnownThrough = new Date();
 
     let cancelled = false;
 
     void (async () => {
       const entries = await Promise.all(
-        driverIds.map(async (driverId) => {
+        assignedDriverIds.map(async (driverId) => {
+          const driver = driversById.get(driverId);
+
+          if (!driver) {
+            return [driverId, null] as const;
+          }
+
+          const planningStart = planningStartForLocalDate(
+            date,
+            driver.normal_start_time,
+            planningTimeZone
+          );
+
+          if (
+            !planningStart ||
+            planningStart.getTime() > activityKnownThrough.getTime()
+          ) {
+            return [driverId, null] as const;
+          }
+
+          const boundaries = planningDriverHoursBoundaries(
+            planningStart,
+            planningTimeZone
+          );
+
           const { data, error } = await tenant.filterByTenant(
             supabase
               .from("driver_activity_logs")
@@ -1884,6 +1919,10 @@ export default function PlanningPage() {
 
           const rows = (data ?? []) as PlanningDriverActivityRow[];
 
+          /*
+           * A result at the limit may have been truncated. It is therefore
+           * never valid evidence of complete compliance history.
+           */
           if (rows.length >= PLANNING_DRIVER_ACTIVITY_ROW_LIMIT) {
             return [driverId, null] as const;
           }
@@ -1912,6 +1951,8 @@ export default function PlanningPage() {
   }, [
     tenant.status,
     tenant.activeTenantId,
+    date,
+    drivers,
     laneDrivers,
     planningTimeZone,
     supabase,
