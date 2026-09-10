@@ -563,58 +563,90 @@ export default function VehicleLicencesPage() {
                 onSubmit={createLicence}
                 className="mb-4 grid gap-3 rounded-lg border border-line bg-surface p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-3"
             >
-                <select
-                    value={vehicleId}
-                    onChange={(event) => setVehicleId(event.target.value)}
-                    className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
-                    required
-                >
-                    <option value="">Select vehicle</option>
-                    {vehicles.map((vehicle) => (
-                        <option key={vehicle.id} value={vehicle.id}>
-                            {vehicleLabel(vehicle)}
-                        </option>
-                    ))}
-                </select>
+                {/* Every field is wrapped in its own <label>, matching
+                    app/vehicles/page.tsx. Placeholders alone were not enough:
+                    the two date inputs render identically as dd/mm/yyyy, so
+                    nothing on screen said which one was the expiry, and a
+                    screen reader had nothing to announce for either. A
+                    placeholder also disappears the moment you type, which is
+                    exactly when you are checking you filled the right box. */}
+                <label className="grid gap-1.5">
+                    <span className="text-sm font-medium text-ink-2">Vehicle</span>
+                    <select
+                        value={vehicleId}
+                        onChange={(event) => setVehicleId(event.target.value)}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                        required
+                    >
+                        <option value="">Select vehicle</option>
+                        {vehicles.map((vehicle) => (
+                            <option key={vehicle.id} value={vehicle.id}>
+                                {vehicleLabel(vehicle)}
+                            </option>
+                        ))}
+                    </select>
+                </label>
 
-                <input
-                    type="text"
-                    placeholder="Licence type"
-                    value={licenceType}
-                    onChange={(event) => setLicenceType(event.target.value)}
-                    className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
-                    required
-                />
-
-                <input
-                    type="date"
-                    value={issueDate}
-                    onChange={(event) => setIssueDate(event.target.value)}
-                    className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
-                />
-
-                <input
-                    type="date"
-                    value={expiryDate}
-                    onChange={(event) => setExpiryDate(event.target.value)}
-                    className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
-                />
-
-                <input
-                    type="text"
-                    placeholder="Notes"
-                    value={notes}
-                    onChange={(event) => setNotes(event.target.value)}
-                    className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
-                />
-
-                <label className="flex min-h-10 items-center gap-2 rounded-md border border-ink-3 bg-surface px-3 text-sm text-ink-2">
+                <label className="grid gap-1.5">
+                    <span className="text-sm font-medium text-ink-2">Licence type</span>
+                    {/* The placeholder stays here because it now carries an
+                        EXAMPLE rather than repeating the label. This field is
+                        free text, so an operator has no other hint about what
+                        belongs in it. */}
                     <input
-                        type="checkbox"
-                        checked={active}
-                        onChange={(event) => setActive(event.target.checked)}
+                        type="text"
+                        placeholder="e.g. O-licence"
+                        value={licenceType}
+                        onChange={(event) => setLicenceType(event.target.value)}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
+                        required
                     />
-                    Active for billing
+                </label>
+
+                <label className="grid gap-1.5">
+                    <span className="text-sm font-medium text-ink-2">Issue date</span>
+                    <input
+                        type="date"
+                        value={issueDate}
+                        onChange={(event) => setIssueDate(event.target.value)}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
+                    />
+                </label>
+
+                <label className="grid gap-1.5">
+                    <span className="text-sm font-medium text-ink-2">Expiry date</span>
+                    <input
+                        type="date"
+                        value={expiryDate}
+                        onChange={(event) => setExpiryDate(event.target.value)}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
+                    />
+                </label>
+
+                <label className="grid gap-1.5">
+                    <span className="text-sm font-medium text-ink-2">Notes (optional)</span>
+                    <input
+                        type="text"
+                        value={notes}
+                        onChange={(event) => setNotes(event.target.value)}
+                        className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
+                    />
+                </label>
+
+                {/* Two spans, not one: the caption keeps this cell the same
+                    height as its labelled neighbours, and the inner span keeps
+                    the bordered control the checkbox already had. Same shape as
+                    the Auto Renew field on /vehicles. */}
+                <label className="grid gap-1.5">
+                    <span className="text-sm font-medium text-ink-2">Status</span>
+                    <span className="flex min-h-10 items-center gap-2 rounded-md border border-ink-3 bg-surface px-3 text-sm text-ink-2">
+                        <input
+                            type="checkbox"
+                            checked={active}
+                            onChange={(event) => setActive(event.target.checked)}
+                        />
+                        Active for billing
+                    </span>
                 </label>
 
                 <div className="sm:col-span-2 lg:col-span-3">
