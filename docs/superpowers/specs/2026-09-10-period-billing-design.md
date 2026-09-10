@@ -82,17 +82,35 @@ before service resumes. A company that has already failed to pay once re-proves 
 The v1 rate card (`lib/billing/money.ts`) is GRADUATED per-week bands. v2 replaces it with
 whole-fleet discounts per period:
 
-| Fleet | Discount |
-|---|---|
-| 1 to 9 | 0% |
-| 10 to 19 | 10% |
-| 20 to 29 | 20% |
-| 30 or more | 22% |
+| Fleet | Discount | Price at the threshold |
+|---|---|---|
+| 1 to 9 | 0% | £64.50 |
+| 10 to 14 | 10% | £580.50 |
+| 15 to 19 | 15% | £822.38 |
+| 20 to 29 | 20% | £1,032.00 |
+| 30 or more | 22% | £1,509.30 |
 
-Applied naively this is not monotonic. At £64.50 a vehicle, 19 vehicles at 10% off is £1,102.95
-while 20 vehicles at 20% off is £1,032.00, so the bill FALLS by £70.95 when the customer adds
-their 20th vehicle, and a 20-vehicle fleet costs the same as an 18-vehicle one. This is the
-exact failure `lib/billing/money.ts` warns about and `money.test.ts` asserts against.
+A whole-fleet discount can only step so far at a threshold before the fleet gets CHEAPER by
+growing. The extra vehicle at the threshold has to pay for the discount the whole fleet just
+gained:
+
+```
+(T - 1) x (1 - d_before)  <=  T x (1 - d_after)
+```
+
+The constraint tightens as the threshold rises, because one more vehicle is a smaller share of
+a bigger fleet. Solving it for a ten-point step gives T <= 9, so the originally requested
+"10% at 10 then 20% at 20" cannot be made monotonic at ANY threshold above nine: 19 vehicles at
+10% off is £1,102.95 while 20 at 20% off is £1,032.00, so the bill fell by £70.95 at the 20th
+vehicle and the cap flattened 18, 19 and 20 to one price. Moving the 20% threshold higher makes
+it worse, not better.
+
+The 15% band splits that jump into two steps that each fit. What remains is one free vehicle
+rather than three. No integer percentage removes it entirely: only a value between 15.79% and
+16% makes both the 15 and the 20 threshold rise strictly, so the choice is which single vehicle
+comes free. At 15% the 15 threshold rises properly (the 15th vehicle costs £9.68) and 19 is
+capped down to the 20 price. At 16% it would be the other way round. 10% at 10 is separately
+the largest possible first step from zero, so the 10th vehicle is always free.
 
 The fix is a threshold cap. The price for a fleet of N is the cheapest of pretending to be any
 band's threshold:
@@ -104,13 +122,23 @@ price(N) = min over bands B of ( max(N, threshold_B) x rate x (100 - discount_B)
 Every term is non-decreasing in N, so their minimum is too, and monotonicity is provable rather
 than spot-checked. `rateCard.test.ts` asserts it across 0 to 200 vehicles.
 
-Consequence worth knowing: fleets just under a threshold pay the threshold price. 18, 19 and 20
-vehicles all cost £1,032.00. Vehicles 19 and 20 are effectively free. That is the intended
-shape of the promise "20% off at 20 vehicles" and it is the price of keeping the curve honest.
-
 Banded pricing was the alternative. It is monotonic for free and matches the existing code, but
 a customer told "20% off at 20 vehicles" who then finds only vehicle 20 and up discounted has
 been sold a different deal.
+
+### The minimum is a floor, never a base fee
+
+The discount applies to the WHOLE fleet from vehicle one, and `PERIOD_MINIMUM_PENCE` only ever
+lifts an invoice that came out below it. It is not added on top.
+
+Below ten vehicles this is indistinguishable from "£129 plus £64.50 from vehicle three", because
+the floor is exactly two vehicles: three vehicles cost £193.50 either way. The two readings
+diverge only once a discount applies, since a base fee would exclude the first two vehicles
+from it. The floor reading is £12.90 a period cheaper at ten vehicles, £25.80 at twenty and
+£28.38 at thirty.
+
+The floor was chosen because the discount a customer is advertised is then the discount they
+can verify on their own invoice.
 
 ### Invoice presentation
 
@@ -163,6 +191,49 @@ statutory retention duties (tachograph records 12 months, maintenance records 15
 a suspended operator out of their own compliance records over an unpaid card would make us part
 of their DVSA problem. A customer who can still see their data is also likelier to come back
 and pay.
+
+### Cancellation closes the period early
+
+Cancellation is the customer leaving. It is a different path from suspension, which is us
+cutting off a non-payer and freezing everything in place.
+
+`period_end` is set to the cancellation date plus one day, the period goes straight to
+`closing`, the close job runs immediately rather than waiting for the scheduled date, and
+`ensure_open_billing_period` opens no successor.
+
+**The cancellation day counts in full**, symmetric with the activation day. A vehicle activated
+at 23:00 buys that whole day, so a cancellation at 09:00 pays for that whole day too. The
+alternative needs a rule for which end of the day wins, and an asymmetry there produces a
+one-day discrepancy nobody can explain two years later.
+
+Rule 4 (no refund on removal) is deliberately NOT applied to cancellation. That rule exists to
+make add-and-remove churn pointless, which is an anti-gaming rule about the vehicle count. A
+company leaving outright is not gaming anything, and an invoice covering two weeks after they
+stopped using the product is the one that becomes a chargeback. Collection is also better while
+the card is live and consent is fresh.
+
+Because the floor is collected up front, most cancellations settle to nothing. Cancelling on
+day 11 of a period:
+
+- **Two vehicles.** Lines total £50.68, below the floor, so the floor applies. £129 already
+  collected. Nothing owed, nothing refunded.
+- **Twenty vehicles.** Lines total £506.80, less the 20% band, so £405.44. £129 already
+  collected. £276.44 plus VAT charged to the card that day.
+
+`billing_periods.closed_reason` records `scheduled`, `cancellation` or `cooling_off`, so a
+short period reads as a customer leaving rather than as a bug in the close job.
+
+### Accidental signups get 48 hours
+
+A customer who activates and cancels the same day has paid £129 for one day. That is the
+minimum working as designed and it is defensible, but it is also the most likely complaint the
+billing model will ever generate, and the population it affects is people who signed up by
+mistake.
+
+Within 48 hours of FIRST vehicle activation, cancellation refunds the £129 in full, closes the
+period and raises no invoice. **Once per company**, or signup-refund-repeat becomes a free
+trial generator. B2B means no statutory right of withdrawal applies, so this is goodwill rather
+than compliance.
 
 ### Licence deletion becomes deactivation
 

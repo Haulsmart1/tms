@@ -49,9 +49,32 @@ export type DiscountBand = {
   readonly discountPercent: number;
 };
 
+/**
+ * A whole-fleet discount can only step so far at a threshold before the fleet
+ * gets CHEAPER by growing. The extra vehicle at the threshold has to pay for
+ * the discount the whole fleet just gained:
+ *
+ *     (T - 1) x (1 - d_before)  <=  T x (1 - d_after)
+ *
+ * Counter-intuitively the constraint tightens as the threshold rises, because
+ * one more vehicle is a smaller share of a bigger fleet. Solving it for a
+ * ten-point step gives T <= 9, so "10% at 10 then 20% at 20" cannot be made
+ * monotonic at ANY threshold above nine, and moving the 20% higher makes it
+ * worse rather than better. That is why 15 exists: it splits the jump into two
+ * steps that each fit.
+ *
+ * 10% at 10 is the largest possible first step, which is why the tenth vehicle
+ * comes free. 15% at 15 then rises properly, and the residual cap falls on 19.
+ * No integer percentage makes both 15 and 20 rise strictly: that needs a value
+ * between 15.79% and 16%, so one free vehicle is unavoidable and this picks
+ * which. Anything steeper anywhere and the cap silently starts flattening
+ * whole stretches of the curve, which is what it is there to make safe rather
+ * than to make invisible.
+ */
 export const DISCOUNT_BANDS: readonly DiscountBand[] = [
   { threshold: 1, discountPercent: 0 },
   { threshold: 10, discountPercent: 10 },
+  { threshold: 15, discountPercent: 15 },
   { threshold: 20, discountPercent: 20 },
   { threshold: 30, discountPercent: 22 },
 ];

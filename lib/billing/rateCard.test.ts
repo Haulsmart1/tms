@@ -52,24 +52,38 @@ describe("fleetPeriodPence", () => {
     expect(fleetPeriodPence(10)).toBe(fleetPeriodPence(9));
   });
 
-  it("applies 10 per cent across the whole fleet above ten vehicles", () => {
+  it("applies 10 per cent across the whole fleet from ten vehicles", () => {
     expect(fleetPeriodPence(11)).toBe(63855);
-    expect(fleetPeriodPence(17)).toBe(98685);
+    expect(fleetPeriodPence(14)).toBe(81270);
   });
 
-  // THE CAP. Priced naively, 19 vehicles at 10% off is 110295 while 20 at 20%
-  // off is 103200, so the bill would FALL by GBP 70.95 when the customer added
-  // their 20th vehicle. Instead a fleet just under a threshold pays the
-  // threshold price, so 18, 19 and 20 all cost the same and vehicles 19 and 20
-  // are effectively free.
+  // The 15 per cent band exists to break the 10-to-20 jump into two steps
+  // small enough to stay monotonic. Without it the cap flattened 18, 19 AND
+  // 20 to a single price. This threshold rises properly rather than flatly:
+  // the 15th vehicle costs GBP 9.68 rather than nothing.
+  it("applies 15 per cent across the whole fleet from fifteen vehicles", () => {
+    expect(fleetPeriodPence(15)).toBe(82238);
+    expect(fleetPeriodPence(15)).toBeGreaterThan(fleetPeriodPence(14));
+    expect(fleetPeriodPence(18)).toBe(98685);
+  });
+
+  // THE CAP, now firing on one vehicle rather than three. 19 vehicles at 15%
+  // off is 104168 while 20 at 20% off is 103200, so priced naively the bill
+  // would still fall by GBP 9.68 at the twentieth vehicle. A fleet of 19 pays
+  // the 20 price instead, which makes the 20th vehicle free.
+  //
+  // 15% is deliberate rather than the largest value that would fit. Only a
+  // discount between 15.79% and 16% makes BOTH thresholds rise strictly, and
+  // no integer percentage lies in that window: 16% would flatten 15 instead.
+  // One free vehicle is unavoidable here; this chooses which one.
   it("caps a fleet just under a threshold at the threshold price", () => {
     expect(fleetPeriodPence(20)).toBe(103200);
     expect(fleetPeriodPence(19)).toBe(103200);
-    expect(fleetPeriodPence(18)).toBe(103200);
   });
 
   it("leaves fleets far enough below a threshold uncapped", () => {
-    expect(fleetPeriodPence(17)).toBeLessThan(fleetPeriodPence(18));
+    expect(fleetPeriodPence(17)).toBe(93203);
+    expect(fleetPeriodPence(18)).toBeLessThan(fleetPeriodPence(19));
   });
 
   it("applies 20 per cent across the whole fleet in the third band", () => {
