@@ -34,6 +34,13 @@ import {
 } from "../../lib/planning/fastPlot";
 import { buildPlanningPhysicalItinerary } from "../../lib/planning/physicalItinerary";
 import {
+  buildPlanningDriverHoursState,
+  planningDriverHoursBoundaries,
+  PLANNING_DRIVER_ACTIVITY_ROW_LIMIT,
+  type PlanningDriverActivityRow,
+} from "../../lib/planning/planningDriverActivity";
+import type { DriverHoursState } from "../../lib/planning/driverHoursState";
+import {
   buildPlanningDropMarkers,
   buildPlanningDropNumbersByJobId,
 } from "../../lib/planning/dropPresentation";
@@ -177,6 +184,9 @@ export default function PlanningPage() {
     new Set()
   );
   const [routes, setRoutes] = useState<Record<string, RouteResult>>({});
+  const [driverHoursById, setDriverHoursById] = useState<
+    Record<string, DriverHoursState | null>
+  >({});
   const [pendingItineraries, setPendingItineraries] = useState<
     Record<string, PendingPlanningItinerary>
   >({});
@@ -1815,6 +1825,98 @@ export default function PlanningPage() {
     return result;
   }, [vehicles, laneOrders, jobById]);
 
+  useEffect(() => {
+    if (tenant.status !== "ready") {
+      setDriverHoursById({});
+      return;
+    }
+
+    const driverIds = [
+      ...new Set(
+        Object.values(laneDrivers).filter(
+          (value): value is string =>
+            typeof value === "string" && value.length > 0
+        )
+      ),
+    ];
+
+    if (driverIds.length === 0) {
+      setDriverHoursById({});
+      return;
+    }
+
+    const planningStart = new Date();
+    const boundaries = planningDriverHoursBoundaries(
+      planningStart,
+      planningTimeZone
+    );
+
+    let cancelled = false;
+
+    void (async () => {
+      const entries = await Promise.all(
+        driverIds.map(async (driverId) => {
+          const { data, error } = await tenant.filterByTenant(
+            supabase
+              .from("driver_activity_logs")
+              .select(`
+                id,
+                driver_id,
+                activity_type,
+                activity_kind,
+                start_time,
+                end_time,
+                duration_minutes
+              `)
+          )
+            .eq("driver_id", driverId)
+            .gt(
+              "end_time",
+              boundaries.historyCoverageStart.toISOString()
+            )
+            .lt("start_time", planningStart.toISOString())
+            .order("start_time", { ascending: true })
+            .limit(PLANNING_DRIVER_ACTIVITY_ROW_LIMIT);
+
+          if (error) {
+            return [driverId, null] as const;
+          }
+
+          const rows = (data ?? []) as PlanningDriverActivityRow[];
+
+          if (rows.length >= PLANNING_DRIVER_ACTIVITY_ROW_LIMIT) {
+            return [driverId, null] as const;
+          }
+
+          return [
+            driverId,
+            buildPlanningDriverHoursState(
+              rows,
+              planningStart,
+              planningTimeZone
+            ),
+          ] as const;
+        })
+      );
+
+      if (cancelled) return;
+
+      setDriverHoursById(Object.fromEntries(entries));
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    tenant.status,
+    tenant.activeTenantId,
+    laneDrivers,
+    planningTimeZone,
+    supabase,
+  ]);
+
   const laneComplianceByVehicle = useMemo(() => {
     const today = operatorDayInTimeZone(positionNow, planningTimeZone);
     const result = new Map<string, PlanningCompliance>();
@@ -1833,7 +1935,9 @@ export default function PlanningPage() {
             jobCount === 0
               ? 0
               : route?.totalTravelTimeSeconds ?? null,
-          activityDataAvailable: false,
+          activityDataAvailable:
+            driverId !== null &&
+            driverHoursById[driverId]?.complete === true,
           today,
         })
       );
@@ -1846,6 +1950,7 @@ export default function PlanningPage() {
     laneDrivers,
     routes,
     driverById,
+    driverHoursById,
     positionNow,
     planningTimeZone,
   ]);
