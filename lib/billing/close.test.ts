@@ -233,6 +233,41 @@ describe("highWaterMark", () => {
     ).toBe(2);
   });
 
+  // vehicle_licences holds COMPLIANCE documents, not billing seats: a vehicle
+  // legitimately carries an O-licence, a waste carrier licence and an ADR
+  // certificate at once, and billing treats it as billable if ANY of them is
+  // active (see lib/billing/vehicleCount.ts). Counting licences would report
+  // a fleet three times its real size.
+  it("counts a vehicle once however many licences it holds", () => {
+    expect(
+      highWaterMark({
+        periodStartISO: PERIOD_START,
+        periodEndISO: PERIOD_END,
+        licences: [
+          licence({ vehicleId: "a", vrnNormalised: "AA11AAA" }),
+          licence({ vehicleId: "a", vrnNormalised: "AA11AAA" }),
+          licence({ vehicleId: "a", vrnNormalised: "AA11AAA" }),
+        ],
+      })
+    ).toBe(1);
+  });
+
+  // Overlapping licences on one vehicle keep it continuously live, so the
+  // vehicle must not drop out when the first of them ends.
+  it("keeps a vehicle live while any of its licences is", () => {
+    expect(
+      highWaterMark({
+        periodStartISO: PERIOD_START,
+        periodEndISO: PERIOD_END,
+        licences: [
+          licence({ vehicleId: "a", deactivatedOnISO: "2026-04-01" }),
+          licence({ vehicleId: "a", activatedOnISO: "2026-03-25" }),
+          licence({ vehicleId: "b", activatedOnISO: "2026-04-05" }),
+        ],
+      })
+    ).toBe(2);
+  });
+
   it("is zero for a period with no licences", () => {
     expect(
       highWaterMark({

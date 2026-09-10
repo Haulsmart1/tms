@@ -129,7 +129,19 @@ export function collectPeriodVehicles(args: {
 }
 
 /**
- * The largest number of licences live at once inside the period.
+ * The largest number of VEHICLES live at once inside the period.
+ *
+ * Vehicles, not licences, and this is a correction to the brief rather than a
+ * paraphrase of it. public.vehicle_licences holds COMPLIANCE documents: the
+ * page at app/settings/licences asks for a free-text licence type, an issue
+ * date and an expiry date, so one vehicle legitimately carries an O-licence, a
+ * waste carrier licence and an ADR certificate at the same time. Billing reads
+ * the set as "billable if ANY licence is active" (lib/billing/vehicleCount.ts),
+ * so counting licence rows would report a fleet several times its real size,
+ * and it would do so silently, on a number nobody reconciles.
+ *
+ * A vehicle is live while ANY of its licences is, so the sweep tracks a count
+ * per vehicle and moves the total only on a 0-to-1 or 1-to-0 transition.
  *
  * Informational, and deliberately NOT the number of invoice lines. Two
  * vehicles that never overlapped, one running the first week and one the
@@ -151,7 +163,7 @@ export function highWaterMark(args: {
     periodEndISO: args.periodEndISO,
   };
 
-  type Event = { onISO: string; delta: number };
+  type Event = { onISO: string; delta: number; vehicleId: string };
   const events: Event[] = [];
 
   for (const licence of args.licences) {
@@ -164,7 +176,7 @@ export function highWaterMark(args: {
       licence.activatedOnISO < args.periodStartISO
         ? args.periodStartISO
         : licence.activatedOnISO;
-    events.push({ onISO: startISO, delta: 1 });
+    events.push({ onISO: startISO, delta: 1, vehicleId: licence.vehicleId });
 
     // A deactivation at or after the period end did not reduce the count
     // inside this period.
@@ -172,7 +184,11 @@ export function highWaterMark(args: {
       licence.deactivatedOnISO !== null &&
       licence.deactivatedOnISO < args.periodEndISO
     ) {
-      events.push({ onISO: licence.deactivatedOnISO, delta: -1 });
+      events.push({
+        onISO: licence.deactivatedOnISO,
+        delta: -1,
+        vehicleId: licence.vehicleId,
+      });
     }
   }
 
@@ -182,10 +198,20 @@ export function highWaterMark(args: {
     return b.delta - a.delta; // +1 before -1 on the same day
   });
 
+  // Licences held per vehicle, so the total only moves when a vehicle gains
+  // its first live licence or loses its last.
+  const perVehicle = new Map<string, number>();
   let live = 0;
   let peak = 0;
+
   for (const event of events) {
-    live += event.delta;
+    const before = perVehicle.get(event.vehicleId) ?? 0;
+    const after = before + event.delta;
+    perVehicle.set(event.vehicleId, after);
+
+    if (before === 0 && after > 0) live += 1;
+    else if (before > 0 && after === 0) live -= 1;
+
     if (live > peak) peak = live;
   }
   return peak;
