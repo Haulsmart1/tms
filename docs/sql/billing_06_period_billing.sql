@@ -145,10 +145,14 @@ create table if not exists public.billing_periods (
   period_end date not null,
   status public.billing_period_status not null default 'open',
 
-  -- Largest number of licences live at once inside the period. Informational,
-  -- and deliberately NOT the invoice line count: two vehicles that never
-  -- overlapped produce two lines but a mark of one. See highWaterMark in
-  -- lib/billing/close.ts.
+  -- Largest number of VEHICLES live at once inside the period. Vehicles, not
+  -- licences: this table holds compliance documents, so one vehicle carries an
+  -- O-licence, a waste carrier licence and an ADR certificate at once, and
+  -- counting rows would report a fleet several times its real size.
+  --
+  -- Informational, and deliberately NOT the invoice line count either: two
+  -- vehicles that never overlapped produce two lines but a mark of one. See
+  -- highWaterMark in lib/billing/close.ts.
   high_water_mark int check (high_water_mark >= 0),
 
   -- Set when a run claims the period. The claim is a conditional UPDATE
@@ -272,12 +276,90 @@ create index if not exists invoice_lines_company_created_idx
   on public.invoice_lines (company_id, created_at desc);
 
 -- ===========================================================================
+-- Period charges.
+-- ===========================================================================
+--
+-- A period produces at most two charges, and they are different things rather
+-- than two attempts at one:
+--
+--   minimum  taken UP FRONT when the period opens, at first vehicle
+--            activation or reactivation after suspension
+--   balance  taken at close, for whatever the period cost ABOVE the minimum
+--            already collected. Often zero.
+--
+-- Deliberately NOT folded into platform_charges. That table is unique on
+-- (company_id, cycle_date, attempt), and a v2 company has a minimum charge
+-- filed at its period start and a balance charge for the period that ended
+-- there, so the two would collide on every boundary. Same reasoning that kept
+-- vehicle_addon_charges separate in billing_03.
+--
+-- STATUS 'pending' EXISTS FOR THE REASON billing_05 SETS OUT AT LENGTH. The
+-- code records intent BEFORE calling Square and updates the row after, so a
+-- crash in between leaves a row a retry can rebuild a byte-identical request
+-- body from. Without it, the retry sends a different body under a key Square
+-- has already seen, gets IDEMPOTENCY_KEY_REUSED, and the charge can never
+-- advance.
+--
+-- A pending row is an UNKNOWN outcome, NOT an unpaid one. The card may well
+-- have been charged. Never delete one to tidy up: that frees the attempt
+-- number and the next request spends the same key with a different body,
+-- which wedges the period permanently. ANY READER OF THIS TABLE MUST FILTER
+-- ON status; anything customer-facing should show 'succeeded' only.
+--
+-- Rows should leave 'pending' within seconds. Anything still pending after a
+-- day is a crash that never got retried and needs reconciling against Square
+-- by idempotency key (the format is in periodChargeIdempotencyKey,
+-- lib/billing/periodPayment.ts):
+--
+--   select * from public.period_charges
+--   where status = 'pending' and created_at < now() - interval '1 day';
+create table if not exists public.period_charges (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  billing_period_id uuid not null
+    references public.billing_periods(id) on delete cascade,
+
+  kind text not null check (kind in ('minimum', 'balance')),
+  attempt int not null check (attempt >= 1),
+
+  net_pence bigint not null,
+  vat_pence bigint not null,
+  gross_pence bigint not null,
+  vat_rate numeric not null default 20.0,
+  currency text not null default 'GBP',
+
+  -- The card is part of the idempotency-keyed request body just as much as
+  -- the amount is, so a replay must resend exactly these. billing_05 added
+  -- the same two columns to vehicle_addon_charges after a customer who
+  -- replaced their card mid-retry wedged their own vehicle permanently.
+  square_payment_id text,
+  square_card_id text,
+  square_customer_id text,
+  receipt_url text,
+
+  status text not null check (status in ('pending', 'succeeded', 'failed')),
+  failure_code text,
+  created_at timestamptz not null default now(),
+
+  unique (billing_period_id, kind, attempt)
+);
+
+create index if not exists period_charges_company_created_idx
+  on public.period_charges (company_id, created_at desc);
+
+-- Finds the pending row a retry has to rebuild its request body from.
+create index if not exists period_charges_pending_idx
+  on public.period_charges (billing_period_id, kind)
+  where status = 'pending';
+
+-- ===========================================================================
 -- RLS. Mirrors billing_01 and billing_03: company admins read their own rows,
 -- super_admin reads all, nothing writes from a browser.
 -- ===========================================================================
 
 alter table public.billing_periods enable row level security;
 alter table public.invoice_lines enable row level security;
+alter table public.period_charges enable row level security;
 
 drop policy if exists billing_periods_select on public.billing_periods;
 create policy billing_periods_select on public.billing_periods
@@ -297,11 +379,21 @@ create policy invoice_lines_select on public.invoice_lines
         and company_id = public.get_my_company_id())
   );
 
+drop policy if exists period_charges_select on public.period_charges;
+create policy period_charges_select on public.period_charges
+  for select to authenticated
+  using (
+    public.get_my_role() = 'super_admin'
+    or (public.get_my_role() = 'admin'
+        and company_id = public.get_my_company_id())
+  );
+
 -- Granted explicitly rather than left to Supabase's default privileges, which
 -- depend on which role runs this file. A policy without a grant reads as an
 -- empty table, not as an error, so the billing page would silently show
 -- nothing. Same reasoning as billing_03.
-grant select on public.billing_periods, public.invoice_lines to authenticated;
+grant select on public.billing_periods, public.invoice_lines,
+  public.period_charges to authenticated;
 
 -- No INSERT/UPDATE/DELETE policies on purpose. All writes come from server
 -- routes on the service role, which bypasses RLS.
@@ -313,6 +405,8 @@ grant select on public.billing_periods, public.invoice_lines to authenticated;
 revoke insert, update, delete on public.billing_periods
   from authenticated, anon, public;
 revoke insert, update, delete on public.invoice_lines
+  from authenticated, anon, public;
+revoke insert, update, delete on public.period_charges
   from authenticated, anon, public;
 
 commit;
@@ -333,16 +427,18 @@ commit;
 --
 --    select relname, relacl from pg_class
 --    where oid in ('public.billing_periods'::regclass,
---                  'public.invoice_lines'::regclass);
+--                  'public.invoice_lines'::regclass,
+--                  'public.period_charges'::regclass);
 --
 -- 3. RLS is actually ON, not merely policied. A policy on a table with RLS
 --    disabled is inert, which is the trap rls_11 exists to close.
 --
 --    select relname, relrowsecurity from pg_class
 --    where oid in ('public.billing_periods'::regclass,
---                  'public.invoice_lines'::regclass);
+--                  'public.invoice_lines'::regclass,
+--                  'public.period_charges'::regclass);
 --
---    Both must be true.
+--    All three must be true.
 --
 -- 4. The partial unique index enforces rule 5 without blocking the two
 --    non-vehicle lines. This must succeed, then fail on the second insert of
