@@ -22,7 +22,10 @@ type Props = {
   // ReactNode, not string, so a loading tile can pass a <Skeleton /> and keep
   // this component the single definition of a stat tile's layout.
   value: ReactNode;
-  sub?: string;
+  // Also ReactNode, for the same reason: a loading tile can put a <Skeleton />
+  // here to reserve the sub-line's height, so the tile does not change size
+  // the moment real data (or its absence) replaces the skeleton.
+  sub?: ReactNode;
   subTone?: Tone;
   onClick?: () => void;
 };

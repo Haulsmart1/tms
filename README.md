@@ -43,7 +43,7 @@ The RLS design and migrations live under `docs/sql/` (`rls_01`..`rls_10`) and ar
 
 ## Design system
 
-**Every console page is now on the design system.** The inline-styled "legacy" tier is gone: the last seven pages (`/driver/dashboard`, `/subcontractor/dashboard` and the five non-requests `/super-admin` pages, including the full-bleed truck photograph and dark overlay panel they shared) were converted to tokens, so `lib/nav/themeableRoutes.ts` now lists every console route and the light/dark toggle works everywhere it is offered.
+**Every console page is now on the design system.** The inline-styled "legacy" tier is gone: the last seven pages (`/driver/dashboard`, `/subcontractor/dashboard` and the five non-requests `/super-admin` pages, including the full-bleed truck photograph and dark overlay panel they shared) were converted to tokens, so `lib/nav/themeableRoutes.ts` now lists every console route and the light/dark toggle works everywhere it is offered. The `/super-admin` **layout** was the last inline-styled surface in that area and followed on 2026-09-11; it also now shares one role check with the `/api/super-admin` routes, so the page gate and the API gate cannot drift apart.
 
 - **Design-system ("ds") pages:** a page opts in by putting `className="ds font-sans bg-canvas text-ink"` on its root element. The `ds` class re-applies a scoped CSS reset (borders, box-sizing, control fonts) via `:where()` rules, and `font-sans` switches to IBM Plex. Semantic tokens (`bg-canvas`, `text-ink`, `border-line`, `bg-surface`, `text-primary`, tone classes) are defined in `app/tokens.css` and consumed by `app/globals.css`.
 - **The failure modes are intentional and asymmetric:** omit `font-sans` and a ds page silently falls back to Inter; omit `ds` and borders vanish and layouts overflow (because Preflight is off, and it stays off). This is documented inline in `app/layout.tsx` and `app/globals.css`.
@@ -104,9 +104,10 @@ Status tags: [OK] functional against live data, [PARTIAL] real data but view-onl
 - **`/settings/billing`** [OK]: subscription payment method (Square card on file, 3DS verified) and charge history; company admins only (super_admin sees a notice linking to `/super-admin/billing`; staff see a notice).
 
 ### Super-admin (platform operator)
-- **`/super-admin`** (stat tiles are hardcoded placeholders, labelled as such on the page, not live platform figures) [STUB]: overview with hardcoded KPI tiles (placeholder numbers).
-- **`/super-admin/companies`** [PARTIAL]: list of customer companies (read-only).
-- **`/super-admin/users`** [PARTIAL]: list of all platform users with tenant and role (read-only).
+- **`/super-admin`** [OK]: live platform figures (companies, vehicles, users, and cash collected over the trailing 28 days across both billing models). A tile names any charge table it could not read rather than reporting zero, because several `billing_0*` migrations may be unapplied and a confident zero would be worse than the hardcoded placeholder this replaced.
+- **`/super-admin/companies`** [OK]: searchable list of customer companies with tenant, billable-vehicle and user counts, billing model and subscription status; each row opens a detail page.
+- **`/super-admin/companies/[id]`** [OK]: edit a company's profile, rename its tenants, and move a tenant to another company behind a typed confirmation that shows what moves and what it will cost. Writes go through `/api/super-admin/*` on the service role, because `companies` and `tenants` have no RLS write policy by design (`docs/sql/rls_04_identity_tables.sql`).
+- **`/super-admin/users`** [OK]: searchable list of every platform user with email, resolved company and tenant names, and role. Read-only. Surfaces orphaned auth accounts (an `auth.users` row with no `profiles` row, which a half-completed invite leaves behind) as "incomplete" rather than hiding them.
 - **`/super-admin/billing`** [OK]: per-company billing (billable vehicles priced on the graduated weekly bands) with invoice generation, plus each company's subscription status (card on file, next charge, past-due with failed attempts).
 - **`/super-admin/invoices`** [OK]: all invoices; mark paid / pending.
 - **`/super-admin/requests`** [OK]: triage landing-page leads; cross-checks the true row count via the service role to detect an RLS misconfiguration. ds / Plex.
@@ -212,8 +213,8 @@ docs/
 - **Lock down the `job-files` bucket:** a second storage bucket with permissive policies, pending a decision on its ownership and use.
 - **Live tracking:** TomTom integration to make `/tracking` and `/telematics` real-time instead of read-only snapshots.
 - **Payments:** platform subscription billing (Square card on file, daily charge cron, dunning) is live at `/settings/billing`; self-serve signup (a company creating its own account and starting a subscription without an operator provisioning it first) is still future work.
-- **Analytics dashboards:** make `/dashboard` and `/super-admin` data-driven; add cross-tenant "which tenant is performing best" views on top of the admin tenant selector; charts and SQL-view aggregation at scale.
-- **Admin management:** turn the read-only super-admin companies / users pages into full management, and finish the per-page permissions model (revoke path, controlled state).
+- **Analytics dashboards:** make `/dashboard` data-driven; add cross-tenant "which tenant is performing best" views on top of the admin tenant selector; charts and SQL-view aggregation at scale.
+- **Admin management:** super-admin user management (the users page is read-only); a `super_admin_audit` table to replace the current log-only trail of company and tenant edits; a transactional RPC so the two-write company and tenant routes cannot leave partial state; and finish the per-page permissions model (revoke path, controlled state).
 - **Design-system rollout:** move the remaining ~14 legacy inline-styled pages onto the design system so they follow the theme. The dark-default "operator theme" itself shipped on 2026-08-13 (see Design system above); what is left is converting those pages' hardcoded colour literals to tokens and adding each path to `lib/nav/themeableRoutes.ts`.
 - **User invite flow:** complete first-user-becomes-admin provisioning and settings guards.
 

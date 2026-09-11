@@ -27,7 +27,11 @@
    delivery receipt should see the operator's theme.
 
    This is an allowlist, not a denylist, so a brand new page defaults to
-   pinned-dark and legacy-safe rather than half-themed.
+   pinned-dark and legacy-safe rather than half-themed. That invariant no
+   longer holds everywhere, though: under the /super-admin/companies/ prefix
+   (see THEMEABLE_ROUTE_PREFIXES below) a brand new page is themed on creation
+   whether or not it has been tokenised, because prefix matching cannot tell
+   a real page from a hypothetical one.
 
    EIGHT ENTRIES BELOW DO NOT SHOW A TOGGLE, and that is correct. AppShell is
    what renders the toggle, and shouldShowShell() hides AppShell entirely on
@@ -89,12 +93,32 @@ export const THEMEABLE_ROUTES: readonly string[] = [
   "/settings/documents",      // app/settings/documents/page.tsx
 ];
 
+/* The ONLY prefix rule, and it stays that way. /super-admin/companies/[id] is
+   the first dynamic console route that has to follow the theme: pinned dark, it
+   would be the one page in the area that ignores the toggle, sitting one click
+   from the list page that obeys it.
+
+   A blanket prefix match was the obvious alternative and is wrong: THEMEABLE_ROUTES
+   already contains entries whose descendants must stay pinned dark. "/pod" is
+   listed but /pod/share/[token] is deliberately not (fixed light palette, a
+   recipient's page, not the operator's); "/" is listed, and a blanket rule
+   would theme literally every path in the app off that one entry. Listing the
+   one prefix that needs it keeps exact match as the default and keeps the
+   deliberate exclusions deliberate. */
+export const THEMEABLE_ROUTE_PREFIXES: readonly string[] = [
+  "/super-admin/companies/", // app/super-admin/companies/[id]/page.tsx
+];
+
 export function isThemeableRoute(pathname: string): boolean {
-  // Exact match, not prefix. Every /super-admin route is tokenised now, so that
-  // area no longer motivates it, but /driver does: /driver/dashboard is listed
-  // while /driver/jobs/[jobId] is deliberately not, and a prefix match would
-  // theme the driver job page along with it.
+  // Exact match by default, not prefix. A blanket prefix match is wrong here:
+  // THEMEABLE_ROUTES lists "/pod" while /pod/share/[token] must stay pinned
+  // dark, and lists "/" itself, so a blanket rule would theme every path in
+  // the app off that one entry. THEMEABLE_ROUTE_PREFIXES above is the one
+  // narrow exception, scoped to the single dynamic route that needs it.
   const normalized =
     pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
-  return THEMEABLE_ROUTES.includes(normalized);
+  return (
+    THEMEABLE_ROUTES.includes(normalized) ||
+    THEMEABLE_ROUTE_PREFIXES.some((prefix) => normalized.startsWith(prefix))
+  );
 }
