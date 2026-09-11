@@ -5,7 +5,9 @@ import { countBillableVehicles, type VehicleRow, type LicenceRow } from "../bill
 
 export type ChargeRow = {
   company_id: string;
-  gross_pence: number | null;
+  // bigint over the wire: usually a number, but a string must be accepted
+  // and coerced rather than concatenated. See the Number(...) call below.
+  gross_pence: number | string | null;
   status: string | null;
   created_at: string | null;
 };
@@ -45,20 +47,43 @@ export function collectedRevenue(
     }
 
     for (const row of source.rows) {
-      /* 'failed', 'pending' and 'refunded' all collected nothing. Only
-         'refunded' is subtle: it succeeded and was then given back in full,
-         so counting it overstates income by exactly what was returned. */
+      /* 'failed' and 'pending' collected nothing. 'refunded' is subtle: it
+         succeeded and was then given back in full, so counting it overstates
+         income by exactly what was returned. Only period_charges can carry
+         it: platform_charges and vehicle_addon_charges constrain status to
+         succeeded/failed only, so a v1 row can never be 'refunded' today. If
+         a v1 refund path is ever added, this function would overstate
+         silently until it is taught to handle it too. */
       if (row.status !== COLLECTED_STATUS) continue;
+
+      // created_at is `not null` on all three tables, so neither guard below
+      // is reachable today. They stay as belt and braces: a malformed date
+      // must be excluded loudly (well, by omission from the total) rather
+      // than turning into NaN and poisoning every later +=.
       if (!row.created_at) continue;
 
       const at = new Date(row.created_at).getTime();
       if (Number.isNaN(at) || at < cutoff) continue;
 
-      totalPence += row.gross_pence ?? 0;
-      companies.add(row.company_id);
+      // gross_pence is a Postgres bigint, which the client can hand back as a
+      // string. Number(...) guards that: "0 + '10000'" would be the string
+      // "010000", and every later += would append instead of sum.
+      const grossPence = Number(row.gross_pence ?? 0);
+      totalPence += grossPence;
+
+      // A v2 balance that settles to nothing owed still inserts a
+      // status = 'succeeded', gross_pence = 0 row (see
+      // lib/billing/periodPaymentServer.ts). That is a normal outcome, not a
+      // payment, so it must not make the company count as having paid.
+      if (grossPence > 0) {
+        companies.add(row.company_id);
+      }
     }
   }
 
+  // totalPence is cash collected GROSS, VAT included. The VAT portion is
+  // owed to HMRC, not profit, which is why this tile is labelled "Collected"
+  // rather than "Revenue".
   return { totalPence, companyCount: companies.size, missingSources };
 }
 
@@ -77,7 +102,7 @@ export type SummaryInput = {
   tenants: readonly { id: string; name?: string | null; company_id: string | null }[];
   vehicles: readonly VehicleRow[];
   licences: readonly LicenceRow[];
-  profiles: readonly { id: string; tenant_id: string | null }[];
+  profiles: readonly { id: string; tenant_id: string | null; company_id?: string | null }[];
   billing: readonly { company_id: string; status: string | null; billing_model?: string | null }[];
 };
 
@@ -91,12 +116,17 @@ export function buildCompanySummaries(input: SummaryInput): CompanySummary[] {
 
     /* A profile belongs to the company when its tenant does, or when its
        tenant_id is the company id directly, the same two-way rule
-       countBillableVehicles applies to vehicles. */
+       countBillableVehicles applies to vehicles. profiles.company_id is a
+       third path: nothing in the repo writes it today (only read, at
+       app/api/settings/users/invite/route.ts), so any row carrying it was
+       seeded by hand, plausibly the account holder, and would otherwise be
+       undercounted by exactly one person. */
     const tenantIdSet = new Set(companyTenantIds);
     const userCount = input.profiles.filter(
       (profile) =>
-        profile.tenant_id != null &&
-        (tenantIdSet.has(profile.tenant_id) || profile.tenant_id === company.id),
+        (profile.tenant_id != null &&
+          (tenantIdSet.has(profile.tenant_id) || profile.tenant_id === company.id)) ||
+        profile.company_id === company.id,
     ).length;
 
     const billing = billingByCompany.get(company.id) ?? null;

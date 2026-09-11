@@ -8,7 +8,7 @@ import {
 
 const NOW = new Date("2026-09-11T12:00:00Z");
 
-function charge(over: Partial<{ company_id: string; gross_pence: number | null; status: string | null; created_at: string | null }> = {}) {
+function charge(over: Partial<{ company_id: string; gross_pence: number | string | null; status: string | null; created_at: string | null }> = {}) {
   return {
     company_id: "c1",
     gross_pence: 10_000,
@@ -88,6 +88,47 @@ describe("collectedRevenue", () => {
     ];
     expect(collectedRevenue(sources, NOW).totalPence).toBe(0);
   });
+
+  it("coerces a bigint gross_pence that arrives as a string", () => {
+    // gross_pence is a Postgres bigint. If it ever arrives as a string,
+    // 0 + "10000" is the string "010000" and every later += appends instead
+    // of summing, so this must be coerced with Number(...) rather than added
+    // directly.
+    const sources: ChargeSource[] = [
+      { key: "v1_cycle", label: "v1 cycles", rows: [charge({ gross_pence: "10000" })] },
+    ];
+    expect(collectedRevenue(sources, NOW).totalPence).toBe(10_000);
+  });
+
+  it("does not count a zero-pence settled-to-nothing row as a paying company", () => {
+    // A v2 balance that settles to nothing owed still inserts a
+    // status = 'succeeded', gross_pence = 0 row (lib/billing/periodPaymentServer.ts).
+    // That is a normal outcome, not a payment, so it must not make the tile
+    // read "collected across N companies" when one of the N paid nothing.
+    const sources: ChargeSource[] = [
+      { key: "v2_period", label: "v2 periods", rows: [charge({ gross_pence: 0 })] },
+    ];
+    const result = collectedRevenue(sources, NOW);
+    expect(result.totalPence).toBe(0);
+    expect(result.companyCount).toBe(0);
+  });
+
+  it("includes a charge dated exactly at the window boundary", () => {
+    const sources: ChargeSource[] = [
+      { key: "v1_cycle", label: "v1 cycles", rows: [charge({ created_at: "2026-08-14T12:00:00Z" })] },
+    ];
+    expect(collectedRevenue(sources, NOW).totalPence).toBe(10_000);
+  });
+
+  it("treats a readable but empty source as present, not missing", () => {
+    // rows: [] is "no charges". Only rows: null is "could not read the table".
+    const sources: ChargeSource[] = [
+      { key: "v2_period", label: "v2 periods", rows: [] },
+    ];
+    const result = collectedRevenue(sources, NOW);
+    expect(result.totalPence).toBe(0);
+    expect(result.missingSources).toEqual([]);
+  });
 });
 
 describe("buildCompanySummaries", () => {
@@ -161,6 +202,17 @@ describe("buildCompanySummaries", () => {
       licences: [{ vehicle_id: "v9", active: true }],
     });
     expect(rows.find((r) => r.id === "c1")?.billableVehicleCount).toBe(1);
+  });
+
+  it("attributes a profile through company_id when its tenant_id is null", () => {
+    // Nothing in the repo writes profiles.company_id today (only read, at
+    // app/api/settings/users/invite/route.ts); any row carrying it was
+    // seeded by hand, plausibly the account holder, and must still count.
+    const rows = buildCompanySummaries({
+      ...input,
+      profiles: [...input.profiles, { id: "u3", tenant_id: null, company_id: "c1" }],
+    });
+    expect(rows.find((r) => r.id === "c1")?.userCount).toBe(2);
   });
 
   it("sorts by company name", () => {
