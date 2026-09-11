@@ -987,10 +987,17 @@ No test: this is presentational, and vitest is not configured for JSX or DOM in 
 
 Create `components/SearchInput.tsx`:
 
+NOTE: the component below was corrected after review. If you are re-running this
+plan, take this version, not an earlier one: the original suppressed neither the
+native `::-webkit-search-cancel-button` (two X icons in Chromium and Safari) nor
+the focus loss on clear.
+
 ```tsx
 "use client";
 
+import { useRef } from "react";
 import { Search, X } from "lucide-react";
+import { cn } from "../lib/cn";
 
 /* Renders correctly ONLY inside a `.ds` wrapper. Preflight is disabled, so this
    relies on the scoped reset in app/globals.css for box-sizing and font
@@ -1004,8 +1011,11 @@ type Props = {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
-  /** Shown beside the box, e.g. "3 of 24". */
+  /** Shown beside the box, e.g. "3 of 24 companies". Include the noun: with an
+      sr-only label, a bare "3 of 24" announces with nothing to anchor it. */
   resultHint?: string;
+  /** Classes for the wrapping <div>, following components/Field.tsx. */
+  wrapperClassName?: string;
 };
 
 export default function SearchInput({
@@ -1015,9 +1025,12 @@ export default function SearchInput({
   onChange,
   placeholder = "Search",
   resultHint,
+  wrapperClassName,
 }: Props) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
   return (
-    <div className="mb-3 flex flex-wrap items-center gap-2">
+    <div className={cn("mb-3 flex flex-wrap items-center gap-2", wrapperClassName)}>
       <div className="relative min-w-0 flex-1 sm:max-w-sm">
         <label htmlFor={id} className="sr-only">
           {label}
@@ -1031,31 +1044,40 @@ export default function SearchInput({
         </span>
 
         <input
+          ref={inputRef}
           id={id}
           type="search"
           value={value}
           onChange={(event) => onChange(event.target.value)}
           placeholder={placeholder}
-          className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface pl-9 pr-9 text-base text-ink placeholder:text-ink-3"
+          /* The arbitrary variant suppresses Chromium/Safari's native clear
+             button, which would otherwise sit ~14px from our own. Deliberately
+             NOT a global rule in app/globals.css: app/pod/page.tsx and
+             app/jobs/page.tsx use the native button as their only clear. */
+          className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface pl-9 pr-9 text-base text-ink placeholder:text-ink-3 [&::-webkit-search-cancel-button]:appearance-none"
         />
 
         {value ? (
           <button
             type="button"
-            onClick={() => onChange("")}
+            /* Refocus the input: this button unmounts the moment it clears the
+               value, so without this focus lands on <body> and a keyboard user
+               is dropped at the top of the document with no announcement. */
+            onClick={() => { onChange(""); inputRef.current?.focus(); }}
             aria-label="Clear search"
-            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-ink-3 hover:bg-surface-hover hover:text-ink"
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1.5 text-ink-3 hover:bg-surface-hover hover:text-ink"
           >
             <X size={14} />
           </button>
         ) : null}
       </div>
 
-      {resultHint ? (
-        <span role="status" className="text-xs text-ink-3">
-          {resultHint}
-        </span>
-      ) : null}
+      {/* Rendered unconditionally so the live region exists on mount. Inserted
+          at the same instant it gains content, most screen readers announce
+          nothing at all. */}
+      <span role="status" className="text-xs text-ink-3">
+        {resultHint ?? ""}
+      </span>
     </div>
   );
 }
@@ -1942,7 +1964,7 @@ export default function SuperAdminCompaniesPage() {
           value={query}
           onChange={setQuery}
           placeholder="Search by name, id, status"
-          resultHint={!loading && query ? `${visible.length} of ${rows.length}` : undefined}
+          resultHint={!loading && query ? `${visible.length} of ${rows.length} companies` : undefined}
         />
 
         <DataTable
@@ -2683,7 +2705,7 @@ export default function SuperAdminUsersPage() {
           value={query}
           onChange={setQuery}
           placeholder="Search by name, email, company, role"
-          resultHint={!loading && query ? `${visible.length} of ${users.length}` : undefined}
+          resultHint={!loading && query ? `${visible.length} of ${users.length} users` : undefined}
         />
 
         <DataTable
@@ -2773,7 +2795,7 @@ Render the search box immediately after the `MessageBanner`, and change the rend
           value={query}
           onChange={setQuery}
           placeholder="Search by id, company, status"
-          resultHint={query ? `${visibleInvoices.length} of ${invoices.length}` : undefined}
+          resultHint={query ? `${visibleInvoices.length} of ${invoices.length} invoices` : undefined}
         />
 ```
 
@@ -2846,16 +2868,15 @@ export default function RequestsTable({ requests }: { requests: RegistrationRequ
 
   return (
     <>
-      <div className="mt-6">
-        <SearchInput
-          id="request-search"
-          label="Search requests"
-          value={query}
-          onChange={setQuery}
-          placeholder="Search by company, contact, email, status"
-          resultHint={query ? `${visible.length} of ${requests.length}` : undefined}
-        />
-      </div>
+      <SearchInput
+        id="request-search"
+        label="Search requests"
+        value={query}
+        onChange={setQuery}
+        placeholder="Search by company, contact, email, status"
+        resultHint={query ? `${visible.length} of ${requests.length} requests` : undefined}
+        wrapperClassName="mt-6"
+      />
 
       {visible.length === 0 ? (
         <div className="rounded-lg bg-surface-2 p-8 text-center text-sm text-ink-3">
@@ -3090,4 +3111,6 @@ Say so out loud when handing back, so nobody assumes otherwise:
 - **The `/settings/company` profile lookup bug is untouched.** It passes `selectedTenantId` where a company id is expected. Real, on a page this feature does not otherwise modify.
 - **`app/tachograph/page.tsx:222-230` reads `company_profiles.timezone` without validating it.** It feeds the value straight to `Intl.DateTimeFormat`, which throws `RangeError` during render on a bad IANA name, white-screening the page. `app/planning/page.tsx:365` guards the same column with `isValidIanaTimeZone` (`lib/time.ts:8`) and falls back; tachograph does not. This plan blocks a bad value at the write path (Task 3), which closes the super-admin route into it, but a company admin can still do it to themselves through `/settings/company`, which offers timezone as free text. The read-side guard is the real fix.
 - **Non-Latin-1 characters in a company profile break invoice PDF generation.** `lib/invoices/generatePdf.ts:451-457` embeds `StandardFonts.Helvetica`, which is WinAnsi-encoded, and pdf-lib throws on any character it cannot encode. An emoji or CJK character in `city` or `company_name` makes every invoice PDF for that company throw. Pre-existing and reachable today through `/settings/company`; the fix belongs at the font layer, not in a field validator.
+- **`Field` and `SearchInput` keep their input styling in step by comment, not by construction.** The enforceable fix is a shared `INPUT_BASE` class fragment both consume. Declined here because it edits `components/Field.tsx`, which every form in the console uses, to prevent a hypothetical drift between two files, and this repo cannot unit test React components at all (`vitest.config.ts` covers `lib/**/*.test.ts` only). Worth doing the next time `Field` is touched for its own reasons.
+- **`lib/nav/skeletonReadyRoutes.ts` has the same exact-match limitation `themeableRoutes` just grew a carve-out for.** `isSkeletonReadyRoute("/super-admin/companies/<uuid>")` is false and cannot be made true without a prefix rule there too. Costs nothing today, because `shouldShowShell` already returns false for every `/super-admin` path, but the second switch will not light up for the new dynamic route.
 - **Two other pages still carry the naive search this plan's module exists to fix.** `app/drivers/page.tsx:1046` and `app/pod/page.tsx:981` both test the whole lowercased query against each field with `.some((value) => String(value).toLowerCase().includes(query))`, so on the drivers page "smith dvla" finds nothing even when a driver named Smith has a DVLA note. Verified, not fixed: those pages are outside this feature. Migrating them is an import change plus a re-test, and `lib/superAdmin/search.ts` can move to `lib/search.ts` at that point if a second area starts using it.
