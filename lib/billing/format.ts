@@ -35,3 +35,10 @@ export function billingStatusBadge(
       return { tone: "neutral", label: "Not set up" };
   }
 }
+
+/* Moved here from ./money.ts, which is the v1 rate card and which v2 code must
+   not import (see CLAUDE.md). Formatting pence is not pricing, so it belongs
+   with the other display helpers and is shared by both billing models. */
+export function formatPence(pence: number): string {
+  return `£${(pence / 100).toFixed(2)}`;
+}
