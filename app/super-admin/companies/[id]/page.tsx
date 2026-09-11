@@ -273,10 +273,14 @@ export default function SuperAdminCompanyDetailPage() {
   /* Counts are read before the dialog's confirm button can be used, not
      after confirming, so the operator sees the size of what is about to
      move while they can still back out. Mirrors PATCH
-     /api/super-admin/tenants/[id]'s own pre-move counting (same two-step
-     query: vehicles for the tenant, then vehicle_licences filtered to those
-     vehicle ids - vehicle_licences has no tenant_id column of its own) so
-     the dialog and the eventual API result agree on what "billable" means. */
+     /api/super-admin/tenants/[id]'s own pre-move counting: vehicles for the
+     tenant, then vehicle_licences filtered to those vehicle ids.
+
+     vehicle_licences DOES have a tenant_id, but billing never consults it.
+     docs/sql/billing_03_mid_cycle_charges.sql:345 records the rule:
+     countBillableVehicles reads vehicles.tenant_id, never the licence's own.
+     Routing through vehicles is therefore what keeps this preview and the
+     API agreeing on what "billable" means, rather than a missing column. */
   async function openMove(tenant: TenantRow) {
     setMoving(tenant);
     setMoveTarget("");
