@@ -236,8 +236,21 @@ v2 is not a reshape of v1. It is a substantial increase, computed from the real 
 | 50 | £1,440.00 | £2,515.50 | 22% | 1.75x |
 
 Small operators are hit hardest. A one-vehicle operator pays more than triple, because the £129
-floor is doing all the work. That is what a floor is for, and it is a deliberate commercial
-choice, recorded here so nobody rediscovers it as a surprise.
+floor is doing all the work.
+
+**This was raised and settled, so it does not need reopening.** The floor is deliberate and the
+reasoning is commercial rather than technical: a one or two van operation is typically a couple
+running it between them, and anyone shopping for a dedicated TMS at all has already decided this
+is a category worth paying for. The floor selects for that, and the accounts it prices out are
+the ones that cost more to serve than they pay. Confirmed with the business on 2026-09-11.
+
+**The design consequence, which is the part that matters here:** if the pricing strategy is
+self-selection, the selection has to happen on the pricing page and not after signup. So the
+public copy leads with the £129 minimum as the real entry price, not with £64.50 per vehicle
+followed by a minimum in smaller text. A customer who works out the floor only once they are
+onboarded is the exact failure this pricing is designed to avoid, and it costs a refund and a
+bad conversation rather than a bounce. This is why the JSON-LD `price` is `129` rather than the
+per-vehicle rate.
 
 Two cap effects the public copy must not misrepresent:
 
