@@ -16,7 +16,11 @@ export type BillingRow = {
   card_exp_month: number | null;
   card_exp_year: number | null;
   status: BillingStatus;
-  next_charge_on: string;
+  /* Null on a v2_period company: next_charge_on drives the v1 4-weekly cron
+     and a period-billed company has no such date. PaymentMethodCard itself
+     never reads this field; V1Billing does, and already guards with
+     `billing?.next_charge_on ? ... : "-"`, so widening breaks nothing. */
+  next_charge_on: string | null;
 };
 
 type Props = {
