@@ -20,6 +20,7 @@ describe("buildUserRows", () => {
         tenantName: "Leeds Depot",
         companyId: "c1",
         companyName: "Acme Haulage",
+        hasProfile: true,
       },
     ]);
   });
@@ -104,6 +105,35 @@ describe("buildUserRows", () => {
       tenantName: null,
       companyId: null,
       companyName: null,
+      hasProfile: false,
     });
+  });
+
+  it("marks a profile row hasProfile: true even with a null name and no role", () => {
+    // app/api/settings/users/invite/route.ts inserts a profile with only
+    // { id, tenant_id }, and profiles_privileged_columns_guard.sql forbids
+    // setting role_id on insert at all, so a freshly invited, never-edited
+    // user has full_name and role both null. That must not read as an
+    // orphan: it has a profiles row, so hasProfile is derived from having
+    // taken this branch, not from the null fields it happens to carry.
+    const rows = buildUserRows({
+      profiles: [{ id: "p1", tenant_id: "t1", full_name: null, roles: null }],
+      tenants: [{ id: "t1", name: "Leeds Depot", company_id: "c1" }],
+      companies: [{ id: "c1", name: "Acme Haulage" }],
+      emailById: new Map([["p1", "invited@example.com"]]),
+    });
+
+    expect(rows[0].hasProfile).toBe(true);
+  });
+
+  it("marks an orphan row hasProfile: false", () => {
+    const rows = buildUserRows({
+      profiles: [],
+      tenants: [],
+      companies: [],
+      emailById: new Map([["orphan-1", "half-invited@example.com"]]),
+    });
+
+    expect(rows[0].hasProfile).toBe(false);
   });
 });

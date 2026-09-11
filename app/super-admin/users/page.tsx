@@ -3,15 +3,27 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { filterBySearch } from "../../../lib/superAdmin/search";
 import type { SuperAdminUserRow } from "../../../lib/superAdmin/users";
+import { SUPER_ADMIN_ROLE } from "../../../lib/roles";
 import DataTable, { type Column, type DataTableState } from "../../../components/DataTable";
 import Badge from "../../../components/Badge";
-import MessageBanner from "../../../components/MessageBanner";
 import SearchInput from "../../../components/SearchInput";
 
 /* Row type comes from lib/superAdmin/users.ts (buildUserRows), which is what
    /api/super-admin/users actually returns, rather than being redeclared here:
    that module dropped createdAt, which nothing in this page ever rendered, so
    a local copy would carry a field that is always undefined. */
+
+/* Single source for the Role column's text, used by both the cell and the
+   search field below so they cannot say different things. hasProfile is the
+   discriminator, not a null check: an invited-but-never-edited user has
+   fullName and role both null too (see SuperAdminUserRow's comment), so
+   testing those fields here would relabel most legitimate users as
+   incomplete. */
+function roleLabel(row: SuperAdminUserRow): string {
+  if (!row.hasProfile) return "incomplete";
+  if (row.role === SUPER_ADMIN_ROLE) return "super admin";
+  return row.role || "none";
+}
 
 export default function SuperAdminUsersPage() {
   const [users, setUsers] = useState<SuperAdminUserRow[]>([]);
@@ -51,11 +63,14 @@ export default function SuperAdminUsersPage() {
   const visible = useMemo(
     () =>
       filterBySearch(query, users, (row) => [
-        row.fullName,
-        row.email,
-        row.role,
-        row.companyName,
-        row.tenantName,
+        // The strings each cell actually renders, not the raw nullable
+        // fields: an operator who sees "incomplete", "none" or "Unnamed
+        // user" on screen must be able to type that word and find it.
+        row.fullName || row.email || "Unnamed user",
+        row.email || "No email on file",
+        roleLabel(row),
+        row.companyName || "none",
+        row.tenantName || "none",
         row.id,
       ]),
     [query, users],
@@ -74,23 +89,21 @@ export default function SuperAdminUsersPage() {
     {
       header: "Role",
       cell: (row) => {
-        /* fullName === null together with role === null is exactly what
-           buildUserRows (lib/superAdmin/users.ts) emits for an auth.users
-           row with no matching profiles row. That is not a data glitch: a
-           half-completed invite leaves one, because
+        const label = roleLabel(row);
+
+        /* !hasProfile is exactly the auth.users-row-with-no-profiles-row
+           case (lib/superAdmin/users.ts): a half-completed invite, because
            app/api/settings/users/invite/route.ts creates the auth user
            first and only then does separate, non-transactional inserts into
            users/profiles/memberships with no rollback if one of those
            throws. These are the accounts an operator most needs to notice,
            so mark them rather than let them read as a blank role. */
-        if (row.fullName === null && row.role === null) {
-          return <Badge tone="warning">incomplete</Badge>;
-        }
+        if (!row.hasProfile) return <Badge tone="warning">{label}</Badge>;
 
-        return row.role === "super_admin" ? (
-          <Badge tone="info">super admin</Badge>
+        return row.role === SUPER_ADMIN_ROLE ? (
+          <Badge tone="info">{label}</Badge>
         ) : (
-          <span className="text-ink-2">{row.role || "none"}</span>
+          <span className="text-ink-2">{label}</span>
         );
       },
     },
@@ -127,8 +140,6 @@ export default function SuperAdminUsersPage() {
           {loading ? "Loading users" : ""}
         </span>
 
-        <MessageBanner tone="danger">{message}</MessageBanner>
-
         <SearchInput
           id="user-search"
           label="Search users"
@@ -138,6 +149,9 @@ export default function SuperAdminUsersPage() {
           resultHint={!loading && query ? `${visible.length} of ${users.length} users` : undefined}
         />
 
+        {/* No separate danger banner for a load failure: the table's own
+            error state below carries the same message plus a Retry button,
+            and showing both would say it twice. */}
         <DataTable
           columns={columns}
           rows={visible}

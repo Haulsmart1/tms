@@ -53,7 +53,14 @@ export default function RequestsTable({ requests }: { requests: RegistrationRequ
         request.contact_name,
         request.email,
         request.phone,
-        request.status,
+        // The rendered word, not the raw value: the badge falls back to
+        // "unknown" on screen (see invoices/page.tsx for the same rule), so
+        // a null status must be searchable as "unknown", not as nothing.
+        request.status ?? "unknown",
+        // Rendered directly under the company name and the largest
+        // free-text field on the page; the most likely thing an operator
+        // types.
+        request.notes,
       ]),
     [query, requests],
   );
@@ -71,6 +78,10 @@ export default function RequestsTable({ requests }: { requests: RegistrationRequ
       />
 
       {visible.length === 0 ? (
+        // Only reachable via a non-empty query: page.tsx only renders this
+        // component once requests.length > 0, so an empty `visible` here is
+        // always a filtered miss, never the genuinely-empty case (that's
+        // page.tsx's "No requests yet" branch).
         <div className="rounded-lg bg-surface-2 p-8 text-center text-sm text-ink-3">
           No requests match &quot;{query}&quot;.
         </div>

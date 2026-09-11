@@ -18,7 +18,7 @@ export default async function SuperAdminLayout({ children }: { children: ReactNo
      authorization rule drift, and the copy that drifts is always the one
      nobody is looking at. */
   const session = await resolveSuperAdmin();
-  const denial = superAdminDenial(session.userId || null, session.roleName);
+  const denial = superAdminDenial(session.userId, session.roleName);
 
   if (denial?.status === 401) {
     // /login, not /. The landing page no longer carries a sign-in form, so
@@ -29,7 +29,10 @@ export default async function SuperAdminLayout({ children }: { children: ReactNo
   if (denial) redirect("/dashboard");
 
   return (
-    <div className="ds min-h-screen bg-canvas font-sans text-ink">
+    // No min-h-screen here: all seven /super-admin pages already carry it on
+    // their own roots, and stacking a second one under the header made the
+    // whole area scroll a little even when a page's content was empty.
+    <div className="ds bg-canvas font-sans text-ink">
       <header className="border-b border-line bg-surface px-4 py-3 md:px-8">
         <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-5 gap-y-2">
           <strong className="inline-flex items-center gap-1.5 text-md font-semibold text-ink">

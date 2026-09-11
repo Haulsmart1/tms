@@ -35,6 +35,16 @@ export type SuperAdminUserRow = {
   tenantName: string | null;
   companyId: string | null;
   companyName: string | null;
+  /* False only for an auth.users row with no profiles row. Derived from WHICH
+     BRANCH built the row, never inferred from null fields: a normally invited
+     user has full_name and role_id null too, because
+     app/api/settings/users/invite/route.ts's insert sets neither, and
+     docs/sql/profiles_privileged_columns_guard.sql forbids setting role_id on
+     insert at all except for service_role/postgres/an existing super admin.
+     Both are only ever populated later, by the explicit edit in
+     app/api/settings/users/[userId]/route.ts. Testing null fields instead of
+     this flag would flag every untouched invite as an orphan. */
+  hasProfile: boolean;
 };
 
 export function buildUserRows(args: {
@@ -67,6 +77,7 @@ export function buildUserRows(args: {
       tenantName: tenant?.name ?? null,
       companyId,
       companyName: companyId ? companyById.get(companyId)?.name ?? null : null,
+      hasProfile: true,
     };
   });
 
@@ -92,6 +103,7 @@ export function buildUserRows(args: {
       tenantName: null,
       companyId: null,
       companyName: null,
+      hasProfile: false,
     });
   }
 
