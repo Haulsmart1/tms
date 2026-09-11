@@ -39,6 +39,15 @@ describe("normalizeTenantEdit", () => {
     expect(normalizeTenantEdit({ unrelated: "x" })).toMatchObject({ ok: false });
   });
 
+  it("rejects a name over the length cap", () => {
+    // This name renders in the tenant selector on every console page, so an
+    // unbounded string is a layout bug waiting to happen, not just a
+    // database one.
+    const tooLong = "A".repeat(501);
+    expect(normalizeTenantEdit({ name: tooLong })).toMatchObject({ ok: false, field: "name" });
+    expect(normalizeTenantEdit({ name: "A".repeat(500) })).toMatchObject({ ok: true });
+  });
+
   it("rejects a blank name", () => {
     expect(normalizeTenantEdit({ name: "" })).toMatchObject({ ok: false, field: "name" });
     expect(normalizeTenantEdit({ name: "   " })).toMatchObject({ ok: false, field: "name" });

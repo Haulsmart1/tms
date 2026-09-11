@@ -2,11 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { withSuperAdmin, logSuperAdminEdit } from "../../../../../lib/superAdmin/guard";
 import { normalizeCompanyEdit } from "../../../../../lib/superAdmin/companyEdit";
+import { isUuid } from "../../../../../lib/uuid";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /* Writes companies.name and the company_profiles row.
 
@@ -35,7 +34,7 @@ export const PATCH = withSuperAdmin(
     // Postgres as 22P02 and comes back through the lookupError branch below,
     // reported to the client as a 500 with a log line that misdescribes what
     // happened.
-    if (!UUID_PATTERN.test(companyId)) {
+    if (!isUuid(companyId)) {
       return NextResponse.json({ error: "No such company." }, { status: 404 });
     }
 

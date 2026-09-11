@@ -1,4 +1,9 @@
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { isUuid } from "../uuid";
+
+// Same cap lib/superAdmin/companyEdit.ts enforces on a company name: this
+// name renders in the tenant selector on every console page, so an
+// unbounded string here is not just a database concern, it is a layout one.
+const MAX_LENGTH = 500;
 
 /* Normalization and validation for a super-admin tenant edit (rename, and/or
    re-parent to a different company).
@@ -43,7 +48,11 @@ export function normalizeTenantEdit(input: unknown): TenantEditResult {
     if (typeof body.name !== "string" || body.name.trim() === "") {
       return { ok: false, error: "Tenant name cannot be blank.", field: "name" };
     }
-    result.name = body.name.trim();
+    const trimmedName = body.name.trim();
+    if (trimmedName.length > MAX_LENGTH) {
+      return { ok: false, error: "Tenant name is too long.", field: "name" };
+    }
+    result.name = trimmedName;
   }
 
   if (hasCompanyId) {
@@ -57,7 +66,7 @@ export function normalizeTenantEdit(input: unknown): TenantEditResult {
     // column reaches PostgREST as 22P02, which the route would otherwise
     // have to distinguish from "no such company" by parsing Supabase error
     // text -- exactly what the route must never surface to the client.
-    if (!UUID_PATTERN.test(trimmed)) {
+    if (!isUuid(trimmed)) {
       return { ok: false, error: "That is not a valid company id.", field: "company_id" };
     }
 

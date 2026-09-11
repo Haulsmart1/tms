@@ -19,6 +19,19 @@ describe("normalizeCompanyEdit", () => {
     expect(normalizeCompanyEdit({ name: "   ", profile: {} })).toMatchObject({ ok: false, field: "name" });
   });
 
+  it("rejects a name over the length cap", () => {
+    // `name` is a parameter, not a key of the profile object the loop below
+    // enforces MAX_LENGTH on, so this check has to be separate -- and it has
+    // to exist, or a multi-kilobyte name reaches company_profiles.company_name
+    // (and later a PDF that never truncates) unchecked.
+    const tooLong = "A".repeat(501);
+    expect(normalizeCompanyEdit({ name: tooLong, profile: {} })).toMatchObject({
+      ok: false,
+      field: "name",
+    });
+    expect(normalizeCompanyEdit({ name: "A".repeat(500), profile: {} })).toMatchObject({ ok: true });
+  });
+
   it("rejects a non-object body", () => {
     expect(normalizeCompanyEdit(null)).toMatchObject({ ok: false });
     expect(normalizeCompanyEdit("nope")).toMatchObject({ ok: false });

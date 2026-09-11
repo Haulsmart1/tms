@@ -84,6 +84,16 @@ export function normalizeCompanyEdit(input: unknown): CompanyEditResult {
   }
   const name = body.name.trim();
 
+  // The MAX_LENGTH check inside the profile loop below never sees this field:
+  // `name` is a parameter of this function, not a key of rawProfile, and
+  // profile.company_name is assigned FROM it after that loop has already
+  // finished (see the bottom of this function). Without a check here a
+  // multi-kilobyte name validates cleanly and reaches
+  // lib/invoices/generatePdf.ts, which wraps long text but never truncates.
+  if (name.length > MAX_LENGTH) {
+    return { ok: false, error: "Company name is too long.", field: "name" };
+  }
+
   const rawProfile =
     body.profile && typeof body.profile === "object" && !Array.isArray(body.profile)
       ? (body.profile as Record<string, unknown>)
