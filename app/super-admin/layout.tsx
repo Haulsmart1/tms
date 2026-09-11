@@ -1,90 +1,68 @@
-import type { ReactNode, CSSProperties } from "react";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { createClient } from "../../lib/supabase/server";
-import { SUPER_ADMIN_ROLE, extractRoleName } from "../../lib/roles";
 import { Zap } from "lucide-react";
+import { resolveSuperAdmin, superAdminDenial } from "../../lib/superAdmin/guard";
 
-export default async function SuperAdminLayout({
-  children,
-}: {
-  children: ReactNode;
-}) {
-  const supabase = await createClient();
+const NAV_LINKS = [
+  { href: "/super-admin", label: "Overview" },
+  { href: "/super-admin/companies", label: "Companies" },
+  { href: "/super-admin/requests", label: "Requests" },
+  { href: "/super-admin/users", label: "Users" },
+  { href: "/super-admin/billing", label: "Billing" },
+  { href: "/super-admin/invoices", label: "Invoices" },
+];
 
-  const { data: { user } } = await supabase.auth.getUser();
+export default async function SuperAdminLayout({ children }: { children: ReactNode }) {
+  /* Same helper the /api/super-admin routes use. Two hand-written copies of an
+     authorization rule drift, and the copy that drifts is always the one
+     nobody is looking at. */
+  const session = await resolveSuperAdmin();
+  const denial = superAdminDenial(session.userId || null, session.roleName);
 
-  if (!user) {
+  if (denial?.status === 401) {
     // /login, not /. The landing page no longer carries a sign-in form, so
     // sending a logged-out user there strands them with no way back in.
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("roles ( name )")
-    .eq("id", user.id)
-    .single();
-
-  if (extractRoleName(profile?.roles) !== SUPER_ADMIN_ROLE) {
-    redirect("/dashboard");
-  }
-
-  const linkStyle: CSSProperties = {
-    color: "white",
-    textDecoration: "none",
-    fontWeight: 500,
-    fontSize: 14,
-    opacity: 0.95,
-  };
+  if (denial) redirect("/dashboard");
 
   return (
-    <>
-      <header
-        style={{
-          padding: 18,
-          background: "#1e1b4b",
-          color: "white",
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-          borderBottom: "1px solid rgba(255,255,255,0.08)",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 20,
-            flexWrap: "wrap",
-          }}
-        >
-          <strong style={{ fontSize: 18, display: "inline-flex", alignItems: "center", gap: 6 }}>
+    <div className="ds min-h-screen bg-canvas font-sans text-ink">
+      <header className="border-b border-line bg-surface px-4 py-3 md:px-8">
+        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-5 gap-y-2">
+          <strong className="inline-flex items-center gap-1.5 text-md font-semibold text-ink">
             <Zap size={16} aria-hidden /> Super Admin
           </strong>
 
-          <div
-            style={{
-              display: "flex",
-              gap: 18,
-              alignItems: "center",
-              flexWrap: "wrap",
-            }}
+          {/* No active-link highlight: usePathname is a client hook and this
+              is a server component, and splitting the nav into its own
+              client component to underline one link is not worth a new
+              component boundary. Each page carries its own <h1>, which is
+              what tells the operator where they are. */}
+          <nav className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+            {NAV_LINKS.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className="text-sm font-medium text-ink-2 no-underline hover:text-ink"
+              >
+                {link.label}
+              </Link>
+            ))}
+          </nav>
+
+          <Link
+            href="/dashboard"
+            className="ml-auto text-sm font-medium text-ink-3 no-underline hover:text-ink"
           >
-            <Link href="/super-admin" style={linkStyle}>Overview</Link>
-            <Link href="/super-admin/companies" style={linkStyle}>Companies</Link>
-            <Link href="/super-admin/requests" style={linkStyle}>Requests</Link>
-            <Link href="/super-admin/users" style={linkStyle}>Users</Link>
-            <Link href="/super-admin/billing" style={linkStyle}>Billing</Link>
-            <Link href="/super-admin/invoices" style={linkStyle}>Invoices</Link>
-            <Link href="/dashboard" style={{ ...linkStyle, opacity: 0.75 }}>
-              ← Back to app
-            </Link>
-          </div>
+            ← Back to app
+          </Link>
         </div>
       </header>
 
       <div>{children}</div>
-    </>
+    </div>
   );
 }
