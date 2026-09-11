@@ -10,7 +10,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { assembleInvoice, estimateVehicleAddition } from "./invoice";
-import type { AssembledLine } from "./invoice";
+import type { AssembledInvoice, AssembledLine } from "./invoice";
 import {
   collectPeriodVehicles,
   highWaterMark,
@@ -382,6 +382,51 @@ export async function closeDuePeriods(
 }
 
 /**
+ * What a period would invoice, without writing anything.
+ *
+ * Extracted from computePeriodInvoice so the billing page and the close job
+ * share ONE implementation. The alternative was for the page to fetch vehicles
+ * and licences itself and assemble in the browser, which would have meant two
+ * implementations of "which vehicles count and over what coverage window".
+ * Any drift between them would make the page confidently display a figure the
+ * close job never produces, which is precisely the class of fault the page
+ * exists to expose.
+ *
+ * Safe to call on an open period. It reads rows and returns a computation; the
+ * writing starts in computePeriodInvoice after this returns.
+ */
+export async function previewPeriodInvoice(
+  admin: SupabaseClient,
+  args: {
+    companyId: string;
+    periodStartISO: string;
+    /** Exclusive, matching billing_periods.period_end. */
+    periodEndISO: string;
+    settings: CompanyBillingSettings;
+  }
+): Promise<AssembledInvoice> {
+  const vehicleIds = await fetchCompanyVehicleIds(admin, args.companyId);
+  const licences = await fetchCompanyLicences(admin, vehicleIds);
+
+  const vehicles = collectPeriodVehicles({
+    periodStartISO: args.periodStartISO,
+    periodEndISO: args.periodEndISO,
+    licences,
+  });
+
+  return assembleInvoice({
+    periodStartISO: args.periodStartISO,
+    periodEndISO: args.periodEndISO,
+    vehicles,
+    minBillDays: args.settings.min_bill_days,
+    unitAmountPence: args.settings.unit_amount_pence,
+    minimumPence: args.settings.min_invoice_pence,
+    includedVehicles: args.settings.included_vehicles,
+    vatRatePercent: args.settings.vat_rate ?? 20,
+  });
+}
+
+/**
  * Claim the period, build its invoice, and make it durable.
  *
  * Returns null when the claim was lost to a concurrent run. The claim is a
@@ -418,26 +463,27 @@ async function computePeriodInvoice(
     if (cleared.error) throw new Error(cleared.error.message);
   }
 
+  // vatRate stays here as well as inside previewPeriodInvoice: the closed
+  // period row below stores it, so removing it from this scope breaks the
+  // update rather than the calculation.
+  const vatRate = settings.vat_rate ?? 20;
+  const invoice = await previewPeriodInvoice(admin, {
+    companyId: period.company_id,
+    periodStartISO: period.period_start,
+    periodEndISO: period.period_end,
+    settings,
+  });
+
+  // Fetched again here, separately from previewPeriodInvoice's internal fetch:
+  // highWaterMark below needs the raw licence rows, and AssembledInvoice does
+  // not carry them (its vehicleCount is a different, invoice-line-shaped
+  // number - see the comment on highWaterMark in close.ts for why the two are
+  // not interchangeable). This file already re-fetches these two elsewhere
+  // (fetchCompanyVehicleIds/fetchCompanyLicences are called independently in
+  // several functions here), so this follows the existing pattern rather than
+  // introducing a new one.
   const vehicleIds = await fetchCompanyVehicleIds(admin, period.company_id);
   const licences = await fetchCompanyLicences(admin, vehicleIds);
-
-  const vehicles = collectPeriodVehicles({
-    periodStartISO: period.period_start,
-    periodEndISO: period.period_end,
-    licences,
-  });
-
-  const vatRate = settings.vat_rate ?? 20;
-  const invoice = assembleInvoice({
-    periodStartISO: period.period_start,
-    periodEndISO: period.period_end,
-    vehicles,
-    minBillDays: settings.min_bill_days,
-    unitAmountPence: settings.unit_amount_pence,
-    minimumPence: settings.min_invoice_pence,
-    includedVehicles: settings.included_vehicles,
-    vatRatePercent: vatRate,
-  });
 
   if (invoice.lines.length > 0) {
     const rows = invoice.lines.map((line: AssembledLine) => ({
