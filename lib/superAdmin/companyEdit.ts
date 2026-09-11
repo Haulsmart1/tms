@@ -1,3 +1,5 @@
+import { isValidIanaTimeZone } from "../time";
+
 /* Normalization and validation for a super-admin company edit.
 
    THE SECURITY CONTROL OF THIS FEATURE. The route that calls this holds the
@@ -8,7 +10,10 @@
 
    Field list mirrors the form at /settings/company. tenant_id is absent on
    purpose: despite the name it holds the COMPANY id (see rls_04), so letting a
-   request rewrite it would move a profile to a different company. */
+   request rewrite it would move a profile to a different company. The caller
+   never gets to set it here: the consuming route supplies tenant_id itself
+   from the URL parameter, never from the request body, which is what makes it
+   a safe upsert conflict key rather than a caller-controlled write. */
 
 export const EDITABLE_PROFILE_FIELDS = [
   "company_name",
@@ -44,6 +49,20 @@ export const EDITABLE_PROFILE_FIELDS = [
 export type EditableProfileField = (typeof EDITABLE_PROFILE_FIELDS)[number];
 
 const UPPERCASE_FIELDS = new Set<EditableProfileField>(["country_code", "currency_code"]);
+
+// app/settings/company/page.tsx:457 writes language_code with .toLowerCase().
+// Storing anything else here is exactly the drift the company_name comment
+// below exists to prevent: the customer's own next save silently flips it.
+const LOWERCASE_FIELDS = new Set<EditableProfileField>(["language_code"]);
+
+// Every field these PDFs and pages render assumes a bounded length. notes is
+// a free-text field so it gets more room; everything else mirrors a form
+// input that was never meant to hold paragraphs.
+const MAX_LENGTH = 500;
+const MAX_NOTES_LENGTH = 5000;
+
+const CURRENCY_CODE_PATTERN = /^[A-Z]{3}$/;
+const COUNTRY_CODE_PATTERN = /^[A-Z]{2}$/;
 
 export type CompanyEditResult =
   | { ok: true; name: string; profile: Partial<Record<EditableProfileField, string | null>> }
@@ -98,11 +117,42 @@ export function normalizeCompanyEdit(input: unknown): CompanyEditResult {
       continue;
     }
 
+    const maxLength = field === "notes" ? MAX_NOTES_LENGTH : MAX_LENGTH;
+    if (trimmed.length > maxLength) {
+      return { ok: false, error: `${field} is too long.`, field };
+    }
+
     if (field === "business_email" && !isEmail(trimmed)) {
       return { ok: false, error: "That business email is not a valid address.", field };
     }
 
-    profile[field] = UPPERCASE_FIELDS.has(field) ? trimmed.toUpperCase() : trimmed;
+    // An invalid IANA name is not harmless: app/tachograph/page.tsx reads
+    // company_profiles.timezone and feeds it straight into
+    // Intl.DateTimeFormat with no guard, so a typo here throws a RangeError
+    // during render and white-screens that page for the customer.
+    if (field === "timezone" && !isValidIanaTimeZone(trimmed)) {
+      return { ok: false, error: "That is not a valid IANA timezone.", field };
+    }
+
+    let normalized = trimmed;
+    if (UPPERCASE_FIELDS.has(field)) normalized = trimmed.toUpperCase();
+    if (LOWERCASE_FIELDS.has(field)) normalized = trimmed.toLowerCase();
+
+    if (field === "currency_code" && !CURRENCY_CODE_PATTERN.test(normalized)) {
+      return { ok: false, error: "That is not a valid currency code.", field };
+    }
+
+    /* country_code also accepts the literal "OTHER": app/settings/company's
+       country select offers it as a real option, not just ISO codes. Any
+       other value outside that select's option set renders the customer's
+       own settings page with nothing selected (the page branches its
+       legal-entity-type options on GB vs US), and their next save silently
+       rewrites their country to whatever fell out of that broken state. */
+    if (field === "country_code" && normalized !== "OTHER" && !COUNTRY_CODE_PATTERN.test(normalized)) {
+      return { ok: false, error: "That is not a valid country code.", field };
+    }
+
+    profile[field] = normalized;
   }
 
   /* companies.name and company_profiles.company_name are separate rows, both

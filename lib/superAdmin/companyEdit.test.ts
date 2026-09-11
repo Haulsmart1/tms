@@ -87,4 +87,112 @@ describe("normalizeCompanyEdit", () => {
     expect(EDITABLE_PROFILE_FIELDS).not.toContain("tenant_id");
     expect(EDITABLE_PROFILE_FIELDS).toContain("city");
   });
+
+  it("pins the allowlist exactly", () => {
+    // Deleting a field here leaves this suite green and the symptom is
+    // silent: the operator edits the field, gets a 200, and nothing changes.
+    expect(EDITABLE_PROFILE_FIELDS).toEqual([
+      "company_name",
+      "trading_name",
+      "legal_entity_type",
+      "industry_type",
+      "registration_number",
+      "tax_number",
+      "vat_number",
+      "eori_number",
+      "operator_licence_number",
+      "us_ein",
+      "usdot_number",
+      "mc_number",
+      "ifta_number",
+      "irp_number",
+      "scac_code",
+      "business_email",
+      "business_phone",
+      "website",
+      "address_line_1",
+      "address_line_2",
+      "city",
+      "region",
+      "postcode",
+      "country_code",
+      "currency_code",
+      "timezone",
+      "language_code",
+      "notes",
+    ]);
+    expect(EDITABLE_PROFILE_FIELDS.length).toBe(28);
+  });
+
+  it("leaves a field the caller did not send out of the patch", () => {
+    // The route does .update(profile). A field absent here must stay
+    // untouched in the row; a null would blank a column nobody edited.
+    const result = ok({ name: "Acme", profile: { city: "Leeds" } });
+    expect(Object.keys(result.profile).sort()).toEqual(["city", "company_name"]);
+  });
+
+  it("accepts an explicit null for a field", () => {
+    const result = ok({ name: "Acme", profile: { city: null } });
+    expect(result.profile.city).toBeNull();
+  });
+
+  it("rejects a body that is an array", () => {
+    expect(normalizeCompanyEdit([])).toMatchObject({ ok: false });
+  });
+
+  it("rejects an invalid IANA timezone", () => {
+    // app/tachograph/page.tsx feeds company_profiles.timezone straight into
+    // Intl.DateTimeFormat with no guard: a typo here throws during render.
+    expect(normalizeCompanyEdit({ name: "Acme", profile: { timezone: "Europe/Londn" } }))
+      .toMatchObject({ ok: false, field: "timezone" });
+  });
+
+  it("accepts a valid IANA timezone", () => {
+    expect(ok({ name: "Acme", profile: { timezone: "Europe/London" } }).profile.timezone).toBe(
+      "Europe/London"
+    );
+  });
+
+  it("rejects a malformed currency code", () => {
+    expect(normalizeCompanyEdit({ name: "Acme", profile: { currency_code: "GBPX" } }))
+      .toMatchObject({ ok: false, field: "currency_code" });
+    expect(normalizeCompanyEdit({ name: "Acme", profile: { currency_code: "ZZ" } }))
+      .toMatchObject({ ok: false, field: "currency_code" });
+  });
+
+  it("rejects a malformed country code", () => {
+    expect(normalizeCompanyEdit({ name: "Acme", profile: { country_code: "ZZZ" } }))
+      .toMatchObject({ ok: false, field: "country_code" });
+    expect(normalizeCompanyEdit({ name: "Acme", profile: { country_code: "UNITED KINGDOM" } }))
+      .toMatchObject({ ok: false, field: "country_code" });
+  });
+
+  it('accepts the literal "OTHER" country code', () => {
+    // app/settings/company/page.tsx offers OTHER as a real option in the
+    // country select, not just ISO codes.
+    expect(ok({ name: "Acme", profile: { country_code: "other" } }).profile.country_code).toBe(
+      "OTHER"
+    );
+  });
+
+  it("rejects a field over the length limit", () => {
+    expect(normalizeCompanyEdit({ name: "Acme", profile: { city: "a".repeat(501) } }))
+      .toMatchObject({ ok: false, field: "city" });
+  });
+
+  it("gives notes a longer length limit than other fields", () => {
+    expect(ok({ name: "Acme", profile: { notes: "a".repeat(5000) } }).profile.notes).toHaveLength(
+      5000
+    );
+    expect(normalizeCompanyEdit({ name: "Acme", profile: { notes: "a".repeat(5001) } }))
+      .toMatchObject({ ok: false, field: "notes" });
+  });
+
+  it("lowercases language_code", () => {
+    // app/settings/company/page.tsx writes language_code with .toLowerCase();
+    // storing anything else drifts back on the customer's next save.
+    expect(ok({ name: "Acme", profile: { language_code: "EN" } }).profile.language_code).toBe(
+      "en"
+    );
+  });
 });
