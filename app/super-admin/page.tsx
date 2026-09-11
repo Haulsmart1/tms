@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import Link from "next/link";
 import { Building2, Users, Banknote, FileText, Inbox, type LucideIcon } from "lucide-react";
 import { createClient } from "../../lib/supabase/browser";
+import { SUPER_ADMIN_ROLE } from "../../lib/roles";
 import {
   collectedRevenue,
   platformBillableVehicleCount,
@@ -126,7 +127,7 @@ export default function SuperAdminPage() {
         supabase
           .from("profiles")
           .select("id, roles!inner(name)", { count: "exact", head: true })
-          .eq("roles.name", "super_admin"),
+          .eq("roles.name", SUPER_ADMIN_ROLE),
         loadChargeSource("platform_charges", "v1_cycle", "v1 cycles", cutoffIso),
         loadChargeSource("vehicle_addon_charges", "v1_addon", "v1 mid-cycle additions", cutoffIso),
         loadChargeSource("period_charges", "v2_period", "v2 periods", cutoffIso),

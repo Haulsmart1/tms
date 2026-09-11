@@ -59,44 +59,32 @@ export async function resolveSuperAdmin(): Promise<SuperAdminSession> {
   return { userId: user.id, roleName: extractRoleName(profile?.roles) };
 }
 
-/* Route-handler form. Returns either the caller's id or a ready NextResponse.
-   The JSON shape matches proxy.ts's { error } so a fetch() sees one shape.
-
-   Task 16's layout needs the raw session (it redirects rather than returning
-   JSON), so this stays exported alongside withSuperAdmin below instead of
-   being replaced by it. */
-export async function requireSuperAdmin(): Promise<
-  { userId: string; response?: undefined } | { userId?: undefined; response: NextResponse }
-> {
-  const session = await resolveSuperAdmin();
-  const denial = superAdminDenial(session.userId, session.roleName);
-
-  if (denial) {
-    return {
-      response: NextResponse.json({ error: denial.error }, { status: denial.status }),
-    };
-  }
-
-  // superAdminDenial only returns null when userId is truthy, so a null
-  // userId never reaches this line: it falls through the !userId branch and
-  // returns a denial above instead.
-  return { userId: session.userId as string };
-}
-
-/* Wraps a route handler so the check cannot be forgotten. requireSuperAdmin's
-   union only protects a route that actually reads userId in a string
-   position: a read-only GET that checks `response` and then goes straight to
-   createAdminClient() never touches userId, so deleting the check compiles
-   clean and hands an anonymous caller the service-role key. A route written
-   as withSuperAdmin(handler) has no code path into the handler that skips
-   the check, because the wrapper is the only way in. */
+/* Wraps a route handler so the check cannot be forgotten. Calls
+   resolveSuperAdmin + superAdminDenial directly rather than through an
+   intermediate requireSuperAdmin export: that manual entry point had no
+   caller (app/super-admin/layout.tsx uses resolveSuperAdmin +
+   superAdminDenial itself, not this), and is worse than ordinary dead code --
+   it sat right beside this wrapper as a second way in, and this file's own
+   audit-logging comment below explains why a future route reaching for the
+   manual form instead of the wrapper is exactly what hands out the
+   service-role key to an unchecked caller. A route written as
+   withSuperAdmin(handler) has no code path into the handler that skips the
+   check, because the wrapper is the only way in. */
 export function withSuperAdmin<T extends unknown[]>(
   handler: (actorId: string, ...args: T) => Promise<NextResponse>,
 ): (...args: T) => Promise<NextResponse> {
   return async (...args: T) => {
-    const result = await requireSuperAdmin();
-    if (result.response) return result.response;
-    return handler(result.userId, ...args);
+    const session = await resolveSuperAdmin();
+    const denial = superAdminDenial(session.userId, session.roleName);
+
+    if (denial) {
+      return NextResponse.json({ error: denial.error }, { status: denial.status });
+    }
+
+    // superAdminDenial only returns null when userId is truthy, so a null
+    // userId never reaches this line: it falls through the !userId branch
+    // and returns a denial above instead.
+    return handler(session.userId as string, ...args);
   };
 }
 

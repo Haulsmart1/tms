@@ -11,10 +11,11 @@ export const dynamic = "force-dynamic";
    identified on screen only by a UUID. Everything else here could have stayed a
    client query; keeping it in one place means the page makes one request, not four. */
 
-/* withSuperAdmin, not a manual requireSuperAdmin check. This handler never
-   reads the actor id, so with the manual form, deleting the check would still
-   typecheck and would hand an anonymous caller the service-role client. The
-   wrapper has no code path into the handler that skips the check. */
+/* withSuperAdmin, not a manual resolveSuperAdmin/superAdminDenial check
+   inlined here. This handler never reads the actor id, so with a manual
+   check, deleting it would still typecheck and would hand an anonymous
+   caller the service-role client. The wrapper has no code path into the
+   handler that skips the check. */
 export const GET = withSuperAdmin(async () => {
   // createAdminClient() throws when SUPABASE_SERVICE_ROLE_KEY is missing.
   // Left uncaught, Next's boundary turns that into its own HTML error page

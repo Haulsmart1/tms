@@ -180,12 +180,21 @@ export function buildCompanySummaries(input: SummaryInput): CompanySummary[] {
    a vehicle with two active compliance licences is still one vehicle.
 
    Deliberately applies the SAME v.tenant_id != null rule as
-   countBillableVehicles in ../billing/vehicleCount.ts. The two definitions
-   must stay identical: without this rule, a vehicle with no tenant_id at all
-   would count here but be invisible to every per-company figure on
-   /super-admin/billing (which can only attribute a vehicle to a company
-   through its tenant), so the platform headline could exceed the sum of its
-   parts. That headline is the number people quote. */
+   countBillableVehicles in ../billing/vehicleCount.ts. That rule closes ONE
+   of two gaps between this headline and the sum of the per-company figures:
+   without it, a vehicle with no tenant_id at all would count here but be
+   invisible to every per-company figure on /super-admin/billing (which can
+   only attribute a vehicle to a company through its tenant).
+
+   It does NOT close the other gap: a vehicle whose tenant_id is set but
+   points at a tenant with no company_id, or at no tenant row at all (a
+   dangling id), still passes this filter and counts here, while still being
+   invisible to every per-company figure -- companies list included, since
+   buildCompanySummaries above can only attribute a vehicle to a company
+   through a resolved tenant->company_id chain. So this headline CAN still
+   exceed the sum of its parts, just not for the reason the tenant_id check
+   guards against. That headline is the number people quote, so the residual
+   is recorded here rather than left to be rediscovered as a mismatch. */
 export function platformBillableVehicleCount(
   vehicles: readonly VehicleRow[],
   licences: readonly LicenceRow[],
