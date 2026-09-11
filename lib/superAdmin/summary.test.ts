@@ -4,6 +4,7 @@ import {
   buildCompanySummaries,
   platformBillableVehicleCount,
   isMissingRelationError,
+  isMissingColumnError,
   type ChargeSource,
 } from "./summary";
 
@@ -273,5 +274,26 @@ describe("isMissingRelationError", () => {
   it("does not treat an ordinary error as a missing table", () => {
     expect(isMissingRelationError({ code: "42703", message: "column does not exist" })).toBe(false);
     expect(isMissingRelationError(null)).toBe(false);
+  });
+});
+
+describe("isMissingColumnError", () => {
+  it("recognises a Postgres undefined-column error", () => {
+    expect(isMissingColumnError({ code: "42703" })).toBe(true);
+  });
+
+  it("recognises the PostgREST schema-cache miss for a column", () => {
+    expect(isMissingColumnError({ code: "PGRST204" })).toBe(true);
+  });
+
+  it("does not treat a missing-table error as a missing column", () => {
+    // The two failure modes are easy to conflate and mean different things:
+    // a whole table absent (42P01 / PGRST205, isMissingRelationError above)
+    // is a different migration gap from one column absent on a table that
+    // does exist (42703 / PGRST204). Confusing them would let a genuine
+    // missing-table error get treated as the narrower, more forgivable case.
+    expect(isMissingColumnError({ code: "42P01" })).toBe(false);
+    expect(isMissingColumnError({ code: "PGRST205" })).toBe(false);
+    expect(isMissingColumnError(null)).toBe(false);
   });
 });

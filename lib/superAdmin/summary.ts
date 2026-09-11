@@ -184,3 +184,17 @@ export function isMissingRelationError(error: unknown): boolean {
   const code = (error as { code?: unknown }).code;
   return code === "42P01" || code === "PGRST205";
 }
+
+/* A sibling of isMissingRelationError for a migration that adds a COLUMN to
+   an existing table rather than a whole new table (billing_06 adding
+   company_billing.billing_model is the motivating case). That failure mode
+   surfaces differently: Postgres reports an undefined column as 42703, and
+   PostgREST reports its own schema-cache miss for a column as PGRST204, not
+   PGRST205, which is the missing-TABLE code above. Conflating the two would
+   let an unrelated 42703 - a genuine typo in a query, say - get silently
+   waved through as "expected, migration not applied". */
+export function isMissingColumnError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = (error as { code?: unknown }).code;
+  return code === "42703" || code === "PGRST204";
+}
