@@ -114,12 +114,33 @@ export const PATCH = withSuperAdmin(
       .eq("id", companyId);
 
     if (nameError) {
-      /* The profile write already landed. Say so, rather than reporting a
-         clean failure the operator would reasonably retry from stale form
-         state, and LOG it: a write that really happened must not go
+      /* The profile write already landed, and it includes the new name:
+         normalizeCompanyEdit always sets profile.company_name = name (see
+         its own comment on why), and that field is not stripped out or
+         written separately -- it goes into the SAME upsert as every other
+         profile column above. So when only this second write fails, the new
+         name is NOT missing; it is already stored, in company_profiles, just
+         not yet in companies.name too. The old message ("could not be
+         updated") was wrong: the name WAS updated, in one of the two places
+         it lives, and the operator's own "cannot drift apart" hint is
+         temporarily untrue until a retry reconciles the two.
+
+         This is FIX 2's chosen shape (option a from the review): leave
+         company_name inside the profile patch rather than reordering the
+         two writes back to name-first. Reverting to name-first would turn
+         most failures into partial writes again, because the profile upsert
+         (28 columns, a table with an unverified unique index and possible
+         constraints this route cannot see) is the one more likely to fail --
+         moving it second would put it back in the failure path most often.
+         The one-column companies.update() failing on its own, after the
+         28-column upsert already succeeded, should be comparatively rare;
+         when it does happen, correcting the message is cheaper and safer
+         than trading back the ordering's own benefit.
+
+         LOG it regardless: a write that really happened must not go
          unaudited just because the request as a whole failed. changedFields
-         names what landed (the profile columns), not "name" -- the update
-         that failed. */
+         names what landed (the profile columns, company_name included), not
+         "name" -- the companies.update() that failed. */
       console.error("super-admin company update: name write failed", nameError);
 
       logSuperAdminEdit({
@@ -131,7 +152,11 @@ export const PATCH = withSuperAdmin(
       });
 
       return NextResponse.json(
-        { error: "The company details were saved, but the company name could not be updated. Please try again.", partial: true },
+        {
+          error:
+            "The company profile, including the new name, was saved. The company record itself still shows the old name until you try again -- the two are temporarily out of step.",
+          partial: true,
+        },
         { status: 500 },
       );
     }
