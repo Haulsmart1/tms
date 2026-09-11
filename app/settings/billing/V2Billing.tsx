@@ -253,6 +253,16 @@ export default function V2Billing() {
     }
   }, [supabase]);
 
+  /* No tenant-status gate here, unlike V1Billing, and that is safe only
+     because of an invariant that lives in page.tsx: the shell renders no body
+     at all until modelLoaded, and modelLoaded only flips once tenant status is
+     "ready" and the role is "admin". So by the time this mounts, the session
+     is resolved and the role is checked.
+
+     Written down because the invariant and the code relying on it are in
+     different files. If the shell ever renders a body earlier, this effect
+     starts querying under an unresolved session and the page will look
+     intermittently empty rather than broken, which is a hard fault to chase. */
   useEffect(() => {
     void load();
   }, [load]);
@@ -323,6 +333,11 @@ export default function V2Billing() {
             value={
               busy ? (
                 <Skeleton display="inline-block" w="16ch" h="1.25rem" />
+              ) : loadError?.preview ? (
+                /* Withheld, not "None open". "None open" is a FINDING, and
+                   stating it because the request failed is the same mistake as
+                   rendering £0.00 for an amount we could not fetch. */
+                "-"
               ) : period ? (
                 `${formatCycleDate(period.period_start)} to ${formatCycleDate(period.period_end)}`
               ) : (
@@ -369,7 +384,15 @@ export default function V2Billing() {
           />
         </div>
 
-        {!busy && !period && !migrationMissing ? (
+        {/* Gated on the preview having actually ANSWERED, not merely on period
+            being absent. A failed request also leaves period null, and this
+            card would then tell the reader that no vehicle has been activated
+            for billing and offer three reasons why, when the truth is that we
+            could not find out. On a page whose job is diagnosis, a confident
+            wrong diagnosis is the worst thing it can do: the operator is here
+            precisely because a charge did not happen, and this card would send
+            them looking in the wrong place. */}
+        {!busy && !loadError?.preview && preview && !period && !migrationMissing ? (
           <Card kicker="No open period" className="mb-6">
             <p className="m-0 text-sm text-ink-2">
               Nothing is being billed right now. A period opens when the first
