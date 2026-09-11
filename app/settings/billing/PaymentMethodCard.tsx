@@ -16,10 +16,20 @@ export type BillingRow = {
   card_exp_month: number | null;
   card_exp_year: number | null;
   status: BillingStatus;
-  /* Null on a v2_period company: next_charge_on drives the v1 4-weekly cron
-     and a period-billed company has no such date. PaymentMethodCard itself
-     never reads this field; V1Billing does, and already guards with
-     `billing?.next_charge_on ? ... : "-"`, so widening breaks nothing. */
+  /* Widened to nullable for the TYPE's sake, not because the column is.
+     `company_billing.next_charge_on` is `date not null` (billing_01), and
+     neither billing_06 nor billing_07 drops that, so every row carries a date
+     including a v2 one, where the value is meaningless: next_charge_on drives
+     the v1 4-weekly cron and a period-billed company has no such date.
+
+     Nullable here because a v2 row's value must never be RENDERED as a real
+     next charge, and a type that permits null makes the guard at the call site
+     obligatory rather than optional. PaymentMethodCard itself never reads the
+     field; V1Billing does, and already guards with
+     `billing?.next_charge_on ? ... : "-"`.
+
+     Anything inserting a v2 row must supply a date. See the Task 9 note in
+     docs/superpowers/plans/2026-09-11-v2-billing-ui-and-pricing.md. */
   next_charge_on: string | null;
 };
 

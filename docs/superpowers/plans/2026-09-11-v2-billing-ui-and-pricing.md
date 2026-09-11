@@ -2251,6 +2251,28 @@ Only continue to Task 9 once a v2 activation has actually charged.
 
 ## Task 9 (FLAGGED): v2 signup branch in the card route
 
+> **STOP. This task as written below does not work, and a code review on
+> 2026-09-11 found two defects in it. Resolve both before implementing.**
+>
+> **(a) `next_charge_on: null` will fail.** `company_billing.next_charge_on` is
+> `date not null` (`docs/sql/billing_01_platform_billing.sql:15`), and neither
+> `billing_06` nor `billing_07` drops the constraint. The insert below violates it.
+> Three ways out, and the choice is a real decision, not a transcription fix:
+> supply a date and rely on the `billing_model` guard in
+> `app/api/billing/run/route.ts:64` to keep the v1 cron off it; add a migration
+> dropping the NOT NULL; or give v2 rows a sentinel far-future date. The guard
+> already exists and is the cheapest, but it makes a NOT NULL column carry a
+> meaningless value, which is how the next person gets confused.
+>
+> **(b) The v2 signup branch is not the only unguarded path in this route.**
+> `closeDuePeriods` sets `company_billing.status = 'past_due'` on a v2 company when
+> dunning exhausts (`lib/billing/periodServer.ts:647`). The REPLACEMENT-card branch,
+> which this task leaves untouched, then routes that admin through
+> `selectRecoveryAction` into `runChargeCycle`: v1 pricing, a stale `next_charge_on`
+> as the cycle date, a `platform_charges` row, and `applyChargeOutcome` flipping
+> status back to `active` while the v2 balance stays uncollected. Fixing only the
+> new-company branch leaves that live.
+
 **This changes what a new customer experiences.** `/api/billing/card` has zero v2 awareness: on a company with no `company_billing` row it calls `runChargeCycle`, which writes `platform_charges` and charges at v1 prices immediately, then inserts a row with `next_charge_on` set and no `billing_model`.
 
 **Files:**
