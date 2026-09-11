@@ -2613,8 +2613,14 @@ type UserRow = {
   tenantName: string | null;
   companyId: string | null;
   companyName: string | null;
-  createdAt: string | null;
 };
+
+/* NOTE: Task 7 extracted this join into lib/superAdmin/users.ts as
+   buildUserRows and dropped createdAt, which nothing here rendered. Import
+   SuperAdminUserRow from there rather than redeclaring this type. A row with a
+   null fullName AND null role is an orphaned auth user: an account that exists
+   in auth.users with no profiles row, which a half-completed invite leaves
+   behind. Rendering it as its email is the correct outcome. */
 
 export default function SuperAdminUsersPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
