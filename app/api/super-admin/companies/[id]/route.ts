@@ -6,6 +6,8 @@ import { normalizeCompanyEdit } from "../../../../../lib/superAdmin/companyEdit"
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /* Writes companies.name and the company_profiles row.
 
    This holds the service-role key because it has to: rls_04 gives companies a
@@ -15,11 +17,27 @@ export const dynamic = "force-dynamic";
 
    Everything that reaches .update() comes from normalizeCompanyEdit, which
    rebuilds the patch from an allowlist. Do not add a field to the update call
-   without adding it there. */
+   without adding it there.
+
+   Both writes are idempotent: .update() sends a fixed payload keyed on id, and
+   .upsert() with onConflict resolves to the same row every time. That is what
+   makes it safe to tell an operator to retry after a partial failure below --
+   a future refactor that swapped the upsert for a plain insert would break
+   that safety without changing anything else about this route's shape. */
 
 export const PATCH = withSuperAdmin(
   async (actorId: string, request: NextRequest, context: { params: Promise<{ id: string }> }) => {
     const { id: companyId } = await context.params;
+
+    // The raw URL segment goes straight into .eq("id", ...) against a uuid
+    // column. An id shaped wrong for that column (not merely absent) is a
+    // client mistake, not a lookup failure: without this check it reaches
+    // Postgres as 22P02 and comes back through the lookupError branch below,
+    // reported to the client as a 500 with a log line that misdescribes what
+    // happened.
+    if (!UUID_PATTERN.test(companyId)) {
+      return NextResponse.json({ error: "No such company." }, { status: 404 });
+    }
 
     let body: unknown;
     try {
@@ -59,7 +77,36 @@ export const PATCH = withSuperAdmin(
       return NextResponse.json({ error: "Unable to update this company." }, { status: 500 });
     }
     if (!existing) {
+      // Load-bearing, not just a nicer 404: without this lookup, a PATCH to a
+      // nonexistent id would have the companies.update() below match zero
+      // rows and return NO error (PostgREST does not treat a zero-row match
+      // as a failure), fall through to the upsert, insert a company_profiles
+      // row keyed to a company that does not exist, and report 200 {ok:true}
+      // -- an orphan row behind an apparent success.
       return NextResponse.json({ error: "No such company." }, { status: 404 });
+    }
+
+    /* company_profiles.tenant_id holds the COMPANY id despite its name
+       (rls_04_identity_tables.sql:27). onConflict names it explicitly so an
+       upsert for a company with no profile row inserts rather than erroring.
+
+       This write goes FIRST, ahead of the one-column companies.name update
+       that follows, because it is the one more likely to fail: a 28-column
+       insert-or-update against a table whose unique index and constraints
+       this route cannot see, versus a single column against a row whose
+       existence was just proven above. Partial state can only happen when
+       the first write lands and the second fails, so ordering the riskier
+       write first turns most failures into a clean, fully-retryable no-op
+       instead of a partial write. */
+    const { error: profileError } = await admin
+      .from("company_profiles")
+      .upsert({ ...normalized.profile, tenant_id: companyId }, { onConflict: "tenant_id" });
+
+    if (profileError) {
+      // Nothing has been written yet, so this is a clean failure, not a
+      // partial one -- there is nothing to audit as landed.
+      console.error("super-admin company update: profile write failed", profileError);
+      return NextResponse.json({ error: "Unable to update this company." }, { status: 500 });
     }
 
     const { error: nameError } = await admin
@@ -68,43 +115,44 @@ export const PATCH = withSuperAdmin(
       .eq("id", companyId);
 
     if (nameError) {
+      /* The profile write already landed. Say so, rather than reporting a
+         clean failure the operator would reasonably retry from stale form
+         state, and LOG it: a write that really happened must not go
+         unaudited just because the request as a whole failed. changedFields
+         names what landed (the profile columns), not "name" -- the update
+         that failed. */
       console.error("super-admin company update: name write failed", nameError);
-      return NextResponse.json({ error: "Unable to update this company." }, { status: 500 });
-    }
-
-    /* company_profiles.tenant_id holds the COMPANY id despite its name
-       (rls_04_identity_tables.sql:27). onConflict names it explicitly so an
-       upsert for a company with no profile row inserts rather than erroring. */
-    const { error: profileError } = await admin
-      .from("company_profiles")
-      .upsert({ ...normalized.profile, tenant_id: companyId }, { onConflict: "tenant_id" });
-
-    if (profileError) {
-      /* The name write already landed. Say so, rather than reporting a clean
-         failure the operator would reasonably retry from stale form state, and
-         LOG it: a write that really happened must not go unaudited just because
-         the request as a whole failed. */
-      console.error("super-admin company update: profile write failed", profileError);
 
       logSuperAdminEdit({
         actorId,
         action: "company.update",
         targetId: companyId,
-        changedFields: ["name"],
+        changedFields: Object.keys(normalized.profile),
         result: "partial",
       });
 
       return NextResponse.json(
-        { error: "The company name was saved, but the company details could not be. Please try again.", partial: true },
+        { error: "The company details were saved, but the company name could not be updated. Please try again.", partial: true },
         { status: 500 },
       );
     }
 
+    // changedFields always includes "name" here (the companies.name column)
+    // alongside the profile keys, so a full success and a partial failure
+    // agree on what "name" means in this log -- the partial branch above
+    // logs only the profile keys because that is genuinely all that landed
+    // when the name write fails.
+    //
+    // Also: this records fields PRESENT IN THE REQUEST, not fields whose
+    // values actually changed. The settings form posts every field on every
+    // save, so in practice this list is the same on every call regardless of
+    // what the operator actually edited. Fine for a breadcrumb, but the name
+    // "changedFields" reads as a stronger claim than that.
     logSuperAdminEdit({
       actorId,
       action: "company.update",
       targetId: companyId,
-      changedFields: Object.keys(normalized.profile),
+      changedFields: ["name", ...Object.keys(normalized.profile)],
       result: "ok",
     });
 
