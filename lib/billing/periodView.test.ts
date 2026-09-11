@@ -92,7 +92,6 @@ describe("pricingExplanation", () => {
         lines: [vehicleLine(6450), adjustmentLine("minimum_adjustment", 6450)],
         vehicleCount: 1,
         minimumPence: 12900,
-        discountPercent: 0,
       })
     ).toBe(
       "The £129.00 minimum exceeds your 1 vehicle at £64.50, so the minimum applies."
@@ -109,7 +108,6 @@ describe("pricingExplanation", () => {
         lines: [vehicleLine(6450, "AB12CDE"), vehicleLine(6450, "XY98ZZZ")],
         vehicleCount: 2,
         minimumPence: 12900,
-        discountPercent: 0,
       })
     ).toBeNull();
   });
@@ -120,9 +118,27 @@ describe("pricingExplanation", () => {
         lines: [vehicleLine(64500), adjustmentLine("volume_discount", -6450)],
         vehicleCount: 10,
         minimumPence: 12900,
-        discountPercent: 10,
       })
-    ).toBe("10% off your whole fleet, saving £64.50.");
+    ).toBe(
+      "A volume discount is applied to your whole fleet, saving £64.50."
+    );
+  });
+
+  /* THE CAPPED FLEET, which had no test and is the case the docstring claims
+     to handle. 19 vehicles are priced by pretending to be 20, so the invoice's
+     nominal discountPercent is 20 while the saving is £193.50 of £1225.50,
+     which is 15.8%. Quoting either percentage beside that saving prints two
+     numbers that cannot both be right. The sentence quotes neither. */
+  it("quotes no percentage, so a capped fleet cannot contradict itself", () => {
+    const explanation = pricingExplanation({
+      lines: [vehicleLine(122550), adjustmentLine("volume_discount", -19350)],
+      vehicleCount: 19,
+      minimumPence: 12900,
+    });
+    expect(explanation).toBe(
+      "A volume discount is applied to your whole fleet, saving £193.50."
+    );
+    expect(explanation).not.toContain("%");
   });
 
   it("prefers the minimum when both lines are present", () => {
@@ -134,7 +150,6 @@ describe("pricingExplanation", () => {
       ],
       vehicleCount: 1,
       minimumPence: 12900,
-      discountPercent: 10,
     });
     expect(explanation).toContain("minimum applies");
   });
@@ -145,7 +160,6 @@ describe("pricingExplanation", () => {
         lines: [vehicleLine(6450), vehicleLine(6450), vehicleLine(6450)],
         vehicleCount: 3,
         minimumPence: 12900,
-        discountPercent: 0,
       })
     ).toBeNull();
   });

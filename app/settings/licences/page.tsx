@@ -57,8 +57,19 @@ function licenceAddedMessage(
     },
     base = "Licence added."
 ): string {
-    if (!payload.charged || payload.grossPence == null || payload.days == null) {
+    if (!payload.charged || payload.grossPence == null) {
         return base;
+    }
+    /* v2 opening charge. The period_opened response carries an amount but no
+       `days`, because opening a period is not a pro-rata top-up: it collects
+       the minimum for the whole period.
+
+       Without this branch the `days == null` guard below swallowed it and a
+       GBP 154.80 debit was announced as "Licence added." That is exactly the
+       surprise charge this whole helper exists to prevent, and it fired on a
+       customer's very first activation. */
+    if (payload.days == null) {
+        return `${base} Charged ${formatPence(payload.grossPence)}, which opens your first billing period.`;
     }
     /* `charged: true` with `alreadyPaid` is NOT a charge that just happened.
        chargeVehicleAddon found a succeeded row from an earlier attempt, took

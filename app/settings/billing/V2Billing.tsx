@@ -24,7 +24,7 @@ import MessageBanner from "../../../components/MessageBanner";
 import Skeleton from "../../../components/Skeleton";
 import Stat from "../../../components/Stat";
 import { formatPence, formatCycleDate } from "../../../lib/billing/format";
-import { londonDateISO } from "../../../lib/billing/schedule";
+import { addDays, londonDateISO } from "../../../lib/billing/schedule";
 import {
   MID_PERIOD_ADDITION_NOTE,
   NO_PERIOD_REASONS,
@@ -60,6 +60,14 @@ type PreviewResponse = {
   vatPence?: number;
   grossPence?: number;
   minimumPence?: number;
+  /* Collected when the period opened, so the close takes only the remainder.
+     grossPence is what the period COST; balanceGrossPence is what will be
+     charged. They differ on any period that prepaid its minimum, which is
+     every company's first one. */
+  prepaidPence?: number;
+  balanceNetPence?: number;
+  balanceVatPence?: number;
+  balanceGrossPence?: number;
 };
 
 /* A settled charge attempt against a period. Distinct from a projection: this
@@ -286,7 +294,6 @@ export default function V2Billing() {
           lines,
           vehicleCount: preview.vehicleCount ?? 0,
           minimumPence: preview.minimumPence ?? 0,
-          discountPercent: preview.discountPercent ?? 0,
         })
       : null;
 
@@ -339,7 +346,13 @@ export default function V2Billing() {
                    rendering £0.00 for an amount we could not fetch. */
                 "-"
               ) : period ? (
-                `${formatCycleDate(period.period_start)} to ${formatCycleDate(period.period_end)}`
+                /* period_end is EXCLUSIVE everywhere in the billing code:
+                   overlapsPeriod in close.ts drops a licence activated on it,
+                   and nothing dated period_end is billed to this period.
+                   Printing it as the last day showed a 29-day range beside
+                   "Day 1 of 28", and named a date that belongs to the NEXT
+                   period. */
+                `${formatCycleDate(period.period_start)} to ${formatCycleDate(addDays(period.period_end, -1))}`
               ) : (
                 "None open"
               )
@@ -369,18 +382,22 @@ export default function V2Billing() {
             }
             sub={period ? "billable so far this period" : undefined}
           />
+          {/* The BALANCE, not the invoice total. What the period costs and
+              what the close will take are different numbers whenever the
+              minimum was already collected, and the figure a customer needs
+              is the one that will leave their account. */}
           <Stat
-            label="Projected total"
+            label="To pay at close"
             value={
               busy ? (
                 <Skeleton display="inline-block" w="8ch" h="1.25rem" />
               ) : period ? (
-                money(preview?.grossPence)
+                money(preview?.balanceGrossPence)
               ) : (
                 "-"
               )
             }
-            sub={period ? "inc VAT, if it closed today" : undefined}
+            sub={period ? "inc VAT, if it runs to term" : undefined}
           />
         </div>
 
@@ -409,8 +426,15 @@ export default function V2Billing() {
           </Card>
         ) : null}
 
+        {/* "runs to term", not "closed today". assembleInvoice sets every
+            vehicle's coverage to the full period end, so this total is the
+            at-term figure and does not grow day by day. Labelling it "if it
+            closed today" invited two wrong readings: that the number is
+            accruing, and that cancelling now would cost this much. A period
+            genuinely cut short prices far lower, because cancellation moves
+            period_end before the invoice is assembled. */}
         {!busy && period ? (
-          <Card kicker="This period, if it closed today" className="mb-6">
+          <Card kicker="This period, if it runs to term" className="mb-6">
             <p className="m-0 text-xs text-ink-3">
               A projection, not an invoice. These figures are produced by the
               same calculation that will run when the period closes.
@@ -430,8 +454,30 @@ export default function V2Billing() {
             <div className="mt-1 border-t border-line pt-1">
               <LineRow label="Net" value={money(preview?.netPence)} />
               <LineRow label="VAT" value={money(preview?.vatPence)} />
-              <LineRow label="Total" value={money(preview?.grossPence)} strong />
+              <LineRow
+                label="Period total"
+                value={money(preview?.grossPence)}
+                strong={!(preview?.prepaidPence ?? 0)}
+              />
             </div>
+
+            {/* Only when money was already taken. Showing "already paid £0.00"
+                on every other period would be noise, and worse, would imply a
+                payment happened. */}
+            {(preview?.prepaidPence ?? 0) > 0 ? (
+              <div className="mt-1 border-t border-line pt-1">
+                <LineRow
+                  label="Paid when this period opened"
+                  value={`-${formatPence(preview?.prepaidPence ?? 0)}`}
+                  muted
+                />
+                <LineRow
+                  label="Left to pay at close"
+                  value={money(preview?.balanceGrossPence)}
+                  strong
+                />
+              </div>
+            ) : null}
 
             {explanation ? (
               <p className="mb-0 mt-3 text-sm text-ink-2">{explanation}</p>

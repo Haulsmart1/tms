@@ -82,12 +82,26 @@ export function periodProgress(args: {
  * positive. At exactly two vehicles the fleet price EQUALS the GBP 129
  * minimum, assembleInvoice raises no adjustment, and "the minimum applies"
  * would be true of the number and false of the bill.
+ *
+ * THE DISCOUNT SENTENCE QUOTES NO PERCENTAGE, deliberately. The obvious
+ * version used the invoice's discountPercent, which is the NOMINAL band from
+ * fleetDiscountBand, and that band is not always the one the fleet sits in: a
+ * 19-vehicle fleet is priced by pretending to be 20, so the nominal figure is
+ * 20% while the saving is GBP 193.50 of GBP 1225.50, or 15.8%. "20% off your
+ * whole fleet, saving GBP 193.50" is two numbers that cannot both be right,
+ * printed side by side, on a bill. Quoting the effective percentage instead
+ * would be arithmetically true and just as confusing, because it names a
+ * percentage that appears nowhere on the pricing page.
+ *
+ * So the sentence states the saving, which is the fact the customer can check
+ * against the total. The band that produced the price is already on the
+ * discount line itself: invoice.ts writes "Volume discount (priced at 20
+ * vehicles)" precisely so the capped case explains itself.
  */
 export function pricingExplanation(args: {
   lines: readonly PreviewLine[];
   vehicleCount: number;
   minimumPence: number;
-  discountPercent: number;
 }): string | null {
   const minimum = args.lines.find((line) => line.kind === "minimum_adjustment");
   if (minimum && minimum.netPence > 0) {
@@ -105,7 +119,7 @@ export function pricingExplanation(args: {
   const discount = args.lines.find((line) => line.kind === "volume_discount");
   if (discount && discount.netPence < 0) {
     return (
-      `${args.discountPercent}% off your whole fleet, saving ` +
+      `A volume discount is applied to your whole fleet, saving ` +
       `${formatPence(Math.abs(discount.netPence))}.`
     );
   }

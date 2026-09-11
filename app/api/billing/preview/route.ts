@@ -11,6 +11,7 @@ import { errorResponse } from "../../../../lib/accounts/server";
 import { requireCompanyAdmin } from "../../../../lib/billing/server";
 import { previewPeriodInvoice } from "../../../../lib/billing/periodServer";
 import type { CompanyBillingSettings } from "../../../../lib/billing/periodServer";
+import { balanceDue } from "../../../../lib/billing/periodPayment";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -92,6 +93,23 @@ export async function GET() {
       settings,
     });
 
+    /* What the close will actually take, which is NOT the invoice total.
+       collectPeriod charges balanceDue(invoiceNet, prepaid_pence, vatRate),
+       because a first period already collected the minimum when it opened and
+       openPeriodAndChargeMinimum recorded that in prepaid_pence.
+
+       Returning only the invoice total made this page contradict the very
+       claim it makes about itself. A new two-vehicle company whose £129 was
+       taken up front would read "Projected total £154.80" under the words
+       "the same calculation that will run when the period closes", and the
+       close would take £0.00.
+
+       Same vat_rate fallback as collectPeriod: neither this route's select nor
+       closeDuePeriods' asks for the column, so both land on 20. */
+    const vatRatePercent = settings.vat_rate ?? 20;
+    const prepaidPence = Number(period.prepaid_pence ?? 0);
+    const balance = balanceDue(invoice.netPence, prepaidPence, vatRatePercent);
+
     return NextResponse.json({
       ok: true,
       period,
@@ -124,6 +142,13 @@ export async function GET() {
       vatPence: invoice.vatPence,
       grossPence: invoice.grossPence,
       minimumPence: settings.min_invoice_pence,
+      /* What the period COST, what was already collected, and what is left to
+         take. The page must show the third as the figure to expect, and the
+         second is why the first and third differ. */
+      prepaidPence,
+      balanceNetPence: balance.netPence,
+      balanceVatPence: balance.vatPence,
+      balanceGrossPence: balance.grossPence,
     });
   } catch (error) {
     const mapped = errorResponse(error);
