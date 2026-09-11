@@ -25,6 +25,16 @@ export type CollectedRevenue = {
   totalPence: number;
   companyCount: number;
   missingSources: string[];
+  // A source whose query returned rows, but zero of them -- distinct from
+  // missingSources (isMissingRelationError, table does not exist at all).
+  // Zero rows is genuinely ambiguous: it means either "no charges in the
+  // window" or "the table exists but the caller cannot read it", and those
+  // look identical over PostgREST. docs/sql/billing_06_period_billing.sql:451
+  // names the concrete cause this project already has one of: "A policy
+  // without a grant reads as an empty table, not as an error." Naming the
+  // source here, instead of collapsing it into the total, gives an operator
+  // seeing an unexpectedly low figure somewhere to look.
+  zeroRowSources: string[];
 };
 
 const COLLECTED_STATUS = "succeeded";
@@ -39,11 +49,23 @@ export function collectedRevenue(
   let totalPence = 0;
   const companies = new Set<string>();
   const missingSources: string[] = [];
+  const zeroRowSources: string[] = [];
 
   for (const source of sources) {
     if (source.rows == null) {
       missingSources.push(source.label);
       continue;
+    }
+
+    // See CollectedRevenue.zeroRowSources: an empty array here is read
+    // BEFORE the loop below runs, so it names "the query returned nothing
+    // at all", not "nothing matched the status/window filter" -- the two
+    // are the same fact for this caller (loadChargeSource already filters
+    // status and created_at server-side), but recording it here, rather
+    // than after filtering, is what makes that fact available even if a
+    // future caller stops pre-filtering.
+    if (source.rows.length === 0) {
+      zeroRowSources.push(source.label);
     }
 
     for (const row of source.rows) {
@@ -84,7 +106,7 @@ export function collectedRevenue(
   // totalPence is cash collected GROSS, VAT included. The VAT portion is
   // owed to HMRC, not profit, which is why this tile is labelled "Collected"
   // rather than "Revenue".
-  return { totalPence, companyCount: companies.size, missingSources };
+  return { totalPence, companyCount: companies.size, missingSources, zeroRowSources };
 }
 
 export type CompanySummary = {

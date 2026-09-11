@@ -48,6 +48,7 @@ type Totals = {
   collectedPence: number;
   payingCompanies: number;
   missingSources: string[];
+  zeroRowSources: string[];
 };
 
 export default function SuperAdminPage() {
@@ -170,6 +171,7 @@ export default function SuperAdminPage() {
         collectedPence: revenue.totalPence,
         payingCompanies: revenue.companyCount,
         missingSources: revenue.missingSources,
+        zeroRowSources: revenue.zeroRowSources,
       });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to load platform figures.");
@@ -267,13 +269,37 @@ export default function SuperAdminPage() {
           />
         </div>
 
-        {/* Names what could not be counted. A tile that silently reported zero
-            for an unapplied migration would be worse than the hardcoded
-            placeholder this dashboard replaced: it would look authoritative. */}
-        {totals && totals.missingSources.length > 0 ? (
-          <div className="mb-6 text-xs font-medium text-warning-strong">
-            Collected (28d, inc VAT) excludes {totals.missingSources.join(" and ")}: not available
-            on this database.
+        {totals && (totals.missingSources.length > 0 || totals.zeroRowSources.length > 0) ? (
+          <div className="mb-6 grid gap-1">
+            {/* Names what could not be counted. A tile that silently
+                reported zero for an unapplied migration would be worse than
+                the hardcoded placeholder this dashboard replaced: it would
+                look authoritative. */}
+            {totals.missingSources.length > 0 ? (
+              <div className="text-xs font-medium text-warning-strong">
+                Collected (28d, inc VAT) excludes {totals.missingSources.join(" and ")}: not
+                available on this database.
+              </div>
+            ) : null}
+
+            {/* FIX 4: a source that returned zero rows is ambiguous between
+                "no charges in 28 days" and "cannot read this table" -- a
+                policy without a grant reads as an empty table, not as an
+                error (docs/sql/billing_06_period_billing.sql:451). This is a
+                real hazard here today: billing_06 is unapplied, so a partial
+                application can land exactly this state for period_charges.
+                No new API route reaches for the service role to
+                disambiguate it (that pattern belongs to
+                app/super-admin/requests/page.tsx and is out of scope here);
+                naming the source instead gives an operator seeing an
+                unexpectedly low figure somewhere concrete to check. */}
+            {totals.zeroRowSources.length > 0 ? (
+              <div className="text-xs font-medium text-ink-3">
+                {totals.zeroRowSources.join(" and ")} contributed nothing in the last 28 days. That
+                is consistent with no charges, but also with an unreadable table (for example a
+                missing GRANT) -- if this figure looks low, check that source&apos;s read access.
+              </div>
+            ) : null}
           </div>
         ) : null}
 
