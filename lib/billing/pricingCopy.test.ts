@@ -8,6 +8,7 @@ import {
 } from "./rateCard";
 import {
   BILLING_BASIS_SENTENCE,
+  THRESHOLD_PARITY_SENTENCE,
   includedVehicleCount,
   pricingBandRows,
   pricingHeadline,
@@ -87,5 +88,40 @@ describe("BILLING_BASIS_SENTENCE", () => {
     expect(BILLING_BASIS_SENTENCE).toContain("28");
     expect(BILLING_BASIS_SENTENCE).toContain("end of each");
     expect(BILLING_BASIS_SENTENCE).toContain("Excludes VAT");
+  });
+});
+
+describe("THRESHOLD_PARITY_SENTENCE", () => {
+  /* This sentence is a public commercial promise printed on the pricing page,
+     not a description of the code. Asserting the rate card actually satisfies
+     it means a reprice that breaks the promise fails here, rather than
+     quietly turning the pricing page into a lie. */
+  it("promises the threshold behaviour it describes", () => {
+    expect(THRESHOLD_PARITY_SENTENCE).toContain("threshold");
+    expect(THRESHOLD_PARITY_SENTENCE).toContain("never costs you more");
+  });
+
+  // The second half of the promise: growing never costs you more.
+  it("holds: the price never falls as the fleet grows", () => {
+    for (let count = 0; count <= 200; count += 1) {
+      expect(fleetPeriodPence(count + 1)).toBeGreaterThanOrEqual(
+        fleetPeriodPence(count)
+      );
+    }
+  });
+
+  /* The first half: a fleet just below a threshold pays the threshold price.
+     Worth asserting that this actually happens somewhere, because a sentence
+     explaining a behaviour the rate card no longer exhibits is its own kind of
+     wrong, and 19 and 9 are the two places the cap currently fires. */
+  it("holds: some fleets pay a larger fleet's price", () => {
+    const parity: number[] = [];
+    for (let count = 1; count <= 200; count += 1) {
+      if (fleetPeriodPence(count) === fleetPeriodPence(count + 1)) {
+        parity.push(count);
+      }
+    }
+    expect(parity).toContain(9);
+    expect(parity).toContain(19);
   });
 });
