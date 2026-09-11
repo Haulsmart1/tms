@@ -532,7 +532,25 @@ export default function VehicleLicencesPage() {
     /* Fail closed to v1, as the billing page shell does: a v2 company shown v1
        copy sees a stale sentence, but a v1 company shown v2 copy sees a price
        it will never be charged. */
-    const isPeriodBilling = billingModel === "v2_period";
+    /* THREE states, not two. billingModel comes back null both when a company
+       genuinely has no billing row and when RLS refused the read, and it
+       refuses for everyone who is not an admin: company_billing is admin-only
+       (billing_01), staff match no row, and a super_admin matches every row so
+       maybeSingle errors.
+
+       Collapsing that into "not v2, therefore v1" would print "£10 per
+       licensed vehicle per week" and a 4-weekly charge figure to a staff
+       member at a v2 company. A wrong price and a wrong amount, both stated as
+       fact, to the reader least able to check them.
+
+       So unknown asserts nothing. Only an admin, whose read actually
+       succeeded, is shown a rate. */
+    const pricingCopyMode: "v2" | "v1" | "unknown" =
+        tenant.status !== "ready" || tenant.role !== "admin"
+            ? "unknown"
+            : billingModel === "v2_period"
+              ? "v2"
+              : "v1";
 
     return (
         <TenantGate>
@@ -542,16 +560,21 @@ export default function VehicleLicencesPage() {
                 <div className="text-kicker uppercase text-ink-3">Admin</div>
                 <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">Vehicle Licences</h1>
                 <p className="m-0 text-sm text-ink-3">
-                    {isPeriodBilling ? (
+                    {pricingCopyMode === "v2" ? (
                         <>
                             Add and manage vehicle licences.{" "}
                             {pricingHeadline().summary} {BILLING_BASIS_SENTENCE}
                         </>
-                    ) : (
+                    ) : pricingCopyMode === "v1" ? (
                         <>
                             Add and manage vehicle licences. £10 per licensed
                             vehicle per week, less per vehicle on larger fleets,
                             charged every 4 weeks.
+                        </>
+                    ) : (
+                        <>
+                            Add and manage vehicle licences. Your company&apos;s
+                            pricing is managed by your company admin.
                         </>
                     )}
                 </p>
@@ -580,37 +603,48 @@ export default function VehicleLicencesPage() {
                     charged. The real v2 figure depends on the open period, so
                     it lives on the billing page rather than being recomputed
                     here from a different rate card. */}
-                {isPeriodBilling ? (
+                {pricingCopyMode === "unknown" ? (
+                    /* One tile, not two withheld ones. A reader who cannot be
+                       told the rate is not helped by two dashes where numbers
+                       should be; they are helped by knowing where the answer
+                       lives. */
                     <Stat
-                        label="This period"
-                        value="See billing"
-                        sub="charged when the period closes"
+                        label="Billing"
+                        value="Admin only"
+                        sub="your company admin can see the rate and the charges"
                     />
+                ) : pricingCopyMode === "v2" ? (
+                    <>
+                        <Stat
+                            label="This period"
+                            value="See billing"
+                            sub="charged when the period closes"
+                        />
+                        <Stat
+                            label="Billing Rule"
+                            value={pricingHeadline().perVehicleLabel}
+                            sub={`per vehicle per ${pricingHeadline().periodDays} days, less on larger fleets`}
+                        />
+                    </>
                 ) : (
-                    <Stat
-                        label="4-Weekly Charge"
-                        value={
-                            showSkeleton ? (
-                                <Skeleton display="inline-block" w="10ch" h="1.25rem" />
-                            ) : (
-                                formatPence(amounts.grossPence)
-                            )
-                        }
-                        sub="this tenant only, inc VAT"
-                    />
-                )}
-                {isPeriodBilling ? (
-                    <Stat
-                        label="Billing Rule"
-                        value={pricingHeadline().perVehicleLabel}
-                        sub={`per vehicle per ${pricingHeadline().periodDays} days, less on larger fleets`}
-                    />
-                ) : (
-                    <Stat
-                        label="Billing Rule"
-                        value="£10"
-                        sub="per vehicle per week, less on larger fleets"
-                    />
+                    <>
+                        <Stat
+                            label="4-Weekly Charge"
+                            value={
+                                showSkeleton ? (
+                                    <Skeleton display="inline-block" w="10ch" h="1.25rem" />
+                                ) : (
+                                    formatPence(amounts.grossPence)
+                                )
+                            }
+                            sub="this tenant only, inc VAT"
+                        />
+                        <Stat
+                            label="Billing Rule"
+                            value="£10"
+                            sub="per vehicle per week, less on larger fleets"
+                        />
+                    </>
                 )}
             </div>
 
