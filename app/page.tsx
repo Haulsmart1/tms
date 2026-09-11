@@ -23,7 +23,7 @@ import Footer from "../components/landing/Footer";
 export const metadata: Metadata = {
   title: "TMS Wizzard | Cloud Transport Management Software for UK & EU Haulage",
   description:
-    "Cloud transport management software for haulage, logistics and delivery operators. Jobs, proof of delivery, invoicing, fleet, drivers, subcontractors and live tracking in one platform. From £10 per vehicle per week, billed every 4 weeks.",
+    "Cloud transport management software for haulage, logistics and delivery operators. Jobs, proof of delivery, invoicing, fleet, drivers, subcontractors and live tracking in one platform. From £129 per 28 days, including your first 2 vehicles.",
   keywords: [
     "transport management software",
     "TMS software",
@@ -73,13 +73,17 @@ export default function HomePage() {
             description:
               "Cloud transport management software for jobs, proof of delivery, invoicing, vehicles, drivers, subcontractors, dispatch, and fleet management.",
             offers: {
-              // Was price "0", which advertised the product as free and
-              // contradicted the pricing card. The price here is the entry
-              // weekly rate; volume bands are on the pricing card.
+              // Was price "0" (advertising the product as free), then "10"
+              // (the v1 weekly per-vehicle rate). Now the v2 MINIMUM, which is
+              // the lowest amount anyone actually pays and therefore the only
+              // honest "from" price. Quoting the 64.50 per-vehicle rate here
+              // would index a number no customer is ever charged, since one
+              // vehicle still costs 129.
               "@type": "Offer",
-              price: "10",
+              price: "129",
               priceCurrency: "GBP",
-              description: "Per vehicle, per week, billed every 4 weeks",
+              description:
+                "Per 28-day period, including the first 2 vehicles, billed in arrears",
             },
           }),
         }}

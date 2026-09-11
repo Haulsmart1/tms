@@ -103,10 +103,13 @@ export const DISCOUNT_BANDS: readonly DiscountBand[] = [
  * asserts it across 0 to 200 vehicles anyway, because "survives a reprice" is
  * exactly the claim worth failing loudly.
  *
- * The visible consequence is that fleets just under a threshold pay the
- * threshold price: 18, 19 and 20 vehicles all cost GBP 1032.00. That is
- * intended. It is the honest form of the promise, and it fails toward the
- * customer.
+ * The visible consequence is that a fleet just under a threshold pays the
+ * threshold price: 19 and 20 vehicles both cost GBP 1032.00. That is intended.
+ * It is the honest form of the promise, and it fails toward the customer.
+ *
+ * This previously read "18, 19 and 20", which is wrong and was quotable to a
+ * customer. 18 costs GBP 986.85: the 15% band gives 18 x 6450 x 0.85 = 98685,
+ * which beats the 20 band's 103200, so the cap does not fire at 18.
  */
 export function fleetPeriodPence(
   vehicleCount: number,

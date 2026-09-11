@@ -182,3 +182,20 @@ describe("fleetDiscountBand", () => {
     }
   });
 });
+
+describe("threshold cap", () => {
+  // These three were documented as equal and are not. The comment above
+  // fleetPeriodPence said "18, 19 and 20 vehicles all cost GBP 1032.00",
+  // which is the kind of sentence that gets quoted to a customer.
+  it("prices 19 and 20 the same, and 18 strictly cheaper", () => {
+    expect(fleetPeriodPence(19)).toBe(fleetPeriodPence(20));
+    expect(fleetPeriodPence(18)).toBeLessThan(fleetPeriodPence(19));
+    expect(fleetPeriodPence(18)).toBe(98685);
+    expect(fleetPeriodPence(20)).toBe(103200);
+  });
+
+  // The other cap effect, which the copy does describe correctly.
+  it("makes the tenth vehicle free", () => {
+    expect(fleetPeriodPence(9)).toBe(fleetPeriodPence(10));
+  });
+});

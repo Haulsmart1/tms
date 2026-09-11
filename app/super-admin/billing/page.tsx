@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../../../lib/supabase/browser";
 import { countBillableVehicles } from "../../../lib/billing/vehicleCount";
 import { computeChargeAmounts, formatPence } from "../../../lib/billing/money";
+import { pricingHeadline } from "../../../lib/billing/pricingCopy";
 import Badge from "../../../components/Badge";
 import Button from "../../../components/Button";
 import MessageBanner from "../../../components/MessageBanner";
@@ -191,9 +192,16 @@ export default function SuperAdminBillingPage() {
                         Super Admin Billing
                     </h1>
 
+                    {/* Both models are live, so naming one is wrong for the
+                        other half of the platform. The figures below this
+                        header are still v1-shaped (they read platform_charges,
+                        which v2 never writes); a v2 view of this console is
+                        deliberately out of scope, see the 2026-09-11 spec. */}
                     <p className="m-0 text-sm text-ink-3">
-                        Billing is £10 per licensed vehicle per week, less per vehicle on
-                        larger fleets, charged every 4 weeks.
+                        Period billing (current): {pricingHeadline().summary}{" "}
+                        Legacy 4-weekly billing: £10 per licensed vehicle per
+                        week, less per vehicle on larger fleets. The figures
+                        below cover 4-weekly companies only.
                     </p>
                 </header>
 
