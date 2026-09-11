@@ -1836,7 +1836,11 @@ export default function SuperAdminCompaniesPage() {
       // vehicles has no company_id column: selecting one fails with 42703.
       supabase.from("vehicles").select("id, tenant_id"),
       supabase.from("vehicle_licences").select("vehicle_id, active"),
-      supabase.from("profiles").select("id, tenant_id"),
+      /* company_id as well as tenant_id: nothing in the repo writes
+         profiles.company_id, so a row carrying one was seeded by hand and is
+         plausibly the account holder. Selecting only tenant_id undercounts
+         those companies by exactly that person. */
+      supabase.from("profiles").select("id, tenant_id, company_id"),
       supabase.from("company_billing").select("company_id, status, billing_model"),
     ]);
 
@@ -1860,7 +1864,7 @@ export default function SuperAdminCompaniesPage() {
         tenants: (tenants.data ?? []) as { id: string; name: string | null; company_id: string | null }[],
         vehicles: (vehicles.data ?? []) as { id: string; tenant_id: string | null }[],
         licences: (licences.data ?? []) as { vehicle_id: string; active: boolean | null }[],
-        profiles: (profiles.data ?? []) as { id: string; tenant_id: string | null }[],
+        profiles: (profiles.data ?? []) as { id: string; tenant_id: string | null; company_id: string | null }[],
         billing: (billing.data ?? []) as { company_id: string; status: string | null; billing_model: string | null }[],
       }),
     );
