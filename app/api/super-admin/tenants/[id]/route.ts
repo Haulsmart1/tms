@@ -8,6 +8,18 @@ import { countBillableVehicles } from "../../../../../lib/billing/vehicleCount";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// PostgREST caps an unscoped select at 1000 rows by default, regardless of
+// which key reads it. vehicle_licences is the many-per-vehicle side (one
+// vehicle legitimately carries several active compliance documents at
+// once), so it truncates FIRST: a tenant with 600 vehicles averaging two
+// licences each returns 1200 licence rows, and countBillableVehicles below
+// would silently under-report the billable count while a vehicles-only
+// guard stayed quiet, since 600 is under the cap. Mirrors
+// POSTGREST_ROW_CAP in lib/billing/server.ts:21 and in the client page's
+// own copy (app/super-admin/companies/[id]/page.tsx), none of which can
+// share one constant across the service-role/client boundary.
+const POSTGREST_ROW_CAP = 1000;
+
 /* Renames a tenant, or re-parents it to a different company. This is the
    single most consequential write in the super-admin feature: operational
    tables (jobs, PODs, invoices, vehicles, drivers) are keyed by tenant_id,
@@ -141,6 +153,11 @@ export const PATCH = withSuperAdmin(
     // hand-driven, low-frequency admin operation; not a guarantee these
     // figures hold under a concurrent write.
     let moved: { vehicles: number; billableVehicles: number; users: number } | null = null;
+    // Set alongside `moved` when either pre-move read hit the row cap, so the
+    // figures in `moved` are known to be a lower bound rather than reported
+    // as exact. Returned to the client as `warning` and folded into the
+    // success notice the confirmation dialog already showed a preview of.
+    let movedWarning: string | undefined;
     if (isActualMove) {
       const [vehiclesResult, profilesResult] = await Promise.all([
         // Full rows, not a head-only count: the billable figure below needs
@@ -203,16 +220,30 @@ export const PATCH = withSuperAdmin(
       // confirmation dialog is built on THIS number, not the fleet size: a
       // tenant with 14 vehicles of which 9 carry an active licence charges
       // the new company for 9, not 14.
+      const vehicleRows = vehiclesResult.data ?? [];
+      const licenceRows = licencesResult.data ?? [];
+
       moved = {
-        vehicles: vehiclesResult.data?.length ?? 0,
+        vehicles: vehicleRows.length,
         billableVehicles: countBillableVehicles({
           companyId: tenantId,
           companyTenantIds: [tenantId],
-          vehicles: vehiclesResult.data ?? [],
-          licences: licencesResult.data ?? [],
+          vehicles: vehicleRows,
+          licences: licenceRows,
         }),
         users: profilesResult.count ?? 0,
       };
+
+      const cappedOn: string[] = [];
+      if (vehicleRows.length >= POSTGREST_ROW_CAP) cappedOn.push("vehicles");
+      if (licenceRows.length >= POSTGREST_ROW_CAP) cappedOn.push("vehicle_licences");
+      if (cappedOn.length > 0) {
+        movedWarning = `${cappedOn.join(" and ")} returned ${POSTGREST_ROW_CAP} or more rows, the PostgREST default cap. The vehicle and billable counts above may understate what actually moved.`;
+        console.warn("super-admin tenant update: pre-move count hit the PostgREST row cap", {
+          tenantId,
+          cappedOn,
+        });
+      }
     }
 
     // Built only from normalized's own fields, never from the raw body: the
@@ -252,6 +283,6 @@ export const PATCH = withSuperAdmin(
       result: "ok",
     });
 
-    return NextResponse.json({ ok: true, moved });
+    return NextResponse.json({ ok: true, moved, warning: movedWarning });
   },
 );
