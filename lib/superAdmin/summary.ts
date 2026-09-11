@@ -152,6 +152,30 @@ export function buildCompanySummaries(input: SummaryInput): CompanySummary[] {
   return rows.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
 }
 
+/* Platform-wide billable count for the /super-admin dashboard: how many
+   vehicles across the WHOLE platform have at least one active licence. Not a
+   per-company sum: the dashboard wants "how many vehicles are billable", and
+   a vehicle with two active compliance licences is still one vehicle.
+
+   Deliberately applies the SAME v.tenant_id != null rule as
+   countBillableVehicles in ../billing/vehicleCount.ts. The two definitions
+   must stay identical: without this rule, a vehicle with no tenant_id at all
+   would count here but be invisible to every per-company figure on
+   /super-admin/billing (which can only attribute a vehicle to a company
+   through its tenant), so the platform headline could exceed the sum of its
+   parts. That headline is the number people quote. */
+export function platformBillableVehicleCount(
+  vehicles: readonly VehicleRow[],
+  licences: readonly LicenceRow[],
+): number {
+  const activeVehicleIds = new Set(
+    licences.filter((licence) => licence.active).map((licence) => licence.vehicle_id),
+  );
+
+  return vehicles.filter((vehicle) => vehicle.tenant_id != null && activeVehicleIds.has(vehicle.id))
+    .length;
+}
+
 /* PostgREST reports a table that does not exist as Postgres 42P01, or as
    PGRST205 when the schema cache has never seen it. Both mean "this migration
    is not applied", which the caller must show rather than swallow. */

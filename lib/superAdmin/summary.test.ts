@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   collectedRevenue,
   buildCompanySummaries,
+  platformBillableVehicleCount,
   isMissingRelationError,
   type ChargeSource,
 } from "./summary";
@@ -224,6 +225,39 @@ describe("buildCompanySummaries", () => {
       ],
     });
     expect(rows.map((r) => r.name)).toEqual(["Acme Haulage", "Bravo Logistics"]);
+  });
+});
+
+describe("platformBillableVehicleCount", () => {
+  it("counts a vehicle with two active licences once", () => {
+    const vehicles = [{ id: "v1", tenant_id: "t1" }];
+    const licences = [
+      { vehicle_id: "v1", active: true },
+      { vehicle_id: "v1", active: true },
+    ];
+    expect(platformBillableVehicleCount(vehicles, licences)).toBe(1);
+  });
+
+  it("excludes a vehicle with no active licence", () => {
+    const vehicles = [{ id: "v1", tenant_id: "t1" }];
+    const licences = [{ vehicle_id: "v1", active: false }];
+    expect(platformBillableVehicleCount(vehicles, licences)).toBe(0);
+  });
+
+  it("excludes a vehicle with a null tenant_id even with an active licence", () => {
+    // Same rule as countBillableVehicles in ../billing/vehicleCount.ts: a
+    // vehicle with no tenant_id cannot be attributed to any company, so it
+    // must not inflate the platform headline past the sum of every
+    // per-company billable count on /super-admin/billing.
+    const vehicles = [{ id: "v1", tenant_id: null }];
+    const licences = [{ vehicle_id: "v1", active: true }];
+    expect(platformBillableVehicleCount(vehicles, licences)).toBe(0);
+  });
+
+  it("counts a vehicle whose tenant_id is a company id directly", () => {
+    const vehicles = [{ id: "v1", tenant_id: "c1" }];
+    const licences = [{ vehicle_id: "v1", active: true }];
+    expect(platformBillableVehicleCount(vehicles, licences)).toBe(1);
   });
 });
 
