@@ -17,6 +17,17 @@ export type Vehicle = {
   insurance_start_date: string | null;
   insurance_expiry: string | null;
   fleet_insurance_policy_id: string | null;
+  mam_kg: number | null;
+  trailer_mam_kg: number | null;
+  tachograph_fitted: boolean | null;
+  tachograph_type:
+    | "analogue"
+    | "digital"
+    | "smart_1"
+    | "smart_2"
+    | "other"
+    | null;
+  home_country_code: string | null;
 };
 
 export type FleetInsurancePolicy = {

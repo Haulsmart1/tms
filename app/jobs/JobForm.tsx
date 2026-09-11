@@ -12,6 +12,11 @@ type FormState = {
   customer_price: string;
   subcontractor_id: string;
   subcontractor_cost: string;
+  journey_scope: string;
+  origin_country_code: string;
+  destination_country_code: string;
+  compliance_regime_override: string;
+  compliance_override_reason: string;
   stops: Stop[];
 };
 
@@ -127,6 +132,109 @@ export default function JobForm({
           </select>
         </label>
         <Field id="job-subcost" label="Subcontractor cost" type="number" step="0.01" value={form.subcontractor_cost} onChange={(e) => onFieldChange("subcontractor_cost", e.target.value)} />
+      </div>
+
+      <div className="grid gap-3 rounded-md border border-line bg-surface-2 p-4">
+        <div>
+          <h3 className="m-0 text-sm font-semibold text-ink">
+            Driver-hours classification
+          </h3>
+          <p className="m-0 mt-1 text-xs text-ink-3">
+            Record the actual journey facts. Unknown values remain subject to review.
+          </p>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <label className="grid min-w-0 gap-1.5">
+            <span className="text-sm font-medium text-ink-2">
+              Journey scope
+            </span>
+            <select
+              className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+              value={form.journey_scope}
+              onChange={(event) =>
+                onFieldChange("journey_scope", event.target.value)
+              }
+            >
+              <option value="">Unknown / review required</option>
+              <option value="gb_domestic">GB domestic</option>
+              <option value="uk_eu">UK?EU</option>
+              <option value="aetr">AETR</option>
+              <option value="international_other">
+                Other international
+              </option>
+            </select>
+          </label>
+
+          <Field
+            id="job-origin-country"
+            label="Origin country"
+            maxLength={2}
+            placeholder="e.g. GB"
+            value={form.origin_country_code}
+            onChange={(event) =>
+              onFieldChange(
+                "origin_country_code",
+                event.target.value.toUpperCase()
+              )
+            }
+          />
+
+          <Field
+            id="job-destination-country"
+            label="Destination country"
+            maxLength={2}
+            placeholder="e.g. GB"
+            value={form.destination_country_code}
+            onChange={(event) =>
+              onFieldChange(
+                "destination_country_code",
+                event.target.value.toUpperCase()
+              )
+            }
+          />
+
+          <label className="grid min-w-0 gap-1.5">
+            <span className="text-sm font-medium text-ink-2">
+              Compliance override
+            </span>
+            <select
+              className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+              value={form.compliance_regime_override}
+              onChange={(event) =>
+                onFieldChange(
+                  "compliance_regime_override",
+                  event.target.value
+                )
+              }
+            >
+              <option value="">None</option>
+              <option value="gb_domestic">GB domestic</option>
+              <option value="assimilated">Assimilated</option>
+              <option value="aetr">AETR</option>
+              <option value="international_light_goods">
+                International light goods
+              </option>
+              <option value="exempt">Exempt</option>
+              <option value="unknown">Unknown</option>
+            </select>
+          </label>
+
+          <div className="sm:col-span-2">
+            <Field
+              id="job-compliance-override-reason"
+              label="Override reason"
+              placeholder="Required when a compliance override is used"
+              value={form.compliance_override_reason}
+              onChange={(event) =>
+                onFieldChange(
+                  "compliance_override_reason",
+                  event.target.value
+                )
+              }
+            />
+          </div>
+        </div>
       </div>
 
       <div>

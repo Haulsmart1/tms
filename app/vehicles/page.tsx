@@ -43,6 +43,11 @@ const EMPTY_FORM = {
   insurance_start_date: "",
   insurance_expiry: "",
   fleet_insurance_policy_id: "",
+  mam_kg: "",
+  trailer_mam_kg: "",
+  tachograph_fitted: "unknown" as "unknown" | "yes" | "no",
+  tachograph_type: "",
+  home_country_code: "",
 };
 
 
@@ -360,6 +365,20 @@ export default function VehiclesPage() {
       insurance_start_date: vehicle.insurance_start_date || "",
       insurance_expiry: vehicle.insurance_expiry || "",
       fleet_insurance_policy_id: vehicle.fleet_insurance_policy_id || "",
+      mam_kg:
+        vehicle.mam_kg == null ? "" : String(vehicle.mam_kg),
+      trailer_mam_kg:
+        vehicle.trailer_mam_kg == null
+          ? ""
+          : String(vehicle.trailer_mam_kg),
+      tachograph_fitted:
+        vehicle.tachograph_fitted == null
+          ? "unknown"
+          : vehicle.tachograph_fitted
+            ? "yes"
+            : "no",
+      tachograph_type: vehicle.tachograph_type || "",
+      home_country_code: vehicle.home_country_code || "",
     });
 
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -389,6 +408,43 @@ export default function VehiclesPage() {
       !form.fleet_insurance_policy_id
     ) {
       setMessage("Select a fleet insurance policy.");
+      return;
+    }
+
+    const vehicleMamKg =
+      form.mam_kg.trim() === "" ? null : Number(form.mam_kg);
+
+    if (
+      vehicleMamKg !== null &&
+      (!Number.isInteger(vehicleMamKg) || vehicleMamKg <= 0)
+    ) {
+      setMessage("Vehicle MAM must be a positive whole number of kilograms.");
+      return;
+    }
+
+    const trailerMamKg =
+      form.trailer_mam_kg.trim() === ""
+        ? null
+        : Number(form.trailer_mam_kg);
+
+    if (
+      trailerMamKg !== null &&
+      (!Number.isInteger(trailerMamKg) || trailerMamKg < 0)
+    ) {
+      setMessage(
+        "Trailer MAM must be zero for no trailer, or a positive whole number of kilograms."
+      );
+      return;
+    }
+
+    const homeCountryCode =
+      form.home_country_code.trim().toUpperCase();
+
+    if (
+      homeCountryCode &&
+      !/^[A-Z]{2}$/.test(homeCountryCode)
+    ) {
+      setMessage("Vehicle home country must be a 2-letter country code, for example GB.");
       return;
     }
 
@@ -422,6 +478,17 @@ export default function VehiclesPage() {
         form.insurance_type === "fleet"
           ? form.fleet_insurance_policy_id || null
           : null,
+      mam_kg: vehicleMamKg,
+      trailer_mam_kg: trailerMamKg,
+      tachograph_fitted:
+        form.tachograph_fitted === "unknown"
+          ? null
+          : form.tachograph_fitted === "yes",
+      tachograph_type:
+        form.tachograph_fitted === "yes"
+          ? form.tachograph_type || null
+          : null,
+      home_country_code: homeCountryCode || null,
     };
 
     let error: { message?: string } | null = null;
@@ -836,6 +903,114 @@ export default function VehiclesPage() {
                     setForm({ ...form, model: event.target.value })
                   }
                 />
+              </div>
+
+              <SectionTitle>Driver-hours classification</SectionTitle>
+
+              <p className="m-0 text-sm text-ink-3">
+                These facts are used by Planning to determine the applicable
+                driver-hours regime. Leave a value unknown rather than guessing.
+              </p>
+
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <label className="grid gap-1.5">
+                  <span className="text-sm font-medium text-ink-2">
+                    Vehicle MAM (kg)
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    className={inputClasses}
+                    placeholder="e.g. 7500"
+                    value={form.mam_kg}
+                    onChange={(event) =>
+                      setForm({ ...form, mam_kg: event.target.value })
+                    }
+                  />
+                </label>
+
+                <label className="grid gap-1.5">
+                  <span className="text-sm font-medium text-ink-2">
+                    Trailer MAM (kg)
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    className={inputClasses}
+                    placeholder="0 = explicitly no trailer"
+                    value={form.trailer_mam_kg}
+                    onChange={(event) =>
+                      setForm({
+                        ...form,
+                        trailer_mam_kg: event.target.value,
+                      })
+                    }
+                  />
+                  <span className="text-xs text-ink-3">
+                    Enter 0 when this vehicle is planned with no trailer.
+                  </span>
+                </label>
+
+                <label className="grid gap-1.5">
+                  <span className="text-sm font-medium text-ink-2">
+                    Home country
+                  </span>
+                  <input
+                    className={inputClasses}
+                    maxLength={2}
+                    placeholder="e.g. GB"
+                    value={form.home_country_code}
+                    onChange={(event) =>
+                      setForm({
+                        ...form,
+                        home_country_code:
+                          event.target.value.toUpperCase(),
+                      })
+                    }
+                  />
+                </label>
+
+                <Select
+                  id="vehicle-tachograph-fitted"
+                  label="Tachograph fitted"
+                  value={form.tachograph_fitted}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      tachograph_fitted: event.target.value as
+                        | "unknown"
+                        | "yes"
+                        | "no",
+                    })
+                  }
+                >
+                  <option value="unknown">Unknown</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </Select>
+
+                {form.tachograph_fitted === "yes" ? (
+                  <Select
+                    id="vehicle-tachograph-type"
+                    label="Tachograph type"
+                    value={form.tachograph_type}
+                    onChange={(event) =>
+                      setForm({
+                        ...form,
+                        tachograph_type: event.target.value,
+                      })
+                    }
+                  >
+                    <option value="">Unknown</option>
+                    <option value="analogue">Analogue</option>
+                    <option value="digital">Digital</option>
+                    <option value="smart_1">Smart 1</option>
+                    <option value="smart_2">Smart 2</option>
+                    <option value="other">Other</option>
+                  </Select>
+                ) : null}
               </div>
 
               <SectionTitle>MOT & Tax</SectionTitle>

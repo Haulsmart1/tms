@@ -93,6 +93,8 @@ export default function JobsPage() {
   const [form, setForm] = useState({
     reference: "", scheduled_date: "", customer_id: "", vehicle_id: "", driver_id: "",
     customer_price: "", subcontractor_id: "", subcontractor_cost: "",
+    journey_scope: "", origin_country_code: "", destination_country_code: "",
+    compliance_regime_override: "", compliance_override_reason: "",
     stops: [emptyStop("collection"), emptyStop("delivery")],
   });
 
@@ -113,6 +115,8 @@ export default function JobsPage() {
     const jobsQuery = supabase.from("jobs").select(`
         id, tenant_id, reference, status, scheduled_date, planning_date, customer_id, vehicle_id, driver_id,
         customer_price, subcontractor_id, subcontractor_cost,
+        journey_scope, origin_country_code, destination_country_code,
+        compliance_regime_override, compliance_override_reason,
         accepted_at, accepted_by, collection_eta, delivery_eta, acceptance_note,
         customers ( name ), vehicles ( registration ), drivers ( name ),
         subcontractors ( name, vehicle_reg, driver_name ),
@@ -187,6 +191,8 @@ export default function JobsPage() {
     setForm({
       reference: "", scheduled_date: "", customer_id: "", vehicle_id: "", driver_id: "",
       customer_price: "", subcontractor_id: "", subcontractor_cost: "",
+      journey_scope: "", origin_country_code: "", destination_country_code: "",
+      compliance_regime_override: "", compliance_override_reason: "",
       stops: [emptyStop("collection"), emptyStop("delivery")],
     });
   }
@@ -218,6 +224,11 @@ export default function JobsPage() {
       customer_price: job.customer_price == null ? "" : String(job.customer_price),
       subcontractor_id: job.subcontractor_id || "",
       subcontractor_cost: job.subcontractor_cost == null ? "" : String(job.subcontractor_cost),
+      journey_scope: job.journey_scope || "",
+      origin_country_code: job.origin_country_code || "",
+      destination_country_code: job.destination_country_code || "",
+      compliance_regime_override: job.compliance_regime_override || "",
+      compliance_override_reason: job.compliance_override_reason || "",
       stops: job.job_stops?.length
         ? job.job_stops.map((s: any) => ({ type: s.type, address_line: s.address_line || "", city: s.city || "", postcode: s.postcode || "" }))
         : [emptyStop("collection"), emptyStop("delivery")],
@@ -271,10 +282,58 @@ export default function JobsPage() {
     const customerPrice = form.customer_price === "" ? null : Number(form.customer_price);
     const subcontractorCost = form.subcontractor_cost === "" ? null : Number(form.subcontractor_cost);
 
+    const originCountryCode =
+      form.origin_country_code.trim().toUpperCase();
+
+    const destinationCountryCode =
+      form.destination_country_code.trim().toUpperCase();
+
+    if (
+      originCountryCode &&
+      !/^[A-Z]{2}$/.test(originCountryCode)
+    ) {
+      setLoading(false);
+      setMessage(
+        "Origin country must be a 2-letter country code, for example GB."
+      );
+      return;
+    }
+
+    if (
+      destinationCountryCode &&
+      !/^[A-Z]{2}$/.test(destinationCountryCode)
+    ) {
+      setLoading(false);
+      setMessage(
+        "Destination country must be a 2-letter country code, for example GB."
+      );
+      return;
+    }
+
+    if (
+      form.compliance_regime_override &&
+      !form.compliance_override_reason.trim()
+    ) {
+      setLoading(false);
+      setMessage(
+        "Enter an override reason when a compliance regime override is selected."
+      );
+      return;
+    }
+
     const payload = {
       reference, scheduled_date: form.scheduled_date || null, customer_id: form.customer_id || null,
       vehicle_id: form.vehicle_id || null, driver_id: form.driver_id || null,
       customer_price: customerPrice, subcontractor_id: form.subcontractor_id || null, subcontractor_cost: subcontractorCost,
+      journey_scope: form.journey_scope || null,
+      origin_country_code: originCountryCode || null,
+      destination_country_code: destinationCountryCode || null,
+      compliance_regime_override:
+        form.compliance_regime_override || null,
+      compliance_override_reason:
+        form.compliance_regime_override
+          ? form.compliance_override_reason.trim() || null
+          : null,
     };
 
     let jobId = editingJobId;
