@@ -27,6 +27,17 @@ describe("matchesSearch", () => {
   it("collapses extra whitespace between terms", () => {
     expect(matchesSearch("  acme   past ", ["Acme Haulage", "past_due"])).toBe(true);
   });
+
+  it("does not match a term that straddles two fields", () => {
+    // The joiner is a single space and a needle can never contain whitespace,
+    // so a match cannot span two fields. Joining with "" would silently break
+    // this and no other test would notice.
+    expect(matchesSearch("acmebravo", ["Acme", "Bravo"])).toBe(false);
+  });
+
+  it("matches a substring, not just a prefix", () => {
+    expect(matchesSearch("haul", ["Acme Haulage"])).toBe(true);
+  });
 });
 
 describe("filterBySearch", () => {
@@ -55,5 +66,16 @@ describe("filterBySearch", () => {
     // match the operator cannot see the reason for.
     const onlyName = (row: Row) => [row.name];
     expect(filterBySearch("past", rows, onlyName)).toEqual([]);
+  });
+
+  it("preserves the order of the rows it is given", () => {
+    // Consuming tables sort upstream and rely on this.
+    const many = [
+      { name: "Acme Haulage", status: "past_due" },
+      { name: "Bravo Logistics", status: "active" },
+      { name: "Acme Storage", status: "active" },
+    ];
+    expect(filterBySearch("acme", many, (row) => [row.name]).map((row) => row.name))
+      .toEqual(["Acme Haulage", "Acme Storage"]);
   });
 });

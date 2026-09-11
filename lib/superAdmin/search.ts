@@ -7,7 +7,15 @@
 
    Fields are declared by the caller, never derived by stringifying the row. A
    row carries ids, timestamps and flags the operator cannot see; if those were
-   searchable, a query would return rows with no visible reason for matching. */
+   searchable, a query would return rows with no visible reason for matching.
+
+   Pass the string the table renders, not the raw value: search should match what
+   the operator can see. A cell showing "£1,234.50" searched as "1234.5" makes
+   typing "1,234" return nothing.
+
+   No diacritic folding: "muller" does not find "Müller Transport". Left out
+   deliberately rather than missed. Fold both sides with NFD normalize if a
+   customer list ever makes it worth the cost. */
 
 export type SearchableField = string | null | undefined;
 
