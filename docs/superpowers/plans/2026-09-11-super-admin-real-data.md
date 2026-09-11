@@ -1445,6 +1445,28 @@ git commit -m "Add the super-admin company edit route"
 
 - [ ] **Step 1: Write the route**
 
+Carry these over from the Task 8 review. This route has the same shape and would
+otherwise inherit the same problems, and the code block below predates them:
+
+- Wrap `createAdminClient()` in try/catch (`app/api/request-access/route.ts:107-117`).
+  It throws when the service-role key is missing, and an unguarded throw returns
+  Next's HTML error page rather than JSON.
+- No Supabase error text in any client-facing body: log the real error, return a
+  fixed generic string. Messages about the operator's own input are the exception.
+- Keep the existence lookup. Without it, a PATCH to a nonexistent id matches zero
+  rows, which PostgREST does NOT report as an error, so the route would answer
+  200 for a write that never happened.
+- Reject a malformed (non-UUID) id with 404 rather than letting Postgres 22P02
+  surface as a 500.
+- `changedFields` records fields PRESENT IN THE REQUEST, not fields whose stored
+  values actually differ.
+- **Neither write route is transactional.** A process death between the existence
+  check and the write leaves state that `logSuperAdminEdit` never records, since
+  the log line runs after. The real fix is a `SECURITY DEFINER` function doing the
+  work in one `admin.rpc()` call, which would also collapse the lookup, the 404
+  and the partial-failure branch into one round trip. Recorded rather than built:
+  it needs a migration, and no migration in this feature is applied yet.
+
 Create `app/api/super-admin/tenants/[id]/route.ts`:
 
 ```ts
