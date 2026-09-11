@@ -95,7 +95,28 @@ export async function GET() {
     return NextResponse.json({
       ok: true,
       period,
-      lines: invoice.lines,
+      /* Projected explicitly rather than sending invoice.lines, which is the
+         internal AssembledLine the close job uses to write database rows.
+         Serialising an internal type straight to a browser means every field
+         added to it later becomes public without anyone deciding to publish
+         it, and this one already carries tenantId, which the page has no use
+         for (billing is at company grain; the column is reporting only).
+
+         lib/billing/periodView.ts's PreviewLine is the other half of this
+         contract. The two are kept in step by hand, on purpose. */
+      lines: invoice.lines.map((line) => ({
+        kind: line.kind,
+        vehicleId: line.vehicleId,
+        vrnNormalised: line.vrnNormalised,
+        coverageStartISO: line.coverageStartISO,
+        coverageEndISO: line.coverageEndISO,
+        actualDays: line.actualDays,
+        billableDays: line.billableDays,
+        unitAmountPence: line.unitAmountPence,
+        netPence: line.netPence,
+        includedInPlan: line.includedInPlan,
+        description: line.description,
+      })),
       vehicleCount: invoice.vehicleCount,
       discountPercent: invoice.discountPercent,
       subtotalPence: invoice.subtotalPence,
