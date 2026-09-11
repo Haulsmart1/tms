@@ -177,6 +177,13 @@ Below that: `PaymentMethodCard` unchanged, then `period_charges` history (date, 
 balance, attempt, amount, status, `failure_code`, receipt link), then closed periods expandable
 to their stored `period_invoice_lines`.
 
+> **NOT BUILT, deliberately, as of 2026-09-11.** The closed-period drilldown is the one thing in
+> this section with no task behind it. `DataTable` already supports it through
+> `renderExpanded`/`expandedKey`, so it is cheap, but **no period has ever closed**: there is no
+> real row shape to build against and no way to tell whether it renders correctly. Build it after
+> the first real close, when there is something to look at. Everything else in this section
+> shipped.
+
 **Projected and stored lines are visually distinct and labelled as "would" versus "did".**
 Confusing a projection with a settled invoice is how somebody argues a charge with a customer
 and turns out to be wrong.
