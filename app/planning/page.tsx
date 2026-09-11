@@ -42,6 +42,10 @@ import {
 } from "../../lib/planning/planningDriverActivity";
 import type { DriverHoursState } from "../../lib/planning/driverHoursState";
 import {
+  buildPlanningDriverSchedulePreview,
+  type PlanningDriverSchedulePreview,
+} from "../../lib/planning/planningDriverSchedule";
+import {
   buildPlanningDropMarkers,
   buildPlanningDropNumbersByJobId,
 } from "../../lib/planning/dropPresentation";
@@ -191,6 +195,12 @@ export default function PlanningPage() {
   const [driverHoursById, setDriverHoursById] = useState<
     Record<string, DriverHoursState | null>
   >({});
+  const [selectedDriverSchedule, setSelectedDriverSchedule] =
+    useState<PlanningDriverSchedulePreview | null>(null);
+  const [driverScheduleNotice, setDriverScheduleNotice] =
+    useState<string | null>(null);
+  const [driverScheduleLoading, setDriverScheduleLoading] =
+    useState(false);
   const [pendingItineraries, setPendingItineraries] = useState<
     Record<string, PendingPlanningItinerary>
   >({});
@@ -1958,6 +1968,205 @@ export default function PlanningPage() {
     supabase,
   ]);
 
+
+  useEffect(() => {
+    setSelectedDriverSchedule(null);
+    setDriverScheduleNotice(null);
+    setDriverScheduleLoading(false);
+
+    if (!selectedVehicleId) return;
+
+    const canonical =
+      pendingItineraries[selectedVehicleId] ??
+      persistedItineraries[selectedVehicleId];
+
+    if (!canonical || canonical.orderedVisits.length === 0) {
+      setDriverScheduleNotice(
+        "Driver-hours preview needs a canonical Smart Optimize itinerary."
+      );
+      return;
+    }
+
+    const driverId = laneDrivers[selectedVehicleId] ?? null;
+
+    if (!driverId) {
+      setDriverScheduleNotice(
+        "Assign a driver to calculate the driver-hours preview."
+      );
+      return;
+    }
+
+    if (canonical.driverId !== driverId) {
+      setDriverScheduleNotice(
+        "The canonical itinerary belongs to a different driver. Re-run Smart Optimize."
+      );
+      return;
+    }
+
+    const driver = driverById.get(driverId) as Driver | undefined;
+
+    if (!driver) {
+      setDriverScheduleNotice(
+        "The assigned driver is unavailable."
+      );
+      return;
+    }
+
+    const planningStart = planningStartForLocalDate(
+      date,
+      driver.normal_start_time,
+      planningTimeZone
+    );
+
+    if (!planningStart) {
+      setDriverScheduleNotice(
+        "Set a valid normal start time for this driver before calculating driver hours."
+      );
+      return;
+    }
+
+    const regime = laneRegimeByVehicle.get(selectedVehicleId);
+
+    if (
+      !regime ||
+      regime.status !== "single" ||
+      regime.regime !== "assimilated" ||
+      regime.reviewRequired
+    ) {
+      setDriverScheduleNotice(
+        "Driver-hours preview requires a single assimilated lane regime without classification review."
+      );
+      return;
+    }
+
+    if (driver.planning_profile === "day") {
+      setDriverScheduleNotice(
+        "DAY driver scheduling needs an explicit operating-base coordinate before return-to-base travel can be calculated."
+      );
+      return;
+    }
+
+    const reading = positions.get(selectedVehicleId);
+
+    if (
+      !reading ||
+      !Number.isFinite(reading.lat) ||
+      !Number.isFinite(reading.lng)
+    ) {
+      setDriverScheduleNotice(
+        "Driver-hours preview needs the vehicle's last-known position."
+      );
+      return;
+    }
+
+    const route = routes[selectedVehicleId] ?? null;
+
+    if (canonical.orderedVisits.length > 1 && !route) {
+      setDriverScheduleNotice(
+        "Waiting for the canonical TomTom route."
+      );
+      return;
+    }
+
+    let cancelled = false;
+
+    setDriverScheduleLoading(true);
+
+    void (async () => {
+      try {
+        const firstPoint = canonical.orderedVisits[0].point;
+
+        const costs = await loadFastPlotCosts(
+          [{ lat: reading.lat, lng: reading.lng }],
+          [firstPoint]
+        );
+
+        if (cancelled) return;
+
+        const firstTravelSeconds =
+          costs?.[0]?.[0] ?? Number.POSITIVE_INFINITY;
+
+        if (
+          !Number.isFinite(firstTravelSeconds) ||
+          firstTravelSeconds < 0
+        ) {
+          setDriverScheduleNotice(
+            "TomTom could not calculate travel from the van to Drop 1."
+          );
+          return;
+        }
+
+        const result = buildPlanningDriverSchedulePreview({
+          jobs: selectedLaneJobs.filter(isRoutable),
+          orderedVisits: canonical.orderedVisits,
+          serviceStops: canonical.serviceStops,
+          route,
+          firstTravelSeconds,
+          planningProfile: driver.planning_profile,
+          planningDate: date,
+          planningStart,
+          driverHoursState: driverHoursById[driverId] ?? null,
+          activityDataAvailable:
+            driverHoursById[driverId]?.complete === true,
+          startLocationId: `vehicle:${selectedVehicleId}`,
+          regime: regime.regime,
+          regimeReviewRequired: regime.reviewRequired,
+        });
+
+        if (cancelled) return;
+
+        if (!result.ok) {
+          const notices = {
+            route_leg_mismatch:
+              "TomTom route legs do not match the canonical physical itinerary.",
+            route_unavailable:
+              "The canonical TomTom route is unavailable.",
+            unsupported_regime:
+              "This lane does not have a supported driver-hours regime.",
+            day_base_unavailable:
+              "DAY driver scheduling needs an operating-base coordinate.",
+            physical_route_mismatch:
+              "The canonical service order does not match the physical itinerary.",
+          } as const;
+
+          setDriverScheduleNotice(notices[result.reason]);
+          return;
+        }
+
+        setSelectedDriverSchedule(result.preview);
+        setDriverScheduleNotice(null);
+      } catch {
+        if (!cancelled) {
+          setSelectedDriverSchedule(null);
+          setDriverScheduleNotice(
+            "Driver-hours preview could not be calculated."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setDriverScheduleLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selectedVehicleId,
+    selectedLaneJobs,
+    pendingItineraries,
+    persistedItineraries,
+    laneDrivers,
+    driverById,
+    date,
+    planningTimeZone,
+    laneRegimeByVehicle,
+    positions,
+    routes,
+    driverHoursById,
+  ]);
+
   const laneComplianceByVehicle = useMemo(() => {
     const today = operatorDayInTimeZone(positionNow, planningTimeZone);
     const result = new Map<string, PlanningCompliance>();
@@ -2313,6 +2522,169 @@ export default function PlanningPage() {
                   reading={selectedVehicleReading}
                   now={positionNow}
                 />
+
+                {selectedVehicleId ? (
+                  <section
+                    aria-label="Driver hours schedule"
+                    className="rounded-lg border border-line bg-surface p-3 shadow-sm"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h2 className="text-sm font-semibold text-ink">
+                        Driver-hours schedule
+                      </h2>
+
+                      {selectedDriverSchedule ? (
+                        <span className="text-xs font-medium uppercase tracking-wide text-warning">
+                          {selectedDriverSchedule.schedule.status ===
+                          "unschedulable"
+                            ? "Unschedulable"
+                            : "Review required"}
+                        </span>
+                      ) : null}
+                    </div>
+
+                    {driverScheduleLoading ? (
+                      <p className="mt-2 text-sm text-ink-3">
+                        Calculating canonical travel and driver hours...
+                      </p>
+                    ) : selectedDriverSchedule ? (
+                      <>
+                        <p className="mt-2 text-xs text-ink-3">
+                          Advisory planning only. The rule profile is deliberately
+                          unverified, so this does not assert legal compliance.
+                        </p>
+
+                        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink-2">
+                          <span>
+                            Driving{" "}
+                            {formatDuration(
+                              selectedDriverSchedule.schedule.events
+                                .filter(
+                                  (event) =>
+                                    event.kind === "drive" ||
+                                    event.kind === "return_to_base"
+                                )
+                                .reduce(
+                                  (total, event) =>
+                                    total + event.durationSeconds,
+                                  0
+                                )
+                            )}
+                          </span>
+
+                          <span>
+                            Service{" "}
+                            {formatDuration(
+                              selectedDriverSchedule.schedule.events
+                                .filter(
+                                  (event) => event.kind === "service"
+                                )
+                                .reduce(
+                                  (total, event) =>
+                                    total + event.durationSeconds,
+                                  0
+                                )
+                            )}
+                          </span>
+
+                          <span>
+                            Breaks{" "}
+                            {
+                              selectedDriverSchedule.schedule.events.filter(
+                                (event) => event.kind === "break"
+                              ).length
+                            }
+                          </span>
+
+                          <span>
+                            Daily rests{" "}
+                            {
+                              selectedDriverSchedule.schedule.events.filter(
+                                (event) => event.kind === "daily_rest"
+                              ).length
+                            }
+                          </span>
+                        </div>
+
+                        {selectedDriverSchedule.schedule.warnings.length > 0 ? (
+                          <div className="mt-3 space-y-1 text-xs text-warning">
+                            {selectedDriverSchedule.schedule.warnings.map(
+                              (warning) => (
+                                <p key={warning}>{warning}</p>
+                              )
+                            )}
+                          </div>
+                        ) : null}
+
+                        <div className="mt-3 max-h-64 overflow-auto rounded-md border border-line">
+                          <table className="w-full text-left text-xs">
+                            <thead className="sticky top-0 bg-surface">
+                              <tr className="border-b border-line text-ink-3">
+                                <th className="px-2 py-1.5 font-medium">
+                                  Drop
+                                </th>
+                                <th className="px-2 py-1.5 font-medium">
+                                  ETA
+                                </th>
+                                <th className="px-2 py-1.5 font-medium">
+                                  Service complete
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {selectedDriverSchedule.dropEtas.map((drop) => {
+                                const eta = new Date(
+                                  selectedDriverSchedule.planningStart.getTime() +
+                                    drop.serviceStartSeconds * 1000
+                                );
+
+                                const complete = new Date(
+                                  selectedDriverSchedule.planningStart.getTime() +
+                                    drop.serviceEndSeconds * 1000
+                                );
+
+                                const formatter = new Intl.DateTimeFormat(
+                                  "en-GB",
+                                  {
+                                    timeZone: planningTimeZone,
+                                    weekday: "short",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  }
+                                );
+
+                                return (
+                                  <tr
+                                    key={`${drop.dropNumber}:${drop.stopId}`}
+                                    className="border-b border-line last:border-b-0"
+                                  >
+                                    <td className="px-2 py-1.5 font-medium text-ink">
+                                      {drop.dropNumber}
+                                    </td>
+                                    <td className="px-2 py-1.5 text-ink-2">
+                                      {formatter.format(eta)}
+                                    </td>
+                                    <td className="px-2 py-1.5 text-ink-2">
+                                      {formatter.format(complete)}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    ) : driverScheduleNotice ? (
+                      <p className="mt-2 text-sm text-ink-3">
+                        {driverScheduleNotice}
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-sm text-ink-3">
+                        Select a canonical route to calculate driver hours.
+                      </p>
+                    )}
+                  </section>
+                ) : null}
 
                 {vehicles.length === 0 ? (
                   <p className="text-sm text-ink-3">No active vehicles. Add one under Fleet.</p>
