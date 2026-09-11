@@ -107,9 +107,22 @@ export async function GET() {
   } catch (error) {
     const mapped = errorResponse(error);
     if (mapped.status === 500) {
+      /* errorResponse puts the raw message in the body on a 500, and the
+         messages reaching here are PostgREST's, which name tables, columns and
+         constraints. Logged for diagnosis and replaced before it is sent, the
+         same way cancel/route.ts does: the person running this down has the
+         server logs, and the person holding the browser should not be handed
+         the schema. */
       console.error(
         "Period preview failed",
         error instanceof Error ? (error.stack ?? error.message) : String(error)
+      );
+      return NextResponse.json(
+        {
+          error:
+            "Your billing figures could not be worked out just now. Nothing has been charged. Try again shortly, and contact support if this persists.",
+        },
+        { status: 500 }
       );
     }
     return NextResponse.json(mapped.body, { status: mapped.status });
