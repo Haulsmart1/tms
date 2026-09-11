@@ -2,6 +2,13 @@ import { createClient } from "../../../lib/supabase/server";
 import { createAdminClient } from "../../../lib/supabase/admin";
 import RequestsTable, { type RegistrationRequest } from "./RequestsTable";
 
+// PostgREST caps an unscoped select at 1000 rows by default. Mirrors the
+// same constant in the sibling companies/dashboard/tenants/company-detail/
+// invoices pages -- this is the last of the new search surfaces that lacked
+// it. A search box changes the symptom: a truncated list reads as a short
+// list, but a search over a truncated read reads as "no such request".
+const POSTGREST_ROW_CAP = 1000;
+
 /* Server component. Reads with the normal (anon-key + session cookie) client,
    NOT the service role, so the RLS policy is doing the real work: only a
    super_admin session can see these rows. The layout's role guard is the first
@@ -24,6 +31,11 @@ export default async function AccessRequestsPage() {
     .order("created_at", { ascending: false });
 
   const requests = (data ?? []) as RegistrationRequest[];
+
+  // Computed here, not moved into the client child: this is a server
+  // component precisely so the row-cap check happens against the real read,
+  // not a value passed down after the fact.
+  const hitRowCap = requests.length >= POSTGREST_ROW_CAP;
 
   /* An empty result is AMBIGUOUS and must not be reported as "no requests".
      When RLS filters every row, PostgREST returns 200 with an empty array, not
@@ -87,7 +99,7 @@ export default async function AccessRequestsPage() {
             </p>
           </div>
         ) : (
-          <RequestsTable requests={requests} />
+          <RequestsTable requests={requests} hitRowCap={hitRowCap} />
         )}
       </div>
     </div>

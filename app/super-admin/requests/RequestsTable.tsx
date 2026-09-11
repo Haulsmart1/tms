@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Badge from "../../../components/Badge";
+import MessageBanner from "../../../components/MessageBanner";
 import SearchInput from "../../../components/SearchInput";
 import { filterBySearch } from "../../../lib/superAdmin/search";
 
@@ -43,7 +44,16 @@ function statusTone(status: string | null) {
   }
 }
 
-export default function RequestsTable({ requests }: { requests: RegistrationRequest[] }) {
+export default function RequestsTable({
+  requests,
+  hitRowCap,
+}: {
+  requests: RegistrationRequest[];
+  // Computed server-side in page.tsx, against the actual read, and passed
+  // down rather than recomputed here: this component only ever sees the
+  // rows the server already fetched, never the query itself.
+  hitRowCap: boolean;
+}) {
   const [query, setQuery] = useState("");
 
   const visible = useMemo(
@@ -67,6 +77,17 @@ export default function RequestsTable({ requests }: { requests: RegistrationRequ
 
   return (
     <>
+      {/* PostgREST caps an unscoped select at 1000 rows by default. A search
+          box changes the symptom of hitting that cap: a truncated LIST
+          reads as a short list, but a search over a truncated read reads as
+          "no such request" -- the request may exist, just outside the 1000
+          rows the server component ever saw. */}
+      <MessageBanner tone="warning">
+        {hitRowCap
+          ? `This list returned 1000 or more rows, the PostgREST default cap. Some requests may be missing below, and a search here may report "no matches" for a request that exists but was never read.`
+          : ""}
+      </MessageBanner>
+
       <SearchInput
         id="request-search"
         label="Search requests"

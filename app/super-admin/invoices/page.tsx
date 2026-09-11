@@ -17,6 +17,16 @@ type Invoice = {
   status: string | null;
 };
 
+// PostgREST caps an unscoped select at 1000 rows by default. Mirrors
+// POSTGREST_ROW_CAP in lib/billing/server.ts:21 (not imported: server-only,
+// pulls in the service-role client and the Square SDK) and the same constant
+// in the sibling companies/dashboard/tenants/company-detail pages. Invoices
+// accrue every 28 days per company, so 1000 is reachable, and a search box
+// changes the symptom of hitting it: a truncated LIST reads as a short list,
+// but a search over a truncated read reads as "no such invoice" -- worse
+// than silent, actively misleading.
+const POSTGREST_ROW_CAP = 1000;
+
 function statusTone(status: string | null): Tone {
   switch ((status ?? "").toLowerCase()) {
     case "paid":
@@ -37,10 +47,12 @@ export default function SuperAdminInvoicesPage() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [capWarning, setCapWarning] = useState("");
   const [query, setQuery] = useState("");
 
   async function loadInvoices() {
     setLoading(true);
+    setCapWarning("");
 
     const { data, error } = await supabase
       .from("invoices")
@@ -51,7 +63,14 @@ export default function SuperAdminInvoicesPage() {
       setErrorMessage(error.message);
     }
 
-    setInvoices((data as Invoice[]) ?? []);
+    const rows = (data as Invoice[]) ?? [];
+    if (rows.length >= POSTGREST_ROW_CAP) {
+      setCapWarning(
+        `This list returned ${POSTGREST_ROW_CAP} or more rows, the PostgREST default cap. Some invoices may be missing below, and a search here may report "no matches" for an invoice that exists but was never read.`,
+      );
+    }
+
+    setInvoices(rows);
     setLoading(false);
   }
 
@@ -110,6 +129,8 @@ export default function SuperAdminInvoicesPage() {
         <MessageBanner tone="danger">{errorMessage}</MessageBanner>
 
         <MessageBanner tone="success">{message}</MessageBanner>
+
+        <MessageBanner tone="warning">{capWarning}</MessageBanner>
 
         <SearchInput
           id="invoice-search"
