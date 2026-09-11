@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../../../lib/supabase/browser";
+import { filterBySearch } from "../../../lib/superAdmin/search";
 import Badge, { type Tone } from "../../../components/Badge";
 import Button from "../../../components/Button";
 import MessageBanner from "../../../components/MessageBanner";
+import SearchInput from "../../../components/SearchInput";
 import Skeleton from "../../../components/Skeleton";
 
 type Invoice = {
@@ -35,6 +37,7 @@ export default function SuperAdminInvoicesPage() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [query, setQuery] = useState("");
 
   async function loadInvoices() {
     setLoading(true);
@@ -55,6 +58,21 @@ export default function SuperAdminInvoicesPage() {
   useEffect(() => {
     loadInvoices();
   }, []);
+
+  const visibleInvoices = useMemo(
+    () =>
+      filterBySearch(query, invoices, (invoice) => [
+        // The rendered strings, not the raw values: the heading only ever
+        // shows the first 8 characters of id, and status falls back to the
+        // literal word "unknown" on screen, so search must match those, not
+        // the full uuid or a null that never appears.
+        invoice.id.slice(0, 8),
+        invoice.company_id,
+        invoice.status ?? "unknown",
+        invoice.amount != null ? String(invoice.amount) : null,
+      ]),
+    [query, invoices],
+  );
 
   async function markStatus(id: string, status: string) {
     setMessage("");
@@ -93,6 +111,15 @@ export default function SuperAdminInvoicesPage() {
 
         <MessageBanner tone="success">{message}</MessageBanner>
 
+        <SearchInput
+          id="invoice-search"
+          label="Search invoices"
+          value={query}
+          onChange={setQuery}
+          placeholder="Search by id, company, status"
+          resultHint={!loading && query ? `${visibleInvoices.length} of ${invoices.length} invoices` : undefined}
+        />
+
         {loading ? (
           <div aria-busy className="grid gap-3">
             <span className="sr-only" role="status">
@@ -122,13 +149,13 @@ export default function SuperAdminInvoicesPage() {
               </div>
             ))}
           </div>
-        ) : invoices.length === 0 ? (
+        ) : visibleInvoices.length === 0 ? (
           <div className="rounded-lg bg-surface-2 p-8 text-center text-sm text-ink-3">
-            No invoices found.
+            {query ? `No invoices match "${query}".` : "No invoices found."}
           </div>
         ) : (
           <div className="grid gap-3">
-            {invoices.map((invoice) => (
+            {visibleInvoices.map((invoice) => (
               <div
                 key={invoice.id}
                 className="rounded-lg border border-line bg-surface p-4 shadow-sm"
