@@ -20,6 +20,14 @@ type ProfileState = Partial<Record<(typeof EDITABLE_PROFILE_FIELDS)[number], str
 type TenantRow = { id: string; name: string | null; company_id: string | null };
 type CompanyOption = { id: string; name: string | null };
 
+// company_billing.billing_model, keyed to the company it describes and read
+// on demand (once for the source, again per chosen target). model is null
+// for both a company with no company_billing row and a read that errored -
+// FIX 1's whole point is that the move dialog must never guess which one
+// happened, so both collapse to the same "could not be determined" state
+// rather than one of them silently defaulting to v1 wording.
+type BillingModelInfo = { companyId: string; model: string | null };
+
 // PostgREST caps an unscoped select at 1000 rows by default. Mirrors
 // POSTGREST_ROW_CAP in lib/billing/server.ts:21, which cannot be imported
 // here: that module pulls in the service-role client and the Square SDK,
@@ -121,6 +129,11 @@ export default function SuperAdminCompanyDetailPage() {
   const [moving, setMoving] = useState<TenantRow | null>(null);
   const [moveTarget, setMoveTarget] = useState("");
   const [moveConfirmText, setMoveConfirmText] = useState("");
+  // This company's own billing model, loaded once alongside the rest of the
+  // page. The destination's model is read separately, per target, below -
+  // see destBillingModel.
+  const [sourceBillingModel, setSourceBillingModel] = useState<BillingModelInfo | null>(null);
+  const [destBillingModel, setDestBillingModel] = useState<BillingModelInfo | null>(null);
   // Keyed to the tenant they describe (see lib/superAdmin/moveConfirm.ts).
   // Never read these without also checking the tenantId matches `moving`:
   // that is what stops a slow response for a cancelled tenant from being
@@ -162,13 +175,18 @@ export default function SuperAdminCompanyDetailPage() {
         setPartial(false);
       }
 
-      const [company, profileRow, tenantRows, companyRows] = await Promise.all([
+      const [company, profileRow, tenantRows, companyRows, billingRow] = await Promise.all([
         supabase.from("companies").select("id, name").eq("id", companyId).maybeSingle(),
         // tenant_id holds the COMPANY id here, despite the column name
         // (docs/sql/rls_04_identity_tables.sql:27). One profile row per company.
         supabase.from("company_profiles").select("*").eq("tenant_id", companyId).maybeSingle(),
         supabase.from("tenants").select("id, name, company_id").eq("company_id", companyId).order("name"),
         supabase.from("companies").select("id, name").order("name"),
+        // Read only for the move dialog's benefit (FIX 1). Not folded into
+        // the fatal error checks below: a failed or missing billing row
+        // means the move dialog falls back to "could not be determined"
+        // wording, not that the whole page should refuse to load.
+        supabase.from("company_billing").select("billing_model").eq("company_id", companyId).maybeSingle(),
       ]);
 
       // A newer load() started while this one was awaiting Supabase. Applying
@@ -253,6 +271,13 @@ export default function SuperAdminCompanyDetailPage() {
           : "",
       );
 
+      setSourceBillingModel({
+        companyId,
+        model: billingRow.error
+          ? null
+          : ((billingRow.data as { billing_model: string | null } | null)?.billing_model ?? null),
+      });
+
       setLoadedId(companyId);
       setLoading(false);
     },
@@ -274,6 +299,41 @@ export default function SuperAdminCompanyDetailPage() {
   function setProfileField(key: keyof ProfileState, value: string) {
     setProfile((current) => ({ ...current, [key]: value }));
   }
+
+  // Re-fetches the destination's billing model every time the operator picks
+  // a different target in the move dialog (FIX 1). `cancelled` is enough to
+  // stop a stale response here, unlike moveCounts' tenantId tagging: this
+  // effect's own dependency array already guarantees only the most recent
+  // moveTarget's request is still uncancelled, so a second tag would be
+  // redundant. Clearing to null when moveTarget is "" is what makes the
+  // modal's neutral "select a target" wording (below) show correctly, since
+  // no fetch is in flight to overwrite it.
+  useEffect(() => {
+    if (!moveTarget) {
+      setDestBillingModel(null);
+      return;
+    }
+
+    let cancelled = false;
+    const target = moveTarget;
+
+    supabase
+      .from("company_billing")
+      .select("billing_model")
+      .eq("company_id", target)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        setDestBillingModel({
+          companyId: target,
+          model: error ? null : ((data as { billing_model: string | null } | null)?.billing_model ?? null),
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, moveTarget]);
 
   async function save() {
     setSaving(true);
@@ -687,6 +747,8 @@ export default function SuperAdminCompanyDetailPage() {
         moveCountsError={moveCountsError}
         moveCountsWarning={moveCountsWarning}
         moveError={moveError}
+        sourceBillingModel={sourceBillingModel}
+        destBillingModel={destBillingModel}
         tenantBusy={tenantBusy}
         onCancel={() => setMoving(null)}
         onConfirm={confirmMove}
@@ -714,6 +776,8 @@ function MoveTenantModal({
   moveCountsError,
   moveCountsWarning,
   moveError,
+  sourceBillingModel,
+  destBillingModel,
   tenantBusy,
   onCancel,
   onConfirm,
@@ -729,11 +793,22 @@ function MoveTenantModal({
   moveCountsError: MoveCountsError | null;
   moveCountsWarning: MoveCountsError | null;
   moveError: MoveCountsError | null;
+  sourceBillingModel: BillingModelInfo | null;
+  destBillingModel: BillingModelInfo | null;
   tenantBusy: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   const requiredConfirmText = requiredMoveConfirmText(moving);
+
+  // undefined = a fetch for this exact target is still in flight (or has not
+  // started yet); null = fetched, but the model is genuinely unknown or the
+  // read failed; a string = the destination's actual billing_model. Tagged
+  // by companyId so a response for a target the operator has since changed
+  // away from is invisible here, same pattern as moveCounts above.
+  const destModelForTarget: string | null | undefined =
+    destBillingModel && destBillingModel.companyId === moveTarget ? destBillingModel.model : undefined;
+  const sourceModel = sourceBillingModel && sourceBillingModel.companyId === companyId ? sourceBillingModel.model : null;
 
   // Only ever read counts/errors/warnings that are tagged for the tenant
   // this dialog is currently showing. A response that lands for a tenant
@@ -795,26 +870,69 @@ function MoveTenantModal({
               it.
             </p>
 
-            {/* The billable subset is the one that costs money. Showing only
-                the fleet size would tell the operator 14 vehicles move when
-                the charge landing on the destination is for the 9 that carry
-                an active licence. */}
-            <p className="text-warning-strong">
-              {countsForThisTenant.billableVehicles} of those are billable and will be charged to the
-              destination company.
+            {/* The billable subset (carries an active licence), stated
+                without a charging claim: whether it gets charged, and when,
+                depends on the DESTINATION's billing model - see the
+                model-conditional block below. Asserting "will be charged"
+                here unconditionally was FIX 1's bug: it is false for a v2
+                destination, which bills in arrears and charges nothing for
+                an added vehicle on its own. */}
+            <p className="text-ink-2">
+              {countsForThisTenant.billableVehicles} of those vehicles are currently billable (carry an
+              active licence).
             </p>
 
-            {/* Stated because it is money. vehicle_cycle_coverage rows are
-                keyed by company, so the arriving vehicles have none at the
-                destination and the next billing run charges the new company
-                pro-rata for them. This page never writes a coverage row to
-                suppress that charge: inventing coverage the new company
-                never paid for would be a silent write-off of revenue nobody
-                agreed to. */}
-            <p className="text-warning-strong">
-              Under v1 billing the destination company will be charged pro-rata for these vehicles at
-              the next billing run, because their paid-coverage records stay with the old company.
-            </p>
+            {/* The actual billing consequence, conditional on the
+                DESTINATION company's billing_model (FIX 1). v1 and v2 have
+                opposite consequences for an arriving vehicle: v1 charges
+                pro-rata immediately, v2 charges nothing until its next
+                period closes but can still move money indirectly, by
+                shifting the whole-fleet volume discount band at both the
+                source and the destination. Getting this wrong is a false
+                money claim on an irreversible action, so an unread or
+                unknown model must say so plainly rather than defaulting to
+                either wording - never guess on this screen.
+
+                Also not shown, and deliberately not computed here even for
+                v1: if a moved vehicle already has a vehicle_cycle_coverage
+                row at the destination for the CURRENT cycle,
+                lib/billing/addon.ts charges only the uncovered vehicles, so
+                even the v1 wording below can overstate what actually gets
+                billed. */}
+            {moveTarget === "" ? (
+              <p className="text-ink-2">
+                Select a target company to see the billing consequence of this move.
+              </p>
+            ) : destModelForTarget === undefined ? (
+              <p className="text-ink-2">Checking the destination&apos;s billing model...</p>
+            ) : destModelForTarget === "v1_immediate" ? (
+              /* Stated because it is money. vehicle_cycle_coverage rows are
+                 keyed by company, so the arriving vehicles have none at the
+                 destination and the next billing run charges the new
+                 company pro-rata for them. This page never writes a
+                 coverage row to suppress that charge: inventing coverage
+                 the new company never paid for would be a silent
+                 write-off of revenue nobody agreed to. */
+              <p className="text-warning-strong">
+                {countsForThisTenant.billableVehicles} of those are billable and, under v1 billing,
+                the destination company will be charged pro-rata for them at the next billing run,
+                because their paid-coverage records stay with the old company.
+              </p>
+            ) : destModelForTarget === "v2_period" ? (
+              <p className="text-warning-strong">
+                The destination bills in arrears (v2): adding these vehicles moves no money
+                immediately.{" "}
+                {sourceModel === "v2_period"
+                  ? "But the move changes the whole-fleet volume discount band for BOTH companies (this company is also v2), which can raise the per-vehicle price at either one - including here, at the company you are moving this tenant out of."
+                  : "But the move changes the whole-fleet volume discount band at the destination, and reduces the vehicle count at this company, which can change the price at each under whichever billing model applies there."}
+              </p>
+            ) : (
+              <p className="text-danger-strong">
+                The billing consequence of this move could not be determined: the destination&apos;s
+                billing model is unknown or could not be read. Do not assume either version&apos;s
+                behaviour before confirming.
+              </p>
+            )}
 
             <MessageBanner tone="warning">{countsWarningForThisTenant?.message ?? ""}</MessageBanner>
           </>
