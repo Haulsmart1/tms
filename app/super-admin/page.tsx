@@ -247,8 +247,15 @@ export default function SuperAdminPage() {
             sub={subValue((t) => `${t.billableVehicles} billable`)}
           />
 
+          {/* Labelled "User profiles", not "Users": this tile counts
+              profiles only. /super-admin/users lists profiles PLUS orphaned
+              auth accounts (a half-completed invite -- see
+              lib/superAdmin/users.ts), so its total can run ahead of this
+              one. Adding the orphan count here would need a second query
+              this dashboard does not otherwise make; labelling the tile for
+              what it actually counts is the honest fix that does not. */}
           <Stat
-            label="Users"
+            label="User profiles"
             value={tileValue(String(totals?.users ?? 0))}
             sub={subValue((t) => `${t.superAdmins} super admins`)}
           />

@@ -131,7 +131,9 @@ export default function SuperAdminUsersPage() {
 
           <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">All Users</h1>
 
-          <p className="m-0 text-sm text-ink-3">Every user profile across every tenant.</p>
+          <p className="m-0 text-sm text-ink-3">
+            Every account across every tenant, including ones with no profile row yet.
+          </p>
         </header>
 
         {/* Skeletons are aria-hidden by design, so without this a screen
