@@ -36,8 +36,16 @@ npm test             # vitest run — runs all lib/**/*.test.ts
   Don't "fix" a failing test by changing the timezone.
 - `tests/` is a **separate** npm project (its own `package.json`/`node_modules`) holding Playwright layout specs
   (`pod-layout.spec.mjs`, `tracking-layout.spec.mjs`), not part of the root `npm test` run.
-- No `next.config.*` and no `middleware.ts` exist yet — there is currently no edge auth gate; the
-  roadmap in README calls for adding one.
+- There is no `next.config.*`. The edge auth gate **exists** and lives in `proxy.ts` at the repo root —
+  Next 16 renamed `middleware.ts` to `proxy.ts`, so searching for `middleware` finds nothing. README still
+  calls it `middleware.ts` in the roadmap section; that name is stale.
+- Two node scripts, both run by hand, never by npm: `node scripts/dev-login.mjs [email] [nextPath]` mints a
+  real single-use magic-link URL so localhost can reach an auth-gated page, and
+  `node scripts/migrate-company-to-period-billing.mjs` switches one company from v1 to v2 billing (dry-run
+  first). Read the header comment in `dev-login.mjs` before using it: `.env.local` points at the **live**
+  Supabase project, so anything you click that saves writes production data.
+- `vercel.json` is the only deployment config: one cron, `/api/billing/run` daily at 06:00 UTC, authenticated
+  by a `CRON_SECRET` bearer token. Without that env var set the route answers 401 and no billing ever runs.
 
 ## Architecture
 
@@ -86,6 +94,9 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
   O-licence, a waste carrier licence and an ADR certificate at once. Billing reads the set as "billable if
   ANY licence is active". Never add a one-active-licence-per-vehicle constraint, and never count licence
   rows where you mean vehicles.
+- **`vehicles` has no `company_id` column.** It is keyed by `tenant_id` only, and some rows carry a company
+  id in that column directly. A vehicle reaches its company through its tenant. Filtering on
+  `vehicles.company_id` answers PostgREST 42703 and fails the whole request.
 - POD (proof-of-delivery) files live in a private `pod-files` Storage bucket, tenant-scoped via the storage
   path's tenant segment, served through short-lived signed URLs (`lib/pod/podUrl.ts`, `lib/pod/shareToken.ts`) —
   never public URLs. The sibling `job-files` bucket is **not yet locked down** (see README roadmap); don't assume
@@ -122,13 +133,24 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
 ### Auth
 
 Passwordless magic-link (Supabase `verifyOtp` with `token_hash`), completed in `app/api/auth/callback`
-(open-redirect hardened `next` param). `lib/supabase/browser.tsx`, `lib/supabase/server.tsx`, and
+(open-redirect hardened `next` param).
+
+`proxy.ts` is the edge gate: it refreshes the Supabase session cookie and turns away anonymous requests
+(redirect to `/login?next=...` for pages, `401 {"error":"unauthorized"}` for anything `isApiPath`, so a
+`fetch()` never gets a login page where it expected JSON). It is **defence in depth, not the boundary** — it
+has no notion of tenants and cannot stop a signed-in user asking for another tenant's rows; RLS still does
+that. It also replaces nothing: `app/super-admin/layout.tsx` still owns the role check and `TenantGate` still
+owns the client-side signed-out redirect. The public allowlist is `lib/auth/publicRoutes.ts`, unit tested —
+a new public route (share links, webhooks, cron) must be added there or it 401s.
+
+`lib/supabase/browser.tsx`, `lib/supabase/server.tsx`, and
 `lib/supabase/admin.ts` are the three Supabase client entry points — `admin.ts` uses the service-role key and is
 server-only (lead intake, super-admin cross-checks); never import it from client code.
 
 ### Directory map (beyond what's obvious from browsing)
 
 ```
+proxy.ts                    edge auth gate (Next 16's name for middleware.ts) — see Auth below
 app/<feature>/page.tsx     one route per feature; app/api/ route handlers mirror the same feature names
 app/components/            shared UI: AppHeader, TenantProvider, TenantGate, TenantSelector, PodLink
 lib/<feature>/              pure logic + colocated *.test.ts, per feature (tenant, pod, planning, tracking,
@@ -136,7 +158,11 @@ lib/<feature>/              pure logic + colocated *.test.ts, per feature (tenan
                              needs testing lives here rather than in app/, since vitest only covers lib/
 lib/roles.ts                SUPER_ADMIN_ROLE constant + role-extraction helper — must match roles.name in DB
                              exactly; this is the single source of truth for the super-admin role string
-docs/sql/                   numbered RLS + storage policy migrations (rls_01..rls_10), applied manually
+docs/sql/                   numbered migrations, applied by hand in order in the Supabase SQL editor:
+                             rls_01..rls_12 (tenancy, storage, job-files lockdown) and billing_01..billing_07
+                             (v1 platform billing, then v2 period billing). `*_verify.sql` files are check
+                             scripts, not migrations. Not every file has been applied — check the handoff.
+scripts/                    dev-login.mjs (local magic link), migrate-company-to-period-billing.mjs
 docs/superpowers/specs/     design specs (read before large features — several trade-offs, like the theme
                              inversion, are only explained here)
 docs/superpowers/plans/     implementation plans
