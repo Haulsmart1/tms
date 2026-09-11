@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isThemeableRoute, THEMEABLE_ROUTES } from "./themeableRoutes";
+import { isThemeableRoute, THEMEABLE_ROUTES, THEMEABLE_ROUTE_PREFIXES } from "./themeableRoutes";
 
 describe("isThemeableRoute", () => {
   it("returns true for the pages that paint their own bg-canvas on a .ds wrapper", () => {
@@ -68,6 +68,19 @@ describe("isThemeableRoute", () => {
     expect(isThemeableRoute("/driver/jobs/abc")).toBe(false);
     expect(isThemeableRoute("/pod/share/tok")).toBe(false);
     expect(isThemeableRoute("/super-admin/users/abc")).toBe(false);
+  });
+
+  /* THEMEABLE_ROUTES gets the verbatim-contents test below precisely so nobody
+     adds an entry unnoticed. THEMEABLE_ROUTE_PREFIXES is only documented with a
+     comment in the source and needs the same protection: the trailing slash on
+     "/super-admin/companies/" is the entire reason a future
+     /super-admin/companies-archive route does not inherit theming, and nothing
+     else guards it. Someone "tidying" the entry to "/super-admin/companies"
+     would break that with a green suite if these assertions did not exist. */
+  it("pins the prefix invariant: exactly one entry, always slash-terminated", () => {
+    expect([...THEMEABLE_ROUTE_PREFIXES]).toEqual(["/super-admin/companies/"]);
+    expect(THEMEABLE_ROUTE_PREFIXES.every((p) => p.endsWith("/"))).toBe(true);
+    expect(isThemeableRoute("/super-admin/companies-archive")).toBe(false);
   });
 
   it("lists exactly the pages known to be tokenised today", () => {
