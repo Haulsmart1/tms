@@ -2355,7 +2355,7 @@ Add this state inside the component, beside the existing state:
   const [moving, setMoving] = useState<TenantRow | null>(null);
   const [moveTarget, setMoveTarget] = useState("");
   const [moveConfirmText, setMoveConfirmText] = useState("");
-  const [moveCounts, setMoveCounts] = useState<{ vehicles: number; users: number } | null>(null);
+  const [moveCounts, setMoveCounts] = useState<{ vehicles: number; billableVehicles: number; users: number } | null>(null);
   const [tenantBusy, setTenantBusy] = useState(false);
 ```
 
@@ -2415,12 +2415,28 @@ Add these functions inside the component:
     setMoveConfirmText("");
     setMoveCounts(null);
 
-    const [vehicles, users] = await Promise.all([
-      supabase.from("vehicles").select("id", { count: "exact", head: true }).eq("tenant_id", tenant.id),
+    /* Mirrors what PATCH /api/super-admin/tenants/[id] returns, including the
+       billable subset, so the dialog and the result message agree. Billable is
+       DISTINCT vehicles with at least one active licence: one vehicle carries
+       several compliance licences at once, so counting licence rows overstates. */
+    const [vehicles, users, licences] = await Promise.all([
+      supabase.from("vehicles").select("id").eq("tenant_id", tenant.id),
       supabase.from("profiles").select("id", { count: "exact", head: true }).eq("tenant_id", tenant.id),
+      supabase.from("vehicle_licences").select("vehicle_id, active").eq("tenant_id", tenant.id),
     ]);
 
-    setMoveCounts({ vehicles: vehicles.count ?? 0, users: users.count ?? 0 });
+    const vehicleRows = (vehicles.data ?? []) as { id: string }[];
+    const activeVehicleIds = new Set(
+      ((licences.data ?? []) as { vehicle_id: string; active: boolean | null }[])
+        .filter((licence) => licence.active)
+        .map((licence) => licence.vehicle_id),
+    );
+
+    setMoveCounts({
+      vehicles: vehicleRows.length,
+      billableVehicles: vehicleRows.filter((vehicle) => activeVehicleIds.has(vehicle.id)).length,
+      users: users.count ?? 0,
+    });
   }
 
   async function confirmMove() {
@@ -2438,14 +2454,19 @@ Add these functions inside the component:
 
     const payload = (await response.json()) as {
       error?: string;
-      moved?: { vehicles: number; users: number } | null;
+      moved?: { vehicles: number; billableVehicles: number; users: number } | null;
     };
 
     if (!response.ok) {
       setError(payload.error ?? "Could not move that tenant.");
     } else {
+      /* Both numbers, because they differ and the difference is the money.
+         moved.vehicles is the fleet; moved.billableVehicles is what the new
+         company gets charged pro-rata for at the next billing run. */
       setNotice(
-        `Tenant moved. ${payload.moved?.vehicles ?? 0} vehicles and ${payload.moved?.users ?? 0} users went with it.`,
+        payload.moved
+          ? `Tenant moved. ${payload.moved.vehicles} vehicles (${payload.moved.billableVehicles} billable) and ${payload.moved.users} users went with it.`
+          : "Tenant updated.",
       );
       setMoving(null);
       await load();
@@ -2552,6 +2573,17 @@ Insert this just before the closing `</div>` of the outermost wrapper, outside t
               ? `${moveCounts.vehicles} vehicles and ${moveCounts.users} users move with it.`
               : "Counting what would move..."}
           </p>
+
+          {/* The billable subset is the one that costs money. Showing only the
+              fleet size would tell the operator 14 vehicles move when the
+              charge landing on the destination is for the 9 that carry an
+              active licence. */}
+          {moveCounts ? (
+            <p className="text-warning-strong">
+              {moveCounts.billableVehicles} of those are billable and will be charged to the
+              destination company.
+            </p>
+          ) : null}
 
           {/* Stated because it is money. Coverage rows are keyed by company, so
               the arriving vehicles have none at the destination and the next
