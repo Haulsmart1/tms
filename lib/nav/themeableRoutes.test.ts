@@ -57,6 +57,19 @@ describe("isThemeableRoute", () => {
     expect(isThemeableRoute("/")).toBe(true);
   });
 
+  it("themes the company detail page under /super-admin/companies/", () => {
+    expect(isThemeableRoute("/super-admin/companies/2f7cc0dc-0000-4000-8000-000000000000")).toBe(true);
+    expect(isThemeableRoute("/super-admin/companies/anything/deeper")).toBe(true);
+  });
+
+  it("does not let the prefix rule leak to other dynamic routes", () => {
+    // The reason isThemeableRoute is exact-match in the first place:
+    // /driver/dashboard is themed, /driver/jobs/[jobId] deliberately is not.
+    expect(isThemeableRoute("/driver/jobs/abc")).toBe(false);
+    expect(isThemeableRoute("/pod/share/tok")).toBe(false);
+    expect(isThemeableRoute("/super-admin/users/abc")).toBe(false);
+  });
+
   it("lists exactly the pages known to be tokenised today", () => {
     expect([...THEMEABLE_ROUTES].sort()).toEqual(
       [

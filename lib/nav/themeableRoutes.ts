@@ -89,12 +89,31 @@ export const THEMEABLE_ROUTES: readonly string[] = [
   "/settings/documents",      // app/settings/documents/page.tsx
 ];
 
+/* The ONLY prefix rule, and it stays that way. /super-admin/companies/[id] is
+   the first dynamic console route that has to follow the theme: pinned dark, it
+   would be the one page in the area that ignores the toggle, sitting one click
+   from the list page that obeys it.
+
+   A blanket prefix match was the obvious alternative and is wrong. It would
+   theme /driver/jobs/[jobId] along with /driver/dashboard, and that page is
+   excluded on purpose: it is driver-facing, outside the console shell, on a
+   fixed light palette. Listing the one prefix that needs it keeps exact match
+   as the default and keeps the deliberate exclusions deliberate. */
+const THEMEABLE_ROUTE_PREFIXES = [
+  "/super-admin/companies/", // app/super-admin/companies/[id]/page.tsx
+];
+
 export function isThemeableRoute(pathname: string): boolean {
-  // Exact match, not prefix. Every /super-admin route is tokenised now, so that
-  // area no longer motivates it, but /driver does: /driver/dashboard is listed
-  // while /driver/jobs/[jobId] is deliberately not, and a prefix match would
-  // theme the driver job page along with it.
+  // Exact match by default, not prefix. Every other /super-admin route is
+  // tokenised now, so that area no longer motivates a broad prefix rule, but
+  // /driver does: /driver/dashboard is listed while /driver/jobs/[jobId] is
+  // deliberately not, and a blanket prefix match would theme the driver job
+  // page along with it. THEMEABLE_ROUTE_PREFIXES above is the one narrow
+  // exception, scoped to the single dynamic route that needs it.
   const normalized =
     pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
-  return THEMEABLE_ROUTES.includes(normalized);
+  return (
+    THEMEABLE_ROUTES.includes(normalized) ||
+    THEMEABLE_ROUTE_PREFIXES.some((prefix) => normalized.startsWith(prefix))
+  );
 }
