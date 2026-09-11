@@ -48,7 +48,7 @@ npx vitest run lib/superAdmin/search.test.ts     # single file
 | `lib/superAdmin/summary.test.ts` | Tests for the above. |
 | `lib/superAdmin/companyEdit.ts` | Column allowlist, normalization and validation for a company edit. Pure. |
 | `lib/superAdmin/companyEdit.test.ts` | Tests for the above. |
-| `lib/superAdmin/guard.ts` | `requireSuperAdmin()` for route handlers, plus the pure decision it wraps. |
+| `lib/superAdmin/guard.ts` | `withSuperAdmin()` wrapper for route handlers, `requireSuperAdmin()` / `resolveSuperAdmin()` for callers that need the session, and the pure decision they wrap. |
 | `lib/superAdmin/guard.test.ts` | Tests the pure decision. |
 | `components/SearchInput.tsx` | The one search box, styled from the same rules as `Field`. |
 | `app/api/super-admin/users/route.ts` | `GET`. Joins profiles to `auth.users` for email. Service role. |
@@ -1170,7 +1170,7 @@ Create `app/api/super-admin/users/route.ts`:
 ```ts
 import { NextResponse } from "next/server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
-import { requireSuperAdmin } from "../../../../lib/superAdmin/guard";
+import { withSuperAdmin } from "../../../../lib/superAdmin/guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -1188,10 +1188,11 @@ type ProfileRow = {
   roles: { name: string }[] | { name: string } | null;
 };
 
-export async function GET() {
-  const auth = await requireSuperAdmin();
-  if (auth.response) return auth.response;
-
+/* withSuperAdmin, not a manual requireSuperAdmin check. This handler never
+   reads the actor id, so with the manual form, deleting the check would still
+   typecheck and would hand an anonymous caller the service-role client. The
+   wrapper has no code path into the handler that skips the check. */
+export const GET = withSuperAdmin(async () => {
   const admin = createAdminClient();
 
   const [{ data: profiles, error: profilesError }, { data: tenants, error: tenantsError }, { data: companies, error: companiesError }] =
@@ -1256,7 +1257,7 @@ export async function GET() {
   });
 
   return NextResponse.json({ users: rows });
-}
+});
 ```
 
 - [ ] **Step 2: Verify types**
@@ -1287,7 +1288,7 @@ Create `app/api/super-admin/companies/[id]/route.ts`:
 ```ts
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
-import { requireSuperAdmin, logSuperAdminEdit } from "../../../../../lib/superAdmin/guard";
+import { withSuperAdmin, logSuperAdminEdit } from "../../../../../lib/superAdmin/guard";
 import { normalizeCompanyEdit } from "../../../../../lib/superAdmin/companyEdit";
 
 export const runtime = "nodejs";
@@ -1304,10 +1305,8 @@ export const dynamic = "force-dynamic";
    rebuilds the patch from an allowlist. Do not add a field to the update call
    without adding it there. */
 
-export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const auth = await requireSuperAdmin();
-  if (auth.response) return auth.response;
-
+export const PATCH = withSuperAdmin(
+  async (actorId: string, request: NextRequest, context: { params: Promise<{ id: string }> }) => {
   const { id: companyId } = await context.params;
 
   let body: unknown;
@@ -1358,7 +1357,17 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
 
   if (profileError) {
     /* The name write already landed. Say so, rather than reporting a clean
-       failure the operator would reasonably retry from stale form state. */
+       failure the operator would reasonably retry from stale form state, and
+       LOG it: a write that really happened must not go unaudited just because
+       the request as a whole failed. */
+    logSuperAdminEdit({
+      actorId,
+      action: "company.update",
+      targetId: companyId,
+      changedFields: ["name"],
+      result: "partial",
+    });
+
     return NextResponse.json(
       {
         error: `The company name was saved, but the profile was not: ${profileError.message}`,
@@ -1369,14 +1378,15 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   }
 
   logSuperAdminEdit({
-    actorId: auth.userId,
+    actorId,
     action: "company.update",
     targetId: companyId,
     changedFields: Object.keys(normalized.profile),
+    result: "ok",
   });
 
   return NextResponse.json({ ok: true });
-}
+});
 ```
 
 - [ ] **Step 2: Verify types**
@@ -1405,7 +1415,7 @@ Create `app/api/super-admin/tenants/[id]/route.ts`:
 ```ts
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
-import { requireSuperAdmin, logSuperAdminEdit } from "../../../../../lib/superAdmin/guard";
+import { withSuperAdmin, logSuperAdminEdit } from "../../../../../lib/superAdmin/guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -1424,10 +1434,8 @@ export const dynamic = "force-dynamic";
    suppress the resulting pro-rata charge: inventing coverage the new company
    never paid for would be a silent write-off. */
 
-export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const auth = await requireSuperAdmin();
-  if (auth.response) return auth.response;
-
+export const PATCH = withSuperAdmin(
+  async (actorId: string, request: NextRequest, context: { params: Promise<{ id: string }> }) => {
   const { id: tenantId } = await context.params;
 
   let body: unknown;
@@ -1512,14 +1520,15 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   }
 
   logSuperAdminEdit({
-    actorId: auth.userId,
+    actorId,
     action: wantsMove ? "tenant.reparent" : "tenant.rename",
     targetId: tenantId,
     changedFields: Object.keys(patch),
+    result: "ok",
   });
 
   return NextResponse.json({ ok: true, moved });
-}
+});
 ```
 
 - [ ] **Step 2: Verify types**
