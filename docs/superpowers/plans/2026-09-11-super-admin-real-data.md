@@ -1296,6 +1296,19 @@ git commit -m "Add the super-admin users route"
 
 ---
 
+## Error responses in Tasks 8 and 9
+
+Adopted after the Task 7 review, and it applies to both routes below. The code
+blocks in those tasks still show `error.message` going to the client; do not
+copy that. Instead: log the real error server side with `console.error`, and
+return a fixed generic string in the response body.
+
+Supabase error text names tables, columns and constraints. A 500 body ends up
+in screenshots, browser consoles and log aggregators, and a super-admin-only
+route is not a reason to skip the habit. The one exception is a VALIDATION
+error from `normalizeCompanyEdit`, which is our own text about the operator's
+own input, names no schema, and is the whole point of returning `field`.
+
 ## Task 8: The company edit route
 
 **Files:**
