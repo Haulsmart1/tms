@@ -110,13 +110,11 @@ export function computeChargeAmounts(vehicleCount: number): ChargeAmounts {
   };
 }
 
-// Display formatting for integer pence. No thousands grouping: this matches
-// the helper it replaces on /settings/billing. Cycle totals are larger than
-// they were under monthly flat pricing (a 60-vehicle fleet renders £1968.00),
-// so revisit this if the ungrouped figures start reading badly.
-export function formatPence(pence: number): string {
-  return `£${(pence / 100).toFixed(2)}`;
-}
+/* Display helper, moved to ./format.ts so v2 code can use it without importing
+   this file. Re-exported rather than relocated at every call site, because the
+   v1 pages that import it from here are correct to and there is no behaviour
+   change. New code imports from ./format. */
+export { formatPence } from "./format";
 
 // Square's CreatePayment idempotency_key allows at most 45 characters, so the
 // key is compacted: UUID without dashes (32) + date without dashes (8) +

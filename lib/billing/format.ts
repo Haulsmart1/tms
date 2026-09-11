@@ -35,3 +35,21 @@ export function billingStatusBadge(
       return { tone: "neutral", label: "Not set up" };
   }
 }
+
+/* Display formatting for integer pence, shared by both billing models.
+
+   Moved here from ./money.ts, which is the v1 rate card and which v2 code must
+   not import (see CLAUDE.md). Formatting pence is not pricing, so it belongs
+   with the other display helpers.
+
+   No thousands grouping. That caveat is carried over from the original, and v2
+   makes it MORE pressing rather than less: a 60-vehicle fleet renders £1640.00
+   under v1's weekly bands and £3018.60 under v2's per-period rate. Revisit this
+   if the ungrouped figures start reading badly.
+
+   (The original wrote £1968.00 for that fleet. It was stale: the figure predates
+   the graduated weekly bands in weeklyNetPence. Both numbers above were computed
+   from the current rate cards.) */
+export function formatPence(pence: number): string {
+  return `£${(pence / 100).toFixed(2)}`;
+}

@@ -208,7 +208,7 @@ docs/
 
 ## Roadmap (intended features)
 
-- **Finish the security-week rollout:** apply the tenant-context de-hardcode and the pod-files private-bucket lockdown to production. The `middleware.ts` auth gate (Supabase session refresh, plus a deny-by-default redirect/401 for unauthenticated requests) is done; its public-route allowlist lives in `lib/auth/publicRoutes.ts` and is unit tested.
+- **Finish the security-week rollout:** apply the tenant-context de-hardcode and the pod-files private-bucket lockdown to production. The `proxy.ts` auth gate is done (Next 16 renamed `middleware.ts` to `proxy.ts`): Supabase session refresh, plus a deny-by-default redirect/401 for unauthenticated requests; its public-route allowlist lives in `lib/auth/publicRoutes.ts` and is unit tested.
 - **Lock down the `job-files` bucket:** a second storage bucket with permissive policies, pending a decision on its ownership and use.
 - **Live tracking:** TomTom integration to make `/tracking` and `/telematics` real-time instead of read-only snapshots.
 - **Payments:** platform subscription billing (Square card on file, daily charge cron, dunning) is live at `/settings/billing`; self-serve signup (a company creating its own account and starting a subscription without an operator provisioning it first) is still future work.

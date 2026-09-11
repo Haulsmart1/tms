@@ -1,20 +1,28 @@
 import Container from "../Container";
 import { buttonClasses } from "../Button";
-import { PRICE_TIERS, formatPence } from "../../lib/billing/money";
+import {
+  BILLING_BASIS_SENTENCE,
+  THRESHOLD_PARITY_SENTENCE,
+  pricingBandRows,
+  pricingHeadline,
+} from "../../lib/billing/pricingCopy";
 
-/* Bands are GRADUATED: the rate shown applies to the vehicles in that band
-   only, not to the whole fleet. The copy says "vehicles 51+" rather than
-   "£5 a vehicle at 50+" on purpose, because a 50-vehicle fleet actually pays
-   a blended £7.20. See docs/superpowers/specs/2026-09-04-weekly-tiered-pricing-design.md */
-function bandLabel(index: number): string {
-  const from = index === 0 ? 1 : (PRICE_TIERS[index - 1].upToVehicle ?? 0) + 1;
-  const to = PRICE_TIERS[index].upToVehicle;
-  if (to === null) return `Vehicles ${from}+`;
-  if (from === 1) return `First ${to} vehicles`;
-  return `Vehicles ${from} to ${to}`;
-}
+/* Every string here is derived from lib/billing/rateCard.ts through
+   pricingCopy, so a reprice moves this card rather than leaving it stale.
 
+   Leads with the MINIMUM, not the per-vehicle rate. The floor selects for
+   customers who can afford the product, and that selection has to happen here
+   rather than after signup. It is framed as "your first N vehicles included"
+   because the floor is exactly N vehicles at the headline rate: the same offer,
+   stated as what you get rather than as a penalty.
+
+   Bands are WHOLE FLEET, unlike v1's graduated weekly bands. "10% off your
+   whole fleet" is accurate here, and the old "vehicles 51+" phrasing would now
+   understate the offer. */
 export default function PricingCard() {
+  const headline = pricingHeadline();
+  const bands = pricingBandRows();
+
   return (
     <section id="pricing" className="py-12 md:py-16">
       <Container className="text-center">
@@ -24,32 +32,37 @@ export default function PricingCard() {
         </h2>
         <div className="mx-auto mt-6 inline-block rounded-lg border-2 border-primary bg-surface p-6 text-left">
           <div className="text-2xl font-semibold text-ink">
-            £10{" "}
+            {headline.fromLabel}{" "}
             <span className="text-sm font-normal text-ink-3">
-              per vehicle, per week
+              per {headline.periodDays} days
             </span>
           </div>
           <p className="mt-1 text-sm text-ink-2">
-            Billed every 4 weeks · excludes VAT · every module included · no
+            Includes your first {headline.includedVehicles} vehicles, then{" "}
+            {headline.perVehicleLabel} per vehicle · every module included · no
             setup fee
           </p>
+          <p className="mt-1 text-sm text-ink-3">{BILLING_BASIS_SENTENCE}</p>
 
           <table className="mt-4 w-full border-collapse text-sm">
             <caption className="pb-2 text-left text-xs text-ink-3">
-              Larger fleets pay less on the vehicles above each threshold
+              Larger fleets get a discount on every vehicle, not just the ones
+              above each threshold
             </caption>
             <tbody>
-              {PRICE_TIERS.map((tier, index) => (
-                <tr key={tier.upToVehicle ?? "rest"} className="border-t border-line">
-                  <td className="py-1.5 pr-6 text-ink-2">{bandLabel(index)}</td>
+              {bands.map((band) => (
+                <tr key={band.threshold} className="border-t border-line">
+                  <td className="py-1.5 pr-6 text-ink-2">{band.label}</td>
                   <td className="py-1.5 text-right font-mono tabular-nums text-ink">
-                    {formatPence(tier.weeklyPence)}
-                    <span className="text-ink-3"> /week</span>
+                    {band.discountPercent}%
+                    <span className="text-ink-3"> off</span>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+
+          <p className="mt-2 text-xs text-ink-3">{THRESHOLD_PARITY_SENTENCE}</p>
 
           <a
             href="#request-access"

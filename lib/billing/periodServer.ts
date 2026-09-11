@@ -10,7 +10,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { assembleInvoice, estimateVehicleAddition } from "./invoice";
-import type { AssembledLine } from "./invoice";
+import type { AssembledInvoice, AssembledLine } from "./invoice";
 import {
   collectPeriodVehicles,
   highWaterMark,
@@ -382,6 +382,105 @@ export async function closeDuePeriods(
 }
 
 /**
+ * What a period would invoice, without writing anything.
+ *
+ * Extracted from computePeriodInvoice so the billing page and the close job
+ * share ONE implementation. The alternative was for the page to fetch vehicles
+ * and licences itself and assemble in the browser, which would have meant two
+ * implementations of "which vehicles count and over what coverage window".
+ * Any drift between them would make the page confidently display a figure the
+ * close job never produces, which is precisely the class of fault the page
+ * exists to expose.
+ *
+ * Safe to call on an open period. It reads rows and returns a computation; the
+ * writing starts in computePeriodInvoice after this returns.
+ */
+type PeriodInvoiceLoad = {
+  invoice: AssembledInvoice;
+  /** The rows the invoice was built from, for highWaterMark. */
+  licences: PeriodLicence[];
+};
+
+/**
+ * Assemble a period's invoice and hand back the licence rows it was built
+ * from, in ONE read.
+ *
+ * The licences come back because computePeriodInvoice needs the raw rows for
+ * highWaterMark, and AssembledInvoice cannot stand in for them: its
+ * vehicleCount is the count of surviving invoice LINES, which is a different
+ * number from the period's high-water mark of vehicles (see close.ts).
+ *
+ * Returning them matters more than it looks. Fetching a second time inside
+ * computePeriodInvoice would let a licence activated mid-close land in one
+ * snapshot and not the other, and the period would then store a
+ * high_water_mark that disagrees with the invoice lines sitting next to it.
+ * That is a billing record contradicting itself, discovered much later by
+ * whoever is trying to explain an invoice to a customer.
+ */
+async function loadPeriodInvoice(
+  admin: SupabaseClient,
+  args: {
+    companyId: string;
+    periodStartISO: string;
+    periodEndISO: string;
+    settings: CompanyBillingSettings;
+  }
+): Promise<PeriodInvoiceLoad> {
+  const vehicleIds = await fetchCompanyVehicleIds(admin, args.companyId);
+  const licences = await fetchCompanyLicences(admin, vehicleIds);
+
+  const vehicles = collectPeriodVehicles({
+    periodStartISO: args.periodStartISO,
+    periodEndISO: args.periodEndISO,
+    licences,
+  });
+
+  const invoice = assembleInvoice({
+    periodStartISO: args.periodStartISO,
+    periodEndISO: args.periodEndISO,
+    vehicles,
+    minBillDays: args.settings.min_bill_days,
+    unitAmountPence: args.settings.unit_amount_pence,
+    minimumPence: args.settings.min_invoice_pence,
+    includedVehicles: args.settings.included_vehicles,
+    vatRatePercent: args.settings.vat_rate ?? 20,
+  });
+
+  return { invoice, licences };
+}
+
+/**
+ * What a period would invoice, without writing anything.
+ *
+ * Extracted from computePeriodInvoice so the billing page and the close job
+ * share ONE implementation. The alternative was for the page to fetch vehicles
+ * and licences itself and assemble in the browser, which would have meant two
+ * implementations of "which vehicles count and over what coverage window".
+ * Any drift between them would make the page confidently display a figure the
+ * close job never produces, which is precisely the class of fault the page
+ * exists to expose.
+ *
+ * Safe to call on an open period. It reads rows and returns a computation; the
+ * writing starts in computePeriodInvoice after this returns.
+ *
+ * A thin wrapper on loadPeriodInvoice, because a caller that only wants to
+ * display a projection has no use for the licence rows.
+ */
+export async function previewPeriodInvoice(
+  admin: SupabaseClient,
+  args: {
+    companyId: string;
+    periodStartISO: string;
+    /** Exclusive, matching billing_periods.period_end. */
+    periodEndISO: string;
+    settings: CompanyBillingSettings;
+  }
+): Promise<AssembledInvoice> {
+  const { invoice } = await loadPeriodInvoice(admin, args);
+  return invoice;
+}
+
+/**
  * Claim the period, build its invoice, and make it durable.
  *
  * Returns null when the claim was lost to a concurrent run. The claim is a
@@ -418,25 +517,21 @@ async function computePeriodInvoice(
     if (cleared.error) throw new Error(cleared.error.message);
   }
 
-  const vehicleIds = await fetchCompanyVehicleIds(admin, period.company_id);
-  const licences = await fetchCompanyLicences(admin, vehicleIds);
-
-  const vehicles = collectPeriodVehicles({
-    periodStartISO: period.period_start,
-    periodEndISO: period.period_end,
-    licences,
-  });
-
+  // vatRate stays here as well as inside loadPeriodInvoice: the closed period
+  // row below stores it, so removing it from this scope breaks the update
+  // rather than the calculation.
   const vatRate = settings.vat_rate ?? 20;
-  const invoice = assembleInvoice({
+
+  // loadPeriodInvoice rather than previewPeriodInvoice: highWaterMark below
+  // needs the raw licence rows, and taking them from the SAME read that built
+  // the invoice is what stops a licence activated mid-close from landing in
+  // one snapshot and not the other. The public wrapper drops them because a
+  // caller rendering a projection has no use for them.
+  const { invoice, licences } = await loadPeriodInvoice(admin, {
+    companyId: period.company_id,
     periodStartISO: period.period_start,
     periodEndISO: period.period_end,
-    vehicles,
-    minBillDays: settings.min_bill_days,
-    unitAmountPence: settings.unit_amount_pence,
-    minimumPence: settings.min_invoice_pence,
-    includedVehicles: settings.included_vehicles,
-    vatRatePercent: vatRate,
+    settings,
   });
 
   if (invoice.lines.length > 0) {

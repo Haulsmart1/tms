@@ -11,6 +11,7 @@ import Stat from "../../../components/Stat";
 import LicenceCard from "./LicenceCard";
 import { shouldShowSkeleton } from "../../../lib/loading/skeletonVisibility";
 import { computeChargeAmounts, formatPence } from "../../../lib/billing/money";
+import { BILLING_BASIS_SENTENCE, pricingHeadline } from "../../../lib/billing/pricingCopy";
 import type { LicenceVehicle, VehicleLicence } from "./types";
 
 /* Three, because these cards are full width in a single-column grid and are
@@ -56,8 +57,19 @@ function licenceAddedMessage(
     },
     base = "Licence added."
 ): string {
-    if (!payload.charged || payload.grossPence == null || payload.days == null) {
+    if (!payload.charged || payload.grossPence == null) {
         return base;
+    }
+    /* v2 opening charge. The period_opened response carries an amount but no
+       `days`, because opening a period is not a pro-rata top-up: it collects
+       the minimum for the whole period.
+
+       Without this branch the `days == null` guard below swallowed it and a
+       GBP 154.80 debit was announced as "Licence added." That is exactly the
+       surprise charge this whole helper exists to prevent, and it fired on a
+       customer's very first activation. */
+    if (payload.days == null) {
+        return `${base} Charged ${formatPence(payload.grossPence)}, which opens your first billing period.`;
     }
     /* `charged: true` with `alreadyPaid` is NOT a charge that just happened.
        chargeVehicleAddon found a succeeded row from an earlier attempt, took
@@ -125,6 +137,7 @@ export default function VehicleLicencesPage() {
        thing the submit button reads. */
     const writeInFlight = useRef(false);
     const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
+    const [billingModel, setBillingModel] = useState<string | null>(null);
 
     /* Mirrors the route's gate rather than inventing a second rule: the route
        authorises through requireCompanyAdmin, which allows ACCOUNTS_ADMIN_ROLES
@@ -156,6 +169,7 @@ export default function VehicleLicencesPage() {
         const [
             { data: vehicleData, error: vehicleError },
             { data: licenceData, error: licenceError },
+            billingRes,
         ] = await Promise.all([
             tenant
                 .filterByTenant(
@@ -198,6 +212,10 @@ export default function VehicleLicencesPage() {
                 )
                 .is("superseded_by", null)
                 .order("created_at", { ascending: false }),
+            /* No filterByTenant: billing_model is a property of the COMPANY,
+               not of a tenant, and RLS scopes this table to the reader's own
+               company. */
+            supabase.from("company_billing").select("*").maybeSingle(),
         ]);
 
         if (vehicleError) {
@@ -213,6 +231,21 @@ export default function VehicleLicencesPage() {
                 ...licence,
                 vehicles: licence.vehicles?.[0] ?? null,
             })
+        );
+
+        /* select("*") for the same reason as the billing page shell:
+           billing_model is a billing_06 column, and naming it explicitly would
+           answer 42703 on a database where that migration has not been
+           applied, failing this page for every v1 company.
+
+           billingRes.error is deliberately not surfaced. A super_admin's RLS
+           scope covers every company, so maybeSingle() errors for them, and
+           staff read no row at all; both land on null, which fails closed to
+           the v1 copy below. A banner about pricing wording would say nothing
+           useful on a page whose job is licences. */
+        setBillingModel(
+            ((billingRes.data as { billing_model?: string | null } | null)
+                ?.billing_model) ?? null
         );
 
         setVehicles(vehicleData ?? []);
@@ -507,6 +540,29 @@ export default function VehicleLicencesPage() {
 
     const showEmpty = !showSkeleton && licences.length === 0;
 
+    /* Fail closed to v1, as the billing page shell does: a v2 company shown v1
+       copy sees a stale sentence, but a v1 company shown v2 copy sees a price
+       it will never be charged. */
+    /* THREE states, not two. billingModel comes back null both when a company
+       genuinely has no billing row and when RLS refused the read, and it
+       refuses for everyone who is not an admin: company_billing is admin-only
+       (billing_01), staff match no row, and a super_admin matches every row so
+       maybeSingle errors.
+
+       Collapsing that into "not v2, therefore v1" would print "£10 per
+       licensed vehicle per week" and a 4-weekly charge figure to a staff
+       member at a v2 company. A wrong price and a wrong amount, both stated as
+       fact, to the reader least able to check them.
+
+       So unknown asserts nothing. Only an admin, whose read actually
+       succeeded, is shown a rate. */
+    const pricingCopyMode: "v2" | "v1" | "unknown" =
+        tenant.status !== "ready" || tenant.role !== "admin"
+            ? "unknown"
+            : billingModel === "v2_period"
+              ? "v2"
+              : "v1";
+
     return (
         <TenantGate>
         <div className="ds min-h-screen bg-canvas font-sans text-ink">
@@ -515,16 +571,32 @@ export default function VehicleLicencesPage() {
                 <div className="text-kicker uppercase text-ink-3">Admin</div>
                 <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">Vehicle Licences</h1>
                 <p className="m-0 text-sm text-ink-3">
-                    Add and manage vehicle licences. £10 per licensed vehicle
-                    per week, less per vehicle on larger fleets, charged every 4
-                    weeks.
+                    {pricingCopyMode === "v2" ? (
+                        <>
+                            Add and manage vehicle licences.{" "}
+                            {pricingHeadline().summary} {BILLING_BASIS_SENTENCE}
+                        </>
+                    ) : pricingCopyMode === "v1" ? (
+                        <>
+                            Add and manage vehicle licences. £10 per licensed
+                            vehicle per week, less per vehicle on larger fleets,
+                            charged every 4 weeks.
+                        </>
+                    ) : (
+                        <>
+                            Add and manage vehicle licences. Your company&apos;s
+                            pricing is managed by your company admin.
+                        </>
+                    )}
                 </p>
             </header>
 
-            {/* These two tiles are derived from `licences`, so they are part of
-                the same loading region as the grid below and must not state a
-                count of zero as fact while the query is in flight. The third
-                is the fixed price and is never a skeleton. */}
+            {/* The tiles derived from `licences` are part of the same loading
+                region as the grid below and must not state a count of zero as
+                fact while the query is in flight. On v1 that is the first two;
+                the third is the fixed price and is never a skeleton. On v2 it
+                is only the first, because the other two state rules rather
+                than amounts. */}
             <div className="mb-4 grid grid-cols-2 gap-2.5 lg:grid-cols-4" aria-busy={showSkeleton}>
                 <Stat
                     label="Licensed Vehicles"
@@ -536,18 +608,55 @@ export default function VehicleLicencesPage() {
                         )
                     }
                 />
-                <Stat
-                    label="4-Weekly Charge"
-                    value={
-                        showSkeleton ? (
-                            <Skeleton display="inline-block" w="10ch" h="1.25rem" />
-                        ) : (
-                            formatPence(amounts.grossPence)
-                        )
-                    }
-                    sub="this tenant only, inc VAT"
-                />
-                <Stat label="Billing Rule" value="£10" sub="per vehicle per week, less on larger fleets" />
+                {/* A v2 company is NOT shown a 4-weekly figure. amounts comes
+                    from lib/billing/money.ts, which is v1's graduated weekly
+                    shape and produces a number a v2 company will never be
+                    charged. The real v2 figure depends on the open period, so
+                    it lives on the billing page rather than being recomputed
+                    here from a different rate card. */}
+                {pricingCopyMode === "unknown" ? (
+                    /* One tile, not two withheld ones. A reader who cannot be
+                       told the rate is not helped by two dashes where numbers
+                       should be; they are helped by knowing where the answer
+                       lives. */
+                    <Stat
+                        label="Billing"
+                        value="Admin only"
+                        sub="your company admin can see the rate and the charges"
+                    />
+                ) : pricingCopyMode === "v2" ? (
+                    <>
+                        <Stat
+                            label="This period"
+                            value="See billing"
+                            sub="charged when the period closes"
+                        />
+                        <Stat
+                            label="Billing Rule"
+                            value={pricingHeadline().perVehicleLabel}
+                            sub={`per vehicle per ${pricingHeadline().periodDays} days, less on larger fleets`}
+                        />
+                    </>
+                ) : (
+                    <>
+                        <Stat
+                            label="4-Weekly Charge"
+                            value={
+                                showSkeleton ? (
+                                    <Skeleton display="inline-block" w="10ch" h="1.25rem" />
+                                ) : (
+                                    formatPence(amounts.grossPence)
+                                )
+                            }
+                            sub="this tenant only, inc VAT"
+                        />
+                        <Stat
+                            label="Billing Rule"
+                            value="£10"
+                            sub="per vehicle per week, less on larger fleets"
+                        />
+                    </>
+                )}
             </div>
 
             {/* The notice replaces the form rather than disabling it: a filled
