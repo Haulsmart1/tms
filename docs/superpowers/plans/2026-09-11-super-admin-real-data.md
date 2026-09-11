@@ -3119,6 +3119,18 @@ git commit -m "Update the page inventory for the super-admin work"
 
 ---
 
+## Unverified assumption, worth one minute in the SQL editor
+
+`company_profiles` is **not created by any tracked migration**: it predates the
+numbered files in `docs/sql/`, so its `CREATE TABLE` is not in this repo. The
+company edit route upserts with `onConflict: "tenant_id"`, which fails at
+runtime unless a unique index or primary key backs that column.
+
+The evidence that one exists is a single live call site, `app/settings/company/page.tsx:463`,
+which performs the same upsert against the same table and works today. That is
+good evidence, not proof. Running `\d company_profiles` in the Supabase SQL
+editor settles it, and this is the main failure mode of that route.
+
 ## What this plan does not do
 
 Say so out loud when handing back, so nobody assumes otherwise:
