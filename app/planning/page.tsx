@@ -62,6 +62,11 @@ import {
   wouldExceedPlanningRouteJobLimit,
 } from "../../lib/planning/routeChunks";
 import type { PlanJob, RouteResult } from "../../lib/planning/types";
+import {
+  createBudgetedFastPlotCostLoader,
+  loadCachedFastPlotCosts,
+  loadPointToPointTravelSeconds,
+} from "../../lib/planning/tomtomCostClient";
 import { createSupabasePositionSource } from "../../lib/tracking/supabasePositions";
 import type { PositionReading } from "../../lib/tracking/position";
 import {
@@ -105,56 +110,6 @@ type Driver = PlanningComplianceDriver & {
    larger with a 400 (it does not truncate), so the client chunks. */
 const GEOCODE_BATCH = 100;
 const POSITION_POLL_MS = 30_000;
-
-async function loadFastPlotCosts(
-  origins: { lat: number; lng: number }[],
-  destinations: { lat: number; lng: number }[]
-): Promise<number[][] | null> {
-  if (
-    origins.length < 1 ||
-    destinations.length < 1 ||
-    origins.length * destinations.length > 100
-  ) {
-    return null;
-  }
-
-  try {
-    const response = await fetch("/api/tomtom/matrix", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ origins, destinations }),
-    });
-
-    if (!response.ok) return null;
-
-    const body = await response.json();
-    const raw = body?.travelSeconds;
-
-    if (
-      !Array.isArray(raw) ||
-      raw.length !== origins.length ||
-      raw.some(
-        (row: unknown) =>
-          !Array.isArray(row) ||
-          row.length !== destinations.length
-      )
-    ) {
-      return null;
-    }
-
-    return raw.map((row: unknown[]) =>
-      row.map((value) =>
-        typeof value === "number" &&
-        Number.isFinite(value) &&
-        value >= 0
-          ? value
-          : Number.POSITIVE_INFINITY
-      )
-    );
-  } catch {
-    return null;
-  }
-}
 
 export default function PlanningPage() {
   const router = useRouter();
@@ -1708,7 +1663,10 @@ export default function PlanningPage() {
       const optimized = await optimizeFastPlotOrderFromStart(
         selectedLaneJobs,
         { lat: vehicleReading.lat, lng: vehicleReading.lng },
-        loadFastPlotCosts
+        createBudgetedFastPlotCostLoader(
+          8,
+          loadCachedFastPlotCosts
+        )
       );
 
       if (!optimized.ok) {
@@ -2076,20 +2034,15 @@ export default function PlanningPage() {
       try {
         const firstPoint = canonical.orderedVisits[0].point;
 
-        const costs = await loadFastPlotCosts(
-          [{ lat: reading.lat, lng: reading.lng }],
-          [firstPoint]
-        );
+        const firstTravelSeconds =
+          await loadPointToPointTravelSeconds(
+            { lat: reading.lat, lng: reading.lng },
+            firstPoint
+          );
 
         if (cancelled) return;
 
-        const firstTravelSeconds =
-          costs?.[0]?.[0] ?? Number.POSITIVE_INFINITY;
-
-        if (
-          !Number.isFinite(firstTravelSeconds) ||
-          firstTravelSeconds < 0
-        ) {
+        if (firstTravelSeconds === null) {
           setDriverScheduleNotice(
             "TomTom could not calculate travel from the van to Drop 1."
           );
