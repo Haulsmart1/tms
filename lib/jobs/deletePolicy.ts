@@ -18,6 +18,19 @@ export function canDeleteJobStatus(
   );
 }
 
+export type OperationalJobRecordCounts = {
+  podEvidence: number;
+  itemScans: number;
+};
+
+/* A planned job can already carry POD uploads or barcode scans. Deleting it
+   would orphan the storage objects (review POD-23), so it is refused. */
+export function hasOperationalJobRecords(
+  records: OperationalJobRecordCounts
+): boolean {
+  return records.podEvidence > 0 || records.itemScans > 0;
+}
+
 export function hasProtectedJobLinks(
   links: ProtectedJobLinkCounts
 ): boolean {
