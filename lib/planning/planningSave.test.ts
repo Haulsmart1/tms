@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildPlanningSavePlan,
   classifyPlanningSaveError,
+  PLANNING_SAVE_ERROR_MESSAGES,
+  planningSaveErrorMessage,
   type PlanningSaveJobFacts,
 } from "./planningSave";
 
@@ -65,5 +67,16 @@ describe("classifyPlanningSaveError", () => {
     expect(classifyPlanningSaveError({ code: "PGRST202", message: "x" })).toBe("rpc_missing");
     expect(classifyPlanningSaveError({ code: "42883", message: "x" })).toBe("rpc_missing");
     expect(classifyPlanningSaveError({ code: "42501", message: "denied" })).toBe("failed");
+  });
+
+  it("recognises the unlicensed-vehicle refusal and keeps its sentence", () => {
+    const error = {
+      code: "LIC01",
+      message: "Vehicle AB12 CDE has no active licence. Activate it on the Licences page before assigning it.",
+    };
+    const kind = classifyPlanningSaveError(error);
+    expect(kind).toBe("unlicensed_vehicle");
+    expect(planningSaveErrorMessage(kind, error)).toContain("Vehicle AB12 CDE has no active licence.");
+    expect(planningSaveErrorMessage("conflict", error)).toBe(PLANNING_SAVE_ERROR_MESSAGES.conflict);
   });
 });

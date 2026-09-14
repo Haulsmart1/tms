@@ -15,6 +15,7 @@
   themselves are the version.
 */
 
+import { isUnlicensedVehicleError, unlicensedVehicleMessage } from "../billing/unlicensedVehicle";
 import type { JobUpdate } from "./saveDiff";
 
 export type PlanningSaveJobFacts = {
@@ -84,7 +85,7 @@ export function buildPlanningSavePlan(
   return { ok: true, tenantId: activeTenantId, rows };
 }
 
-export type PlanningSaveErrorKind = "conflict" | "rpc_missing" | "failed";
+export type PlanningSaveErrorKind = "conflict" | "rpc_missing" | "unlicensed_vehicle" | "failed";
 
 const MISSING_FUNCTION_CODES = new Set(["42883", "PGRST202"]);
 
@@ -100,6 +101,12 @@ export function classifyPlanningSaveError(error: {
     return "conflict";
   }
 
+  // The licence gate (BILL1-1) refuses the whole save when a lane uses a
+  // vehicle with no active licence. Retrying cannot help, so it is not "failed".
+  if (isUnlicensedVehicleError(error)) {
+    return "unlicensed_vehicle";
+  }
+
   return "failed";
 }
 
@@ -108,5 +115,18 @@ export const PLANNING_SAVE_ERROR_MESSAGES: Record<PlanningSaveErrorKind, string>
     "Someone else saved changes to these jobs after this board loaded. Nothing was saved. Reload the board to see the latest plan, then make your change again.",
   rpc_missing:
     "Saving is unavailable until the planning save update (docs/sql/prodfix_70_planning_save.sql) is installed. Nothing was saved; your changes are kept in this browser.",
+  unlicensed_vehicle: unlicensedVehicleMessage(null),
   failed: "The plan could not be saved. Nothing was saved; your changes are kept in this browser.",
 };
+
+/** The sentence to show for a failed save. An unlicensed vehicle keeps the
+    database's own sentence, which names the registration. */
+export function planningSaveErrorMessage(
+  kind: PlanningSaveErrorKind,
+  error: { code?: string | null; message?: string | null; hint?: string | null },
+): string {
+  if (kind === "unlicensed_vehicle") {
+    return `${unlicensedVehicleMessage(error)} Nothing was saved; your changes are kept in this browser.`;
+  }
+  return PLANNING_SAVE_ERROR_MESSAGES[kind];
+}

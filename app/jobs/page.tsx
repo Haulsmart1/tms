@@ -17,6 +17,7 @@ import Button from "../../components/Button";
 import { fetchAllPages, type PageResponse } from "../../lib/jobs/fetchPages";
 import { isStopLocked, planStopChanges } from "../../lib/jobs/stopDiff";
 import { saveStopPod } from "../../lib/pod/savePod";
+import { isUnlicensedVehicleError, unlicensedVehicleMessage } from "../../lib/billing/unlicensedVehicle";
 
 type FormStop = {
   id?: string | null;
@@ -483,9 +484,12 @@ export default function JobsPage() {
         .eq("id", editingJobId)
         .eq("tenant_id", jobTenantId);
       setLoading(false);
-      // Surface the database's own message: an assignment trigger (for
-      // example an unlicensed vehicle) explains why a save was refused.
-      if (updateError) { setMessage(`Update job error: ${updateError.message}`); await loadData(); return; }
+      // An unlicensed vehicle gets the licence gate's own sentence (BILL1-1).
+      if (updateError) {
+        setMessage(isUnlicensedVehicleError(updateError) ? unlicensedVehicleMessage(updateError) : `Update job error: ${updateError.message}`);
+        await loadData();
+        return;
+      }
 
       setMessage("Job updated.");
       resetForm();
@@ -498,7 +502,11 @@ export default function JobsPage() {
       .insert([{ ...payload, tenant_id: tenant.writeTenantId, status: "planned" }])
       .select("id")
       .single();
-    if (jobError) { setLoading(false); setMessage(`Create job error: ${jobError.message}`); return; }
+    if (jobError) {
+      setLoading(false);
+      setMessage(isUnlicensedVehicleError(jobError) ? unlicensedVehicleMessage(jobError) : `Create job error: ${jobError.message}`);
+      return;
+    }
     const jobId = insertedJob.id;
 
     const stopsToInsert = validStops.map((stop, index) => ({

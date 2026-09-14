@@ -16,6 +16,7 @@ import MessageBanner from "../../components/MessageBanner";
 import Select from "../../components/Select";
 import Skeleton from "../../components/Skeleton";
 import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
+import { isUnlicensedVehicleError, unlicensedVehicleMessage } from "../../lib/billing/unlicensedVehicle";
 import { CircleCheck, TriangleAlert } from "lucide-react";
 
 type Driver = {
@@ -684,10 +685,12 @@ export default function DriversPage() {
       );
 
       if (error) {
-        // Surface the database's own message: the unlicensed-vehicle
-        // trigger explains why an assignment was refused.
+        // The licence gate (BILL1-1) gets its own sentence, naming the
+        // registration; anything else keeps the database message.
         setErrorMessage(
-          `Vehicle assignment failed: ${error.message}`
+          isUnlicensedVehicleError(error)
+            ? unlicensedVehicleMessage(error)
+            : `Vehicle assignment failed: ${error.message}`
         );
         return;
       }

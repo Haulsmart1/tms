@@ -25,8 +25,10 @@ import {
   classifyPlanningSaveError,
   PLANNING_SAVE_BLOCKED_MESSAGES,
   PLANNING_SAVE_ERROR_MESSAGES,
+  planningSaveErrorMessage,
   type PlanningSaveErrorKind,
 } from "../../lib/planning/planningSave";
+import { isUnlicensedVehicleError } from "../../lib/billing/unlicensedVehicle";
 import {
   autosaveDelay,
   recordAutosaveFailure,
@@ -1432,7 +1434,7 @@ export default function PlanningPage() {
             console.error("planning save failed:", error.code, error.message);
           }
 
-          throw new Error(PLANNING_SAVE_ERROR_MESSAGES[failureKind]);
+          throw new Error(planningSaveErrorMessage(failureKind, error));
         }
       }
 
@@ -1473,6 +1475,10 @@ export default function PlanningPage() {
         );
 
         if (error) {
+          if (isUnlicensedVehicleError(error)) {
+            failureKind = "unlicensed_vehicle";
+            throw new Error(planningSaveErrorMessage(failureKind, error));
+          }
           throw new Error(`canonical itinerary save failed: ${error.message}`);
         }
       }

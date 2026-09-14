@@ -8,6 +8,7 @@ import {
   requireTenant,
 } from "../../../lib/api/server";
 import { TenantAccessError } from "../../../lib/auth/serverTenantAccess";
+import { isUnlicensedVehicleError, unlicensedVehicleMessage } from "../../../lib/billing/unlicensedVehicle";
 import { findOpenManifestConflicts } from "../../../lib/driver/manifestConflicts";
 import {
   manifestBarcodeValue,
@@ -42,6 +43,10 @@ function mapCreateRpcError(
 
   if (error.code === "22023") {
     return new ApiError(400, message);
+  }
+
+  if (isUnlicensedVehicleError(error)) {
+    return new ApiError(409, unlicensedVehicleMessage(error));
   }
 
   if (
