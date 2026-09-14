@@ -10,7 +10,12 @@ import {
 import {
   errorResponse,
   requireTenantAccess,
+  AccountsHttpError,
 } from "../../../../../../lib/accounts/server";
+
+import {
+  publicAppOrigin,
+} from "../../../../../../lib/accounts/appUrl";
 
 import {
   createQuotationShareToken,
@@ -42,9 +47,7 @@ function expiryFromQuotation(
     ).getTime();
 
   if (!Number.isFinite(endOfValidity)) {
-    throw new Error(
-      "Quotation has an invalid valid-until date."
-    );
+    throw new AccountsHttpError(409, "Quotation has an invalid valid-until date.", "invalid_valid_until");
   }
 
   const expirySeconds =
@@ -56,9 +59,7 @@ function expiryFromQuotation(
     expirySeconds <=
     nowSeconds
   ) {
-    throw new Error(
-      "Quotation validity has expired."
-    );
+    throw new AccountsHttpError(409, "Quotation validity has expired. Extend the valid-until date first.", "quotation_expired");
   }
 
   return expirySeconds;
@@ -269,10 +270,9 @@ export async function POST(
       );
     }
 
+    // Review INV-26: the configured site URL, never the request Host.
     const origin =
-      new URL(
-        request.url
-      ).origin;
+      publicAppOrigin(request.url);
 
     const shareUrl =
       `${origin}/quotation/share/${encodeURIComponent(

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { errorResponse, requireTenantAccess } from "../../../../lib/accounts/server";
 import { AccountsHttpError, readJsonObject, rpcFailure, type RpcMessages } from "../../../../lib/accounts/errors";
 import { parsePaymentInput } from "../../../../lib/accounts/payments";
+import { operatorDay } from "../../../../lib/time";
 
 export const dynamic = "force-dynamic";
 
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest) {
 
     const { admin, user } = await requireTenantAccess(tenantId);
 
-    const parsed = parsePaymentInput(body, new Date().toISOString().slice(0, 10));
+    const parsed = parsePaymentInput(body, operatorDay(new Date()));
     if (!parsed.ok) {
       throw new AccountsHttpError(400, parsed.message, "invalid_payment");
     }

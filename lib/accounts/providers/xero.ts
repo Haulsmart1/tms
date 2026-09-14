@@ -248,15 +248,18 @@ function decodeJwtPayload(
   }
 }
 
+/** The authentication_event_id claim, which scopes /connections to this consent. */
+export function xeroAuthEventId(accessToken: string): string | null {
+  const payload = decodeJwtPayload(accessToken);
+  return typeof payload.authentication_event_id === "string"
+    ? payload.authentication_event_id
+    : null;
+}
+
 export async function getXeroConnections(
   accessToken: string
 ): Promise<XeroConnection[]> {
-  const payload = decodeJwtPayload(accessToken);
-
-  const authEventId =
-    typeof payload.authentication_event_id === "string"
-      ? payload.authentication_event_id
-      : null;
+  const authEventId = xeroAuthEventId(accessToken);
 
   const url = new URL(CONNECTIONS_URL);
 
@@ -289,11 +292,17 @@ export async function getXeroConnections(
   );
 }
 
+/**
+  Stores the token pair. With `expectedUpdatedAt`, the update only applies when
+  the row has not changed since it was read, and the function returns false
+  when another request refreshed first (review ACC-17).
+*/
 export async function saveXeroCredentials(args: {
   tenantId: string;
   integrationId: string;
   token: XeroTokenResponse;
-}) {
+  expectedUpdatedAt?: string | null;
+}): Promise<boolean> {
   const admin = createAdminClient();
 
   const expiresAt = new Date(
@@ -331,23 +340,33 @@ export async function saveXeroCredentials(args: {
   }
 
   if (existing) {
-    const { error } = await admin
+    let update = admin
       .from("accounting_oauth_credentials")
       .update(payload)
       .eq("id", existing.id);
 
-    if (error) {
-      throw new Error(error.message);
+    if (args.expectedUpdatedAt) {
+      update = update.eq("updated_at", args.expectedUpdatedAt);
     }
-  } else {
-    const { error } = await admin
-      .from("accounting_oauth_credentials")
-      .insert(payload);
+
+    const { data: updated, error } = await update.select("id");
 
     if (error) {
       throw new Error(error.message);
     }
+
+    return (updated ?? []).length > 0;
   }
+
+  const { error } = await admin
+    .from("accounting_oauth_credentials")
+    .insert(payload);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return true;
 }
 
 async function readCredential(
@@ -408,51 +427,85 @@ export async function getValidXeroAccessToken(
   const refreshed =
     await refreshXeroToken(refreshToken);
 
-  await saveXeroCredentials({
+  // Review ACC-17: only store the new pair if nobody refreshed since we read
+  // the row. A request that loses the race uses the stored pair instead of
+  // overwriting a newer one with an older one.
+  const readUpdatedAt =
+    (credential as StoredCredential & { updated_at?: string | null }).updated_at ?? null;
+
+  const saved = await saveXeroCredentials({
     tenantId: credential.tenant_id,
     integrationId:
       credential.integration_id,
     token: refreshed,
+    expectedUpdatedAt: readUpdatedAt,
   });
+
+  if (!saved) {
+    const latest = await readCredential(integrationId);
+    const latestExpiry = latest.expires_at ? new Date(latest.expires_at).getTime() : 0;
+
+    if (latestExpiry > Date.now() + refreshEarlyMs) {
+      return decryptSecret(latest.access_token_encrypted);
+    }
+  }
 
   return refreshed.access_token;
 }
 
+/**
+  Best-effort revocation at Xero, then removal of the stored credential
+  (review ACC-16). A missing credential, a token Xero already revoked, or Xero
+  being unreachable never throws, so disconnect cannot get stuck.
+*/
 export async function revokeXeroConnection(
   integrationId: string
-) {
-  const credential =
-    await readCredential(integrationId);
+): Promise<{ revokedAtXero: boolean }> {
+  const admin = createAdminClient();
 
-  if (credential.refresh_token_encrypted) {
-    const refreshToken = decryptSecret(
-      credential.refresh_token_encrypted
-    );
+  const { data: credential, error: readError } = await admin
+    .from("accounting_oauth_credentials")
+    .select("refresh_token_encrypted")
+    .eq("integration_id", integrationId)
+    .maybeSingle();
 
-    const response = await fetch(
-      REVOCATION_URL,
-      {
-        method: "POST",
-        headers: {
-          Authorization: basicAuthorization(),
-          "Content-Type":
-            "application/x-www-form-urlencoded",
-        },
-        body: new URLSearchParams({
-          token: refreshToken,
-        }),
-        cache: "no-store",
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error(
-        `Xero token revocation failed (${response.status}).`
-      );
-    }
+  if (readError) {
+    throw new Error(readError.message);
   }
 
-  const admin = createAdminClient();
+  let revokedAtXero = false;
+
+  if (credential?.refresh_token_encrypted) {
+    try {
+      const refreshToken = decryptSecret(
+        credential.refresh_token_encrypted
+      );
+
+      const response = await fetch(
+        REVOCATION_URL,
+        {
+          method: "POST",
+          headers: {
+            Authorization: basicAuthorization(),
+            "Content-Type":
+              "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({
+            token: refreshToken,
+          }),
+          cache: "no-store",
+        }
+      );
+
+      revokedAtXero = response.ok;
+
+      if (!response.ok) {
+        console.warn(`[xero] token revocation answered ${response.status}; removing the local credential anyway.`);
+      }
+    } catch (error) {
+      console.warn("[xero] token revocation failed; removing the local credential anyway.", error);
+    }
+  }
 
   const { error } = await admin
     .from("accounting_oauth_credentials")
@@ -462,4 +515,6 @@ export async function revokeXeroConnection(
   if (error) {
     throw new Error(error.message);
   }
+
+  return { revokedAtXero };
 }

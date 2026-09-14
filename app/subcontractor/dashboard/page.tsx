@@ -100,7 +100,14 @@ export default function SubcontractorDashboardPage() {
     setMessage("");
 
     try {
-      const response = await fetch("/api/subcontractor/me", {
+      // A person linked to several subcontractors picks one with ?link=<id>.
+      const link =
+        typeof window === "undefined"
+          ? null
+          : new URLSearchParams(window.location.search).get("link");
+      const response = await fetch(
+        link ? `/api/subcontractor/me?link=${encodeURIComponent(link)}` : "/api/subcontractor/me",
+        {
         cache: "no-store",
       });
 

@@ -25,11 +25,17 @@ import {
   generatePodPdf,
 } from "../../../../../../lib/pod/generatePdf";
 
+import {
+  loadDocumentBranding,
+} from "../../../../../../lib/accounts/documentBranding";
+
+import {
+  authorizeDocumentRecipient,
+  enforceDocumentEmailLimits,
+} from "../../../../../../lib/accounts/documentEmail";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const EMAIL_PATTERN =
-  /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const POD_READY_STATUSES =
   new Set([
@@ -48,68 +54,6 @@ function safeHeader(
     .slice(0, 180);
 }
 
-async function loadDocumentBranding(
-  request: NextRequest,
-  tenantId: string
-) {
-  try {
-    const url =
-      new URL(
-        "/api/settings/documents",
-        request.url
-      );
-
-    url.searchParams.set(
-      "tenantId",
-      tenantId
-    );
-
-    const headers =
-      new Headers();
-
-    const cookie =
-      request.headers.get(
-        "cookie"
-      );
-
-    const authorization =
-      request.headers.get(
-        "authorization"
-      );
-
-    if (cookie) {
-      headers.set(
-        "cookie",
-        cookie
-      );
-    }
-
-    if (authorization) {
-      headers.set(
-        "authorization",
-        authorization
-      );
-    }
-
-    const response =
-      await fetch(
-        url,
-        {
-          method: "GET",
-          headers,
-          cache: "no-store",
-        }
-      );
-
-    if (!response.ok) {
-      return null;
-    }
-
-    return await response.json();
-  } catch {
-    return null;
-  }
-}
 
 export async function POST(
   request: NextRequest,
@@ -135,6 +79,11 @@ export async function POST(
 
     const includePodRequested =
       body.includePod === true;
+
+    // When the customer does not require POD, attach whichever PODs are
+    // ready and report the rest instead of refusing the send.
+    const attachAvailablePod =
+      body.attachAvailablePod === true;
 
     const {
       id: invoiceId,
@@ -405,32 +354,32 @@ export async function POST(
       );
     }
 
+    // Review ACC-5: only addresses stored for this customer (or the caller's
+    // own address). invoice_email is offered as a default but is trusted only
+    // when it is also on the customer record, since older code let callers
+    // write arbitrary addresses into it.
     const recipient =
-      requestedRecipient ||
-      String(
-        invoice.invoice_email ??
-          customer.accounts_email ??
-          customer.email ??
-          customer.operations_email ??
-          ""
-      ).trim();
+      await authorizeDocumentRecipient({
+        admin,
+        tenantId,
+        customerId: String(invoice.customer_id),
+        requested: requestedRecipient,
+        defaults: [
+          invoice.invoice_email,
+          customer.accounts_email,
+          customer.email,
+          customer.operations_email,
+        ],
+        customerEmails: [
+          customer.accounts_email,
+          customer.email,
+          customer.operations_email,
+        ],
+        callerEmail: user.email,
+      });
 
-    if (
-      !recipient ||
-      !EMAIL_PATTERN.test(
-        recipient
-      )
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "A valid invoice email recipient is required.",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
+    // Review ACC-18: per-user and per-tenant send limits.
+    await enforceDocumentEmailLimits(admin, user.id, tenantId);
 
     const jobIds =
       Array.from(
@@ -500,9 +449,14 @@ export async function POST(
       customer.invoice_pod_attachment_required ===
       true;
 
+    const podOptional =
+      !requiresPod &&
+      !requiresPodAttachment;
+
     const attachPod =
       requiresPodAttachment ||
-      includePodRequested;
+      includePodRequested ||
+      attachAvailablePod;
 
     if (
       (requiresPod ||
@@ -552,7 +506,7 @@ export async function POST(
 
     if (
       requiresPod ||
-      attachPod
+      (attachPod && !podOptional)
     ) {
       const incompleteJobs =
         jobs.filter(
@@ -593,10 +547,7 @@ export async function POST(
     }
 
     const branding =
-      await loadDocumentBranding(
-        request,
-        tenantId
-      );
+      await loadDocumentBranding(admin, tenantId);
 
     const {
       bytes: invoicePdfBytes,
@@ -727,16 +678,51 @@ export async function POST(
     const attachedPodJobIds:
       string[] = [];
 
+    const skippedPodJobs:
+      Array<{ id: string; reference: string; podStatus: string }> = [];
+
     if (attachPod) {
       for (const job of jobs) {
+        const podReady =
+          POD_READY_STATUSES.has(
+            String(job.pod_status ?? "").toLowerCase()
+          );
+
+        if (podOptional && !podReady) {
+          skippedPodJobs.push({
+            id: job.id,
+            reference: job.reference ?? job.id,
+            podStatus: job.pod_status ?? "pending",
+          });
+          continue;
+        }
+
+        let generated: Awaited<ReturnType<typeof generatePodPdf>>;
+
+        try {
+          generated =
+            await generatePodPdf(
+              tenantId,
+              job.id
+            );
+        } catch (podError) {
+          if (!podOptional) {
+            throw podError;
+          }
+
+          console.error("[invoice email] optional POD PDF failed", job.id, podError);
+          skippedPodJobs.push({
+            id: job.id,
+            reference: job.reference ?? job.id,
+            podStatus: "unavailable",
+          });
+          continue;
+        }
+
         const {
           bytes,
           filename,
-        } =
-          await generatePodPdf(
-            tenantId,
-            job.id
-          );
+        } = generated;
 
         attachments.push({
           filename,
@@ -916,6 +902,11 @@ export async function POST(
         },
       });
 
+    // Review INV-25: from here on the email has been delivered, so bookkeeping
+    // failures are reported as warnings instead of an error that invites a
+    // duplicate send.
+    const warnings: string[] = [];
+
     const sentAt =
       new Date()
         .toISOString();
@@ -931,8 +922,6 @@ export async function POST(
           sentAt,
         sent_by:
           user.id,
-        invoice_email:
-          recipient,
         updated_at:
           sentAt,
       })
@@ -946,9 +935,8 @@ export async function POST(
       );
 
     if (invoiceUpdateError) {
-      throw new Error(
-        invoiceUpdateError.message
-      );
+      console.error("[invoice email] sent but status update failed", invoiceUpdateError.code);
+      warnings.push("The invoice was emailed, but it could not be marked as sent. Do not resend; refresh the list.");
     }
 
     if (
@@ -977,9 +965,8 @@ export async function POST(
         );
 
       if (podAttachedError) {
-        throw new Error(
-          podAttachedError.message
-        );
+        console.error("[invoice email] sent but POD attachment flags failed", podAttachedError.code);
+        warnings.push("The invoice was emailed, but the POD attachment flags could not be updated.");
       }
     }
 
@@ -1001,6 +988,8 @@ export async function POST(
       podAttachmentCount:
         attachedPodJobIds.length,
       sentAt,
+      warnings,
+      skippedPodJobs,
     });
   }
   catch (error) {
