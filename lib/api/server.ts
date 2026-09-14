@@ -58,8 +58,9 @@ export async function requireTenant(request: NextRequest) {
     throw new ApiError(403, "No tenant is linked to this user");
   }
 
+  let authorized;
   try {
-    await authorizeTenant(admin, user.id, tenantId, "access");
+    authorized = await authorizeTenant(admin, user.id, tenantId, "access");
   } catch (error) {
     if (error instanceof TenantAccessError && error.status === 403) {
       throw new ApiError(403, "You do not have access to this tenant");
@@ -71,6 +72,10 @@ export async function requireTenant(request: NextRequest) {
     supabase,
     user,
     tenantId,
+    /** profiles-based tier, the same one RLS uses: super_admin, admin or staff. */
+    tier: authorized.tier,
+    /** Exact roles.name for the caller, or null. */
+    roleName: authorized.caller.roleName,
   };
 }
 
