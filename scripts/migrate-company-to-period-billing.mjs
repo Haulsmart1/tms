@@ -40,17 +40,26 @@
    proof on a customer who has never paid. A migrating company has been paying
    for months.
 
-   ORDER MATTERS, and it is the reverse of what feels natural:
+   --apply IS ONE TRANSACTION. It calls public.migrate_company_to_period_billing
+   (docs/sql/prodfix_32_migrate_company_to_period_billing.sql), which locks the
+   company_billing row, re-checks every eligibility rule below under that
+   lock, and then in one statement block:
 
-     1. Create the first v2 period (dated at next_charge_on, in the future).
-        Harmless while the flag is still v1: closeDuePeriods skips periods
-        belonging to non-v2 companies, and it is not due anyway.
-     2. Rewrite activated_at on active licences.
-     3. Flip billing_model LAST.
+     1. Creates the first v2 period (dated at next_charge_on, in the future).
+     2. Rewrites activated_at on active licences.
+     3. Flips billing_model LAST.
 
-   Flipping first would open a window where the company is on v2 with no
-   period, so a vehicle added in that window would open a period dated TODAY
-   and charge them GBP 129 they do not owe.
+   Previously these were three separate writes from this script, so a failure
+   after step 1 left a v1 company holding an open future period, and a failure
+   in step 2 left a partial activated_at rewrite (review BILL2-21). If the
+   function is not installed this script REFUSES; it never falls back to the
+   old non-transactional writes.
+
+   The dry run (the default) is read-only and reports the same refusal reasons
+   the function enforces, including pending v1 charges, which would be
+   orphaned once the v1 cron starts skipping the company. It also refuses when
+   a vehicle or licence query reaches PostgREST's 1000-row cap, because a
+   truncated count would misreport the fleet being migrated.
 
    next_charge_on is deliberately NOT cleared. The v1 cron skips v2 companies
    explicitly (app/api/billing/run/route.ts), so it is inert, and leaving it
@@ -104,6 +113,35 @@ function londonToday() {
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
+}
+
+// PostgREST caps an unscoped select at 1000 rows. A count taken from a capped
+// result would silently misreport the fleet, so refuse instead.
+const POSTGREST_ROW_CAP = 1000;
+
+function refuseAtRowCap(label, rows) {
+  if ((rows ?? []).length >= POSTGREST_ROW_CAP) {
+    console.error(
+      `Refusing: the ${label} query hit the ${POSTGREST_ROW_CAP}-row cap, so the counts below would be incomplete. Nothing was written.`
+    );
+    process.exit(1);
+  }
+}
+
+// Pending rows are payments with an unknown Square outcome. A missing table
+// (42P01) cannot hold any; an invalid status value cannot either (22P02 would
+// only arise on an enum, these are text checks).
+async function countPending(table, companyId) {
+  const { count, error } = await admin
+    .from(table)
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", companyId)
+    .eq("status", "pending");
+  if (error) {
+    if (error.code === "42P01") return 0;
+    throw new Error(`${table} pending check failed: ${error.message}`);
+  }
+  return count ?? 0;
 }
 
 async function listCandidates() {
@@ -174,6 +212,31 @@ async function migrate(companyId, apply) {
     process.exit(1);
   }
 
+  // Pending v1 charges are payments whose Square outcome is unknown. Once the
+  // company is v2 the v1 cron skips it and nothing would ever replay them.
+  const pendingCycle = await countPending("platform_charges", companyId);
+  const pendingAddon = await countPending("vehicle_addon_charges", companyId);
+  if (pendingCycle > 0 || pendingAddon > 0) {
+    console.error(
+      `Refusing to migrate ${companyId}: ${pendingCycle} pending cycle charge(s) and ${pendingAddon} pending add-on charge(s). Reconcile them against Square first.`
+    );
+    process.exit(1);
+  }
+
+  const { data: openPeriod, error: openError } = await admin
+    .from("billing_periods")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("status", "open")
+    .maybeSingle();
+  if (openError) throw new Error(openError.message);
+  if (openPeriod) {
+    console.error(
+      `Refusing to migrate ${companyId}: open billing period ${openPeriod.id} already exists. It may be part-migrated; inspect billing_periods.`
+    );
+    process.exit(1);
+  }
+
   const seam = billing.next_charge_on;
   const periodEnd = addDays(seam, PERIOD_DAYS);
 
@@ -193,6 +256,7 @@ async function migrate(companyId, apply) {
     .select("id")
     .in("tenant_id", scope);
   if (vehiclesError) throw new Error(vehiclesError.message);
+  refuseAtRowCap("vehicles", vehicles);
 
   const vehicleIds = (vehicles ?? []).map((v) => v.id);
 
@@ -204,6 +268,7 @@ async function migrate(companyId, apply) {
       .in("vehicle_id", vehicleIds)
       .is("deactivated_at", null);
     if (error) throw new Error(error.message);
+    refuseAtRowCap("vehicle_licences", data);
     activeLicences = data ?? [];
   }
 
@@ -224,55 +289,31 @@ async function migrate(companyId, apply) {
     return;
   }
 
-  // 1. The period, BEFORE the flag. See the header: flipping first would let a
-  //    vehicle added in the gap open a period dated today and charge GBP 129.
-  const { data: period, error: periodError } = await admin
-    .from("billing_periods")
-    .insert({
-      company_id: companyId,
-      period_start: seam,
-      period_end: periodEnd,
-      status: "open",
-      prepaid_pence: 0,
-    })
-    .select("id")
-    .single();
-  if (periodError) {
-    if (periodError.code === "23505") {
+  // One transaction in the database. The function re-checks every refusal
+  // above under a row lock, so a change between this dry-run read and the
+  // apply is caught there rather than half-applied here.
+  const { data: summary, error: rpcError } = await admin.rpc(
+    "migrate_company_to_period_billing",
+    { p_company_id: companyId, p_today: today }
+  );
+  if (rpcError) {
+    if (rpcError.code === "PGRST202" || rpcError.code === "42883") {
       console.error(
-        "This company already has an open billing period. It may be part-migrated; inspect billing_periods before continuing."
+        "migrate_company_to_period_billing is not installed. Apply docs/sql/prodfix_32_migrate_company_to_period_billing.sql first. Nothing was written."
       );
       process.exit(1);
     }
-    throw new Error(periodError.message);
-  }
-  console.log(`\nCreated billing period ${period.id}`);
-
-  // 2. Move every active licence's clock to the seam. Without this the first
-  //    v2 invoice prorates from the original activation and bills again for
-  //    time v1 already collected.
-  if (activeLicences.length > 0) {
-    const { error } = await admin
-      .from("vehicle_licences")
-      .update({ activated_at: `${seam}T00:00:00Z`, grace_until: null })
-      .in(
-        "id",
-        activeLicences.map((l) => l.id)
-      );
-    if (error) throw new Error(error.message);
-    console.log(`Reset activated_at on ${activeLicences.length} active licences`);
+    console.error(`Migration refused or failed, nothing was written: ${rpcError.message}`);
+    process.exit(1);
   }
 
-  // 3. The flag, LAST.
-  const { error: flagError } = await admin
-    .from("company_billing")
-    .update({ billing_model: "v2_period" })
-    .eq("company_id", companyId);
-  if (flagError) throw new Error(flagError.message);
-  console.log("Switched billing_model to v2_period");
-
+  console.log(`\nCreated billing period ${summary.period_id}`);
   console.log(
-    `\nDone. The v1 cron now skips this company. Its first v2 invoice is raised on ${periodEnd}.`
+    `Reset activated_at on ${summary.licences_reset} active licences (${summary.distinct_vehicles} vehicles)`
+  );
+  console.log("Switched billing_model to v2_period");
+  console.log(
+    `\nDone. The v1 cron now skips this company. Its first v2 invoice is raised on ${summary.period_end}.`
   );
 }
 
