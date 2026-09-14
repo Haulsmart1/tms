@@ -132,7 +132,8 @@ export async function POST(request: NextRequest) {
 
   if (!userId) {
     const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
-      redirectTo: `${getSiteUrl()}/api/auth/callback?next=/dashboard`,
+      // Invite links land on the scanner-safe confirm page (AUTH-6).
+      redirectTo: `${getSiteUrl()}/auth/confirm?next=${encodeURIComponent("/dashboard")}`,
       data: { tenant_id: tenantId, role, invited_by: user.id },
     });
 

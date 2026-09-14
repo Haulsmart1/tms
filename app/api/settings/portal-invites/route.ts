@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@supabase/ssr";
-import { createClient } from "@supabase/supabase-js";
-import { cookies } from "next/headers";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { checkRateLimit, RATE_LIMITS } from "../../../../lib/rateLimit";
+import { operatorDay } from "../../../../lib/time";
+import { MIGRATION_MISSING_MESSAGE } from "../../../../lib/tenant/userAdmin";
+import { portalInviteMessage, portalLinkDecision } from "../../../../lib/tenant/portalInvite";
+import { requireUserAdmin } from "../users/shared";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,33 +16,12 @@ const SUB_ROLES = new Set([
   "accounts",
 ]);
 
-async function userClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anon) throw new Error("Missing Supabase public env vars.");
+const MISSING_FUNCTION_CODES = new Set(["42883", "PGRST202"]);
 
-  const store = await cookies();
-  return createServerClient(url, anon, {
-    cookies: {
-      getAll: () => store.getAll(),
-      setAll(items) {
-        try {
-          items.forEach(({ name, value, options }) =>
-            store.set(name, value, options)
-          );
-        } catch {}
-      },
-    },
-  });
-}
-
-function adminClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("Missing Supabase server env vars.");
-  return createClient(url, key, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+class PortalInviteError extends Error {
+  constructor(public readonly status: number, public readonly publicMessage: string) {
+    super(publicMessage);
+  }
 }
 
 function siteUrl() {
@@ -49,75 +31,124 @@ function siteUrl() {
   );
 }
 
-async function requireAdmin(tenantId: string) {
-  const client = await userClient();
-  const { data: { user }, error } = await client.auth.getUser();
-  if (error || !user) throw new Error("UNAUTHENTICATED");
-
-  const admin = adminClient();
-  const { data: membership, error: membershipError } = await admin
-    .from("memberships")
-    .select("role")
-    .eq("tenant_id", tenantId)
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (membershipError) throw new Error(membershipError.message);
-  if (!membership || !["admin", "super_admin"].includes(membership.role)) {
-    throw new Error("FORBIDDEN");
+async function findAuthUserId(admin: SupabaseClient, email: string): Promise<string | null> {
+  const { data, error } = await admin.rpc("find_auth_user_id_by_email", { p_email: email });
+  if (error) {
+    if (error.code && MISSING_FUNCTION_CODES.has(error.code)) {
+      throw new PortalInviteError(503, MIGRATION_MISSING_MESSAGE);
+    }
+    console.error("[portal-invites] lookup failed", error.code);
+    throw new PortalInviteError(500, "Unable to send the invitation right now.");
   }
-
-  return { admin, user };
+  return typeof data === "string" ? data : null;
 }
 
-async function findAuthUser(admin: ReturnType<typeof adminClient>, email: string) {
-  let page = 1;
-  while (true) {
-    const { data, error } = await admin.auth.admin.listUsers({
-      page,
-      perPage: 1000,
-    });
-    if (error) throw new Error(error.message);
-
-    const match = data.users.find(
-      (u) => u.email?.trim().toLowerCase() === email
-    );
-    if (match) return match;
-    if (data.users.length < 1000) return null;
-    page += 1;
-  }
-}
-
-async function ensurePublicUser(
-  admin: ReturnType<typeof adminClient>,
-  userId: string,
-  email: string
-) {
+/** The company an existing account belongs to, or null when it has none. "super" for a super admin. */
+async function accountCompany(admin: SupabaseClient, userId: string): Promise<string | null | "super"> {
   const { data, error } = await admin
-    .from("users")
-    .select("id, email")
+    .from("profiles")
+    .select("company_id, tenant_id, roles(name)")
     .eq("id", userId)
     .maybeSingle();
+  if (error) throw new PortalInviteError(500, "Unable to send the invitation right now.");
+  if (!data) return null;
 
-  if (error) throw new Error(error.message);
+  const roles = data.roles as { name?: unknown } | { name?: unknown }[] | null;
+  const role = Array.isArray(roles) ? roles[0] : roles;
+  if (role?.name === "super_admin") return "super";
 
+  if (data.company_id) return String(data.company_id);
+  if (!data.tenant_id) return null;
+
+  const { data: tenantRow, error: tenantError } = await admin
+    .from("tenants")
+    .select("company_id")
+    .eq("id", data.tenant_id)
+    .maybeSingle();
+  if (tenantError) throw new PortalInviteError(500, "Unable to send the invitation right now.");
+  return tenantRow?.company_id ? String(tenantRow.company_id) : null;
+}
+
+async function ensurePublicUser(admin: SupabaseClient, userId: string, email: string) {
+  const { data, error } = await admin.from("users").select("id").eq("id", userId).maybeSingle();
+  if (error) throw new Error("users lookup failed");
   if (!data) {
-    const { error: insertError } = await admin
-      .from("users")
-      .insert({ id: userId, email });
-    if (insertError) throw new Error(insertError.message);
+    const { error: insertError } = await admin.from("users").insert({ id: userId, email });
+    if (insertError) throw new Error("users insert failed");
   }
+}
+
+async function sendSignInLink(email: string, next: string) {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anon) return;
+  try {
+    const client = createClient(url, anon, { auth: { autoRefreshToken: false, persistSession: false } });
+    const { error } = await client.auth.signInWithOtp({
+      email,
+      options: { shouldCreateUser: false, emailRedirectTo: `${siteUrl()}/auth/confirm?next=${encodeURIComponent(next)}` },
+    });
+    if (error) console.warn("[portal-invites] sign-in link not sent", error.status);
+  } catch (error) {
+    console.warn("[portal-invites] sign-in link not sent", error);
+  }
+}
+
+/*
+  Resolves (or creates) the account for a portal invite.
+
+  AUTH-5 / SET-8: an existing account is linked only when it has no company or
+  already belongs to the inviting company. An account in another company, or
+  a super admin, is never attached without consent; the caller gets the same
+  "invitation sent" answer either way, so the response reveals nothing.
+*/
+async function resolveInvitee(
+  admin: SupabaseClient,
+  email: string,
+  companyId: string | null,
+  inviteMetadata: Record<string, unknown>,
+  next: string,
+): Promise<{ userId: string | null; createdUserId: string | null; existing: boolean }> {
+  let userId = await findAuthUserId(admin, email);
+
+  if (userId) {
+    const decision = portalLinkDecision(await accountCompany(admin, userId), companyId);
+    return { userId: decision === "link" ? userId : null, createdUserId: null, existing: true };
+  }
+
+  const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
+    // Invite links land on the scanner-safe confirm page (AUTH-6).
+    redirectTo: `${siteUrl()}/auth/confirm?next=${encodeURIComponent(next)}`,
+    data: inviteMetadata,
+  });
+
+  if (error || !data.user?.id) {
+    userId = await findAuthUserId(admin, email);
+    if (!userId) {
+      console.error("[portal-invites] invite failed", error?.status, error?.code);
+      throw new PortalInviteError(400, "Unable to send the invitation. Check the address and try again.");
+    }
+    const decision = portalLinkDecision(await accountCompany(admin, userId), companyId);
+    return { userId: decision === "link" ? userId : null, createdUserId: null, existing: true };
+  }
+
+  return { userId: data.user.id, createdUserId: data.user.id, existing: false };
+}
+
+async function cleanupCreated(admin: SupabaseClient, createdUserId: string | null) {
+  if (!createdUserId) return;
+  const { error } = await admin.auth.admin.deleteUser(createdUserId);
+  if (error) console.error("[portal-invites] cleanup of new auth user failed", createdUserId);
 }
 
 export async function GET(request: NextRequest) {
+  const tenantId = request.nextUrl.searchParams.get("tenantId")?.trim() ?? "";
+  const access = await requireUserAdmin(tenantId);
+  if (!access.ok) return access.response;
+
+  const { admin } = access.ctx;
+
   try {
-    const tenantId = request.nextUrl.searchParams.get("tenantId")?.trim();
-    if (!tenantId) {
-      return NextResponse.json({ error: "Choose a tenant." }, { status: 400 });
-    }
-
-    const { admin } = await requireAdmin(tenantId);
-
     const [drivers, subcontractors, employees, driverUsers, subUsers] =
       await Promise.all([
         admin
@@ -155,7 +186,7 @@ export async function GET(request: NextRequest) {
       driverUsers.error ||
       subUsers.error;
 
-    if (err) throw new Error(err.message);
+    if (err) throw new Error(err.code ?? "load failed");
 
     return NextResponse.json({
       drivers: drivers.data ?? [],
@@ -165,22 +196,33 @@ export async function GET(request: NextRequest) {
       subcontractorUsers: subUsers.data ?? [],
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to load.";
-    const status = message === "UNAUTHENTICATED" ? 401 : message === "FORBIDDEN" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    console.error("[portal-invites] load failed", error);
+    return NextResponse.json({ error: "Unable to load portal access." }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
+  let body: Record<string, unknown>;
   try {
-    const body = await request.json();
-    const tenantId = String(body.tenantId ?? "").trim();
-    if (!tenantId) {
-      return NextResponse.json({ error: "Choose a tenant." }, { status: 400 });
-    }
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+  }
 
-    const { admin, user: inviter } = await requireAdmin(tenantId);
+  const tenantId = String(body.tenantId ?? "").trim();
+  const access = await requireUserAdmin(tenantId);
+  if (!access.ok) return access.response;
 
+  const { admin, user: inviter, tenant } = access.ctx;
+
+  const limit = await checkRateLimit(admin, RATE_LIMITS.invitePerUser, inviter.id);
+  if (!limit.allowed) {
+    return NextResponse.json({ error: "Too many invitations. Try again later." }, { status: 429 });
+  }
+
+  let createdUserId: string | null = null;
+
+  try {
     if (body.type === "driver") {
       const driverId = String(body.driverId ?? "").trim();
       if (!driverId) {
@@ -194,7 +236,7 @@ export async function POST(request: NextRequest) {
         .eq("tenant_id", tenantId)
         .maybeSingle();
 
-      if (error) throw new Error(error.message);
+      if (error) throw new Error("driver lookup failed");
       if (!driver) return NextResponse.json({ error: "Driver not found." }, { status: 404 });
       if (driver.active === false) {
         return NextResponse.json({ error: "Driver is inactive." }, { status: 409 });
@@ -204,72 +246,55 @@ export async function POST(request: NextRequest) {
       }
 
       const email = driver.email.trim().toLowerCase();
-      const existing = await findAuthUser(admin, email);
-
-      let userId: string;
-      let inviteSent = false;
-
-      if (existing) {
-        userId = existing.id;
-      } else {
-        const { data, error: inviteError } =
-          await admin.auth.admin.inviteUserByEmail(email, {
-            redirectTo: `${siteUrl()}/api/auth/callback?next=/driver/dashboard`,
-            data: {
-              portal: "driver",
-              tenant_id: tenantId,
-              driver_id: driver.id,
-              invited_by: inviter.id,
-            },
-          });
-
-        if (inviteError) {
-          return NextResponse.json({ error: inviteError.message }, { status: 400 });
-        }
-        if (!data.user?.id) throw new Error("Invite returned no user ID.");
-        userId = data.user.id;
-        inviteSent = true;
-      }
-
-      await ensurePublicUser(admin, userId, email);
 
       const { data: existingLink, error: linkError } = await admin
         .from("driver_users")
-        .select("id")
+        .select("id, user_id, active")
         .eq("tenant_id", tenantId)
         .eq("driver_id", driver.id)
         .maybeSingle();
 
-      if (linkError) throw new Error(linkError.message);
+      if (linkError) throw new Error("driver link lookup failed");
 
-      if (existingLink) {
-        const { error: updateError } = await admin
-          .from("driver_users")
-          .update({
-            user_id: userId,
-            active: true,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", existingLink.id);
-        if (updateError) throw new Error(updateError.message);
-      } else {
-        const { error: insertError } = await admin
-          .from("driver_users")
-          .insert({
-            tenant_id: tenantId,
-            driver_id: driver.id,
-            user_id: userId,
-            active: true,
-          });
-        if (insertError) throw new Error(insertError.message);
+      const next = "/driver/dashboard";
+      const invitee = await resolveInvitee(
+        admin,
+        email,
+        tenant.companyId,
+        { portal: "driver", tenant_id: tenantId, driver_id: driver.id, invited_by: inviter.id },
+        next,
+      );
+      createdUserId = invitee.createdUserId;
+
+      if (invitee.userId) {
+        // Never silently repoint an active link to a different account.
+        if (existingLink?.active && existingLink.user_id && existingLink.user_id !== invitee.userId) {
+          await cleanupCreated(admin, createdUserId);
+          return NextResponse.json(
+            { error: "This driver's portal access is linked to a different account. Revoke it before inviting again." },
+            { status: 409 },
+          );
+        }
+
+        await ensurePublicUser(admin, invitee.userId, email);
+
+        if (existingLink) {
+          const { error: updateError } = await admin
+            .from("driver_users")
+            .update({ user_id: invitee.userId, active: true, updated_at: new Date().toISOString() })
+            .eq("id", existingLink.id);
+          if (updateError) throw new Error("driver link update failed");
+        } else {
+          const { error: insertError } = await admin
+            .from("driver_users")
+            .insert({ tenant_id: tenantId, driver_id: driver.id, user_id: invitee.userId, active: true });
+          if (insertError) throw new Error("driver link insert failed");
+        }
+
+        if (invitee.existing) await sendSignInLink(email, next);
       }
 
-      return NextResponse.json({
-        ok: true,
-        message: inviteSent
-          ? `Driver invitation sent to ${email}.`
-          : `${email} already had an account and now has driver portal access.`,
-      });
+      return NextResponse.json({ ok: true, message: portalInviteMessage("driver", email) });
     }
 
     if (body.type === "subcontractor") {
@@ -292,12 +317,12 @@ export async function POST(request: NextRequest) {
         .eq("tenant_id", tenantId)
         .maybeSingle();
 
-      if (error) throw new Error(error.message);
+      if (error) throw new Error("employee lookup failed");
       if (!employee) {
         return NextResponse.json({ error: "Employee not found." }, { status: 404 });
       }
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = operatorDay(new Date());
       if (
         employee.directly_employed !== true ||
         employee.active !== true ||
@@ -314,86 +339,78 @@ export async function POST(request: NextRequest) {
       }
 
       const email = employee.email.trim().toLowerCase();
-      const existing = await findAuthUser(admin, email);
-
-      let userId: string;
-      let inviteSent = false;
-
-      if (existing) {
-        userId = existing.id;
-      } else {
-        const next = role === "driver" ? "/driver/dashboard" : "/subcontractor/dashboard";
-
-        const { data, error: inviteError } =
-          await admin.auth.admin.inviteUserByEmail(email, {
-            redirectTo: `${siteUrl()}/api/auth/callback?next=${encodeURIComponent(next)}`,
-            data: {
-              portal: "subcontractor",
-              tenant_id: tenantId,
-              subcontractor_id: employee.subcontractor_id,
-              employee_id: employee.id,
-              role,
-              invited_by: inviter.id,
-            },
-          });
-
-        if (inviteError) {
-          return NextResponse.json({ error: inviteError.message }, { status: 400 });
-        }
-        if (!data.user?.id) throw new Error("Invite returned no user ID.");
-        userId = data.user.id;
-        inviteSent = true;
-      }
-
-      await ensurePublicUser(admin, userId, email);
 
       const { data: link, error: linkError } = await admin
         .from("subcontractor_users")
-        .select("id")
+        .select("id, user_id, active")
         .eq("tenant_id", tenantId)
         .eq("subcontractor_id", employee.subcontractor_id)
         .eq("employee_id", employee.id)
         .maybeSingle();
 
-      if (linkError) throw new Error(linkError.message);
+      if (linkError) throw new Error("subcontractor link lookup failed");
 
-      if (link) {
-        const { error: updateError } = await admin
-          .from("subcontractor_users")
-          .update({
-            user_id: userId,
-            role,
-            active: true,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", link.id);
-        if (updateError) throw new Error(updateError.message);
-      } else {
-        const { error: insertError } = await admin
-          .from("subcontractor_users")
-          .insert({
-            tenant_id: tenantId,
-            subcontractor_id: employee.subcontractor_id,
-            employee_id: employee.id,
-            user_id: userId,
-            role,
-            active: true,
-          });
-        if (insertError) throw new Error(insertError.message);
+      const next = role === "driver" ? "/driver/dashboard" : "/subcontractor/dashboard";
+      const invitee = await resolveInvitee(
+        admin,
+        email,
+        tenant.companyId,
+        {
+          portal: "subcontractor",
+          tenant_id: tenantId,
+          subcontractor_id: employee.subcontractor_id,
+          employee_id: employee.id,
+          role,
+          invited_by: inviter.id,
+        },
+        next,
+      );
+      createdUserId = invitee.createdUserId;
+
+      if (invitee.userId) {
+        if (link?.active && link.user_id && link.user_id !== invitee.userId) {
+          await cleanupCreated(admin, createdUserId);
+          return NextResponse.json(
+            { error: "This employee's portal access is linked to a different account. Revoke it before inviting again." },
+            { status: 409 },
+          );
+        }
+
+        await ensurePublicUser(admin, invitee.userId, email);
+
+        if (link) {
+          const { error: updateError } = await admin
+            .from("subcontractor_users")
+            .update({ user_id: invitee.userId, role, active: true, updated_at: new Date().toISOString() })
+            .eq("id", link.id);
+          if (updateError) throw new Error("subcontractor link update failed");
+        } else {
+          const { error: insertError } = await admin
+            .from("subcontractor_users")
+            .insert({
+              tenant_id: tenantId,
+              subcontractor_id: employee.subcontractor_id,
+              employee_id: employee.id,
+              user_id: invitee.userId,
+              role,
+              active: true,
+            });
+          if (insertError) throw new Error("subcontractor link insert failed");
+        }
+
+        if (invitee.existing) await sendSignInLink(email, next);
       }
 
-      return NextResponse.json({
-        ok: true,
-        message: inviteSent
-          ? `Subcontractor portal invitation sent to ${email}.`
-          : `${email} already had an account and now has subcontractor portal access.`,
-      });
+      return NextResponse.json({ ok: true, message: portalInviteMessage("subcontractor", email) });
     }
 
     return NextResponse.json({ error: "Unknown invite type." }, { status: 400 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Invite failed.";
-    const status = message === "UNAUTHENTICATED" ? 401 : message === "FORBIDDEN" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    await cleanupCreated(admin, createdUserId);
+    if (error instanceof PortalInviteError) {
+      return NextResponse.json({ error: error.publicMessage }, { status: error.status });
+    }
+    console.error("[portal-invites] invite failed", error);
+    return NextResponse.json({ error: "Invite failed. Nothing was changed; try again." }, { status: 500 });
   }
 }
