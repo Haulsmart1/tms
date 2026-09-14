@@ -5,7 +5,7 @@ import {
   errorResponse,
   requireTenantAccess,
 } from "../../../../lib/accounts/server";
-import { loadTenantRef } from "../../../../lib/auth/serverTenantAccess";
+import { DocumentBrandingReadError, loadBrandingRecords } from "../../../../lib/accounts/documentBranding";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,53 +46,13 @@ function respondError(error: unknown) {
 }
 
 async function loadSettings(admin: AdminClient, tenantId: string) {
-  /* SET-1: company_profiles.tenant_id holds the COMPANY id
-     (docs/sql/rls_04_identity_tables.sql), so resolve it through the tenant. */
-  const tenantRef = await loadTenantRef(admin, tenantId);
-  const companyId = tenantRef?.companyId ?? null;
-
-  const [companyResult, documentResult, quotationResult] = await Promise.all([
-    companyId
-      ? admin
-          .from("company_profiles")
-          .select(`
-            tenant_id,
-            company_name,
-            trading_name,
-            registration_number,
-            vat_number,
-            business_email,
-            business_phone,
-            website,
-            address_line_1,
-            address_line_2,
-            city,
-            region,
-            postcode,
-            country_code
-          `)
-          .eq("tenant_id", companyId)
-          .maybeSingle()
-      : Promise.resolve({ data: null, error: null }),
-
-    admin
-      .from("document_settings")
-      .select(`
-        id,
-        tenant_id,
-        logo_path,
-        footer_text,
-        bank_details,
-        generic_document_note,
-        show_logo,
-        show_company_registration,
-        show_vat_number,
-        show_contact_details,
-        created_at,
-        updated_at
-      `)
-      .eq("tenant_id", tenantId)
-      .maybeSingle(),
+  /* Company profile, document settings and the signed logo come from the same
+     loader the invoice and quotation PDFs use (SET-1, SET-15). */
+  const [branding, quotationResult] = await Promise.all([
+    loadBrandingRecords(admin, tenantId).catch((error: unknown) => {
+      if (error instanceof DocumentBrandingReadError) fail(error.label, { code: error.code });
+      throw error;
+    }),
 
     admin
       .from("quotation_template_settings")
@@ -116,29 +76,11 @@ async function loadSettings(admin: AdminClient, tenantId: string) {
       .maybeSingle(),
   ]);
 
-  if (companyResult.error) fail("company profile read", companyResult.error);
-  if (documentResult.error) fail("document settings read", documentResult.error);
   if (quotationResult.error) fail("quotation template read", quotationResult.error);
 
-  let logoSignedUrl: string | null = null;
-  const logoPath = documentResult.data?.logo_path;
-
-  // Only ever sign a path inside this tenant's own logo folder (SET-15).
-  if (typeof logoPath === "string" && logoPath.startsWith(`${tenantId}/logo/`)) {
-    const { data: signedLogo, error: signedLogoError } = await admin.storage
-      .from("document-branding")
-      .createSignedUrl(logoPath, 60 * 60);
-
-    if (!signedLogoError) {
-      logoSignedUrl = signedLogo?.signedUrl ?? null;
-    }
-  }
-
   return {
-    companyProfile: companyResult.data,
-    documentSettings: documentResult.data
-      ? { ...documentResult.data, logo_signed_url: logoSignedUrl }
-      : null,
+    companyProfile: branding.companyProfile,
+    documentSettings: branding.documentSettings,
     quotationTemplate: quotationResult.data,
   };
 }
