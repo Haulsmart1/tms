@@ -1,4 +1,8 @@
-
+-- NOTE 2026-09-14 (review SQL-4 / POD-15 / SQL-16 / SQL-17): the select policy below uses
+-- auth_tenant_id(); docs/sql/prodfix_85_replace_auth_tenant_id_policies.sql replaces it with
+-- can_access_tenant(tenant_id), and docs/sql/prodfix_90_child_tenant_binding.sql binds the scan's
+-- tenant to its job, stop and item. This file uses bare `create table` / `create policy`, so a
+-- re-run errors partway: do not re-run it.
 create table public.job_item_scans (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null,

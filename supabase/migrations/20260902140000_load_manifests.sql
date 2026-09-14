@@ -1,3 +1,8 @@
+-- NOTE 2026-09-14 (review SQL-4 / POD-15 / SQL-17): the three *_select_tenant policies below use
+-- auth_tenant_id(); docs/sql/prodfix_85_replace_auth_tenant_id_policies.sql replaces them with
+-- can_access_tenant(tenant_id) under the same names. Bare `create table` / `create policy`: do not
+-- re-run this file.
+--
 -- Multi-job van load manifests.
 -- Application/service-role APIs are authoritative for writes.
 -- Authenticated clients receive tenant-scoped read access only.

@@ -3,6 +3,14 @@
 -- results as rows you read in the results grid. Every probe is isolated; expected errors are
 -- caught and mutations are rolled back, so nothing persists.
 --
+-- SECURITY NOTE (review finding SQL-10, 2026-09-14): the function this creates switches role and
+-- JWT claims to whatever user id it is given. While it exists, Supabase's default privileges let
+-- anon and authenticated call it at /rest/v1/rpc/rls_verify and impersonate any user for the
+-- probes. Drop it IMMEDIATELY after reading the results: run docs/sql/prodfix_81_drop_rls_verify.sql.
+-- The super_admin and admin profile ids that used to be hard-coded at the bottom of this file have
+-- been replaced with placeholders; they remain in git history and in
+-- docs/superpowers/plans/2026-07-28-rls-tenancy-hardening.md.
+--
 -- STEP 1 -- create a NULL-ROLE staff test profile (run as postgres; the guard exempts it):
 --   insert into public.profiles (id, tenant_id, company_id)
 --   select gen_random_uuid(), t.id, t.company_id
@@ -180,9 +188,14 @@ begin
 end;
 $fn$;
 
--- RUN THIS (replace the staff id with the null-role profile you created in step 1):
+-- RUN THIS (replace all three placeholders; the ids used to be committed here, see header):
+--   select p.id, r.name from public.profiles p join public.roles r on r.id = p.role_id
+--   where r.name in ('super_admin', 'admin');
 select * from public.rls_verify(
-  '362aa5fd-0ae8-47e3-8a01-f005d246f476'::uuid,   -- super_admin
-  '005e1811-8165-4213-b92b-4fbaed5591d2'::uuid,   -- a company admin
-  '00000000-0000-0000-0000-000000000000'::uuid    -- staff  <-- REPLACE with your NULL-ROLE staff id
+  '<SUPER_ADMIN_USER_ID>'::uuid,   -- super_admin
+  '<COMPANY_ADMIN_USER_ID>'::uuid, -- a company admin
+  '<NULL_ROLE_STAFF_USER_ID>'::uuid -- staff: the null-role profile you created in step 1
 );
+
+-- THEN, ALWAYS: drop the function again (docs/sql/prodfix_81_drop_rls_verify.sql):
+--   drop function if exists public.rls_verify(uuid, uuid, uuid);

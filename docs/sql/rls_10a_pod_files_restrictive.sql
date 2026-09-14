@@ -1,4 +1,12 @@
 -- pod-files lockdown -- ACTUALLY APPLIED 2026-08-10 (supersedes rls_10a_pod_files_policies.sql).
+--
+-- UPDATE 2026-09-14: the four policies below are now reproducible, uncommented, in
+-- docs/sql/prodfix_83_storage_restrictive_policies.sql (audit item M7), which creates each one only
+-- if it is missing. That file also adds pod_files_non_authenticated_deny (`to public`), because a
+-- restrictive policy constrains only the roles it names and all four here are `to authenticated`:
+-- if an original permissive pod-files policy targets `public`, anon was never restricted (review
+-- finding SQL-8). Apply order: docs/sql/prodfix_80_README.md.
+--
 -- See that file's header for why: storage.objects is owned by the reserved role
 -- supabase_storage_admin; postgres cannot ALTER/DROP/CREATE POLICY on it directly, and the
 -- Supabase Dashboard's Storage > Policies UI showed the 4 existing pod-files policies as
