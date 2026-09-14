@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  billingModelForRow,
   DISCOUNT_BANDS,
   fleetDiscountBand,
   fleetPeriodPence,
+  NEW_COMPANY_BILLING_MODEL,
   PERIOD_MINIMUM_PENCE,
   PERIOD_VEHICLE_PENCE,
 } from "./rateCard";
@@ -197,5 +199,36 @@ describe("threshold cap", () => {
   // The other cap effect, which the copy does describe correctly.
   it("makes the tenth vehicle free", () => {
     expect(fleetPeriodPence(9)).toBe(fleetPeriodPence(10));
+  });
+});
+
+describe("billingModelForRow", () => {
+  // A company with no company_billing row has not added a card yet. It will be
+  // created on whatever the default is, so that is what its page must show.
+  // Showing v1 here tells a v2 signup a price they will never be charged.
+  it("gives a company with no row the new-company default", () => {
+    expect(billingModelForRow(null)).toBe(NEW_COMPANY_BILLING_MODEL);
+  });
+
+  it("reads the model from a row that has one", () => {
+    expect(billingModelForRow({ billing_model: "v2_period" })).toBe("v2_period");
+    expect(billingModelForRow({ billing_model: "v1_immediate" })).toBe(
+      "v1_immediate"
+    );
+  });
+
+  // The case the shell's select("*") comment exists for: billing_06 not
+  // applied, so the row exists but the column does not. That company IS on
+  // v1, whatever the new-company default says. Merging this with "no row"
+  // would render every existing company as v2 the moment the default flips.
+  it("fails closed to v1 for a row missing the column", () => {
+    expect(billingModelForRow({})).toBe("v1_immediate");
+    expect(billingModelForRow({ billing_model: null })).toBe("v1_immediate");
+  });
+
+  it("fails closed to v1 for an unrecognised value", () => {
+    expect(billingModelForRow({ billing_model: "v3_future" })).toBe(
+      "v1_immediate"
+    );
   });
 });

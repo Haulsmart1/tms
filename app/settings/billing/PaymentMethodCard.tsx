@@ -43,6 +43,10 @@ type Props = {
   onReplace: () => void;
   onCancel: () => void;
   onComplete: (response: Record<string, unknown>) => void;
+  /* Shown beside the card form when there is no card yet. Defaults to the v1
+     wording, which promises a charge today. A v2 body must pass its own: v2
+     takes nothing until a vehicle is activated. */
+  setupNotice?: string;
 };
 
 /* The icon square from the Settings launcher cards (app/settings/page.tsx),
@@ -71,6 +75,7 @@ export default function PaymentMethodCard({
   onReplace,
   onCancel,
   onComplete,
+  setupNotice = "Add a card to start your subscription. Your first charge is taken today.",
 }: Props) {
   let body: ReactNode;
 
@@ -119,9 +124,7 @@ export default function PaymentMethodCard({
   } else if (!billing) {
     body = (
       <div className="grid gap-3">
-        <p className="m-0 text-sm text-ink-2">
-          Add a card to start your subscription. Your first charge is taken today.
-        </p>
+        <p className="m-0 text-sm text-ink-2">{setupNotice}</p>
         <SquareCardForm onComplete={onComplete} />
       </div>
     );

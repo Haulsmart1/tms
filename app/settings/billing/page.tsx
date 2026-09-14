@@ -9,6 +9,7 @@ import MessageBanner from "../../../components/MessageBanner";
 import Skeleton from "../../../components/Skeleton";
 import V1Billing from "./V1Billing";
 import V2Billing from "./V2Billing";
+import { billingModelForRow } from "../../../lib/billing/rateCard";
 
 /* Shell for the billing page. Owns the role gates and ONE query, then hands
    off to the body for whichever billing model this company is on.
@@ -73,7 +74,10 @@ export default function BillingSettingsPage() {
         .select("*")
         .maybeSingle();
       if (error) throw new Error(error.message);
-      setModel((data as BillingModelRow | null)?.billing_model ?? null);
+      /* No row and a row missing the column are different facts; see
+         billingModelForRow. A company that has not added a card yet is shown
+         the model it will be created on, not v1 by accident. */
+      setModel(billingModelForRow(data as BillingModelRow | null));
     } catch (error) {
       setModelError(error instanceof Error ? error.message : "Unexpected error");
     } finally {
