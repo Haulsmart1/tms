@@ -1,3 +1,8 @@
+-- NOTE 2026-09-14 (review SQL-4 / POD-15): the driver_users_select_tenant policy below uses
+-- auth_tenant_id(), which is defined nowhere in the repo and may read user-editable JWT
+-- user_metadata. It is replaced by a can_access_tenant(tenant_id) policy of the same name in
+-- docs/sql/prodfix_85_replace_auth_tenant_id_policies.sql. Do not re-run this file after that.
+-- Hygiene (SQL-17): `create table if not exists` silently accepts a different pre-existing shape.
 create table if not exists public.driver_users (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null,
