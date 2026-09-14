@@ -252,6 +252,8 @@ export default function PlanningPage() {
      itself be superseded by a later load, not just by unmount. */
   const loadSeq = useRef(0);
   const saveInFlight = useRef(false);
+  /* Lets the planner stop a long Smart Optimize run (PLAN-12). */
+  const optimizeAbort = useRef<AbortController | null>(null);
   const latestPendingUpdatesJson = useRef("[]");
   const loadedPlanningScope = useRef<string | null>(null);
   const canonicalGeneration = useRef(0);
@@ -1792,14 +1794,23 @@ export default function PlanningPage() {
         return;
       }
 
+      const controller = new AbortController();
+      optimizeAbort.current = controller;
+
       const optimized = await optimizeFastPlotOrderFromStart(
         selectedLaneJobs,
         { lat: vehicleReading.lat, lng: vehicleReading.lng },
         createBudgetedFastPlotCostLoader(
           8,
           loadCachedFastPlotCosts
-        )
+        ),
+        { signal: controller.signal }
       );
+
+      if (controller.signal.aborted || (!optimized.ok && optimized.reason === "cancelled")) {
+        setMessage("Smart Optimize was cancelled. The lane order is unchanged.");
+        return;
+      }
 
       if (!optimized.ok) {
         const reason =
@@ -1884,6 +1895,7 @@ export default function PlanningPage() {
     } catch {
       setMessage("Smart Optimize failed.");
     } finally {
+      optimizeAbort.current = null;
       setOptimizing(false);
     }
   }
@@ -2611,6 +2623,16 @@ export default function PlanningPage() {
                   ? `Smart Optimize ${selectedVehicle.registration}`
                   : "Smart Optimize Route"}
             </Button>
+
+            {optimizing ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => optimizeAbort.current?.abort()}
+              >
+                Cancel optimize
+              </Button>
+            ) : null}
 
             <Button
               size="sm"
