@@ -13,6 +13,7 @@ import { useTenant } from "../../components/TenantProvider";
 import TenantGate from "../../components/TenantGate";
 import Skeleton from "../../../components/Skeleton";
 import { companyIdFromTenantRow, companyLookupTenantId } from "../../../lib/tenant/companyScope";
+import { isValidIanaTimeZone } from "../../../lib/time";
 
 type CompanyProfile = {
   tenant_id: string;
@@ -452,6 +453,14 @@ export default function CompanySettingsPage() {
 
     if (!profile.legal_entity_type.trim()) {
       setError("Legal entity type is required.");
+      return;
+    }
+
+    // Planning, Tracking and Tachograph fall back to Europe/London on an
+    // invalid zone; refusing it here stops a typo from being saved at all.
+    const timeZone = profile.timezone.trim();
+    if (timeZone && !isValidIanaTimeZone(timeZone)) {
+      setError(`"${timeZone}" is not a recognised timezone. Use a name like Europe/London.`);
       return;
     }
 
