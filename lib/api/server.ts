@@ -58,8 +58,9 @@ export async function requireTenant(request: NextRequest) {
     throw new ApiError(403, "No tenant is linked to this user");
   }
 
+  let authorized;
   try {
-    await authorizeTenant(admin, user.id, tenantId, "access");
+    authorized = await authorizeTenant(admin, user.id, tenantId, "access");
   } catch (error) {
     if (error instanceof TenantAccessError && error.status === 403) {
       throw new ApiError(403, "You do not have access to this tenant");
@@ -71,6 +72,10 @@ export async function requireTenant(request: NextRequest) {
     supabase,
     user,
     tenantId,
+    /** profiles-based tier, the same one RLS uses: super_admin, admin or staff. */
+    tier: authorized.tier,
+    /** Exact roles.name for the caller, or null. */
+    roleName: authorized.caller.roleName,
   };
 }
 
@@ -81,4 +86,22 @@ export class ApiError extends Error {
   ) {
     super(message);
   }
+}
+
+/**
+  Wraps a PostgREST/Postgres error without echoing its text (review ACC-15).
+  The raw error is logged. Data problems the client can fix (class 22 data
+  exceptions and class 23 constraint violations, plus PostgREST's malformed
+  filter codes) answer 400 with a generic sentence; anything else is a 500.
+*/
+export function apiDbError(
+  error: { code?: string | null; message?: string | null },
+  message: string
+): ApiError {
+  console.error("[api] database error", error.code, error.message);
+  const code = String(error.code ?? "");
+  if (code.startsWith("22") || code.startsWith("23") || code === "PGRST100") {
+    return new ApiError(400, `${message} Some of the details are not valid.`);
+  }
+  return new ApiError(500, message);
 }

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ApiError, requireTenant } from "../../../../lib/api/server";
+import { ApiError, apiDbError, requireTenant } from "../../../../lib/api/server";
+import { isUuid } from "../../../../lib/auth/serverTenantAccess";
+import { validateWebhookUrl } from "../../../../lib/validation/webhookUrl";
 
 const allowedFields = new Set([
   "name",
@@ -75,6 +77,10 @@ export async function GET(
     const { id } = await context.params;
     const { supabase, tenantId } = await requireTenant(request);
 
+    if (!isUuid(id)) {
+      throw new ApiError(404, "Customer not found");
+    }
+
     const { data: customer, error } = await supabase
       .from("customers")
       .select("*")
@@ -83,7 +89,7 @@ export async function GET(
       .maybeSingle();
 
     if (error) {
-      throw new ApiError(400, error.message);
+      throw apiDbError(error, "Unable to load the customer.");
     }
 
     if (!customer) {
@@ -128,7 +134,7 @@ export async function GET(
       integrations.error;
 
     if (childError) {
-      throw new ApiError(400, childError.message);
+      throw apiDbError(childError, "Unable to load the customer.");
     }
 
     return NextResponse.json({
@@ -149,9 +155,21 @@ export async function PATCH(
 ) {
   try {
     const { id } = await context.params;
-    const { supabase, tenantId } = await requireTenant(request);
+    const { supabase, tenantId, tier } = await requireTenant(request);
 
-    const body = (await request.json()) as Record<string, unknown>;
+    if (!isUuid(id)) {
+      throw new ApiError(404, "Customer not found");
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      const parsed = await request.json();
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+      body = parsed as Record<string, unknown>;
+    } catch {
+      throw new ApiError(400, "The request body must be a JSON object");
+    }
+
     const payload = cleanCustomerPayload(body);
 
     if (Object.keys(payload).length === 0) {
@@ -160,6 +178,54 @@ export async function PATCH(
 
     if ("name" in payload && !String(payload.name ?? "").trim()) {
       throw new ApiError(400, "Customer name cannot be empty");
+    }
+
+    // Review ACC-23: webhook_url must be a public https URL, and only an admin
+    // may change api_enabled or webhook_url. The customer form always sends
+    // both, so unchanged values from staff are dropped rather than refused.
+    if ("webhook_url" in payload) {
+      const webhook = validateWebhookUrl(payload.webhook_url);
+      if (!webhook.ok) {
+        throw new ApiError(400, webhook.message);
+      }
+      payload.webhook_url = webhook.value;
+    }
+
+    if ("api_enabled" in payload) {
+      payload.api_enabled = payload.api_enabled === true;
+    }
+
+    if (tier === "staff" && ("webhook_url" in payload || "api_enabled" in payload)) {
+      const { data: current, error: currentError } = await supabase
+        .from("customers")
+        .select("api_enabled, webhook_url")
+        .eq("id", id)
+        .eq("tenant_id", tenantId)
+        .maybeSingle();
+
+      if (currentError) {
+        throw apiDbError(currentError, "Unable to save the customer.");
+      }
+
+      if (!current) {
+        throw new ApiError(404, "Customer not found");
+      }
+
+      const webhookChanged =
+        "webhook_url" in payload && (payload.webhook_url ?? null) !== (current.webhook_url || null);
+      const apiChanged =
+        "api_enabled" in payload && payload.api_enabled !== (current.api_enabled === true);
+
+      if (webhookChanged || apiChanged) {
+        throw new ApiError(403, "Only an admin can change API access or the webhook URL");
+      }
+
+      delete payload.webhook_url;
+      delete payload.api_enabled;
+
+      if (Object.keys(payload).length === 0) {
+        return NextResponse.json({ customer: current });
+      }
     }
 
     const { data, error } = await supabase
@@ -171,7 +237,7 @@ export async function PATCH(
       .maybeSingle();
 
     if (error) {
-      throw new ApiError(400, error.message);
+      throw apiDbError(error, "Unable to save the customer.");
     }
 
     if (!data) {
@@ -192,6 +258,10 @@ export async function DELETE(
     const { id } = await context.params;
     const { supabase, tenantId } = await requireTenant(request);
 
+    if (!isUuid(id)) {
+      throw new ApiError(404, "Customer not found");
+    }
+
     const { error } = await supabase
       .from("customers")
       .delete()
@@ -199,7 +269,7 @@ export async function DELETE(
       .eq("tenant_id", tenantId);
 
     if (error) {
-      throw new ApiError(400, error.message);
+      throw apiDbError(error, "Unable to delete the customer.");
     }
 
     return NextResponse.json({ ok: true });

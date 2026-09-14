@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { errorResponse, requireTenantAccess } from "../../../../lib/accounts/server";
+import { readJsonObject } from "../../../../lib/accounts/errors";
+import { assertTenantRow } from "../../../../lib/accounts/ownership";
 
 export const dynamic = "force-dynamic";
+
+function boundedText(value: unknown, max: number): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, max) : null;
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -27,11 +35,11 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await readJsonObject(request);
     const tenantId = String(body.tenantId ?? "").trim();
-    const customerId = String(body.customerId ?? "").trim();
+    const rawCustomerId = String(body.customerId ?? "").trim();
 
-    if (!tenantId || !customerId) {
+    if (!tenantId || !rawCustomerId) {
       return NextResponse.json(
         { error: "tenantId and customerId are required." },
         { status: 400 }
@@ -39,6 +47,9 @@ export async function POST(request: NextRequest) {
     }
 
     const { admin, user } = await requireTenantAccess(tenantId);
+
+    // Review ACC-14: the customer must belong to this tenant.
+    const customerId = await assertTenantRow(admin, "customers", rawCustomerId, tenantId, "Customer");
 
     const { data: invoices, error: invoiceError } = await admin
       .from("invoices")
@@ -75,9 +86,9 @@ export async function POST(request: NextRequest) {
       .insert({
         tenant_id: tenantId,
         customer_id: customerId,
-        chase_level: body.chaseLevel || "reminder_1",
-        subject: body.subject || "Outstanding account reminder",
-        body: body.body || null,
+        chase_level: boundedText(body.chaseLevel, 50) || "reminder_1",
+        subject: boundedText(body.subject, 200) || "Outstanding account reminder",
+        body: boundedText(body.body, 10000),
         outstanding_balance: outstanding,
         oldest_due_date: oldestDueDate,
         days_overdue: daysOverdue,

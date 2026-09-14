@@ -1,7 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { errorResponse, requireTenantAccess } from "../../../../../lib/accounts/server";
+import { AccountsHttpError, readJsonObject, rpcFailure, type RpcMessages } from "../../../../../lib/accounts/errors";
+import { canEditInvoiceValues, checkInvoiceTransition } from "../../../../../lib/accounts/invoiceStatus";
+import { parseInvoicePatch } from "../../../../../lib/accounts/invoiceRequests";
+import { isUuid } from "../../../../../lib/auth/serverTenantAccess";
 
 export const dynamic = "force-dynamic";
+
+const EDIT_MESSAGES: RpcMessages = {
+  invoice_not_found: [404, "Invoice not found."],
+  invoice_synced: [409, "This invoice has been posted to the accounting system and can no longer be edited."],
+  invoice_locked: [409, "Only draft invoices can be edited. Reload to see its current status."],
+  invoice_line_invalid: [400, "Invalid invoice line values."],
+  invoice_line_not_found: [400, "One or more lines do not belong to this invoice."],
+};
 
 export async function GET(
   request: NextRequest,
@@ -16,6 +28,10 @@ export async function GET(
     }
 
     const { admin } = await requireTenantAccess(tenantId);
+
+    if (!isUuid(id)) {
+      return NextResponse.json({ error: "Invoice not found." }, { status: 404 });
+    }
 
     const [invoiceResult, linesResult, jobsResult, paymentsResult, creditsResult] =
       await Promise.all([
@@ -104,12 +120,23 @@ export async function GET(
   }
 }
 
+/*
+  Review ACC-3, ACC-4, INV-8. Order matters and is deliberate:
+    1. parse and validate the whole request (status and value edits cannot be
+       mixed; server-only fields are refused; every line is validated);
+    2. read the current invoice and apply the lock or transition rules;
+    3. only then write. A status change is a conditional update on the status
+       we read, so a concurrent change makes it fail instead of overwrite. A
+       value edit goes through accounts_update_invoice_values
+       (docs/sql/prodfix_43), which re-checks the lock under a row lock and
+       writes header, lines and totals in one transaction.
+*/
 export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const body = await request.json();
+    const body = await readJsonObject(request);
     const tenantId = String(body.tenantId ?? "").trim();
     const { id } = await context.params;
 
@@ -117,160 +144,102 @@ export async function PATCH(
       return NextResponse.json({ error: "tenantId is required." }, { status: 400 });
     }
 
-    const { admin, user } = await requireTenantAccess(tenantId);
+    const { admin, user, tier } = await requireTenantAccess(tenantId);
 
-    const allowed = new Set([
-      "status",
-      "issue_date",
-      "due_date",
-      "po_reference",
-      "customer_reference",
-      "notes",
-      "invoice_email",
-      "accounting_provider",
-      "accounting_invoice_id",
-      "accounting_sync_status",
-      "accounting_sync_error",
-    ]);
-
-    const patch: Record<string, unknown> = {};
-
-    Object.entries(body).forEach(([key, value]) => {
-      if (allowed.has(key)) patch[key] = value;
-    });
-
-    if (body.status === "approved") {
-      patch.approved_by = user.id;
-      patch.approved_at = new Date().toISOString();
+    if (!isUuid(id)) {
+      return NextResponse.json({ error: "Invoice not found." }, { status: 404 });
     }
 
-    if (body.status === "sent") {
-      patch.sent_by = user.id;
-      patch.sent_at = new Date().toISOString();
+    const { tenantId: _tenantId, ...changes } = body;
+    void _tenantId;
+
+    const parsed = parseInvoicePatch(changes);
+    if (!parsed.ok) {
+      throw new AccountsHttpError(400, parsed.message, parsed.code);
     }
 
-    const { error } = await admin
+    const { data: invoice, error: invoiceError } = await admin
       .from("invoices")
-      .update(patch)
-      .eq("id", id)
-      .eq("tenant_id", tenantId);
-
-    if (error) throw new Error(error.message);
-
-    const { data: currentInvoice, error: currentInvoiceError } = await admin
-      .from("invoices")
-      .select("id,status,accounting_sync_status")
+      .select("id,status,accounting_invoice_id,amount_paid,credit_total")
       .eq("id", id)
       .eq("tenant_id", tenantId)
       .maybeSingle();
 
-    if (currentInvoiceError) {
-      throw new Error(currentInvoiceError.message);
+    if (invoiceError) throw new Error(invoiceError.message);
+
+    if (!invoice) {
+      return NextResponse.json({ error: "Invoice not found." }, { status: 404 });
     }
 
-    if (!currentInvoice) {
-      return NextResponse.json(
-        { error: "Invoice not found." },
-        { status: 404 }
-      );
-    }
+    if (parsed.value.kind === "status") {
+      const to = parsed.value.status;
+      const rule = checkInvoiceTransition({
+        from: invoice.status,
+        to,
+        tier,
+        accountingInvoiceId: invoice.accounting_invoice_id,
+        amountPaid: Number(invoice.amount_paid ?? 0),
+        creditTotal: Number(invoice.credit_total ?? 0),
+      });
 
-    const lockedStatuses = new Set([
-      "sent",
-      "paid",
-      "void",
-      "credited",
-    ]);
-
-    if (
-      Array.isArray(body.lines) &&
-      lockedStatuses.has(
-        String(currentInvoice.status ?? "").toLowerCase()
-      )
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Sent, paid, void or credited invoices cannot have their values edited.",
-        },
-        {
-          status: 409,
-        }
-      );
-    }
-
-    if (Array.isArray(body.lines)) {
-      for (const rawLine of body.lines) {
-        const lineId =
-          String(rawLine.id ?? "").trim();
-
-        const quantity =
-          Number(rawLine.quantity);
-
-        const unitPrice =
-          Number(rawLine.unit_price);
-
-        const vatRate =
-          Number(rawLine.vat_rate);
-
-        if (
-          !lineId ||
-          !Number.isFinite(quantity) ||
-          quantity <= 0 ||
-          !Number.isFinite(unitPrice) ||
-          unitPrice < 0 ||
-          !Number.isFinite(vatRate) ||
-          vatRate < 0
-        ) {
-          return NextResponse.json(
-            {
-              error:
-                "Invalid invoice line values.",
-            },
-            {
-              status: 400,
-            }
-          );
-        }
-
-        const { error: lineError } = await admin
-          .from("invoice_lines")
-          .update({
-            description:
-              String(
-                rawLine.description ?? ""
-              ).trim() ||
-              "Transport service",
-            quantity,
-            unit_price: unitPrice,
-            vat_rate: vatRate,
-          })
-          .eq("id", lineId)
-          .eq("invoice_id", id)
-          .eq("tenant_id", tenantId);
-
-        if (lineError) {
-          throw new Error(
-            lineError.message
-          );
-        }
+      if (!rule.ok) {
+        throw new AccountsHttpError(rule.status, rule.message, rule.code);
       }
 
-      const {
-        error: recalculateError,
-      } = await admin.rpc(
-        "recalculate_invoice_totals",
-        {
-          p_invoice_id: id,
-        }
-      );
+      const now = new Date().toISOString();
+      const patch: Record<string, unknown> = { status: to, updated_at: now };
 
-      if (recalculateError) {
-        throw new Error(
-          recalculateError.message
+      if (to === "approved") {
+        patch.approved_by = user.id;
+        patch.approved_at = now;
+      }
+
+      let update = admin
+        .from("invoices")
+        .update(patch)
+        .eq("id", id)
+        .eq("tenant_id", tenantId)
+        .eq("status", invoice.status);
+
+      if (!invoice.accounting_invoice_id) {
+        update = update.is("accounting_invoice_id", null);
+      }
+
+      const { data: updated, error: updateError } = await update.select("id");
+
+      if (updateError) throw new Error(updateError.message);
+
+      if (!updated || updated.length === 0) {
+        throw new AccountsHttpError(
+          409,
+          "The invoice changed while you were saving. Reload and try again.",
+          "invoice_changed"
         );
       }
+
+      return NextResponse.json({ ok: true, status: to });
     }
+
+    const lock = canEditInvoiceValues({
+      status: invoice.status,
+      accountingInvoiceId: invoice.accounting_invoice_id,
+    });
+
+    if (!lock.ok) {
+      throw new AccountsHttpError(lock.status, lock.message, lock.code);
+    }
+
+    const { error: editError } = await admin.rpc("accounts_update_invoice_values", {
+      p_tenant_id: tenantId,
+      p_invoice_id: id,
+      p_header: parsed.value.header,
+      p_lines: parsed.value.lines,
+    });
+
+    if (editError) {
+      throw rpcFailure(editError, EDIT_MESSAGES, "prodfix_43_accounts_invoice_edit.sql");
+    }
+
     return NextResponse.json({ ok: true });
   } catch (error) {
     const result = errorResponse(error);

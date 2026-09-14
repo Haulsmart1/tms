@@ -22,7 +22,8 @@ export const RequestAccessValidation = z.object({
   vehicles: z.coerce
     .number({ error: "Enter how many vehicles you run." })
     .int("Enter a whole number.")
-    .positive("Enter at least one vehicle."),
+    .positive("Enter at least one vehicle.")
+    .max(100000, "Enter a realistic number of vehicles."),
   notes: z.preprocess(emptyToUndefined, z.string().trim().max(2000).optional()),
 });
 

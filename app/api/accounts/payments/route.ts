@@ -1,7 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { errorResponse, requireTenantAccess } from "../../../../lib/accounts/server";
+import { AccountsHttpError, readJsonObject, rpcFailure, type RpcMessages } from "../../../../lib/accounts/errors";
+import { parsePaymentInput } from "../../../../lib/accounts/payments";
+import { operatorDay } from "../../../../lib/time";
 
 export const dynamic = "force-dynamic";
+
+/*
+  Recording a payment and allocating it to an invoice happens in one database
+  transaction (docs/sql/prodfix_40), which checks that the invoice belongs to
+  this tenant and customer, is payable, is in the same currency, and has enough
+  outstanding balance (review ACC-1, INV-3, INV-10).
+*/
+const PAYMENT_MESSAGES: RpcMessages = {
+  payment_invalid: [400, "The payment details are not valid."],
+  payment_amount_invalid: [400, "Enter a payment amount greater than zero."],
+  customer_not_found: [404, "Customer not found."],
+  invoice_not_found: [404, "Invoice not found for this customer."],
+  invoice_not_payable: [409, "Payments can only be allocated to an approved or sent invoice."],
+  currency_mismatch: [409, "The payment currency does not match the invoice currency."],
+  allocation_invalid: [400, "The allocated amount must be greater than zero and no more than the payment."],
+  allocation_exceeds_balance: [
+    409,
+    "The allocation is more than the invoice's outstanding balance. Allocate the balance and record the rest as unallocated.",
+  ],
+};
 
 export async function GET(request: NextRequest) {
   try {
@@ -27,54 +50,42 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await readJsonObject(request);
     const tenantId = String(body.tenantId ?? "").trim();
-    const customerId = String(body.customerId ?? "").trim();
-    const amount = Number(body.amount ?? 0);
 
-    if (!tenantId || !customerId || amount <= 0) {
-      return NextResponse.json(
-        { error: "tenantId, customerId and a positive amount are required." },
-        { status: 400 }
-      );
+    if (!tenantId) {
+      return NextResponse.json({ error: "tenantId is required." }, { status: 400 });
     }
 
     const { admin, user } = await requireTenantAccess(tenantId);
 
-    const { data: payment, error } = await admin
-      .from("customer_payments")
-      .insert({
-        tenant_id: tenantId,
-        customer_id: customerId,
-        payment_date: body.paymentDate || new Date().toISOString().slice(0, 10),
-        amount,
-        currency: body.currency || "GBP",
-        payment_method: body.paymentMethod || null,
-        payment_reference: body.paymentReference || null,
-        bank_reference: body.bankReference || null,
-        notes: body.notes || null,
-        created_by: user.id,
-      })
-      .select("id")
-      .single();
-
-    if (error) throw new Error(error.message);
-
-    if (body.invoiceId && Number(body.allocateAmount ?? amount) > 0) {
-      const { error: allocationError } = await admin
-        .from("payment_allocations")
-        .insert({
-          tenant_id: tenantId,
-          payment_id: payment.id,
-          invoice_id: body.invoiceId,
-          amount: Number(body.allocateAmount ?? amount),
-          allocated_by: user.id,
-        });
-
-      if (allocationError) throw new Error(allocationError.message);
+    const parsed = parsePaymentInput(body, operatorDay(new Date()));
+    if (!parsed.ok) {
+      throw new AccountsHttpError(400, parsed.message, "invalid_payment");
     }
 
-    return NextResponse.json({ ok: true, paymentId: payment.id }, { status: 201 });
+    const input = parsed.value;
+
+    const { data: paymentId, error } = await admin.rpc("accounts_record_customer_payment", {
+      p_tenant_id: tenantId,
+      p_customer_id: input.customerId,
+      p_user_id: user.id,
+      p_payment_date: input.paymentDate,
+      p_amount: input.amount,
+      p_currency: input.currency,
+      p_payment_method: input.paymentMethod,
+      p_payment_reference: input.paymentReference,
+      p_bank_reference: input.bankReference,
+      p_notes: input.notes,
+      p_invoice_id: input.invoiceId,
+      p_allocate_amount: input.allocateAmount,
+    });
+
+    if (error) {
+      throw rpcFailure(error, PAYMENT_MESSAGES, "prodfix_40_accounts_payment_allocation.sql");
+    }
+
+    return NextResponse.json({ ok: true, paymentId }, { status: 201 });
   } catch (error) {
     const result = errorResponse(error);
     return NextResponse.json(result.body, { status: result.status });

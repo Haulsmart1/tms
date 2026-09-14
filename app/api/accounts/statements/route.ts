@@ -1,7 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { errorResponse, requireTenantAccess } from "../../../../lib/accounts/server";
+import { AccountsHttpError, readJsonObject } from "../../../../lib/accounts/errors";
+import { assertTenantRow } from "../../../../lib/accounts/ownership";
+import { isIsoDate } from "../../../../lib/accounts/payments";
 
 export const dynamic = "force-dynamic";
+
+function optionalDate(value: unknown, label: string): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  const text = String(value).trim();
+  if (!isIsoDate(text)) {
+    throw new AccountsHttpError(400, `${label} must be a valid date.`, "invalid_date");
+  }
+  return text;
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -27,11 +39,11 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await readJsonObject(request);
     const tenantId = String(body.tenantId ?? "").trim();
-    const customerId = String(body.customerId ?? "").trim();
+    const rawCustomerId = String(body.customerId ?? "").trim();
 
-    if (!tenantId || !customerId) {
+    if (!tenantId || !rawCustomerId) {
       return NextResponse.json(
         { error: "tenantId and customerId are required." },
         { status: 400 }
@@ -39,6 +51,14 @@ export async function POST(request: NextRequest) {
     }
 
     const { admin, user } = await requireTenantAccess(tenantId);
+
+    // Review ACC-14: the customer must belong to this tenant.
+    const customerId = await assertTenantRow(admin, "customers", rawCustomerId, tenantId, "Customer");
+
+    const statementDate =
+      optionalDate(body.statementDate, "Statement date") ?? new Date().toISOString().slice(0, 10);
+    const periodStart = optionalDate(body.periodStart, "Period start");
+    const periodEnd = optionalDate(body.periodEnd, "Period end");
 
     const { data: debt, error: debtError } = await admin
       .from("customer_aged_debt")
@@ -55,11 +75,11 @@ export async function POST(request: NextRequest) {
         tenant_id: tenantId,
         customer_id: customerId,
         statement_number:
-          body.statementNumber ||
+          (typeof body.statementNumber === "string" && body.statementNumber.trim().slice(0, 50)) ||
           `STM-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}`,
-        statement_date: body.statementDate || new Date().toISOString().slice(0, 10),
-        period_start: body.periodStart || null,
-        period_end: body.periodEnd || null,
+        statement_date: statementDate,
+        period_start: periodStart,
+        period_end: periodEnd,
         opening_balance: 0,
         invoice_total: Number(debt?.total_outstanding ?? 0),
         closing_balance: Number(debt?.total_outstanding ?? 0),

@@ -1,17 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { errorResponse, requireTenantAccess } from "../../../../lib/accounts/server";
+import { AccountsHttpError, readJsonObject, rpcFailure, type RpcMessages } from "../../../../lib/accounts/errors";
+import { parseCreateInvoice } from "../../../../lib/accounts/invoiceRequests";
+import { operatorDay } from "../../../../lib/time";
 
 export const dynamic = "force-dynamic";
 
-type CreateInvoiceBody = {
-  tenantId?: string;
-  customerId?: string;
-  jobIds?: string[];
-  issueDate?: string;
-  dueDate?: string;
-  invoiceNumber?: string;
-  poReference?: string;
-  notes?: string;
+/*
+  Invoice creation runs in one transaction (docs/sql/prodfix_41): per-job
+  locks, the "already invoiced" check, number allocation, invoice, lines,
+  invoice_jobs and the totals recalculation either all happen or none do
+  (review ACC-9, INV-9).
+*/
+const CREATE_MESSAGES: RpcMessages = {
+  invoice_invalid: [400, "The invoice details are not valid."],
+  no_jobs: [400, "Select at least one job."],
+  customer_not_found: [404, "Customer not found."],
+  jobs_not_found: [400, "One or more selected jobs were not found."],
+  jobs_mixed_customer: [409, "All jobs on an invoice must belong to the same customer."],
+  jobs_already_invoiced: [409, "One or more selected jobs have already been invoiced."],
+  invoice_number_empty: [500, "Invoice number allocation failed. Please try again."],
+  invoice_number_taken: [409, "The next invoice number is already in use. Please try again."],
 };
 
 export async function GET(request: NextRequest) {
@@ -44,6 +53,7 @@ export async function GET(request: NextRequest) {
       const { data: customerRows, error: customerError } = await admin
         .from("customers")
         .select("id,name")
+        .eq("tenant_id", tenantId)
         .in("id", customerIds);
 
       if (customerError) throw new Error(customerError.message);
@@ -67,12 +77,10 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as CreateInvoiceBody;
-    const tenantId = body.tenantId?.trim();
-    const customerId = body.customerId?.trim();
-    const jobIds = Array.from(new Set(body.jobIds ?? []));
+    const body = await readJsonObject(request);
+    const tenantId = String(body.tenantId ?? "").trim();
 
-    if (!tenantId || !customerId || jobIds.length === 0) {
+    if (!tenantId) {
       return NextResponse.json(
         { error: "tenantId, customerId and at least one job are required." },
         { status: 400 }
@@ -81,159 +89,33 @@ export async function POST(request: NextRequest) {
 
     const { admin, user } = await requireTenantAccess(tenantId);
 
-    const { data: customer, error: customerError } = await admin
-      .from("customers")
-      .select(
-        "id,name,payment_terms_days,currency_code,vat_rate,requires_po,pod_required,invoice_pod_attachment_required,accounts_email"
-      )
-      .eq("id", customerId)
-      .eq("tenant_id", tenantId)
-      .maybeSingle();
-
-    if (customerError) throw new Error(customerError.message);
-    if (!customer) {
-      return NextResponse.json({ error: "Customer not found." }, { status: 404 });
+    const parsed = parseCreateInvoice(body, operatorDay(new Date()));
+    if (!parsed.ok) {
+      throw new AccountsHttpError(400, parsed.message, parsed.code);
     }
 
-    const { data: jobs, error: jobsError } = await admin
-      .from("jobs")
-      .select("id,customer_id,reference,customer_price,pod_status,completed_at")
-      .eq("tenant_id", tenantId)
-      .in("id", jobIds);
+    const input = parsed.value;
 
-    if (jobsError) throw new Error(jobsError.message);
-
-    if ((jobs ?? []).length !== jobIds.length) {
-      return NextResponse.json(
-        { error: "One or more selected jobs were not found." },
-        { status: 400 }
-      );
-    }
-
-    if ((jobs ?? []).some((job) => job.customer_id !== customerId)) {
-      return NextResponse.json(
-        { error: "All jobs on an invoice must belong to the same customer." },
-        { status: 409 }
-      );
-    }
-
-    const { data: existingInvoiceJobs, error: duplicateError } = await admin
-      .from("invoice_jobs")
-      .select("job_id")
-      .in("job_id", jobIds)
-      .eq("active", true);
-
-    if (duplicateError) throw new Error(duplicateError.message);
-
-    if ((existingInvoiceJobs ?? []).length > 0) {
-      return NextResponse.json(
-        { error: "One or more selected jobs have already been invoiced." },
-        { status: 409 }
-      );
-    }
-
-    const requiresPod = customer.pod_required === true;
-    const requiresAttachment = customer.invoice_pod_attachment_required === true;
-    const podBlocked = (jobs ?? []).some((job) => {
-      const status = String(job.pod_status ?? "").toLowerCase();
-      return requiresPod && !["complete", "completed", "approved", "received", "delivered"].includes(status);
+    const { data: invoiceId, error } = await admin.rpc("accounts_create_invoice_from_jobs", {
+      p_tenant_id: tenantId,
+      p_customer_id: input.customerId,
+      p_user_id: user.id,
+      p_job_ids: input.jobIds,
+      p_issue_date: input.issueDate,
+      p_due_date: input.dueDate,
+      p_po_reference: input.poReference,
+      p_notes: input.notes,
     });
 
-    const issueDate = body.issueDate || new Date().toISOString().slice(0, 10);
-
-    const due = body.dueDate
-      ? new Date(`${body.dueDate}T00:00:00`)
-      : new Date(`${issueDate}T00:00:00`);
-
-    if (!body.dueDate) {
-      due.setDate(due.getDate() + Number(customer.payment_terms_days ?? 30));
+    if (error) {
+      throw rpcFailure(error, CREATE_MESSAGES, "prodfix_41_accounts_invoice_create.sql");
     }
 
-    let invoiceNumber = body.invoiceNumber?.trim() || "";
-
-    if (!invoiceNumber) {
-      const { data: allocatedNumber, error: numberError } = await admin.rpc(
-        "next_invoice_number",
-        {
-          p_tenant_id: tenantId,
-          p_issue_date: issueDate,
-        }
-      );
-
-      if (numberError) {
-        throw new Error(
-          `Unable to allocate invoice number: ${numberError.message}`
-        );
-      }
-
-      invoiceNumber = String(allocatedNumber ?? "").trim();
-
-      if (!invoiceNumber) {
-        throw new Error("Invoice number allocation returned an empty value.");
-      }
+    if (!invoiceId) {
+      throw new Error("accounts_create_invoice_from_jobs returned no id");
     }
 
-    const status = podBlocked ? "awaiting_pod" : "draft";
-
-    const { data: invoice, error: invoiceError } = await admin
-      .from("invoices")
-      .insert({
-        tenant_id: tenantId,
-        customer_id: customerId,
-        invoice_number: invoiceNumber,
-        status,
-        issue_date: issueDate,
-        due_date: due.toISOString().slice(0, 10),
-        currency: customer.currency_code || "GBP",
-        po_reference: body.poReference?.trim() || null,
-        notes: body.notes?.trim() || null,
-        invoice_email: customer.accounts_email || null,
-        created_by: user.id,
-      })
-      .select("id")
-      .single();
-
-    if (invoiceError) throw new Error(invoiceError.message);
-
-    const vatRate = Number(customer.vat_rate ?? 20);
-
-    const lineRows = (jobs ?? []).map((job, index) => ({
-      tenant_id: tenantId,
-      invoice_id: invoice.id,
-      job_id: job.id,
-      line_number: index + 1,
-      description: `Transport job ${job.reference || job.id}`,
-      quantity: 1,
-      unit_price: Number(job.customer_price ?? 0),
-      vat_rate: vatRate,
-    }));
-
-    const { error: linesError } = await admin.from("invoice_lines").insert(lineRows);
-    if (linesError) throw new Error(linesError.message);
-
-    const invoiceJobRows = (jobs ?? []).map((job) => ({
-      tenant_id: tenantId,
-      invoice_id: invoice.id,
-      job_id: job.id,
-      pod_required: requiresPod,
-      pod_status: job.pod_status || null,
-      pod_attached: requiresAttachment ? false : !requiresPod,
-      po_required: customer.requires_po === true,
-      po_reference: body.poReference?.trim() || null,
-      active: true,
-    }));
-
-    const { error: invoiceJobsError } = await admin
-      .from("invoice_jobs")
-      .insert(invoiceJobRows);
-
-    if (invoiceJobsError) throw new Error(invoiceJobsError.message);
-
-    await admin.rpc("recalculate_invoice_totals", {
-      p_invoice_id: invoice.id,
-    });
-
-    return NextResponse.json({ ok: true, invoiceId: invoice.id }, { status: 201 });
+    return NextResponse.json({ ok: true, invoiceId }, { status: 201 });
   } catch (error) {
     const result = errorResponse(error);
     return NextResponse.json(result.body, { status: result.status });
