@@ -16,7 +16,8 @@ import { buildActivity } from "../../lib/tracking/activity";
 import { createSupabasePositionSource } from "../../lib/tracking/supabasePositions";
 import { pingLabel, type PositionReading } from "../../lib/tracking/position";
 import type { TrackingJob } from "../../lib/tracking/types";
-import { OPERATOR_TIME_ZONE, operatorDay } from "../../lib/time";
+import { OPERATOR_TIME_ZONE, todayIsoDateInZone } from "../../lib/time";
+import { loadCompanyTimeZone } from "../../lib/planning/companyTimeZone";
 
 /* The old page polled every 10 seconds and fetched every vehicle_locations row
    ever recorded on each pass. 30 seconds matches the design's own footnote, and
@@ -31,13 +32,12 @@ function rel(value: any): any {
   return Array.isArray(value) ? (value[0] ?? null) : (value ?? null);
 }
 
-// Same operator calendar as the journey timeline and /pod. See lib/time.ts.
-const CLOCK = new Intl.DateTimeFormat("en-GB", {
-  timeZone: OPERATOR_TIME_ZONE, hour: "2-digit", minute: "2-digit", hour12: false,
-});
-
 const TRACKING_GEOCODE_BATCH = 20;
 
+/* Geocoding used to run for every null stop on every 30 second poll, all day
+   (review PLAN-13). Each stop is now asked for at most once per page session:
+   `attempted` lives for the tenant's effect, and the server additionally
+   remembers definite misses across sessions (prodfix_73). */
 async function geocodeMissingTrackingStops<T extends {
   stops: Array<{
     id: string;
@@ -46,13 +46,17 @@ async function geocodeMissingTrackingStops<T extends {
   }>;
 }>(
   jobs: T[],
-  isCancelled: () => boolean
+  isCancelled: () => boolean,
+  attempted: Set<string>
 ): Promise<T[]> {
   const missingStopIds = jobs.flatMap((job) =>
     job.stops
       .filter((stop) => stop.lat === null || stop.lng === null)
       .map((stop) => stop.id)
+      .filter((id) => !attempted.has(id))
   );
+
+  for (const id of missingStopIds) attempted.add(id);
 
   if (missingStopIds.length === 0) {
     return jobs;
@@ -148,12 +152,18 @@ export default function TrackingPage() {
   const [refreshFailed, setRefreshFailed] = useState(false);
   const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  /* The company's resolved zone decides "today", "Late" and the clock, the
+     same zone Planning uses (review PLAN-10, PLAN-16). */
+  const [timeZone, setTimeZone] = useState(OPERATOR_TIME_ZONE);
+  const [timeZoneNote, setTimeZoneNote] = useState<string | null>(null);
 
   useEffect(() => {
     // `cancelled` guards against setting state after the tenant changes or the
     // page unmounts mid-request. The old page had no such guard. It says
     // nothing about ORDERING, which is what `inFlight` below is for.
     let cancelled = false;
+    const attemptedGeocodes = new Set<string>();
+    let zone: string | null = null;
 
     /* load() fires from the interval AND from visibilitychange, so two calls
        can otherwise overlap and a slower earlier response can land after a
@@ -183,7 +193,21 @@ export default function TrackingPage() {
            single instant rather than to three Dates a few hundred
            milliseconds apart. */
         const startedAt = new Date();
-        const today = operatorDay(startedAt);
+
+        if (zone === null) {
+          const resolved = await loadCompanyTimeZone(
+            supabase,
+            tenant.activeTenantId
+              ? [tenant.activeTenantId]
+              : tenant.tenants.map((option) => option.id),
+          );
+          if (cancelled) return;
+          zone = resolved.timeZone;
+          setTimeZone(resolved.timeZone);
+          setTimeZoneNote(resolved.note);
+        }
+
+        const today = todayIsoDateInZone(zone, startedAt);
 
         /* Narrowed server-side on the three cheap conditions before
            isOnTheRoad applies the rest client-side. The stop-level condition
@@ -195,6 +219,7 @@ export default function TrackingPage() {
               reference,
               status,
               scheduled_date,
+              planning_date,
               created_at,
               vehicle_id,
               subcontractor_id,
@@ -210,7 +235,9 @@ export default function TrackingPage() {
           )
           .eq("status", "planned")
           .not("vehicle_id", "is", null)
-          .lte("scheduled_date", today);
+          .or(
+            `planning_date.lte.${today},and(planning_date.is.null,scheduled_date.lte.${today})`,
+          );
 
         if (cancelled) return;
 
@@ -228,6 +255,7 @@ export default function TrackingPage() {
             reference: row.reference,
             status: row.status,
             scheduled_date: row.scheduled_date,
+            planning_date: row.planning_date ?? null,
             created_at: row.created_at,
             customer_name: rel(row.customers)?.name ?? null,
             vehicle_id: row.vehicle_id,
@@ -248,7 +276,7 @@ export default function TrackingPage() {
         const vehicleIds = Array.from(
           new Set(
             mapped
-              .filter((j) => isOnTheRoad(j, startedAt))
+              .filter((j) => isOnTheRoad(j, startedAt, zone ?? OPERATOR_TIME_ZONE))
               .map((j) => j.vehicle_id)
               .filter((id): id is string => Boolean(id)),
           ),
@@ -260,9 +288,10 @@ export default function TrackingPage() {
         if (cancelled) return;
 
         const geocodedJobs = await geocodeMissingTrackingStops(
-        mapped,
-        () => cancelled
-      );
+          mapped,
+          () => cancelled,
+          attemptedGeocodes
+        );
 
       if (cancelled) return;
 
@@ -309,7 +338,16 @@ export default function TrackingPage() {
      instead. It exists only to keep this a plain Date for the callees. */
   const now = useMemo(() => lastLoadedAt ?? new Date(), [lastLoadedAt]);
 
-  const rail = useMemo(() => buildRail(jobs, now), [jobs, now]);
+  const rail = useMemo(() => buildRail(jobs, now, timeZone), [jobs, now, timeZone]);
+
+  // Same operator calendar as the rail's "today". See lib/time.ts.
+  const clock = useMemo(
+    () =>
+      new Intl.DateTimeFormat("en-GB", {
+        timeZone, hour: "2-digit", minute: "2-digit", hour12: false,
+      }),
+    [timeZone],
+  );
 
   // Falling back to the first row means a fresh load, or a poll that removes
   // the selected job, always leaves something selected rather than blanking
@@ -344,9 +382,10 @@ export default function TrackingPage() {
 
   const footNote = [
     lastLoadedAt
-      ? `Auto-refresh 30 s · updated ${CLOCK.format(lastLoadedAt)}`
+      ? `Auto-refresh 30 s · updated ${clock.format(lastLoadedAt)}`
       : "Auto-refresh 30 s",
     refreshFailed ? "refresh failed, showing last known data" : null,
+    timeZoneNote,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -431,7 +470,7 @@ export default function TrackingPage() {
                   <>
                     <TrackingHeader
                       job={selectedJob}
-                      phase={jobPhase(selectedJob, now)}
+                      phase={jobPhase(selectedJob, now, timeZone)}
                       journey={journey}
                       reading={reading}
                       now={now}

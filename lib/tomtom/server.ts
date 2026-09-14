@@ -9,6 +9,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import type { LatLng } from "../planning/types";
+import { createAdminClient } from "../supabase/admin";
+import { checkRateLimit, RATE_LIMITS, type RateLimitRule } from "../rateLimit";
 
 /** Cookie-backed, RLS-scoped Supabase client for the calling user.
     setAll persists refreshed auth cookies rather than discarding them: a
@@ -62,6 +64,18 @@ export async function requireOperator(client: TomTomClient): Promise<Operator | 
   const { data, error } = await client.rpc("get_my_company_id");
   if (error) throw new Error(error.message);
   return { userId: user.id, companyId: typeof data === "string" && data ? data : null };
+}
+
+/* DURABLE RATE LIMIT (review PLAN-25), shared across serverless instances via
+   public.rate_limit_hit (docs/sql/prodfix_01_rate_limits.sql). Checked in
+   addition to the in-memory speed bump below, which still absorbs bursts
+   without a database round trip. Service-role client, server only. */
+export async function isDurablyRateLimited(
+  userId: string,
+  rule: RateLimitRule = RATE_LIMITS.tomtomPerUser
+): Promise<boolean> {
+  const { allowed } = await checkRateLimit(createAdminClient(), rule, userId);
+  return !allowed;
 }
 
 /* RATE LIMIT, keyed by user id plus an optional traffic bucket.
