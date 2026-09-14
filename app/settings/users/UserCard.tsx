@@ -18,13 +18,20 @@ type UserEdit = {
 type Props = {
   user: TenantUser;
   loading?: boolean;
-  canInvite: boolean;
+  /** The caller may edit this particular user (admin, and a super admin
+   *  target only for a super admin caller). The server enforces the same
+   *  rule; this only hides controls that would be refused. */
+  canManage: boolean;
+  /** Removing is also refused for yourself. */
+  canRemove?: boolean;
+  removing?: boolean;
   /** null means not editing. Replaces a separate isEditing flag, which could
    *  disagree with these values. The edit form lives inside the card because
    *  it is part of the card's layout, but every value in it stays owned by
    *  the page. */
   edit: UserEdit | null;
   onBeginEdit: (user: TenantUser) => void;
+  onRemove?: (user: TenantUser) => void;
 };
 
 /* ONE layout definition for both states, per the batch 1 decision. A separate
@@ -36,9 +43,12 @@ type Props = {
 export default function UserCard({
   user,
   loading = false,
-  canInvite,
+  canManage,
+  canRemove = false,
+  removing = false,
   edit,
   onBeginEdit,
+  onRemove,
 }: Props) {
   const isEditing = edit !== null;
   return (
@@ -91,8 +101,8 @@ export default function UserCard({
           {/* Real button, disabled. Fixed size and no data, so this is both
               more faithful than a grey rectangle and more honest about being
               inert. While loading there is no user_id to read, so the button
-              renders on canInvite alone. */}
-          {canInvite && (loading || user.user_id) ? (
+              renders on canManage alone. */}
+          {canManage && (loading || user.user_id) ? (
             <Button
               type="button"
               variant="secondary"
@@ -101,6 +111,18 @@ export default function UserCard({
               onClick={() => (edit ? edit.onCancel() : onBeginEdit(user))}
             >
               {isEditing ? "Cancel" : "Edit"}
+            </Button>
+          ) : null}
+
+          {!loading && canManage && canRemove && onRemove && user.user_id ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={removing}
+              onClick={() => onRemove(user)}
+            >
+              {removing ? "Removing..." : "Remove"}
             </Button>
           ) : null}
         </div>
@@ -132,7 +154,7 @@ export default function UserCard({
           </label>
 
           <label className="grid gap-1.5">
-            <span className="text-sm font-medium text-ink-2">Tenant role</span>
+            <span className="text-sm font-medium text-ink-2">Role</span>
             <select
               value={edit.role}
               onChange={(event) => edit.setRole(event.target.value)}

@@ -1,273 +1,126 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  createAdminClient,
-  createUserClient,
-} from "../../../../../lib/accounts/server";
+import { checkRemoval, checkRoleEdit, parseInvitableRole, userAdminErrorResponse } from "../../../../../lib/tenant/userAdmin";
+import { json, loadCompanyTarget, requireUserAdmin } from "../shared";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ALLOWED_ROLES = new Set(["admin", "staff", "driver"]);
-const ADMIN_ROLES = new Set(["admin", "super_admin"]);
+type RouteContext = { params: Promise<{ userId: string }> };
 
-async function requireTenantAdmin(tenantId: string) {
-  const userClient = await createUserClient();
+const NOT_FOUND = { error: "That user does not belong to this company." };
 
-  const {
-    data: { user },
-    error: authError,
-  } = await userClient.auth.getUser();
-
-  if (authError || !user) {
-    return {
-      error: NextResponse.json(
-        { error: "You must be signed in." },
-        { status: 401 }
-      ),
-    };
-  }
-
-  const admin = createAdminClient();
-
-  const { data: membership, error } = await admin
-    .from("memberships")
-    .select("id, role")
-    .eq("tenant_id", tenantId)
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (error) {
-    return {
-      error: NextResponse.json(
-        { error: "Unable to verify tenant permissions." },
-        { status: 500 }
-      ),
-    };
-  }
-
-  if (!membership) {
-    return {
-      error: NextResponse.json(
-        { error: "You do not belong to this tenant." },
-        { status: 403 }
-      ),
-    };
-  }
-
-  if (!ADMIN_ROLES.has(String(membership.role))) {
-    return {
-      error: NextResponse.json(
-        { error: "Only a tenant admin can manage users." },
-        { status: 403 }
-      ),
-    };
-  }
-
-  return {
-    admin,
-    currentUser: user,
-  };
+function cleanOptional(value: unknown, max: number): string | null {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text ? text.slice(0, max) : null;
 }
 
-export async function PATCH(
-  request: NextRequest,
-  context: {
-    params: Promise<{
-      userId: string;
-    }>;
-  }
-) {
+export async function PATCH(request: NextRequest, context: RouteContext) {
+  const { userId } = await context.params;
+
+  let body: { tenantId?: unknown; fullName?: unknown; phone?: unknown; role?: unknown };
   try {
-    const { userId } = await context.params;
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+  }
 
-    const body = (await request.json()) as {
-      tenantId?: string;
-      fullName?: string;
-      phone?: string;
-      role?: string;
-    };
+  const tenantId = typeof body.tenantId === "string" ? body.tenantId.trim() : "";
+  const role = parseInvitableRole(body.role);
+  if (!role) {
+    return NextResponse.json({ error: "Invalid role." }, { status: 400 });
+  }
 
-    const tenantId = body.tenantId?.trim() ?? "";
-    const fullName = body.fullName?.trim() ?? "";
-    const phone = body.phone?.trim() ?? "";
-    const role = body.role?.trim().toLowerCase() ?? "";
+  const access = await requireUserAdmin(tenantId);
+  if (!access.ok) return access.response;
 
-    if (!tenantId) {
-      return NextResponse.json(
-        { error: "A tenant must be selected." },
-        { status: 400 }
-      );
-    }
+  const { admin, user, tier, tenant } = access.ctx;
 
-    if (!userId) {
-      return NextResponse.json(
-        { error: "A user must be selected." },
-        { status: 400 }
-      );
-    }
+  try {
+    const target = await loadCompanyTarget(admin, userId, tenant.companyId);
+    if (!target) return NextResponse.json(NOT_FOUND, { status: 404 });
 
-    if (!ALLOWED_ROLES.has(role)) {
-      return NextResponse.json(
-        { error: "Invalid role." },
-        { status: 400 }
-      );
-    }
-
-    const access = await requireTenantAdmin(tenantId);
-
-    if ("error" in access) {
-      return access.error;
-    }
-
-    const { admin } = access;
-
-    const { data: targetMembership, error: membershipError } = await admin
-      .from("memberships")
-      .select("id, user_id, tenant_id, role")
-      .eq("tenant_id", tenantId)
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    if (membershipError) {
-      throw new Error(
-        `Unable to load tenant membership: ${membershipError.message}`
-      );
-    }
-
-    if (!targetMembership) {
-      return NextResponse.json(
-        { error: "That user does not belong to this tenant." },
-        { status: 404 }
-      );
-    }
-
-    const currentlyAdmin = ADMIN_ROLES.has(
-      String(targetMembership.role)
-    );
-
-    const willRemainAdmin = ADMIN_ROLES.has(role);
-
-    if (currentlyAdmin && !willRemainAdmin) {
-      const { data: memberships, error: adminsError } = await admin
-        .from("memberships")
-        .select("id, role")
-        .eq("tenant_id", tenantId);
-
-      if (adminsError) {
-        throw new Error(
-          `Unable to count tenant admins: ${adminsError.message}`
-        );
-      }
-
-      const adminCount = (memberships ?? []).filter((membership) =>
-        ADMIN_ROLES.has(String(membership.role))
-      ).length;
-
-      if (adminCount <= 1) {
-        return NextResponse.json(
-          {
-            error:
-              "You cannot demote the final administrator for this tenant.",
-          },
-          { status: 409 }
-        );
-      }
-    }
-
-    const { data: profile, error: profileError } = await admin
-      .from("profiles")
-      .select("id, tenant_id")
-      .eq("id", userId)
-      .maybeSingle();
-
-    if (profileError) {
-      throw new Error(
-        `Unable to load user profile: ${profileError.message}`
-      );
-    }
-
-    if (!profile) {
-      return NextResponse.json(
-        { error: "The user's TMS profile does not exist." },
-        { status: 409 }
-      );
-    }
-
-    const { error: profileUpdateError } = await admin
-      .from("profiles")
-      .update({
-        full_name: fullName || null,
-        phone: phone || null,
-      })
-      .eq("id", userId);
-
-    if (profileUpdateError) {
-      throw new Error(
-        `Unable to update profile: ${profileUpdateError.message}`
-      );
-    }
-
-    const { error: membershipUpdateError } = await admin
-      .from("memberships")
-      .update({
-        role,
-      })
-      .eq("id", targetMembership.id);
-
-    if (membershipUpdateError) {
-      throw new Error(
-        `Unable to update tenant role: ${membershipUpdateError.message}`
-      );
-    }
-
-    if (profile.tenant_id === tenantId) {
-      const { data: matchingRole, error: roleError } = await admin
-        .from("roles")
-        .select("id")
-        .eq("name", role)
-        .maybeSingle();
-
-      if (roleError) {
-        throw new Error(
-          `Unable to load role: ${roleError.message}`
-        );
-      }
-
-      if (matchingRole) {
-        const { error: profileRoleError } = await admin
-          .from("profiles")
-          .update({
-            role_id: matchingRole.id,
-          })
-          .eq("id", userId);
-
-        if (profileRoleError) {
-          throw new Error(
-            `Unable to synchronize profile role: ${profileRoleError.message}`
-          );
-        }
-      }
-    }
-
-    return NextResponse.json({
-      ok: true,
-      userId,
-      tenantId,
-      fullName: fullName || null,
-      phone: phone || null,
-      role,
+    const refusal = checkRoleEdit({
+      callerId: user.id,
+      callerTier: tier,
+      target: { userId: target.id, roleName: target.roleName },
+      newRole: role,
     });
-  } catch (error) {
-    console.error("Tenant user update failed:", error);
+    if (refusal) return json(refusal);
 
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unable to update tenant user.",
-      },
-      { status: 500 }
-    );
+    // profiles.role_id is the source of truth, so a demotion is visible to RLS
+    // on the very next query. The function also syncs memberships and holds
+    // the last-admin guard under a lock.
+    if (target.roleName !== role || target.roleId === null || target.companyId === null) {
+      const { error } = await admin.rpc("set_company_user_role", {
+        p_user_id: target.id,
+        p_company_id: tenant.companyId,
+        p_role: role,
+        p_caller_is_super: tier === "super_admin",
+      });
+      if (error) {
+        console.error("[settings/users] role change failed", error.code, error.message);
+        return json(userAdminErrorResponse(error));
+      }
+    }
+
+    // Name and phone are the person's own profile fields, edited only for a
+    // user already proven to be in the caller's company (SET-8).
+    const fullName = cleanOptional(body.fullName, 200);
+    const phone = cleanOptional(body.phone, 50);
+    const { error: detailsError } = await admin
+      .from("profiles")
+      .update({ full_name: fullName, phone })
+      .eq("id", target.id);
+
+    if (detailsError) {
+      console.error("[settings/users] details update failed", detailsError.code);
+      return NextResponse.json(
+        { error: "The role was saved, but the name and phone could not be updated." },
+        { status: 500 },
+      );
+    }
+
+    return NextResponse.json({ ok: true, userId: target.id, tenantId, fullName, phone, role });
+  } catch (error) {
+    console.error("[settings/users] update failed", error);
+    return NextResponse.json({ error: "Unable to update the user." }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: NextRequest, context: RouteContext) {
+  const { userId } = await context.params;
+  const tenantId = request.nextUrl.searchParams.get("tenantId")?.trim() ?? "";
+
+  const access = await requireUserAdmin(tenantId);
+  if (!access.ok) return access.response;
+
+  const { admin, user, tier, tenant } = access.ctx;
+
+  try {
+    const target = await loadCompanyTarget(admin, userId, tenant.companyId);
+    if (!target) return NextResponse.json(NOT_FOUND, { status: 404 });
+
+    const refusal = checkRemoval({
+      callerId: user.id,
+      callerTier: tier,
+      target: { userId: target.id, roleName: target.roleName },
+    });
+    if (refusal) return json(refusal);
+
+    const { error } = await admin.rpc("remove_company_user", {
+      p_user_id: target.id,
+      p_company_id: tenant.companyId,
+      p_caller_is_super: tier === "super_admin",
+    });
+
+    if (error) {
+      console.error("[settings/users] removal failed", error.code, error.message);
+      return json(userAdminErrorResponse(error));
+    }
+
+    return NextResponse.json({ ok: true, userId: target.id });
+  } catch (error) {
+    console.error("[settings/users] removal failed", error);
+    return NextResponse.json({ error: "Unable to remove the user." }, { status: 500 });
   }
 }
