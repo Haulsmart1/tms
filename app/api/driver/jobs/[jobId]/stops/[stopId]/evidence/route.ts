@@ -1,289 +1,91 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import {
-  validatePodPhotoContent,
-  validatePodPhotoMetadata,
-} from "../../../../../../../../lib/driver/pod";
-import {
-  driverErrorResponse,
-  requireDriverSession,
-} from "../../../../../../../../lib/driver/server";
+import { isUuid } from "../../../../../../../../lib/auth/serverTenantAccess";
+import { loadDriverJobStop } from "../../../../../../../../lib/driver/jobAccess";
+import { driverErrorResponse, requireDriverSession } from "../../../../../../../../lib/driver/server";
+import { isWorkableJobStatus, jobNotWorkableMessage } from "../../../../../../../../lib/jobs/jobStatus";
+import { isPodEvidencePathFor } from "../../../../../../../../lib/pod/evidencePath";
+import { POD_PHOTO_MIME_TYPES } from "../../../../../../../../lib/pod/evidenceRules";
+import { recordEvidenceRow, verifyUploadedEvidence } from "../../../../../../../../lib/pod/evidenceServer";
 import { createAdminClient } from "../../../../../../../../lib/supabase/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const UUID =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+type RouteContext = { params: Promise<{ jobId: string; stopId: string }> };
 
-const POD_BUCKET = "pod-files";
-
-type RouteContext = {
-  params: Promise<{
-    jobId: string;
-    stopId: string;
-  }>;
-};
-
-export async function POST(
-  request: Request,
-  context: RouteContext,
-) {
+/*
+  Step 2 of a driver POD photo upload (review POD-2): the photo is already in
+  storage via the signed upload URL. Re-authorize, confirm the object sits at
+  a path this driver's job and stop own, check its real size and leading bytes,
+  then record the pod_evidence row. The request body is a few bytes of JSON.
+*/
+export async function POST(request: Request, context: RouteContext) {
   try {
-    const {
-      jobId,
-      stopId,
-    } = await context.params;
+    const { jobId, stopId } = await context.params;
 
-    if (
-      !UUID.test(jobId) ||
-      !UUID.test(stopId)
-    ) {
+    if (!isUuid(jobId) || !isUuid(stopId)) {
+      return NextResponse.json({ error: "Job stop not found." }, { status: 404 });
+    }
+
+    let body: { storagePath?: unknown; originalFilename?: unknown; mimeType?: unknown };
+
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+    }
+
+    const mimeType = typeof body.mimeType === "string" ? body.mimeType : "";
+
+    if (!(POD_PHOTO_MIME_TYPES as readonly string[]).includes(mimeType)) {
+      return NextResponse.json({ error: "Use a JPEG, PNG, WebP or HEIC photo." }, { status: 415 });
+    }
+
+    const session = await requireDriverSession({ jobId });
+    const admin = createAdminClient();
+    const loaded = await loadDriverJobStop(admin, session, jobId, stopId);
+
+    if (!loaded || loaded.stop.type !== "delivery") {
+      return NextResponse.json({ error: "Delivery stop not found." }, { status: 404 });
+    }
+
+    if (!isWorkableJobStatus(loaded.job.status)) {
+      return NextResponse.json({ error: jobNotWorkableMessage(loaded.job.status) }, { status: 409 });
+    }
+
+    if (loaded.stop.pod_status === "delivered") {
       return NextResponse.json(
-        {
-          error:
-            "Job stop not found.",
-        },
-        { status: 404 },
+        { error: "This delivery is already complete, so no more photos can be added." },
+        { status: 409 },
       );
     }
 
-    const session =
-      await requireDriverSession();
+    const owner = { tenantId: session.tenantId, jobId, stopId };
+    const storagePath = typeof body.storagePath === "string" ? body.storagePath : "";
 
-    const admin =
-      createAdminClient();
-
-    let jobQuery = admin
-      .from("jobs")
-      .select(
-        "id,subcontractor_id",
-      )
-      .eq("id", jobId)
-      .eq(
-        "tenant_id",
-        session.tenantId,
-      )
-      .eq(
-        "driver_id",
-        session.driverId,
-      );
-
-    if (session.subcontractorId) {
-      jobQuery = jobQuery.eq(
-        "subcontractor_id",
-        session.subcontractorId,
-      );
+    if (!isPodEvidencePathFor(storagePath, owner) || storagePath.split("/")[3] !== "photos") {
+      return NextResponse.json({ error: "Invalid upload reference." }, { status: 400 });
     }
 
-    const {
-      data: job,
-      error: jobError,
-    } =
-      await jobQuery.maybeSingle();
+    const verified = await verifyUploadedEvidence(admin, storagePath, mimeType);
 
-    if (jobError) {
-      throw new Error(
-        jobError.message,
-      );
+    if (!verified.ok) {
+      return NextResponse.json({ error: verified.message }, { status: verified.status });
     }
 
-    if (!job) {
-      return NextResponse.json(
-        {
-          error:
-            "Job stop not found.",
-        },
-        { status: 404 },
-      );
-    }
+    const evidence = await recordEvidenceRow(admin, {
+      ...owner,
+      evidenceType: "photo",
+      storagePath,
+      originalFilename: typeof body.originalFilename === "string" ? body.originalFilename : null,
+      mimeType,
+      size: verified.size,
+      createdBy: session.userId,
+    });
 
-    const {
-      data: stop,
-      error: stopError,
-    } = await admin
-      .from("job_stops")
-      .select("id,type")
-      .eq("id", stopId)
-      .eq("job_id", jobId)
-      .eq(
-        "tenant_id",
-        session.tenantId,
-      )
-      .maybeSingle();
-
-    if (stopError) {
-      throw new Error(
-        stopError.message,
-      );
-    }
-
-    if (
-      !stop ||
-      stop.type !== "delivery"
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Delivery stop not found.",
-        },
-        { status: 404 },
-      );
-    }
-
-    const formData =
-      await request.formData();
-
-    const file =
-      formData.get("file");
-
-    if (!(file instanceof File)) {
-      return NextResponse.json(
-        {
-          error:
-            "A POD photo is required.",
-        },
-        { status: 400 },
-      );
-    }
-
-    const validation =
-      validatePodPhotoMetadata({
-        size: file.size,
-        mimeType: file.type,
-      });
-
-    if (!validation.ok) {
-      return NextResponse.json(
-        {
-          error:
-            validation.message,
-        },
-        {
-          status:
-            validation.status,
-        },
-      );
-    }
-
-    const safeName =
-      (file.name || "pod-photo")
-        .replace(
-          /[^a-zA-Z0-9.\-_]/g,
-          "_",
-        )
-        .slice(0, 160);
-
-    const storagePath =
-      `${session.tenantId}/${jobId}/${stopId}/photos/` +
-      `${Date.now()}-${randomUUID()}-${safeName}`;
-
-    const fileBytes =
-      new Uint8Array(
-        await file.arrayBuffer(),
-      );
-
-    const contentValidation =
-      validatePodPhotoContent({
-        bytes: fileBytes,
-        mimeType: file.type,
-      });
-
-    if (!contentValidation.ok) {
-      return NextResponse.json(
-        {
-          error:
-            contentValidation.message,
-        },
-        {
-          status:
-            contentValidation.status,
-        },
-      );
-    }
-
-    const bytes =
-      Buffer.from(fileBytes);
-
-    const {
-      error: uploadError,
-    } = await admin.storage
-      .from(POD_BUCKET)
-      .upload(
-        storagePath,
-        bytes,
-        {
-          upsert: false,
-          contentType:
-            file.type,
-        },
-      );
-
-    if (uploadError) {
-      throw new Error(
-        uploadError.message,
-      );
-    }
-
-    const {
-      data: evidence,
-      error: insertError,
-    } = await admin
-      .from("pod_evidence")
-      .insert({
-        tenant_id:
-          session.tenantId,
-        job_id: jobId,
-        stop_id: stopId,
-        evidence_type: "photo",
-        storage_path:
-          storagePath,
-        original_filename:
-          file.name || null,
-        mime_type:
-          file.type || null,
-        file_size_bytes:
-          file.size,
-        created_by:
-          session.userId,
-      })
-      .select(
-        "id,stop_id,evidence_type,storage_path,original_filename,mime_type,file_size_bytes,created_at",
-      )
-      .single();
-
-    if (insertError) {
-      await admin.storage
-        .from(POD_BUCKET)
-        .remove([
-          storagePath,
-        ]);
-
-      throw new Error(
-        insertError.message,
-      );
-    }
-
-    return NextResponse.json(
-      {
-        ok: true,
-        evidence,
-      },
-      { status: 201 },
-    );
+    return NextResponse.json({ ok: true, evidence }, { status: 201 });
   } catch (error) {
-    const response =
-      driverErrorResponse(error);
-
-    return NextResponse.json(
-      {
-        error:
-          response.message,
-      },
-      {
-        status:
-          response.status,
-      },
-    );
+    const response = driverErrorResponse(error);
+    return NextResponse.json({ error: response.message }, { status: response.status });
   }
 }

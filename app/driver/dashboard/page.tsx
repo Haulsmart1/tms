@@ -4,6 +4,7 @@ import Link from "next/link";
 import Skeleton from "../../../components/Skeleton";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isDriverJobForDate } from "../../../lib/driver/dashboardJobs";
+import { operatorDay } from "../../../lib/time";
 
 type Driver = {
   id: string;
@@ -39,6 +40,8 @@ type Job = {
 type DriverResponse = {
   driver: Driver;
   jobs: Job[];
+  today?: string;
+  todayJobs?: Job[];
   vehicleAssignments: Array<{
     id: string;
     vehicle_id: string;
@@ -86,9 +89,11 @@ export default function DriverDashboardPage() {
   const todaysJobs = useMemo(() => {
     if (!data) return [];
 
-    const today = new Date().toISOString().slice(0, 10);
+    // The server works out today in the operator's time zone and filters on
+    // it (review POD-21); the fallback only covers an older API response.
+    const today = data.today ?? operatorDay(new Date());
 
-    return data.jobs
+    return (data.todayJobs ?? data.jobs)
       .filter((job) => isDriverJobForDate(job, today))
       .sort((a, b) => {
         const aOrder = a.route_order ?? Number.MAX_SAFE_INTEGER;
