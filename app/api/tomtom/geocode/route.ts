@@ -9,9 +9,23 @@ import {
 import { geocodeUrl } from "../../../../lib/tomtom/api";
 import {
   authClient,
+  isDurablyRateLimited,
   isRateLimited,
   requireOperator,
 } from "../../../../lib/tomtom/server";
+import { shouldRetryGeocode } from "../../../../lib/tomtom/geocodeRetry";
+import { RATE_LIMITS } from "../../../../lib/rateLimit";
+
+type StopRow = {
+  id: string;
+  address_line: string | null;
+  city: string | null;
+  postcode: string | null;
+  lat: number | null;
+  lng: number | null;
+  geocode_failed_at?: string | null;
+  geocode_attempts?: number | null;
+};
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -214,7 +228,8 @@ export async function POST(request: Request) {
     }
 
     if (
-      isRateLimited(operator.userId)
+      isRateLimited(operator.userId) ||
+      (await isDurablyRateLimited(operator.userId))
     ) {
       return NextResponse.json(
         {
@@ -262,18 +277,54 @@ export async function POST(request: Request) {
       );
     }
 
-    const {
-      data: stops,
-      error,
-    } = await client
+    /* The failure cache columns come from prodfix_73. Until that is applied
+       the select answers 42703 and geocoding runs as before, uncached. */
+    type StopsResult = {
+      data: StopRow[] | null;
+      error: { code?: string; message: string } | null;
+    };
+
+    let failureCacheAvailable = true;
+    let stopsResult = (await client
       .from("job_stops")
       .select(
-        "id, address_line, city, postcode, lat, lng",
+        "id, address_line, city, postcode, lat, lng, geocode_failed_at, geocode_attempts",
       )
-      .in("id", stopIds);
+      .in("id", stopIds)) as unknown as StopsResult;
 
-    if (error) {
-      throw new Error(error.message);
+    if (stopsResult.error?.code === "42703") {
+      failureCacheAvailable = false;
+      stopsResult = (await client
+        .from("job_stops")
+        .select(
+          "id, address_line, city, postcode, lat, lng",
+        )
+        .in("id", stopIds)) as unknown as StopsResult;
+    }
+
+    if (stopsResult.error) {
+      throw new Error(stopsResult.error.message);
+    }
+
+    const stops = stopsResult.data;
+
+    /* A definite "not found" is remembered so tracking polls and planning
+       loads stop paying for it again (review PLAN-13). Best effort: a failed
+       write only costs a later retry. */
+    async function recordGeocodeMiss(stop: StopRow) {
+      if (!failureCacheAvailable) return;
+
+      const { error: missError } = await client
+        .from("job_stops")
+        .update({
+          geocode_failed_at: new Date().toISOString(),
+          geocode_attempts: (stop.geocode_attempts ?? 0) + 1,
+        })
+        .eq("id", stop.id);
+
+      if (missError) {
+        console.error("tomtom/geocode: could not record miss", stop.id, missError.code);
+      }
     }
 
     const geocoded: {
@@ -281,6 +332,10 @@ export async function POST(request: Request) {
       lat: number;
       lng: number;
     }[] = [];
+
+    const skipped: string[] = [];
+    let upstreamBudgetExhausted = false;
+    const requestStartedAt = new Date();
 
     const deadline =
       Date.now() + 25_000;
@@ -304,11 +359,36 @@ export async function POST(request: Request) {
           continue;
         }
 
+        if (
+          failureCacheAvailable &&
+          !shouldRetryGeocode(
+            stop.geocode_failed_at,
+            stop.geocode_attempts,
+            requestStartedAt,
+          )
+        ) {
+          skipped.push(stop.id);
+          continue;
+        }
+
         const query =
           geocodeQuery(stop);
 
         if (!query) {
+          await recordGeocodeMiss(stop);
           continue;
+        }
+
+        /* Budget counts stops that need upstream calls, not requests: one
+           request can carry 100 stops at up to five TomTom calls each. */
+        if (
+          await isDurablyRateLimited(
+            operator.userId,
+            RATE_LIMITS.tomtomGeocodeStopsPerUser,
+          )
+        ) {
+          upstreamBudgetExhausted = true;
+          break;
         }
 
         const expectedPostcode =
@@ -456,6 +536,10 @@ export async function POST(request: Request) {
         }
 
         if (!position) {
+          // Only a definite miss is cached; upstream errors stay retryable.
+          if (result.status === 200) {
+            await recordGeocodeMiss(stop);
+          }
           continue;
         }
 
@@ -468,6 +552,9 @@ export async function POST(request: Request) {
             lng: position.lng,
             geocoded_at:
               new Date().toISOString(),
+            ...(failureCacheAvailable
+              ? { geocode_failed_at: null, geocode_attempts: 0 }
+              : {}),
           })
           .eq("id", stop.id);
 
@@ -506,6 +593,10 @@ export async function POST(request: Request) {
     return NextResponse.json({
       geocoded,
       failed,
+      /* Recently failed addresses not retried this time. */
+      skipped,
+      /* True when the per-user upstream budget stopped this batch early. */
+      rateLimited: upstreamBudgetExhausted,
     });
   } catch (error) {
     console.error(

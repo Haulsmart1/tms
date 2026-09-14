@@ -37,6 +37,6 @@ describe("activitySourceLabel", () => {
   it("identifies API provenance", () => {
     expect(
       activitySourceLabel("tachograph_api", "demo")
-    ).toBe("Tacho API ? demo");
+    ).toBe("Tacho API · demo");
   });
 });

@@ -14,10 +14,25 @@ import { computeSaveDiff, type LanePlan } from "../../lib/planning/saveDiff";
 import {
   createPlanningDraft,
   parsePlanningDraft,
+  planningDraftBaseline,
+  planningDraftIsStale,
   planningDraftMatchesPlan,
   planningDraftStorageKey,
   type PlanningDraft,
 } from "../../lib/planning/draftCache";
+import {
+  buildPlanningSavePlan,
+  classifyPlanningSaveError,
+  PLANNING_SAVE_BLOCKED_MESSAGES,
+  PLANNING_SAVE_ERROR_MESSAGES,
+  type PlanningSaveErrorKind,
+} from "../../lib/planning/planningSave";
+import {
+  autosaveDelay,
+  recordAutosaveFailure,
+  type AutosaveFailure,
+} from "../../lib/planning/autosave";
+import { loadCompanyTimeZone } from "../../lib/planning/companyTimeZone";
 import {
   assignJobsToLane,
   moveJobInLane,
@@ -36,7 +51,9 @@ import { buildPlanningPhysicalItinerary } from "../../lib/planning/physicalItine
 import {
   buildPlanningDriverHoursState,
   planningDriverHoursBoundaries,
+  planningHoursInstant,
   planningStartForLocalDate,
+  planningStartIssue,
   PLANNING_DRIVER_ACTIVITY_ROW_LIMIT,
   type PlanningDriverActivityRow,
 } from "../../lib/planning/planningDriverActivity";
@@ -71,6 +88,7 @@ import { createSupabasePositionSource } from "../../lib/tracking/supabasePositio
 import type { PositionReading } from "../../lib/tracking/position";
 import {
   evaluatePlanningCompliance,
+  PLANNING_CHECKS_NOT_PERFORMED,
   type PlanningCompliance,
   type PlanningComplianceDriver,
 } from "../../lib/planning/compliance";
@@ -80,7 +98,6 @@ import {
   type LaneRegimeSummary,
 } from "../../lib/planning/laneRegime";
 import {
-  isValidIanaTimeZone,
   OPERATOR_TIME_ZONE,
   operatorDay,
   operatorDayInTimeZone,
@@ -110,6 +127,8 @@ type Driver = PlanningComplianceDriver & {
    larger with a 400 (it does not truncate), so the client chunks. */
 const GEOCODE_BATCH = 100;
 const POSITION_POLL_MS = 30_000;
+/* How often today's driver-hours state is re-evaluated against "now". */
+const HOURS_REFRESH_MS = 5 * 60_000;
 
 export default function PlanningPage() {
   const router = useRouter();
@@ -132,6 +151,24 @@ export default function PlanningPage() {
       : fallback;
   });
   const [planningTimeZone, setPlanningTimeZone] = useState(OPERATOR_TIME_ZONE);
+  const [timeZoneNote, setTimeZoneNote] = useState<string | null>(null);
+  /* Planning edits exactly one tenant. With admin "All tenants" active the
+     board is read-only, so a lane can never mix tenants and Save never writes
+     jobs before failing on a missing tenant (review PLAN-8). */
+  const planningTenantId =
+    tenant.status === "ready" &&
+    typeof tenant.activeTenantId === "string" &&
+    tenant.activeTenantId.length > 0
+      ? tenant.activeTenantId
+      : null;
+  /* Autosave failure for the current snapshot of unsaved work (PLAN-7). */
+  const [autosaveFailure, setAutosaveFailure] =
+    useState<AutosaveFailure | null>(null);
+  /* Set when the server refused a save because newer changes exist (PLAN-11). */
+  const [saveConflict, setSaveConflict] = useState(false);
+  /* Bumped after each successful save so autosave re-checks for edits made
+     while that save was in flight. */
+  const [saveRound, setSaveRound] = useState(0);
   const [jobs, setJobs] = useState<PlanJob[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -156,6 +193,10 @@ export default function PlanningPage() {
     useState<string | null>(null);
   const [driverScheduleLoading, setDriverScheduleLoading] =
     useState(false);
+  /* Assumptions behind the preview the planner must see (PLAN-2, PLAN-24). */
+  const [driverScheduleNotes, setDriverScheduleNotes] =
+    useState<string[]>([]);
+  const [hoursClock, setHoursClock] = useState(() => Date.now());
   const [pendingItineraries, setPendingItineraries] = useState<
     Record<string, PendingPlanningItinerary>
   >({});
@@ -211,6 +252,8 @@ export default function PlanningPage() {
      itself be superseded by a later load, not just by unmount. */
   const loadSeq = useRef(0);
   const saveInFlight = useRef(false);
+  /* Lets the planner stop a long Smart Optimize run (PLAN-12). */
+  const optimizeAbort = useRef<AbortController | null>(null);
   const latestPendingUpdatesJson = useRef("[]");
   const loadedPlanningScope = useRef<string | null>(null);
   const canonicalGeneration = useRef(0);
@@ -266,6 +309,19 @@ export default function PlanningPage() {
     itineraryInvalidations.size > 0;
   const hasUnsavedWork = dirty || hasCanonicalWork;
   latestPendingUpdatesJson.current = pendingUpdatesJson;
+  /* Identifies the unsaved work an autosave failure belongs to. Any edit
+     (assignment, order, driver, optimize, invalidation) changes it, which is
+     what resumes autosave after it stopped (PLAN-7). */
+  const autosaveSnapshot = [
+    pendingUpdatesJson,
+    [...itineraryInvalidations].sort().join(","),
+    Object.keys(pendingItineraries).sort().join(","),
+    String(canonicalGeneration.current),
+  ].join("|");
+  /* Server assignments the local draft is written against (PLAN-11). Keyed
+     as a string so geocoding updates to jobs do not reset the autosave timer. */
+  const draftBaseline = useMemo(() => planningDraftBaseline(jobs), [jobs]);
+  const draftBaselineKey = JSON.stringify(draftBaseline);
 
   async function loadData(isCancelled: () => boolean) {
     // Guard lives here, not in the effect: see TenantContextValue in lib/tenant/context.ts
@@ -284,12 +340,21 @@ export default function PlanningPage() {
     setPersistedItineraries({});
     canonicalMutationGeneration.current = {};
     setPlanningTimeZone(OPERATOR_TIME_ZONE);
+    setTimeZoneNote(null);
+    setAutosaveFailure(null);
+    setSaveConflict(false);
 
-    const profileQuery = tenant
-      .filterByTenant(
-        supabase.from("company_profiles").select("timezone")
-      )
-      .maybeSingle();
+    /* company_profiles is keyed by company id, so the zone is resolved through
+       tenants.company_id rather than filterByTenant, validated, and never
+       aborts the load. A super_admin on "All" spanning several companies gets
+       the operator default with a note instead of a multi-row error
+       (review PLAN-10). */
+    const timeZonePromise = loadCompanyTimeZone(
+      supabase,
+      tenant.activeTenantId
+        ? [tenant.activeTenantId]
+        : tenant.tenants.map((option) => option.id)
+    );
 
     const jobsQuery = supabase
       .from("jobs")
@@ -310,7 +375,7 @@ export default function PlanningPage() {
         `planning_date.eq.${date},and(planning_date.is.null,scheduled_date.eq.${date})`
       );
 
-    const { data: profileData, error: profileError } = await profileQuery;
+    const resolvedTimeZone = await timeZonePromise;
     const { data: jobsData, error: jobsError } = await tenant
       .filterByTenant(jobsQuery)
       .order("created_at", { ascending: true });
@@ -348,23 +413,12 @@ export default function PlanningPage() {
       .order("name", { ascending: true });
 
     if (isCancelled()) return;
-    if (profileError) {
-      setMessage(`Company profile load error: ${profileError.message}`);
-      setLoading(false);
-      return;
-    }
     if (jobsError) { setMessage(`Jobs load error: ${jobsError.message}`); setLoading(false); return; }
     if (vehicleError) { setMessage(`Vehicles load error: ${vehicleError.message}`); setLoading(false); return; }
     if (driverError) { setMessage(`Drivers load error: ${driverError.message}`); setLoading(false); return; }
 
-    const profileTimeZone =
-      typeof profileData?.timezone === "string"
-        ? profileData.timezone.trim()
-        : "";
-    const loadedTimeZone =
-      profileTimeZone && isValidIanaTimeZone(profileTimeZone)
-        ? profileTimeZone
-        : OPERATOR_TIME_ZONE;
+    const loadedTimeZone = resolvedTimeZone.timeZone;
+    const loadNotices: string[] = [];
 
     const loaded: PlanJob[] = (jobsData ?? []).map((row: any) => ({
       id: row.id,
@@ -549,6 +603,22 @@ export default function PlanningPage() {
           (serviceRows ?? []) as any[],
           loaded.filter(isRoutable)
         );
+
+        /* A saved route that no longer matches its lane (stops edited on
+           /jobs, a job moved or removed) is dropped by the parser. Say so
+           rather than silently falling back to the unoptimized order
+           (review PLAN-23). */
+        const droppedRoutes = (itineraryRows ?? []).filter(
+          (row: any) => !loadedPersistedItineraries[row.vehicle_id as string]
+        ).length;
+
+        if (droppedRoutes > 0) {
+          loadNotices.push(
+            `The saved Smart Optimize order for ${droppedRoutes} ${
+              droppedRoutes === 1 ? "vehicle" : "vehicles"
+            } no longer matches its jobs (stops were edited or jobs moved), so it is not used. Re-run Smart Optimize for those lanes.`
+          );
+        }
       }
     }
 
@@ -582,12 +652,24 @@ export default function PlanningPage() {
           window.localStorage.removeItem(planningScope);
           cachedDraft = null;
         }
+
+        /* A draft made against an older server plan would overwrite newer
+           changes if restored and autosaved (review PLAN-11). */
+        if (cachedDraft && planningDraftIsStale(cachedDraft, loaded)) {
+          window.localStorage.removeItem(planningScope);
+          cachedDraft = null;
+          loadNotices.push(
+            "An unsaved draft in this browser was discarded because the plan was changed and saved elsewhere after it was made."
+          );
+        }
       } catch {
         cachedDraft = null;
       }
     }
 
     setPlanningTimeZone(loadedTimeZone);
+    setTimeZoneNote(resolvedTimeZone.note);
+    if (loadNotices.length > 0) setMessage(loadNotices.join(" "));
     setJobs(loaded);
     setSelectedUnassignedJobIds(new Set());
     setBulkVehicleId("");
@@ -877,7 +959,21 @@ export default function PlanningPage() {
     });
   }
 
+  /* True (and explains why) when the board is read-only because no single
+     tenant is selected. Every edit path checks this first (PLAN-8). */
+  function planningReadOnly(): boolean {
+    if (planningTenantId) return false;
+    setMessage(PLANNING_SAVE_BLOCKED_MESSAGES.no_tenant_selected);
+    return true;
+  }
+
+  function reloadBoard() {
+    const seq = ++loadSeq.current;
+    void loadData(() => loadSeq.current !== seq);
+  }
+
   function moveJob(jobId: string, vehicleId: string | null, beforeJobId: string | null) {
+    if (planningReadOnly()) return;
     const job = jobById.get(jobId);
     if (!job || job.subcontractor_id) return;
 
@@ -1200,6 +1296,7 @@ export default function PlanningPage() {
   }
 
   function assignSelectedToVehicle() {
+    if (planningReadOnly()) return;
     const vehicleId = bulkVehicleId || selectedVehicleId;
 
     if (!vehicleId || !vehicles.some((vehicle) => vehicle.id === vehicleId)) {
@@ -1244,6 +1341,7 @@ export default function PlanningPage() {
   }
 
   function moveLaneJob(jobId: string, vehicleId: string, offset: -1 | 1) {
+    if (planningReadOnly()) return;
     const currentLane = laneOrders[vehicleId] ?? [];
     const currentIndex = currentLane.indexOf(jobId);
 
@@ -1281,17 +1379,31 @@ export default function PlanningPage() {
     const canonicalSnapshot = Object.values(pendingItineraries);
     const generationSnapshot = { ...canonicalMutationGeneration.current };
 
-    const missingTenantUpdate = updates.find(
-      (update) => !jobById.get(update.id)?.tenant_id
+    const failedSnapshot = autosaveSnapshot;
+
+    /* Validated before anything is written: no tenant selected, or a job
+       from another tenant, refuses the save outright (PLAN-8). */
+    const savePlanResult = buildPlanningSavePlan(
+      updates,
+      jobById,
+      planningTenantId
     );
 
-    if (missingTenantUpdate) {
+    if (!savePlanResult.ok) {
       setMessage(
-        "Save error: one or more jobs are missing tenant information."
+        `Save error: ${PLANNING_SAVE_BLOCKED_MESSAGES[savePlanResult.reason]}`
       );
       setSaveStatus("local-only");
+      if (mode === "auto") {
+        setAutosaveFailure((previous) =>
+          recordAutosaveFailure(previous, failedSnapshot, false)
+        );
+      }
       return false;
     }
+
+    const activeTenantId = savePlanResult.tenantId;
+    let failureKind: PlanningSaveErrorKind | null = null;
 
     saveInFlight.current = true;
     setSaving(true);
@@ -1302,38 +1414,26 @@ export default function PlanningPage() {
     }
 
     try {
-      for (const update of updates) {
-        const tenantId = jobById.get(update.id)?.tenant_id;
-
-        if (!tenantId) {
-          throw new Error(
-            "one or more jobs are missing tenant information."
-          );
-        }
-
-        const { error } = await supabase
-          .from("jobs")
-          .update({
-            vehicle_id: update.vehicle_id,
-            driver_id: update.driver_id,
-            route_order: update.route_order,
-          })
-          .eq("id", update.id)
-          .eq("tenant_id", tenantId);
+      /* One atomic call. Every job carries the assignment this tab last saw;
+         the RPC refuses the whole save if any job changed since (PLAN-11). */
+      if (savePlanResult.rows.length > 0) {
+        const { error } = await supabase.rpc(
+          "save_planning_assignments",
+          {
+            p_tenant_id: activeTenantId,
+            p_updates: savePlanResult.rows,
+          }
+        );
 
         if (error) {
-          throw new Error(error.message);
+          failureKind = classifyPlanningSaveError(error);
+
+          if (failureKind === "failed") {
+            console.error("planning save failed:", error.code, error.message);
+          }
+
+          throw new Error(PLANNING_SAVE_ERROR_MESSAGES[failureKind]);
         }
-      }
-
-      const activeTenantId =
-        tenant.status === "ready" &&
-        typeof tenant.activeTenantId === "string"
-          ? tenant.activeTenantId
-          : null;
-
-      if (!activeTenantId) {
-        throw new Error("active tenant is unavailable.");
       }
 
       const invalidations = invalidationSnapshot;
@@ -1493,14 +1593,32 @@ export default function PlanningPage() {
         setSaveStatus("pending");
       }
 
+      setAutosaveFailure(null);
+      setSaveConflict(false);
+      setSaveRound((round) => round + 1);
+
       return true;
     } catch (error) {
       const reason =
         error instanceof Error ? error.message : "unknown save failure";
 
+      if (failureKind === "conflict") {
+        setSaveConflict(true);
+      }
+
+      /* Conflicts and a missing RPC will fail the same way every time, so
+         autosave stops at once; anything else backs off (PLAN-7). */
+      setAutosaveFailure((previous) =>
+        recordAutosaveFailure(
+          previous,
+          failedSnapshot,
+          failureKind === null || failureKind === "failed"
+        )
+      );
+
       setMessage(
         mode === "auto"
-          ? `Autosave failed: ${reason}. Changes are kept locally.`
+          ? `Autosave failed: ${reason}`
           : `Save error: ${reason}`
       );
       setSaveStatus("local-only");
@@ -1517,9 +1635,7 @@ export default function PlanningPage() {
 
   useEffect(() => {
     if (
-      tenant.status !== "ready" ||
-      typeof tenant.activeTenantId !== "string" ||
-      tenant.activeTenantId.length === 0 ||
+      !planningTenantId ||
       loading ||
       recoveryDraft ||
       !hasUnsavedWork
@@ -1528,7 +1644,7 @@ export default function PlanningPage() {
     }
 
     const storageKey = planningDraftStorageKey(
-      tenant.activeTenantId,
+      planningTenantId,
       date
     );
 
@@ -1537,12 +1653,13 @@ export default function PlanningPage() {
     }
 
     const draft = createPlanningDraft({
-      tenantId: tenant.activeTenantId,
+      tenantId: planningTenantId,
       date,
       laneOrders,
       laneDrivers,
       selectedVehicleId,
       updatedAt: Date.now(),
+      baseline: draftBaseline,
     });
 
     try {
@@ -1555,8 +1672,25 @@ export default function PlanningPage() {
       return;
     }
 
-    if (saving || saveInFlight.current) {
+    /* A refused save waits for the planner to reload; retrying cannot help. */
+    if (saveConflict) {
+      setSaveStatus("local-only");
+      return;
+    }
+
+    /* No timer while a save is in flight. `saveRound` (success) or
+       `autosaveFailure` (failure) re-runs this effect when it settles, so
+       `saving` is deliberately not a dependency: it used to re-arm autosave
+       every 1.2 s after every failure, forever (PLAN-7). */
+    if (saveInFlight.current) {
       setSaveStatus("pending");
+      return;
+    }
+
+    const delay = autosaveDelay(autosaveSnapshot, autosaveFailure);
+
+    if (delay === null) {
+      setSaveStatus("local-only");
       return;
     }
 
@@ -1564,7 +1698,7 @@ export default function PlanningPage() {
 
     const timer = window.setTimeout(() => {
       void persistPlan("auto");
-    }, 1200);
+    }, delay);
 
     return () => {
       window.clearTimeout(timer);
@@ -1575,25 +1709,25 @@ export default function PlanningPage() {
     // snapshot rather than racing the old one.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    tenant.status,
-    tenant.activeTenantId,
+    planningTenantId,
     date,
     loading,
     recoveryDraft,
     dirty,
     hasCanonicalWork,
     hasUnsavedWork,
-    saving,
-    pendingUpdatesJson,
-    pendingItineraries,
-    itineraryInvalidations,
+    autosaveSnapshot,
+    autosaveFailure,
+    saveConflict,
+    saveRound,
+    draftBaselineKey,
     laneOrders,
     laneDrivers,
     selectedVehicleId,
   ]);
 
   function restoreRecoveryDraft() {
-    if (!recoveryDraft) return;
+    if (!recoveryDraft || planningReadOnly()) return;
 
     invalidateCanonicalVehicles(Object.keys(recoveryDraft.laneOrders));
     setLaneOrders(recoveryDraft.laneOrders);
@@ -1630,7 +1764,7 @@ export default function PlanningPage() {
   }
 
   async function optimize() {
-    if (optimizing || !selectedVehicleId) return;
+    if (optimizing || !selectedVehicleId || planningReadOnly()) return;
 
     const routable = selectedLaneJobs.filter(isRoutable);
 
@@ -1660,14 +1794,23 @@ export default function PlanningPage() {
         return;
       }
 
+      const controller = new AbortController();
+      optimizeAbort.current = controller;
+
       const optimized = await optimizeFastPlotOrderFromStart(
         selectedLaneJobs,
         { lat: vehicleReading.lat, lng: vehicleReading.lng },
         createBudgetedFastPlotCostLoader(
           8,
           loadCachedFastPlotCosts
-        )
+        ),
+        { signal: controller.signal }
       );
+
+      if (controller.signal.aborted || (!optimized.ok && optimized.reason === "cancelled")) {
+        setMessage("Smart Optimize was cancelled. The lane order is unchanged.");
+        return;
+      }
 
       if (!optimized.ok) {
         const reason =
@@ -1752,6 +1895,7 @@ export default function PlanningPage() {
     } catch {
       setMessage("Smart Optimize failed.");
     } finally {
+      optimizeAbort.current = null;
       setOptimizing(false);
     }
   }
@@ -1827,6 +1971,11 @@ export default function PlanningPage() {
      * Activity can only establish legal state up to an instant that has
      * actually happened. A future planning start necessarily contains an
      * unknown interval of future activity, so it remains incomplete.
+     *
+     * When planning TODAY after the driver's start time, the state is
+     * evaluated at now, not at the start time, so driving and duty already
+     * recorded today count (review PLAN-2). hoursClock re-runs this every few
+     * minutes so "now" does not freeze while the tab stays open.
      */
     const activityKnownThrough = new Date();
 
@@ -1847,15 +1996,25 @@ export default function PlanningPage() {
             planningTimeZone
           );
 
-          if (
-            !planningStart ||
-            planningStart.getTime() > activityKnownThrough.getTime()
-          ) {
+          if (!planningStart) {
             return [driverId, null] as const;
           }
 
-          const boundaries = planningDriverHoursBoundaries(
+          const hoursWindow = planningHoursInstant(
+            date,
             planningStart,
+            activityKnownThrough,
+            planningTimeZone
+          );
+
+          if (hoursWindow.kind === "future") {
+            return [driverId, null] as const;
+          }
+
+          const evaluatedAt = hoursWindow.instant;
+
+          const boundaries = planningDriverHoursBoundaries(
+            evaluatedAt,
             planningTimeZone
           );
 
@@ -1877,7 +2036,7 @@ export default function PlanningPage() {
               "end_time",
               boundaries.historyCoverageStart.toISOString()
             )
-            .lt("start_time", planningStart.toISOString())
+            .lt("start_time", evaluatedAt.toISOString())
             .order("start_time", { ascending: true })
             .limit(PLANNING_DRIVER_ACTIVITY_ROW_LIMIT);
 
@@ -1899,7 +2058,7 @@ export default function PlanningPage() {
             driverId,
             buildPlanningDriverHoursState(
               rows,
-              planningStart,
+              evaluatedAt,
               planningTimeZone
             ),
           ] as const;
@@ -1924,12 +2083,24 @@ export default function PlanningPage() {
     laneDrivers,
     planningTimeZone,
     supabase,
+    hoursClock,
   ]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        setHoursClock(Date.now());
+      }
+    }, HOURS_REFRESH_MS);
+
+    return () => window.clearInterval(timer);
+  }, []);
 
 
   useEffect(() => {
     setSelectedDriverSchedule(null);
     setDriverScheduleNotice(null);
+    setDriverScheduleNotes([]);
     setDriverScheduleLoading(false);
 
     if (!selectedVehicleId) return;
@@ -1978,9 +2149,44 @@ export default function PlanningPage() {
 
     if (!planningStart) {
       setDriverScheduleNotice(
-        "Set a valid normal start time for this driver before calculating driver hours."
+        planningStartIssue(
+          date,
+          driver.normal_start_time,
+          planningTimeZone
+        ) === "clock_change_gap"
+          ? `The driver's normal start time ${driver.normal_start_time?.slice(0, 5)} does not exist on ${date} in ${planningTimeZone}, because the clocks go forward then. The driver profile is fine; this day needs a start after the change.`
+          : "Set a valid normal start time for this driver before calculating driver hours."
       );
       return;
+    }
+
+    const scheduleNow = new Date();
+    const hoursWindow = planningHoursInstant(
+      date,
+      planningStart,
+      scheduleNow,
+      planningTimeZone
+    );
+    /* Today, after the start time: ETAs start from now (review PLAN-2). */
+    const scheduleStart =
+      hoursWindow.kind === "known" ? hoursWindow.instant : planningStart;
+    /* A later day: the vehicle's current GPS fix says nothing about where it
+       starts that day (review PLAN-24), and no depot coordinate exists. */
+    const futureDay =
+      date > operatorDayInTimeZone(scheduleNow, planningTimeZone);
+
+    const scheduleNotes: string[] = [];
+
+    if (hoursWindow.kind === "known" && hoursWindow.rebasedToNow) {
+      scheduleNotes.push(
+        "Today's start time has passed, so ETAs start from now and the driving already recorded today is counted."
+      );
+    }
+
+    if (futureDay) {
+      scheduleNotes.push(
+        "This is a future day, so travel to the first stop is not included: the vehicle's start location for that day is unknown. Recorded driver hours before that day are not applied either."
+      );
     }
 
     const regime = laneRegimeByVehicle.get(selectedVehicleId);
@@ -2007,9 +2213,10 @@ export default function PlanningPage() {
     const reading = positions.get(selectedVehicleId);
 
     if (
-      !reading ||
-      !Number.isFinite(reading.lat) ||
-      !Number.isFinite(reading.lng)
+      !futureDay &&
+      (!reading ||
+        !Number.isFinite(reading.lat) ||
+        !Number.isFinite(reading.lng))
     ) {
       setDriverScheduleNotice(
         "Driver-hours preview needs the vehicle's last-known position."
@@ -2035,10 +2242,12 @@ export default function PlanningPage() {
         const firstPoint = canonical.orderedVisits[0].point;
 
         const firstTravelSeconds =
-          await loadPointToPointTravelSeconds(
-            { lat: reading.lat, lng: reading.lng },
-            firstPoint
-          );
+          futureDay || !reading
+            ? 0
+            : await loadPointToPointTravelSeconds(
+                { lat: reading.lat, lng: reading.lng },
+                firstPoint
+              );
 
         if (cancelled) return;
 
@@ -2057,9 +2266,12 @@ export default function PlanningPage() {
           firstTravelSeconds,
           planningProfile: driver.planning_profile,
           planningDate: date,
-          planningStart,
-          driverHoursState: driverHoursById[driverId] ?? null,
+          planningStart: scheduleStart,
+          driverHoursState: futureDay
+            ? null
+            : driverHoursById[driverId] ?? null,
           activityDataAvailable:
+            !futureDay &&
             driverHoursById[driverId]?.complete === true,
           startLocationId: `vehicle:${selectedVehicleId}`,
           regime: regime.regime,
@@ -2087,6 +2299,7 @@ export default function PlanningPage() {
         }
 
         setSelectedDriverSchedule(result.preview);
+        setDriverScheduleNotes(scheduleNotes);
         setDriverScheduleNotice(null);
       } catch {
         if (!cancelled) {
@@ -2138,9 +2351,10 @@ export default function PlanningPage() {
             jobCount === 0
               ? 0
               : route?.totalTravelTimeSeconds ?? null,
-          activityDataAvailable:
-            driverId !== null &&
-            driverHoursById[driverId]?.complete === true,
+          driverHours:
+            driverId !== null
+              ? driverHoursById[driverId] ?? null
+              : null,
           today,
         })
       );
@@ -2244,6 +2458,14 @@ export default function PlanningPage() {
 
           </header>
 
+          {tenant.status === "ready" && !planningTenantId ? (
+            <p className="text-sm text-warning">
+              {PLANNING_SAVE_BLOCKED_MESSAGES.no_tenant_selected}
+            </p>
+          ) : null}
+          {timeZoneNote ? (
+            <p className="text-sm text-warning">{timeZoneNote}</p>
+          ) : null}
           {message ? <p className="text-sm text-danger">{message}</p> : null}
           {geocodeUnavailable ? (
             <p className="text-sm text-ink-3">
@@ -2305,9 +2527,11 @@ export default function PlanningPage() {
             </div>
 
             <p className="sm:col-span-2 xl:col-span-5 text-xs text-ink-3">
-              Advisory mode: no hard dispatch blocks. Actual driving,
-              remaining hours, breaks and WTD stay unknown until driver
-              activity data is available.
+              Advisory only: nothing here blocks dispatch or confirms a plan
+              is legal. With complete driver activity data each lane checks
+              daily (9 h), weekly (56 h) and two-week (90 h) driving and when
+              a 45 min break is due; without it, hours are not checked at all.{" "}
+              {PLANNING_CHECKS_NOT_PERFORMED}
             </p>
           </section>
 
@@ -2400,24 +2624,56 @@ export default function PlanningPage() {
                   : "Smart Optimize Route"}
             </Button>
 
+            {optimizing ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => optimizeAbort.current?.abort()}
+              >
+                Cancel optimize
+              </Button>
+            ) : null}
+
             <Button
               size="sm"
               onClick={savePlan}
               loading={saving}
-              disabled={!dirty}
+              disabled={!planningTenantId || (!dirty && !hasCanonicalWork)}
             >
               Save plan
             </Button>
 
             <span className="text-xs text-ink-3">
-              {saveStatus === "saving"
-                ? "Saving…"
-                : saveStatus === "local-only"
-                  ? "Saved locally — retry pending"
-                  : dirty || saveStatus === "pending"
-                    ? "Autosave pending"
-                    : "Plan saved ✓"}
+              {!planningTenantId
+                ? "Read-only: pick a tenant to plan"
+                : saveStatus === "saving"
+                  ? "Saving…"
+                  : saveConflict
+                    ? "Not saved: newer changes exist on the server"
+                    : saveStatus === "local-only"
+                      ? autosaveDelay(autosaveSnapshot, autosaveFailure) === null
+                        ? "Not saved. Autosave stopped; kept in this browser. Edit or press Save plan to retry."
+                        : "Not saved yet; kept in this browser, retrying shortly"
+                      : dirty || saveStatus === "pending"
+                        ? "Autosave pending"
+                        : "Plan saved ✓"}
             </span>
+
+            {saveConflict ? (
+              <div className="basis-full rounded-md border border-line bg-surface p-3 text-sm">
+                <p className="font-medium text-warning">
+                  This plan was changed elsewhere
+                </p>
+                <p className="mt-1 text-xs text-ink-3">
+                  {PLANNING_SAVE_ERROR_MESSAGES.conflict}
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <Button size="sm" onClick={reloadBoard}>
+                    Reload board
+                  </Button>
+                </div>
+              </div>
+            ) : null}
 
             {recoveryDraft ? (
               <div className="basis-full rounded-md border border-line bg-surface p-3 text-sm">
@@ -2505,7 +2761,18 @@ export default function PlanningPage() {
                         <p className="mt-2 text-xs text-ink-3">
                           Advisory planning only. The rule profile is deliberately
                           unverified, so this does not assert legal compliance.
+                          It places 45 min breaks and a daily rest when 9 h of
+                          driving would be passed; loading and service time never
+                          trigger a break or rest. {PLANNING_CHECKS_NOT_PERFORMED}
                         </p>
+
+                        {driverScheduleNotes.length > 0 ? (
+                          <div className="mt-2 space-y-1 text-xs text-ink-2">
+                            {driverScheduleNotes.map((note) => (
+                              <p key={note}>{note}</p>
+                            ))}
+                          </div>
+                        ) : null}
 
                         <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink-2">
                           <span>
@@ -2673,7 +2940,7 @@ export default function PlanningPage() {
                           driver: null,
                           hasPlannedJobs: false,
                           plannedDrivingSeconds: 0,
-                          activityDataAvailable: false,
+                          driverHours: null,
                           today: operatorDayInTimeZone(
                             positionNow,
                             planningTimeZone
@@ -2687,6 +2954,7 @@ export default function PlanningPage() {
                         setBulkVehicleId(v.id);
                       }}
                       onDriverChange={(driverId) => {
+                        if (planningReadOnly()) return;
                         invalidateCanonicalVehicles([v.id]);
                         setLaneDrivers((prev) => ({ ...prev, [v.id]: driverId }));
                         setRoutes((prev) => {

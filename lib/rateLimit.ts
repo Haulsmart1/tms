@@ -31,6 +31,9 @@ export const RATE_LIMITS = {
   invitePerUser: { bucket: "invite:user", windowSeconds: 3600, max: 30 },
   podSharePdfPerIp: { bucket: "pod-share-pdf:ip", windowSeconds: 600, max: 60 },
   tomtomPerUser: { bucket: "tomtom:user", windowSeconds: 60, max: 120 },
+  /* Added by review PLAN-13: counts stops that need upstream geocoding (each
+     can cost several TomTom calls), not incoming requests. */
+  tomtomGeocodeStopsPerUser: { bucket: "tomtom-geocode:user", windowSeconds: 3600, max: 600 },
 } as const satisfies Record<string, RateLimitRule>;
 
 const MISSING_FUNCTION_CODES = new Set(["42883", "PGRST202"]);

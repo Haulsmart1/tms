@@ -43,11 +43,11 @@ export function activitySourceLabel(
       return "Manual";
     case "tachograph_file":
       return sourceProvider
-        ? `Tacho file ? ${sourceProvider}`
+        ? `Tacho file · ${sourceProvider}`
         : "Tacho file";
     case "tachograph_api":
       return sourceProvider
-        ? `Tacho API ? ${sourceProvider}`
+        ? `Tacho API · ${sourceProvider}`
         : "Tacho API";
     default:
       return "Legacy";

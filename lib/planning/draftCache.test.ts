@@ -3,6 +3,8 @@ import {
   PLANNING_DRAFT_MAX_AGE_MS,
   createPlanningDraft,
   parsePlanningDraft,
+  planningDraftBaseline,
+  planningDraftIsStale,
   planningDraftMatchesPlan,
   planningDraftStorageKey,
 } from "./draftCache";
@@ -34,8 +36,59 @@ function draft() {
       "van-b": null,
     },
     selectedVehicleId: "van-a",
+    baseline: {
+      "job-1": ["van-a", "driver-a", 1],
+      "job-2": [null, null, null],
+      "job-3": ["van-b", null, 1],
+    },
   });
 }
+
+describe("planning draft staleness (PLAN-11)", () => {
+  const serverJobs = [
+    { id: "job-1", vehicle_id: "van-a", driver_id: "driver-a", route_order: 1 },
+    { id: "job-2", vehicle_id: null, driver_id: null, route_order: null },
+    { id: "job-3", vehicle_id: "van-b", driver_id: null, route_order: 1 },
+  ];
+
+  it("is not stale while the server still matches the baseline", () => {
+    expect(planningDraftIsStale(draft(), serverJobs)).toBe(false);
+  });
+
+  it("is stale once another planner has changed a job", () => {
+    expect(
+      planningDraftIsStale(draft(), [
+        { ...serverJobs[0], vehicle_id: "van-b" },
+        serverJobs[1],
+        serverJobs[2],
+      ])
+    ).toBe(true);
+  });
+
+  it("is stale when a job the draft never saw is now assigned", () => {
+    expect(
+      planningDraftIsStale(draft(), [
+        ...serverJobs,
+        { id: "job-9", vehicle_id: "van-a", driver_id: null, route_order: 3 },
+      ])
+    ).toBe(true);
+  });
+
+  it("builds the baseline from the loaded jobs", () => {
+    expect(planningDraftBaseline(serverJobs)).toEqual(draft().baseline);
+  });
+
+  it("ignores a version 1 draft, which has no baseline", () => {
+    const { baseline: _baseline, ...legacy } = draft();
+
+    expect(
+      parsePlanningDraft(
+        JSON.stringify({ ...legacy, version: 1 }),
+        context()
+      )
+    ).toBeNull();
+  });
+});
 
 describe("planning draft cache", () => {
   it("keys drafts by tenant and planning date", () => {

@@ -34,8 +34,45 @@ export type AnchoredFastPlotResult =
         | "no_reachable_first_visit"
         | "start_cost_unavailable"
         | "route_cost_unavailable"
-        | "unsupported_physical_route";
+        | "unsupported_physical_route"
+        | "cancelled";
     };
+
+export class FastPlotCancelledError extends Error {
+  constructor() {
+    super("Smart Optimize was cancelled.");
+    this.name = "FastPlotCancelledError";
+  }
+}
+
+/**
+ * Cooperative scheduling for the beam search (review PLAN-12).
+ *
+ * The search is CPU bound (scratch run F: 30 two-stop jobs took 14 s of pure
+ * CPU) and used to run in one synchronous stretch on the UI thread, freezing
+ * the planning page. The returned function is awaited between state
+ * expansions: once a time slice has been used it yields to the event loop so
+ * the browser can paint and handle input (including the Cancel button), and
+ * it throws FastPlotCancelledError as soon as the signal is aborted. The
+ * search result is unchanged; only when it runs is.
+ */
+export function createCooperativeYield(
+  signal?: AbortSignal,
+  sliceMs = 12,
+  clock: () => number = () => Date.now()
+): () => Promise<void> {
+  let sliceStart = clock();
+
+  return async function maybeYield(): Promise<void> {
+    if (signal?.aborted) throw new FastPlotCancelledError();
+    if (clock() - sliceStart < sliceMs) return;
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    sliceStart = clock();
+
+    if (signal?.aborted) throw new FastPlotCancelledError();
+  };
+}
 
 function pointKey(point: LatLng): string {
   return `${point.lat},${point.lng}`;
@@ -736,7 +773,8 @@ async function beamSearchFastPlotOrder(
   visits: FastPlotVisit[],
   counts: Map<string, number>,
   table: FastPlotCostTable,
-  firstVisit: FastPlotVisit | null = null
+  firstVisit: FastPlotVisit | null = null,
+  maybeYield: () => Promise<void> = createCooperativeYield()
 ): Promise<FastPlotVisit[] | null> {
   const clusters = buildFastPlotClusters(visits);
   const initialProgress = new Map<string, number>();
@@ -781,6 +819,9 @@ async function beamSearchFastPlotOrder(
     const next: FastPlotSearchState[] = [];
 
     for (const state of beam) {
+      // Yield between expansions so the page stays responsive (PLAN-12).
+      await maybeYield();
+
       next.push(
         ...expandSearchState(
           state,
@@ -1332,8 +1373,13 @@ export function jobsInFastPlotOrder(
 export async function optimizeFastPlotOrderFromStart(
   jobs: PlanJob[],
   startPoint: LatLng,
-  loadCosts: FastPlotCostLoader
+  loadCosts: FastPlotCostLoader,
+  options: { signal?: AbortSignal } = {}
 ): Promise<AnchoredFastPlotResult> {
+  if (options.signal?.aborted) {
+    return { ok: false, reason: "cancelled" };
+  }
+
   if (
     requiresPhysicalRevisit(jobs) ||
     hasPhysicalPrecedenceCycle(jobs)
@@ -1387,12 +1433,24 @@ export async function optimizeFastPlotOrderFromStart(
       return { ok: false, reason: "route_cost_unavailable" };
     }
 
-    orderedVisits = await beamSearchFastPlotOrder(
-      visits,
-      counts,
-      table,
-      first.visit
-    );
+    try {
+      orderedVisits = await beamSearchFastPlotOrder(
+        visits,
+        counts,
+        table,
+        first.visit,
+        createCooperativeYield(options.signal)
+      );
+    } catch (error) {
+      if (error instanceof FastPlotCancelledError) {
+        return { ok: false, reason: "cancelled" };
+      }
+      throw error;
+    }
+  }
+
+  if (options.signal?.aborted) {
+    return { ok: false, reason: "cancelled" };
   }
 
   if (!orderedVisits || orderedVisits.length !== visits.length) {

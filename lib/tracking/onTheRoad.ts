@@ -1,4 +1,4 @@
-import { operatorDay } from "../time";
+import { OPERATOR_TIME_ZONE, todayIsoDateInZone } from "../time";
 import type { TrackingJob, TrackingStop } from "./types";
 import type { Tone } from "../../components/Badge";
 
@@ -51,24 +51,45 @@ export const PHASE_TONE: Record<Phase, Tone> = {
    from operatorDay in lib/time.ts, which is pinned to the operator's zone and
    therefore gives the same answer on a dispatcher's laptop, on Vercel's UTC
    runtime, and in a test. */
-export function isOnTheRoad(job: TrackingJob, now: Date): boolean {
+/* The day a job is planned to run: planning_date when Planning moved it,
+   otherwise scheduled_date. The same rule Planning's load uses
+   (`planning_date = day, or planning_date is null and scheduled_date = day`),
+   so a job moved to Wednesday is not "Late" on Tuesday and a job pulled
+   forward to today appears on today's rail (review PLAN-16). */
+export function planDate(job: TrackingJob): string | null {
+  return job.planning_date ?? job.scheduled_date;
+}
+
+/* `timeZone` is the operator's resolved company zone (lib/planning/
+   companyTimeZone.ts); it defaults to the operator fallback. */
+export function isOnTheRoad(
+  job: TrackingJob,
+  now: Date,
+  timeZone: string = OPERATOR_TIME_ZONE,
+): boolean {
   if (job.status !== "planned") return false;
   if (!job.vehicle_id) return false;
   // A job with no date cannot be shown to be due. Treating undated jobs as due
   // would fill the rail with work nobody scheduled.
-  if (!job.scheduled_date) return false;
+  const date = planDate(job);
+  if (!date) return false;
   // Lexicographic comparison is correct for "YYYY-MM-DD".
-  if (job.scheduled_date > operatorDay(now)) return false;
+  if (date > todayIsoDateInZone(timeZone, now)) return false;
 
   const deliveries = job.stops.filter((s) => s.type === "delivery");
   if (deliveries.length === 0) return false;
   return deliveries.some((s) => s.pod_status !== "delivered");
 }
 
-export function jobPhase(job: TrackingJob, now: Date): Phase {
+export function jobPhase(
+  job: TrackingJob,
+  now: Date,
+  timeZone: string = OPERATOR_TIME_ZONE,
+): Phase {
   // Late is checked first and outranks progress: a job running a day behind is
   // still the thing a dispatcher needs to see, however many stops it has done.
-  if (job.scheduled_date && job.scheduled_date < operatorDay(now)) return "late";
+  const date = planDate(job);
+  if (date && date < todayIsoDateInZone(timeZone, now)) return "late";
   // ANY stop counts, including a collection, deliberately. A job whose goods
   // are collected is under way even before the first drop. Note this is a
   // wider net than isOnTheRoad, which filters to delivery stops: that is
@@ -94,7 +115,7 @@ export function routeEndpoints(stops: TrackingStop[]): { origin: string; destina
   };
 }
 
-function toRailRow(job: TrackingJob, now: Date): RailRow {
+function toRailRow(job: TrackingJob, now: Date, timeZone: string): RailRow {
   const { origin, destination } = routeEndpoints(job.stops);
 
   return {
@@ -104,13 +125,19 @@ function toRailRow(job: TrackingJob, now: Date): RailRow {
     driverName: job.driver_name,
     originCity: origin,
     destinationCity: destination,
-    scheduledDate: job.scheduled_date,
-    phase: jobPhase(job, now),
+    scheduledDate: planDate(job),
+    phase: jobPhase(job, now, timeZone),
   };
 }
 
-export function buildRail(jobs: TrackingJob[], now: Date): RailRow[] {
-  const rows = jobs.filter((j) => isOnTheRoad(j, now)).map((j) => toRailRow(j, now));
+export function buildRail(
+  jobs: TrackingJob[],
+  now: Date,
+  timeZone: string = OPERATOR_TIME_ZONE,
+): RailRow[] {
+  const rows = jobs
+    .filter((j) => isOnTheRoad(j, now, timeZone))
+    .map((j) => toRailRow(j, now, timeZone));
 
   /* Late first, then oldest scheduled date, then reference, then jobId. The
      rail can reshuffle on every 30 second poll otherwise, which moves the row

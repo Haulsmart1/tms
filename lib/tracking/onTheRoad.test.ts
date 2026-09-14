@@ -54,6 +54,34 @@ describe("the operator's day boundary", () => {
   });
 });
 
+describe("planning_date (PLAN-16)", () => {
+  it("does not mark a job re-planned to a later day as late or on the road", () => {
+    const moved = job({ scheduled_date: YESTERDAY, planning_date: TOMORROW });
+
+    expect(isOnTheRoad(moved, NOW)).toBe(false);
+    expect(jobPhase(moved, NOW)).not.toBe("late");
+  });
+
+  it("puts a job pulled forward to today on today's rail", () => {
+    const pulled = job({ scheduled_date: TOMORROW, planning_date: TODAY });
+
+    expect(isOnTheRoad(pulled, NOW)).toBe(true);
+    expect(buildRail([pulled], NOW)[0].scheduledDate).toBe(TODAY);
+  });
+
+  it("falls back to scheduled_date when planning_date is null", () => {
+    expect(jobPhase(job({ scheduled_date: YESTERDAY, planning_date: null }), NOW)).toBe("late");
+  });
+
+  it("uses the supplied operator timezone for today", () => {
+    // 22:30Z on the 14th is already the 15th in Paris.
+    const at = new Date("2026-08-14T22:30:00Z");
+
+    expect(isOnTheRoad(job({ scheduled_date: TOMORROW }), at, "Europe/Paris")).toBe(true);
+    expect(isOnTheRoad(job({ scheduled_date: TOMORROW }), at)).toBe(false);
+  });
+});
+
 describe("isOnTheRoad", () => {
   it("is true for an assigned, due, unfinished job", () => {
     expect(isOnTheRoad(job(), NOW)).toBe(true);

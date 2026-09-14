@@ -24,6 +24,9 @@ import {
 import {
   planningStartForLocalDate,
 } from "../../lib/planning/planningDriverActivity";
+import {
+  loadCompanyTimeZone,
+} from "../../lib/planning/companyTimeZone";
 import type {
   TachographProviderDescriptor,
 } from "../../lib/tachograph/provider";
@@ -143,6 +146,9 @@ export default function TachographPage() {
   const [timeZone, setTimeZone] =
     useState(OPERATOR_TIME_ZONE);
 
+  const [timeZoneNote, setTimeZoneNote] =
+    useState<string | null>(null);
+
   const [loadingDrivers, setLoadingDrivers] =
     useState(true);
 
@@ -180,9 +186,11 @@ export default function TachographPage() {
     setLoadingDrivers(true);
     setErrorMessage("");
 
+    /* The company timezone is resolved through tenants.company_id and
+       validated, never passed raw into Intl (review PLAN-9, PLAN-10). */
     const [
       driverResult,
-      profileResult,
+      resolvedTimeZone,
     ] = await Promise.all([
       tenant
         .filterByTenant(
@@ -193,13 +201,12 @@ export default function TachographPage() {
         .eq("active", true)
         .order("name", { ascending: true }),
 
-      tenant
-        .filterByTenant(
-          supabase
-            .from("company_profiles")
-            .select("timezone")
-        )
-        .maybeSingle(),
+      loadCompanyTimeZone(
+        supabase,
+        tenant.activeTenantId
+          ? [tenant.activeTenantId]
+          : tenant.tenants.map((option) => option.id)
+      ),
     ]);
 
     if (driverResult.error) {
@@ -219,15 +226,8 @@ export default function TachographPage() {
       );
     }
 
-    if (
-      !profileResult.error &&
-      typeof profileResult.data?.timezone === "string" &&
-      profileResult.data.timezone
-    ) {
-      setTimeZone(
-        profileResult.data.timezone
-      );
-    }
+    setTimeZone(resolvedTimeZone.timeZone);
+    setTimeZoneNote(resolvedTimeZone.note);
 
     setLoadingDrivers(false);
   }, [
@@ -424,7 +424,7 @@ export default function TachographPage() {
 
     if (!start || !end) {
       setErrorMessage(
-        "One of the local times is invalid in the company timezone."
+        `One of these local times does not exist in ${timeZone}, usually because the clocks go forward at that time. Enter a time after the change.`
       );
       return;
     }
@@ -704,6 +704,12 @@ export default function TachographPage() {
                 <span className="text-ink-3">
                   Timezone: {timeZone}
                 </span>
+
+                {timeZoneNote ? (
+                  <span className="mt-1 block text-xs text-warning">
+                    {timeZoneNote}
+                  </span>
+                ) : null}
               </div>
             </div>
           </section>
@@ -1009,7 +1015,7 @@ export default function TachographPage() {
                               activity.start_time,
                               timeZone
                             )}
-                            {" ? "}
+                            {" to "}
                             {formatStamp(
                               activity.end_time,
                               timeZone
@@ -1021,7 +1027,7 @@ export default function TachographPage() {
                               activity.duration_minutes ??
                                 0
                             )}{" "}
-                            min ?{" "}
+                            min ·{" "}
                             {activitySourceLabel(
                               activity.source_kind,
                               activity.source_provider

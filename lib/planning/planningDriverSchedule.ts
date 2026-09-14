@@ -66,6 +66,54 @@ export type PlanningDriverScheduleInput = {
   regimeReviewRequired: boolean;
 };
 
+/* Longest a driver can be on duty inside 24 h and still take a regular 11 h
+   daily rest in that window (EC 561/2006 Art 8(2)). */
+export const MAX_DUTY_SPAN_WITH_REGULAR_REST_SECONDS = 13 * 60 * 60;
+
+/**
+ * Advisory only (review PLAN-3). The scheduler inserts a daily rest when the
+ * next drive would pass 9 h of daily driving, but service and loading time
+ * never trigger one, so a dense multi-drop day can run for 20 h or more with
+ * no rest. This does not model the 24 h rest window; it flags any schedule
+ * day whose planned activity spans more than 13 h so the planner cannot read
+ * the ETAs as a workable day. It never marks anything compliant.
+ */
+export function dutySpanWarnings(
+  schedule: Pick<DriverScheduleResult, "events">
+): string[] {
+  const spans = new Map<number, { start: number; end: number }>();
+
+  for (const event of schedule.events) {
+    if (event.kind === "daily_rest") continue;
+
+    const span = spans.get(event.day);
+
+    if (!span) {
+      spans.set(event.day, { start: event.startSeconds, end: event.endSeconds });
+    } else {
+      span.start = Math.min(span.start, event.startSeconds);
+      span.end = Math.max(span.end, event.endSeconds);
+    }
+  }
+
+  const warnings: string[] = [];
+
+  for (const [day, span] of [...spans.entries()].sort((a, b) => a[0] - b[0])) {
+    const seconds = span.end - span.start;
+
+    if (seconds > MAX_DUTY_SPAN_WITH_REGULAR_REST_SECONDS) {
+      const totalMinutes = Math.round(seconds / 60);
+      warnings.push(
+        `Day ${day} runs ${Math.floor(totalMinutes / 60)} h ${String(
+          totalMinutes % 60
+        ).padStart(2, "0")} m from first to last planned activity with no daily rest. A driver taking a regular 11 h daily rest can be on duty for at most 13 h in 24 h, and this preview does not schedule that rest. Split the work or review manually.`
+      );
+    }
+  }
+
+  return warnings;
+}
+
 function locationId(visit: FastPlotVisit): string {
   return `location:${visit.point.lat},${visit.point.lng}`;
 }
@@ -286,7 +334,13 @@ export function buildPlanningDriverSchedulePreview(
     preview: {
       planningStart:
         new Date(input.planningStart),
-      schedule: result.schedule,
+      schedule: {
+        ...result.schedule,
+        warnings: [
+          ...result.schedule.warnings,
+          ...dutySpanWarnings(result.schedule),
+        ],
+      },
       dropEtas,
     },
   };

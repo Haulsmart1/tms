@@ -33,13 +33,9 @@ export async function GET() {
       providers: listTachographProviders(),
     });
   } catch (error) {
+    console.error("tachograph/providers failed:", error);
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unable to list tachograph providers.",
-      },
+      { error: "Unable to list tachograph providers." },
       { status: 500 }
     );
   }

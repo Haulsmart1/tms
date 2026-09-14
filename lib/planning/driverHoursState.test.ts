@@ -265,7 +265,10 @@ describe("buildDriverHoursState", () => {
     ).toBe(1);
   });
 
-  it("does not treat 24 hours alone as proof of regular weekly rest", () => {
+  it("treats a 24 hour rest as a reduced weekly rest that ends the reduced daily-rest run", () => {
+    /* Changed by review PLAN-4. A rest of 24 h is a legal reduced weekly rest
+       (EC 561/2006 Art 8(6)); counting it as a daily rest left the Art 8(4)
+       counter running and produced false "more than three" warnings. */
     const result = state([
       activity(
         "reduced-daily",
@@ -283,7 +286,7 @@ describe("buildDriverHoursState", () => {
 
     expect(
       result.reducedDailyRestsSinceRegularWeeklyRest,
-    ).toBe(1);
+    ).toBe(0);
   });
 
   it("regular 45 hour weekly rest clears reduced daily-rest count", () => {

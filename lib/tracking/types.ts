@@ -31,6 +31,9 @@ export type TrackingJob = {
   status: string | null;
   /** A `date` column, so "YYYY-MM-DD" with no time and no zone. */
   scheduled_date: string | null;
+  /** The day Planning moved the job to, when it differs from scheduled_date
+      (review PLAN-16). Optional so fixtures without it read as unset. */
+  planning_date?: string | null;
   created_at: string | null;
   customer_name: string | null;
   vehicle_id: string | null;

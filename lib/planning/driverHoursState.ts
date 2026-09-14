@@ -364,9 +364,18 @@ export function buildDriverHoursState(
         break;
 
       case "rest":
+        /*
+         * A rest of 24 h or more is a weekly rest: 45 h regular, or 24 h
+         * reduced (EC 561/2006 Art 8(6)). Either one ends the run of reduced
+         * daily rests that Art 8(4) caps at three, so both reset the counter.
+         * Counting a 24 h to 45 h rest as a daily rest left the counter
+         * running and produced false "more than three reduced rests"
+         * warnings (review PLAN-4). Compensation for a reduced weekly rest is
+         * not tracked.
+         */
         if (
           durationSeconds >=
-          ASSIMILATED_DRIVER_HOURS_LIMITS.regularWeeklyRestSeconds
+          ASSIMILATED_DRIVER_HOURS_LIMITS.reducedWeeklyRestSeconds
         ) {
           currentStateBoundaryKnown = true;
           continuousDrivingSeconds = 0;
