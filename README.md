@@ -88,7 +88,7 @@ Status tags: [OK] functional against live data, [PARTIAL] real data but view-onl
 ### Commercial
 - **`/customers`** [OK]: customer directory with create / edit / activate.
 - **`/subcontractors`** [OK]: subcontractor directory with create / edit / activate.
-- **`/invoices`** [OK]: raise and track tenant invoices, update status.
+- **`/invoices`** [OK]: raise and track tenant invoices, quotations, payments and credit notes. Lists page with "Load more" (the list APIs take `page` / `pageSize`), and the outstanding / overdue KPIs are computed server-side across every invoice. Only the customer acceptance portal can accept a quotation; share links expire at the end of `valid_until`, London time.
 - **`/stats`** [OK]: company KPI dashboard (revenue, margins, job / POD / fleet counts, driver leaderboard, top customers) with a period selector and client-side aggregation.
 
 ### Fleet and compliance
