@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { withSuperAdmin, logSuperAdminEdit } from "../../../../../lib/superAdmin/guard";
 import { normalizeCompanyEdit } from "../../../../../lib/superAdmin/companyEdit";
+import { recordSuperAdminAudit } from "../../../../../lib/superAdmin/audit";
 import { isUuid } from "../../../../../lib/uuid";
 
 export const runtime = "nodejs";
@@ -151,6 +152,15 @@ export const PATCH = withSuperAdmin(
         result: "partial",
       });
 
+      await recordSuperAdminAudit(admin, {
+        actorId,
+        action: "company.update",
+        targetType: "company",
+        targetId: companyId,
+        changedFields: Object.keys(normalized.profile),
+        result: "partial",
+      });
+
       return NextResponse.json(
         {
           error:
@@ -175,6 +185,17 @@ export const PATCH = withSuperAdmin(
     logSuperAdminEdit({
       actorId,
       action: "company.update",
+      targetId: companyId,
+      changedFields: ["name", ...Object.keys(normalized.profile)],
+      result: "ok",
+    });
+
+    // Durable copy of the breadcrumb above (AUTH-15). Best effort: the edit
+    // has already landed, so a missing audit table must not fail it.
+    await recordSuperAdminAudit(admin, {
+      actorId,
+      action: "company.update",
+      targetType: "company",
       targetId: companyId,
       changedFields: ["name", ...Object.keys(normalized.profile)],
       result: "ok",
