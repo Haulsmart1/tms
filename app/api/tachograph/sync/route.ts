@@ -125,13 +125,11 @@ export async function POST(request: Request) {
       { status: 501 }
     );
   } catch (error) {
+    /* Constant message. This catch also receives provider testConnection()
+       failures, which can quote vendor internals or credentials context. */
+    console.error("tachograph/sync failed:", error);
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Tachograph provider request failed.",
-      },
+      { error: "Tachograph provider request failed." },
       { status: 500 }
     );
   }

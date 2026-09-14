@@ -181,13 +181,13 @@ export default function VehicleLane({
 
         {compliance.warnings.length > 0 ? (
           <p className="mt-1 text-xs text-warning">
-            {compliance.warnings.join(" ? ")}
+            {compliance.warnings.join(" · ")}
           </p>
         ) : null}
 
         {compliance.missing.length > 0 ? (
           <p className="mt-1 text-xs text-ink-3">
-            Missing: {compliance.missing.join(" ? ")}
+            Missing: {compliance.missing.join(" · ")}
           </p>
         ) : null}
       </div>
