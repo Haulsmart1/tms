@@ -14,10 +14,25 @@ import { computeSaveDiff, type LanePlan } from "../../lib/planning/saveDiff";
 import {
   createPlanningDraft,
   parsePlanningDraft,
+  planningDraftBaseline,
+  planningDraftIsStale,
   planningDraftMatchesPlan,
   planningDraftStorageKey,
   type PlanningDraft,
 } from "../../lib/planning/draftCache";
+import {
+  buildPlanningSavePlan,
+  classifyPlanningSaveError,
+  PLANNING_SAVE_BLOCKED_MESSAGES,
+  PLANNING_SAVE_ERROR_MESSAGES,
+  type PlanningSaveErrorKind,
+} from "../../lib/planning/planningSave";
+import {
+  autosaveDelay,
+  recordAutosaveFailure,
+  type AutosaveFailure,
+} from "../../lib/planning/autosave";
+import { loadCompanyTimeZone } from "../../lib/planning/companyTimeZone";
 import {
   assignJobsToLane,
   moveJobInLane,
@@ -83,7 +98,6 @@ import {
   type LaneRegimeSummary,
 } from "../../lib/planning/laneRegime";
 import {
-  isValidIanaTimeZone,
   OPERATOR_TIME_ZONE,
   operatorDay,
   operatorDayInTimeZone,
@@ -137,6 +151,24 @@ export default function PlanningPage() {
       : fallback;
   });
   const [planningTimeZone, setPlanningTimeZone] = useState(OPERATOR_TIME_ZONE);
+  const [timeZoneNote, setTimeZoneNote] = useState<string | null>(null);
+  /* Planning edits exactly one tenant. With admin "All tenants" active the
+     board is read-only, so a lane can never mix tenants and Save never writes
+     jobs before failing on a missing tenant (review PLAN-8). */
+  const planningTenantId =
+    tenant.status === "ready" &&
+    typeof tenant.activeTenantId === "string" &&
+    tenant.activeTenantId.length > 0
+      ? tenant.activeTenantId
+      : null;
+  /* Autosave failure for the current snapshot of unsaved work (PLAN-7). */
+  const [autosaveFailure, setAutosaveFailure] =
+    useState<AutosaveFailure | null>(null);
+  /* Set when the server refused a save because newer changes exist (PLAN-11). */
+  const [saveConflict, setSaveConflict] = useState(false);
+  /* Bumped after each successful save so autosave re-checks for edits made
+     while that save was in flight. */
+  const [saveRound, setSaveRound] = useState(0);
   const [jobs, setJobs] = useState<PlanJob[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -275,6 +307,19 @@ export default function PlanningPage() {
     itineraryInvalidations.size > 0;
   const hasUnsavedWork = dirty || hasCanonicalWork;
   latestPendingUpdatesJson.current = pendingUpdatesJson;
+  /* Identifies the unsaved work an autosave failure belongs to. Any edit
+     (assignment, order, driver, optimize, invalidation) changes it, which is
+     what resumes autosave after it stopped (PLAN-7). */
+  const autosaveSnapshot = [
+    pendingUpdatesJson,
+    [...itineraryInvalidations].sort().join(","),
+    Object.keys(pendingItineraries).sort().join(","),
+    String(canonicalGeneration.current),
+  ].join("|");
+  /* Server assignments the local draft is written against (PLAN-11). Keyed
+     as a string so geocoding updates to jobs do not reset the autosave timer. */
+  const draftBaseline = useMemo(() => planningDraftBaseline(jobs), [jobs]);
+  const draftBaselineKey = JSON.stringify(draftBaseline);
 
   async function loadData(isCancelled: () => boolean) {
     // Guard lives here, not in the effect: see TenantContextValue in lib/tenant/context.ts
@@ -293,12 +338,21 @@ export default function PlanningPage() {
     setPersistedItineraries({});
     canonicalMutationGeneration.current = {};
     setPlanningTimeZone(OPERATOR_TIME_ZONE);
+    setTimeZoneNote(null);
+    setAutosaveFailure(null);
+    setSaveConflict(false);
 
-    const profileQuery = tenant
-      .filterByTenant(
-        supabase.from("company_profiles").select("timezone")
-      )
-      .maybeSingle();
+    /* company_profiles is keyed by company id, so the zone is resolved through
+       tenants.company_id rather than filterByTenant, validated, and never
+       aborts the load. A super_admin on "All" spanning several companies gets
+       the operator default with a note instead of a multi-row error
+       (review PLAN-10). */
+    const timeZonePromise = loadCompanyTimeZone(
+      supabase,
+      tenant.activeTenantId
+        ? [tenant.activeTenantId]
+        : tenant.tenants.map((option) => option.id)
+    );
 
     const jobsQuery = supabase
       .from("jobs")
@@ -319,7 +373,7 @@ export default function PlanningPage() {
         `planning_date.eq.${date},and(planning_date.is.null,scheduled_date.eq.${date})`
       );
 
-    const { data: profileData, error: profileError } = await profileQuery;
+    const resolvedTimeZone = await timeZonePromise;
     const { data: jobsData, error: jobsError } = await tenant
       .filterByTenant(jobsQuery)
       .order("created_at", { ascending: true });
@@ -357,23 +411,12 @@ export default function PlanningPage() {
       .order("name", { ascending: true });
 
     if (isCancelled()) return;
-    if (profileError) {
-      setMessage(`Company profile load error: ${profileError.message}`);
-      setLoading(false);
-      return;
-    }
     if (jobsError) { setMessage(`Jobs load error: ${jobsError.message}`); setLoading(false); return; }
     if (vehicleError) { setMessage(`Vehicles load error: ${vehicleError.message}`); setLoading(false); return; }
     if (driverError) { setMessage(`Drivers load error: ${driverError.message}`); setLoading(false); return; }
 
-    const profileTimeZone =
-      typeof profileData?.timezone === "string"
-        ? profileData.timezone.trim()
-        : "";
-    const loadedTimeZone =
-      profileTimeZone && isValidIanaTimeZone(profileTimeZone)
-        ? profileTimeZone
-        : OPERATOR_TIME_ZONE;
+    const loadedTimeZone = resolvedTimeZone.timeZone;
+    const loadNotices: string[] = [];
 
     const loaded: PlanJob[] = (jobsData ?? []).map((row: any) => ({
       id: row.id,
@@ -558,6 +601,22 @@ export default function PlanningPage() {
           (serviceRows ?? []) as any[],
           loaded.filter(isRoutable)
         );
+
+        /* A saved route that no longer matches its lane (stops edited on
+           /jobs, a job moved or removed) is dropped by the parser. Say so
+           rather than silently falling back to the unoptimized order
+           (review PLAN-23). */
+        const droppedRoutes = (itineraryRows ?? []).filter(
+          (row: any) => !loadedPersistedItineraries[row.vehicle_id as string]
+        ).length;
+
+        if (droppedRoutes > 0) {
+          loadNotices.push(
+            `The saved Smart Optimize order for ${droppedRoutes} ${
+              droppedRoutes === 1 ? "vehicle" : "vehicles"
+            } no longer matches its jobs (stops were edited or jobs moved), so it is not used. Re-run Smart Optimize for those lanes.`
+          );
+        }
       }
     }
 
@@ -591,12 +650,24 @@ export default function PlanningPage() {
           window.localStorage.removeItem(planningScope);
           cachedDraft = null;
         }
+
+        /* A draft made against an older server plan would overwrite newer
+           changes if restored and autosaved (review PLAN-11). */
+        if (cachedDraft && planningDraftIsStale(cachedDraft, loaded)) {
+          window.localStorage.removeItem(planningScope);
+          cachedDraft = null;
+          loadNotices.push(
+            "An unsaved draft in this browser was discarded because the plan was changed and saved elsewhere after it was made."
+          );
+        }
       } catch {
         cachedDraft = null;
       }
     }
 
     setPlanningTimeZone(loadedTimeZone);
+    setTimeZoneNote(resolvedTimeZone.note);
+    if (loadNotices.length > 0) setMessage(loadNotices.join(" "));
     setJobs(loaded);
     setSelectedUnassignedJobIds(new Set());
     setBulkVehicleId("");
@@ -886,7 +957,21 @@ export default function PlanningPage() {
     });
   }
 
+  /* True (and explains why) when the board is read-only because no single
+     tenant is selected. Every edit path checks this first (PLAN-8). */
+  function planningReadOnly(): boolean {
+    if (planningTenantId) return false;
+    setMessage(PLANNING_SAVE_BLOCKED_MESSAGES.no_tenant_selected);
+    return true;
+  }
+
+  function reloadBoard() {
+    const seq = ++loadSeq.current;
+    void loadData(() => loadSeq.current !== seq);
+  }
+
   function moveJob(jobId: string, vehicleId: string | null, beforeJobId: string | null) {
+    if (planningReadOnly()) return;
     const job = jobById.get(jobId);
     if (!job || job.subcontractor_id) return;
 
@@ -1209,6 +1294,7 @@ export default function PlanningPage() {
   }
 
   function assignSelectedToVehicle() {
+    if (planningReadOnly()) return;
     const vehicleId = bulkVehicleId || selectedVehicleId;
 
     if (!vehicleId || !vehicles.some((vehicle) => vehicle.id === vehicleId)) {
@@ -1253,6 +1339,7 @@ export default function PlanningPage() {
   }
 
   function moveLaneJob(jobId: string, vehicleId: string, offset: -1 | 1) {
+    if (planningReadOnly()) return;
     const currentLane = laneOrders[vehicleId] ?? [];
     const currentIndex = currentLane.indexOf(jobId);
 
@@ -1290,17 +1377,31 @@ export default function PlanningPage() {
     const canonicalSnapshot = Object.values(pendingItineraries);
     const generationSnapshot = { ...canonicalMutationGeneration.current };
 
-    const missingTenantUpdate = updates.find(
-      (update) => !jobById.get(update.id)?.tenant_id
+    const failedSnapshot = autosaveSnapshot;
+
+    /* Validated before anything is written: no tenant selected, or a job
+       from another tenant, refuses the save outright (PLAN-8). */
+    const savePlanResult = buildPlanningSavePlan(
+      updates,
+      jobById,
+      planningTenantId
     );
 
-    if (missingTenantUpdate) {
+    if (!savePlanResult.ok) {
       setMessage(
-        "Save error: one or more jobs are missing tenant information."
+        `Save error: ${PLANNING_SAVE_BLOCKED_MESSAGES[savePlanResult.reason]}`
       );
       setSaveStatus("local-only");
+      if (mode === "auto") {
+        setAutosaveFailure((previous) =>
+          recordAutosaveFailure(previous, failedSnapshot, false)
+        );
+      }
       return false;
     }
+
+    const activeTenantId = savePlanResult.tenantId;
+    let failureKind: PlanningSaveErrorKind | null = null;
 
     saveInFlight.current = true;
     setSaving(true);
@@ -1311,38 +1412,26 @@ export default function PlanningPage() {
     }
 
     try {
-      for (const update of updates) {
-        const tenantId = jobById.get(update.id)?.tenant_id;
-
-        if (!tenantId) {
-          throw new Error(
-            "one or more jobs are missing tenant information."
-          );
-        }
-
-        const { error } = await supabase
-          .from("jobs")
-          .update({
-            vehicle_id: update.vehicle_id,
-            driver_id: update.driver_id,
-            route_order: update.route_order,
-          })
-          .eq("id", update.id)
-          .eq("tenant_id", tenantId);
+      /* One atomic call. Every job carries the assignment this tab last saw;
+         the RPC refuses the whole save if any job changed since (PLAN-11). */
+      if (savePlanResult.rows.length > 0) {
+        const { error } = await supabase.rpc(
+          "save_planning_assignments",
+          {
+            p_tenant_id: activeTenantId,
+            p_updates: savePlanResult.rows,
+          }
+        );
 
         if (error) {
-          throw new Error(error.message);
+          failureKind = classifyPlanningSaveError(error);
+
+          if (failureKind === "failed") {
+            console.error("planning save failed:", error.code, error.message);
+          }
+
+          throw new Error(PLANNING_SAVE_ERROR_MESSAGES[failureKind]);
         }
-      }
-
-      const activeTenantId =
-        tenant.status === "ready" &&
-        typeof tenant.activeTenantId === "string"
-          ? tenant.activeTenantId
-          : null;
-
-      if (!activeTenantId) {
-        throw new Error("active tenant is unavailable.");
       }
 
       const invalidations = invalidationSnapshot;
@@ -1502,14 +1591,32 @@ export default function PlanningPage() {
         setSaveStatus("pending");
       }
 
+      setAutosaveFailure(null);
+      setSaveConflict(false);
+      setSaveRound((round) => round + 1);
+
       return true;
     } catch (error) {
       const reason =
         error instanceof Error ? error.message : "unknown save failure";
 
+      if (failureKind === "conflict") {
+        setSaveConflict(true);
+      }
+
+      /* Conflicts and a missing RPC will fail the same way every time, so
+         autosave stops at once; anything else backs off (PLAN-7). */
+      setAutosaveFailure((previous) =>
+        recordAutosaveFailure(
+          previous,
+          failedSnapshot,
+          failureKind === null || failureKind === "failed"
+        )
+      );
+
       setMessage(
         mode === "auto"
-          ? `Autosave failed: ${reason}. Changes are kept locally.`
+          ? `Autosave failed: ${reason}`
           : `Save error: ${reason}`
       );
       setSaveStatus("local-only");
@@ -1526,9 +1633,7 @@ export default function PlanningPage() {
 
   useEffect(() => {
     if (
-      tenant.status !== "ready" ||
-      typeof tenant.activeTenantId !== "string" ||
-      tenant.activeTenantId.length === 0 ||
+      !planningTenantId ||
       loading ||
       recoveryDraft ||
       !hasUnsavedWork
@@ -1537,7 +1642,7 @@ export default function PlanningPage() {
     }
 
     const storageKey = planningDraftStorageKey(
-      tenant.activeTenantId,
+      planningTenantId,
       date
     );
 
@@ -1546,12 +1651,13 @@ export default function PlanningPage() {
     }
 
     const draft = createPlanningDraft({
-      tenantId: tenant.activeTenantId,
+      tenantId: planningTenantId,
       date,
       laneOrders,
       laneDrivers,
       selectedVehicleId,
       updatedAt: Date.now(),
+      baseline: draftBaseline,
     });
 
     try {
@@ -1564,8 +1670,25 @@ export default function PlanningPage() {
       return;
     }
 
-    if (saving || saveInFlight.current) {
+    /* A refused save waits for the planner to reload; retrying cannot help. */
+    if (saveConflict) {
+      setSaveStatus("local-only");
+      return;
+    }
+
+    /* No timer while a save is in flight. `saveRound` (success) or
+       `autosaveFailure` (failure) re-runs this effect when it settles, so
+       `saving` is deliberately not a dependency: it used to re-arm autosave
+       every 1.2 s after every failure, forever (PLAN-7). */
+    if (saveInFlight.current) {
       setSaveStatus("pending");
+      return;
+    }
+
+    const delay = autosaveDelay(autosaveSnapshot, autosaveFailure);
+
+    if (delay === null) {
+      setSaveStatus("local-only");
       return;
     }
 
@@ -1573,7 +1696,7 @@ export default function PlanningPage() {
 
     const timer = window.setTimeout(() => {
       void persistPlan("auto");
-    }, 1200);
+    }, delay);
 
     return () => {
       window.clearTimeout(timer);
@@ -1584,25 +1707,25 @@ export default function PlanningPage() {
     // snapshot rather than racing the old one.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    tenant.status,
-    tenant.activeTenantId,
+    planningTenantId,
     date,
     loading,
     recoveryDraft,
     dirty,
     hasCanonicalWork,
     hasUnsavedWork,
-    saving,
-    pendingUpdatesJson,
-    pendingItineraries,
-    itineraryInvalidations,
+    autosaveSnapshot,
+    autosaveFailure,
+    saveConflict,
+    saveRound,
+    draftBaselineKey,
     laneOrders,
     laneDrivers,
     selectedVehicleId,
   ]);
 
   function restoreRecoveryDraft() {
-    if (!recoveryDraft) return;
+    if (!recoveryDraft || planningReadOnly()) return;
 
     invalidateCanonicalVehicles(Object.keys(recoveryDraft.laneOrders));
     setLaneOrders(recoveryDraft.laneOrders);
@@ -1639,7 +1762,7 @@ export default function PlanningPage() {
   }
 
   async function optimize() {
-    if (optimizing || !selectedVehicleId) return;
+    if (optimizing || !selectedVehicleId || planningReadOnly()) return;
 
     const routable = selectedLaneJobs.filter(isRoutable);
 
@@ -2323,6 +2446,14 @@ export default function PlanningPage() {
 
           </header>
 
+          {tenant.status === "ready" && !planningTenantId ? (
+            <p className="text-sm text-warning">
+              {PLANNING_SAVE_BLOCKED_MESSAGES.no_tenant_selected}
+            </p>
+          ) : null}
+          {timeZoneNote ? (
+            <p className="text-sm text-warning">{timeZoneNote}</p>
+          ) : null}
           {message ? <p className="text-sm text-danger">{message}</p> : null}
           {geocodeUnavailable ? (
             <p className="text-sm text-ink-3">
@@ -2485,20 +2616,42 @@ export default function PlanningPage() {
               size="sm"
               onClick={savePlan}
               loading={saving}
-              disabled={!dirty}
+              disabled={!planningTenantId || (!dirty && !hasCanonicalWork)}
             >
               Save plan
             </Button>
 
             <span className="text-xs text-ink-3">
-              {saveStatus === "saving"
-                ? "Saving…"
-                : saveStatus === "local-only"
-                  ? "Saved locally — retry pending"
-                  : dirty || saveStatus === "pending"
-                    ? "Autosave pending"
-                    : "Plan saved ✓"}
+              {!planningTenantId
+                ? "Read-only: pick a tenant to plan"
+                : saveStatus === "saving"
+                  ? "Saving…"
+                  : saveConflict
+                    ? "Not saved: newer changes exist on the server"
+                    : saveStatus === "local-only"
+                      ? autosaveDelay(autosaveSnapshot, autosaveFailure) === null
+                        ? "Not saved. Autosave stopped; kept in this browser. Edit or press Save plan to retry."
+                        : "Not saved yet; kept in this browser, retrying shortly"
+                      : dirty || saveStatus === "pending"
+                        ? "Autosave pending"
+                        : "Plan saved ✓"}
             </span>
+
+            {saveConflict ? (
+              <div className="basis-full rounded-md border border-line bg-surface p-3 text-sm">
+                <p className="font-medium text-warning">
+                  This plan was changed elsewhere
+                </p>
+                <p className="mt-1 text-xs text-ink-3">
+                  {PLANNING_SAVE_ERROR_MESSAGES.conflict}
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <Button size="sm" onClick={reloadBoard}>
+                    Reload board
+                  </Button>
+                </div>
+              </div>
+            ) : null}
 
             {recoveryDraft ? (
               <div className="basis-full rounded-md border border-line bg-surface p-3 text-sm">
@@ -2779,6 +2932,7 @@ export default function PlanningPage() {
                         setBulkVehicleId(v.id);
                       }}
                       onDriverChange={(driverId) => {
+                        if (planningReadOnly()) return;
                         invalidateCanonicalVehicles([v.id]);
                         setLaneDrivers((prev) => ({ ...prev, [v.id]: driverId }));
                         setRoutes((prev) => {
