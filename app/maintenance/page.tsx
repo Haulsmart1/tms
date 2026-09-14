@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
@@ -63,6 +63,19 @@ type MaintenanceRecordWithVehicle = MaintenanceRecord & {
 export default function MaintenancePage() {
     const supabase = useMemo(() => createClient(), []);
     const tenant = useTenant();
+
+    /* SET-11: guard_vehicle_columns (docs/sql/rls_04b_vehicles.sql) lets
+       only admins change vor, vor_since, vor_reason and
+       returned_to_service_at. Staff are refused up front with a clear
+       message instead of saving a VOR maintenance record while the vehicle
+       itself stays available for planning. */
+    const canChangeVehicleStatus =
+        tenant.role === "admin" || tenant.role === "super_admin";
+    const VOR_ADMIN_ONLY_MESSAGE =
+        "Only an admin can take a vehicle off the road or return it to service. Ask an admin to change the vehicle's VOR status.";
+
+    /* SET-18: latest request wins on tenant switch. */
+    const loadSeqRef = useRef(0);
 
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
 
@@ -128,6 +141,8 @@ export default function MaintenancePage() {
     const loadData = useCallback(
         async () => {
             if (tenant.status !== "ready") return;
+
+            const seq = ++loadSeqRef.current;
 
             setLoading(true);
             setErrorMessage("");
@@ -269,19 +284,24 @@ export default function MaintenancePage() {
                                 record.asset !== null
                         );
 
+                if (seq !== loadSeqRef.current) return;
+
                 setVehicles(tenantVehicles);
                 setAssets(tenantAssets);
                 setRecords(tenantMaintenance);
                 setDataTenantId(tenant.activeTenantId);
             } catch (error) {
+                if (seq !== loadSeqRef.current) return;
                 setErrorMessage(
                     error instanceof Error
                         ? error.message
                         : "Unable to load maintenance information."
                 );
             } finally {
-                setLoading(false);
-                setHasLoaded(true);
+                if (seq === loadSeqRef.current) {
+                    setLoading(false);
+                    setHasLoaded(true);
+                }
             }
         },
         [supabase, tenant]
@@ -374,6 +394,24 @@ export default function MaintenancePage() {
             setErrorMessage("Enter valid maintenance hours.");
             return;
         }
+
+        if (status === "vor" && vehicleId && !canChangeVehicleStatus) {
+            setErrorMessage(VOR_ADMIN_ONLY_MESSAGE);
+            return;
+        }
+
+        /* SET-22: same rule as the edit path. Number("12,50") is NaN, which
+           Postgres rejects, and a negative cost must not be saved. */
+        const numericCost =
+            cost.trim() === "" ? null : Number(cost.trim());
+
+        if (
+            numericCost !== null &&
+            (!Number.isFinite(numericCost) || numericCost < 0)
+        ) {
+            setErrorMessage("Cost must be a valid positive number.");
+            return;
+        }
         setSaving(true);
 
         try {
@@ -387,10 +425,7 @@ export default function MaintenancePage() {
                 completed_date:
                     completedDate || null,
                 status,
-                cost:
-                    cost.trim() !== ""
-                        ? Number(cost)
-                        : null,
+                cost: numericCost,
                 mileage: numericMileage,
                 maintenance_hours: numericMaintenanceHours,
                 notes: notes.trim() || null,
@@ -598,6 +633,11 @@ export default function MaintenancePage() {
 
         clearMessages();
 
+        if (!canChangeVehicleStatus) {
+            setErrorMessage(VOR_ADMIN_ONLY_MESSAGE);
+            return;
+        }
+
         const reason = vorReason.trim();
 
         if (!reason) {
@@ -664,6 +704,11 @@ export default function MaintenancePage() {
         }
 
         clearMessages();
+
+        if (!canChangeVehicleStatus) {
+            setErrorMessage(VOR_ADMIN_ONLY_MESSAGE);
+            return;
+        }
 
         const confirmed = window.confirm(
             `Return ${

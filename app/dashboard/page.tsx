@@ -7,7 +7,9 @@ import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
 import Stat from "../../components/Stat";
 import DataTable, { type Column } from "../../components/DataTable";
-import { buildNeedsAttention, buildRevenueLast7Days, type AttentionItem, type RevenueDay } from "../../lib/dashboard/aggregate";
+import { buildNeedsAttention, type AttentionItem, type RevenueDay } from "../../lib/dashboard/aggregate";
+import { buildRevenueForDays, lastNDayKeys, NON_COLLECTABLE_STATUS_FILTER } from "../../lib/dashboard/days";
+import { operatorDay } from "../../lib/time";
 import { isAwaitingPod } from "../../lib/pod/overdue";
 import Skeleton from "../../components/Skeleton";
 import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
@@ -26,10 +28,6 @@ type TodayJobRow = {
   customerName: string;
   status: string;
 };
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 function money(value: number): string {
   return new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(value);
@@ -76,13 +74,12 @@ export default function DashboardPage() {
       if (tenant.status !== "ready") return;
 
       setState("loading");
-      const today = todayIso();
-
-      const sevenDaysAgo = (() => {
-        const d = new Date();
-        d.setDate(d.getDate() - 6);
-        return d.toISOString().slice(0, 10);
-      })();
+      /* SET-14: the operator's calendar day (lib/time.ts), not the UTC date,
+         which is still yesterday between 00:00 and 01:00 BST. The revenue
+         chart and its query share the same day keys. */
+      const today = operatorDay(new Date());
+      const revenueDays = lastNDayKeys(today, 7);
+      const sevenDaysAgo = revenueDays[0];
 
       const jobsTodayQuery = tenant.filterByTenant(
         supabase.from("jobs").select("id, reference, status, vehicle_id, driver_id, customer_id, customers(name)"),
@@ -106,7 +103,8 @@ export default function DashboardPage() {
 
       const overdueInvoicesQuery = tenant
         .filterByTenant(supabase.from("invoices").select("id, invoice_number, due_date, total, status"))
-        .neq("status", "paid")
+        // Void, credited, cancelled and draft invoices are not money owed.
+        .not("status", "in", NON_COLLECTABLE_STATUS_FILTER)
         .lt("due_date", today);
 
       const paidInvoicesQuery = tenant
@@ -188,9 +186,9 @@ export default function DashboardPage() {
       );
 
       setRevenue(
-        buildRevenueLast7Days(
+        buildRevenueForDays(
           (paidInvoices ?? []).map((i) => ({ issueDate: i.issue_date, total: Number(i.total) })),
-          new Date(),
+          revenueDays,
         ),
       );
 

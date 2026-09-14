@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useTenant } from "../../components/TenantProvider";
 import TenantGate from "../../components/TenantGate";
@@ -8,6 +8,7 @@ import Button from "../../../components/Button";
 import MessageBanner from "../../../components/MessageBanner";
 import Select from "../../../components/Select";
 import { tenantDataView } from "../../../lib/loading/tenantDataView";
+import { canManageListedUser } from "../../../lib/tenant/userAdmin";
 import UserCard from "./UserCard";
 import type { TenantUser } from "./types";
 
@@ -18,6 +19,14 @@ const SKELETON_CARDS = 4;
    "which fields the card reads", drifting silently the first time the card
    reads one more. */
 const PLACEHOLDER_USER = { membership_id: "skeleton" } as TenantUser;
+
+async function readJson(response: Response): Promise<{ error?: string; message?: string; users?: TenantUser[] }> {
+  try {
+    return await response.json();
+  } catch {
+    return {};
+  }
+}
 
 export default function UsersPage() {
   const tenant = useTenant();
@@ -39,11 +48,19 @@ export default function UsersPage() {
   const [editPhone, setEditPhone] = useState("");
   const [editRole, setEditRole] = useState("staff");
   const [savingUser, setSavingUser] = useState(false);
+  const [removingUserId, setRemovingUserId] = useState<string | null>(null);
+
+  /* SET-18: latest request wins. A slow response for the tenant the admin
+     just switched away from must not replace the new tenant's list. */
+  const loadSeqRef = useRef(0);
 
   const loadUsers = useCallback(async () => {
     if (tenant.status !== "ready") return;   // stay in the loading view
 
-    if (!tenant.activeTenantId) {
+    const seq = ++loadSeqRef.current;
+    const requestedTenantId = tenant.activeTenantId;
+
+    if (!requestedTenantId) {
       // A resolved admin on "All tenants". Nothing is coming, and the view
       // says so rather than claiming the tenant has no users.
       setUsers([]);
@@ -57,31 +74,28 @@ export default function UsersPage() {
 
     try {
       const response = await fetch(
-        `/api/settings/users/invite?tenantId=${encodeURIComponent(
-          tenant.activeTenantId
-        )}`,
+        `/api/settings/users/invite?tenantId=${encodeURIComponent(requestedTenantId)}`,
         { cache: "no-store" }
       );
 
-      const body = (await response.json()) as {
-        users?: TenantUser[];
-        error?: string;
-      };
+      const body = await readJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Unable to load tenant users.");
       }
 
+      if (seq !== loadSeqRef.current) return;
       setUsers(body.users ?? []);
-      setDataTenantId(tenant.activeTenantId);
+      setDataTenantId(requestedTenantId);
     } catch (error) {
+      if (seq !== loadSeqRef.current) return;
       setUsers([]);
       setLoadFailed(true);
       setMessage(
         error instanceof Error ? error.message : "Unable to load tenant users."
       );
     } finally {
-      setLoading(false);
+      if (seq === loadSeqRef.current) setLoading(false);
     }
   }, [tenant.status, tenant.activeTenantId]);
 
@@ -130,10 +144,7 @@ export default function UsersPage() {
         }),
       });
 
-      const body = (await response.json()) as {
-        error?: string;
-        message?: string;
-      };
+      const body = await readJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Unable to invite user.");
@@ -153,7 +164,7 @@ export default function UsersPage() {
   }
 
   function beginEdit(user: TenantUser) {
-    if (!canInvite || !user.user_id) {
+    if (!canManageListedUser(tenant.role, user.role) || !user.user_id) {
       return;
     }
 
@@ -202,9 +213,7 @@ export default function UsersPage() {
         }
       );
 
-      const body = (await response.json()) as {
-        error?: string;
-      };
+      const body = await readJson(response);
 
       if (!response.ok) {
         throw new Error(body.error || "Unable to update tenant user.");
@@ -224,6 +233,52 @@ export default function UsersPage() {
     }
   }
 
+  async function removeUser(user: TenantUser) {
+    if (!user.user_id || !tenant.writeTenantId) {
+      setMessage("Pick a specific tenant before removing users.");
+      return;
+    }
+
+    const label = user.full_name || user.email || "this user";
+    if (
+      !window.confirm(
+        `Remove ${label} from the company? They lose access to every tenant immediately.`
+      )
+    ) {
+      return;
+    }
+
+    setRemovingUserId(user.user_id);
+    setMessage("");
+
+    try {
+      const response = await fetch(
+        `/api/settings/users/${encodeURIComponent(user.user_id)}?tenantId=${encodeURIComponent(
+          tenant.writeTenantId
+        )}`,
+        { method: "DELETE" }
+      );
+
+      const body = await readJson(response);
+
+      if (!response.ok) {
+        throw new Error(body.error || "Unable to remove the user.");
+      }
+
+      if (editingUserId === user.user_id) cancelEdit();
+      setMessage(`${label} was removed.`);
+      await loadUsers();
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Unable to remove the user."
+      );
+    } finally {
+      setRemovingUserId(null);
+    }
+  }
+
+  const ownEmail = tenant.userEmail?.trim().toLowerCase() ?? null;
+
   return (
     <TenantGate>
       <div className="ds min-h-screen bg-canvas font-sans text-ink">
@@ -234,7 +289,7 @@ export default function UsersPage() {
               Users
             </h1>
             <p className="text-sm text-ink-3">
-              Invite users and manage tenant roles and contact details.
+              Invite users and manage company roles and contact details.
             </p>
           </header>
 
@@ -296,7 +351,7 @@ export default function UsersPage() {
                   key={`skeleton-${index}`}
                   user={PLACEHOLDER_USER}
                   loading
-                  canInvite={canInvite}
+                  canManage={canInvite}
                   edit={null}
                   onBeginEdit={() => {}}
                 />
@@ -321,7 +376,12 @@ export default function UsersPage() {
                 <UserCard
                   key={user.membership_id}
                   user={user}
-                  canInvite={canInvite}
+                  canManage={canManageListedUser(tenant.role, user.role)}
+                  canRemove={
+                    !ownEmail || (user.email ?? "").trim().toLowerCase() !== ownEmail
+                  }
+                  removing={removingUserId === user.user_id}
+                  onRemove={(target) => void removeUser(target)}
                   edit={
                     user.user_id && editingUserId === user.user_id
                       ? {

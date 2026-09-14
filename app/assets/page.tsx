@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
@@ -56,6 +56,7 @@ export default function AssetsPage() {
   const tenant = useTenant();
 
   const [assets, setAssets] = useState<Asset[]>([]);
+  const loadSeqRef = useRef(0);
   const [assetTypes, setAssetTypes] = useState<AssetType[]>([]);
 
   const [loading, setLoading] = useState(true);
@@ -114,6 +115,10 @@ export default function AssetsPage() {
   const loadAssets = useCallback(async () => {
     if (tenant.status !== "ready") return;
 
+    /* SET-18: latest request wins, so a slow response for the tenant the
+       user just switched away from cannot replace the new list. */
+    const seq = ++loadSeqRef.current;
+
     setLoading(true);
 
     const [assetResult, typeResult] = await Promise.all([
@@ -122,6 +127,8 @@ export default function AssetsPage() {
         .order("created_at", { ascending: false }),
       supabase.from("asset_types").select("id, name").order("name", { ascending: true }),
     ]);
+
+    if (seq !== loadSeqRef.current) return;
 
     if (assetResult.error) {
       setErrorMessage(assetResult.error.message);
