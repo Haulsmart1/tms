@@ -1,6 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import type { NextRequest } from "next/server";
+import { createAdminClient } from "../supabase/admin";
+import { authorizeTenant, loadCallerProfile, TenantAccessError } from "../auth/serverTenantAccess";
 
 export async function createApiSupabase() {
   const cookieStore = await cookies();
@@ -39,57 +41,36 @@ export async function requireTenant(request: NextRequest) {
     throw new ApiError(401, "Not authenticated");
   }
 
-  const requestedTenantId = request.headers.get("x-tenant-id");
+  const requestedTenantId = request.headers.get("x-tenant-id")?.trim() || null;
 
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("tenant_id")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if (profileError) {
-    throw new ApiError(500, profileError.message);
+  // Authorize from profiles, the same rule RLS applies (can_access_tenant),
+  // not the legacy memberships table (review AUTH-4 / SET-3).
+  const admin = createAdminClient();
+  let caller;
+  try {
+    caller = await loadCallerProfile(admin, user.id);
+  } catch {
+    throw new ApiError(500, "Unable to verify tenant access");
   }
 
-  if (!requestedTenantId) {
-    if (!profile?.tenant_id) {
-      throw new ApiError(403, "No tenant is linked to this user");
+  const tenantId = requestedTenantId ?? caller.homeTenantId;
+  if (!tenantId) {
+    throw new ApiError(403, "No tenant is linked to this user");
+  }
+
+  try {
+    await authorizeTenant(admin, user.id, tenantId, "access");
+  } catch (error) {
+    if (error instanceof TenantAccessError && error.status === 403) {
+      throw new ApiError(403, "You do not have access to this tenant");
     }
-
-    return {
-      supabase,
-      user,
-      tenantId: profile.tenant_id as string,
-    };
-  }
-
-  if (profile?.tenant_id === requestedTenantId) {
-    return {
-      supabase,
-      user,
-      tenantId: requestedTenantId,
-    };
-  }
-
-  const { data: membership, error: membershipError } = await supabase
-    .from("memberships")
-    .select("id")
-    .eq("user_id", user.id)
-    .eq("tenant_id", requestedTenantId)
-    .maybeSingle();
-
-  if (membershipError) {
-    throw new ApiError(500, membershipError.message);
-  }
-
-  if (!membership) {
-    throw new ApiError(403, "You do not have access to this tenant");
+    throw new ApiError(500, "Unable to verify tenant access");
   }
 
   return {
     supabase,
     user,
-    tenantId: requestedTenantId,
+    tenantId,
   };
 }
 
