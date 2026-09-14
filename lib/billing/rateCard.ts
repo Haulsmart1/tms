@@ -193,7 +193,7 @@ function pricedBands(
  * scripts/migrate-company-to-period-billing.mjs to move one.
  */
 export const NEW_COMPANY_BILLING_MODEL: "v1_immediate" | "v2_period" =
-  "v1_immediate";
+  "v2_period";
 
 /**
  * Which model a company's billing page should render, given its

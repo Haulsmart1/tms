@@ -232,3 +232,12 @@ describe("billingModelForRow", () => {
     );
   });
 });
+
+describe("NEW_COMPANY_BILLING_MODEL", () => {
+  // A tripwire, like the rate constants above. Changing this reprices every
+  // signup, and the v2 path it selects was gated on a dry run that charged
+  // (2026-09-14). Flipping it back is a commercial decision, not a refactor.
+  it("creates new companies on period billing", () => {
+    expect(NEW_COMPANY_BILLING_MODEL).toBe("v2_period");
+  });
+});

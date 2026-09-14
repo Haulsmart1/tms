@@ -2251,6 +2251,25 @@ Only continue to Task 9 once a v2 activation has actually charged.
 
 ## Task 9 (FLAGGED): v2 signup branch in the card route
 
+> **BUILT 2026-09-14 on `ethan/v2-signup-default`, after the dry run charged
+> GBP 154.80.** Both defects in the STOP block were resolved, and review of the
+> no-row path found three more that this plan did not cover. What shipped
+> differs from the steps below in four places:
+>
+> 1. **(a) resolved by supplying the signup date**, not null and not a
+>    sentinel. It is inert: the v1 cron skips v2 rows, and so does recovery.
+> 2. **(b) resolved in `selectRecoveryAction`** (`lib/billing/run.ts`), not in
+>    the route, so it is unit tested. A v2 company replacing its card now takes
+>    no money; the period's own dunning ladder collects on the daily cron.
+> 3. **No row no longer reads as v1** on the billing page shell, the preview
+>    route or the licences page. `billingModelForRow` separates "no row" (use
+>    the default) from "row without the column" (billing_06 unapplied, still
+>    v1). Without this, every v2 signup would have seen v1's price, a 409 error
+>    banner, and "Your first charge is taken today".
+> 4. **Activation before a card is refused on a v2 default.** It used to fall
+>    through to v1's free `no_subscription`, which on v2 would leave every
+>    vehicle activated before the card billable and never billed.
+
 > **STOP. This task as written below does not work, and a code review on
 > 2026-09-11 found two defects in it. Resolve both before implementing.**
 >
@@ -2279,7 +2298,7 @@ Only continue to Task 9 once a v2 activation has actually charged.
 - Modify: `lib/billing/rateCard.ts`
 - Modify: `app/api/billing/card/route.ts`
 
-- [ ] **Step 1: Add the constant, still set to v1**
+- [x] **Step 1: Add the constant, still set to v1**
 
 Append to `lib/billing/rateCard.ts`:
 
@@ -2300,7 +2319,7 @@ export const NEW_COMPANY_BILLING_MODEL: "v1_immediate" | "v2_period" =
   "v1_immediate";
 ```
 
-- [ ] **Step 2: Branch the new-company path**
+- [x] **Step 2: Branch the new-company path**
 
 In `app/api/billing/card/route.ts`, add the import:
 
@@ -2346,7 +2365,7 @@ Then, in the first-time path, **before** the `platform_charges` attempt lookup a
       }
 ```
 
-- [ ] **Step 3: Verify the v1 path is untouched**
+- [x] **Step 3: Verify the v1 path is untouched**
 
 ```bash
 npm test
@@ -2355,7 +2374,7 @@ npm run typecheck
 
 Expected: 1163 tests pass, typecheck clean. With the constant still `v1_immediate`, the branch is unreachable and behaviour is identical to before.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add lib/billing/rateCard.ts app/api/billing/card/route.ts
@@ -2379,14 +2398,14 @@ unreachable and nothing changes yet. Task 10 flips it."
 **Files:**
 - Modify: `lib/billing/rateCard.ts`
 
-- [ ] **Step 1: Flip the constant**
+- [x] **Step 1: Flip the constant**
 
 ```ts
 export const NEW_COMPANY_BILLING_MODEL: "v1_immediate" | "v2_period" =
   "v2_period";
 ```
 
-- [ ] **Step 2: Verify**
+- [x] **Step 2: Verify**
 
 ```bash
 npm test
@@ -2399,7 +2418,7 @@ Expected: 1163 tests pass, typecheck clean.
 
 With a throwaway company: sign up, add a card, and confirm **no charge appears at Square** and the `company_billing` row reads `billing_model = 'v2_period'` with `next_charge_on` null. Then activate a vehicle licence and confirm the £129 minimum plus VAT is taken and a period opens.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add lib/billing/rateCard.ts
