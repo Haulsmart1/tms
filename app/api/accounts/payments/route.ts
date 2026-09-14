@@ -1,3 +1,4 @@
+import { listPageInfo, parseListPage } from "../../../../lib/accounts/listPaging";
 import { NextRequest, NextResponse } from "next/server";
 import { errorResponse, requireTenantAccess } from "../../../../lib/accounts/server";
 import { AccountsHttpError, readJsonObject, rpcFailure, type RpcMessages } from "../../../../lib/accounts/errors";
@@ -34,14 +35,21 @@ export async function GET(request: NextRequest) {
     }
 
     const { admin } = await requireTenantAccess(tenantId);
-    const { data, error } = await admin
+    // INV-11: one explicit page with the exact total, never a silent cap.
+    const page = parseListPage(request.nextUrl.searchParams);
+    const { data, error, count } = await admin
       .from("customer_payments")
-      .select("*")
+      .select("*", { count: "exact" })
       .eq("tenant_id", tenantId)
-      .order("payment_date", { ascending: false });
+      .order("payment_date", { ascending: false })
+      .order("id", { ascending: false })
+      .range(page.from, page.to);
 
     if (error) throw new Error(error.message);
-    return NextResponse.json({ payments: data ?? [] });
+    return NextResponse.json({
+      payments: data ?? [],
+      pagination: listPageInfo(page, count, (data ?? []).length),
+    });
   } catch (error) {
     const result = errorResponse(error);
     return NextResponse.json(result.body, { status: result.status });
