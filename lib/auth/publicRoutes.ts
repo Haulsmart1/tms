@@ -45,8 +45,9 @@ const PUBLIC_EXACT = new Set([
    are staff-only; a prefix allowlist here would let an anonymous caller mint
    POD share tokens for any job. */
 const PUBLIC_PATTERNS = [
-  /* HMAC-token gated customer links (lib/pod/shareToken.ts and siblings). The
-     token is the credential; a session would defeat the point of sharing. */
+  /* Token-gated customer links. POD share tokens are random, stored hashed in
+     pod_share_links and re-checked on every view (lib/pod/shareLinks.ts); the
+     token is the credential, a session would defeat the point of sharing. */
   /^\/pod\/share\/[^/]+$/,
   /^\/api\/pod\/share\/[^/]+\/pdf$/,
   /^\/quotation\/share\/[^/]+$/,
