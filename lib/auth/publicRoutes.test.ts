@@ -11,6 +11,7 @@ describe("isPublicPath", () => {
     "/login",
     "/auth/confirm",
     "/api/auth/callback",
+    "/api/auth/magic-link",
     "/api/public/quotation-share/abc123",
     "/api/public/quote-request/abc123",
     "/pod/share/abc123",
@@ -47,6 +48,23 @@ describe("isPublicPath", () => {
     "/api/pod/share/abc123/pdf/extra",
     "/api/pod/share/abc/def/pdf",
   ])("denies the non-public POD share endpoint %s", (path) => {
+    expect(isPublicPath(path)).toBe(false);
+  });
+
+  /* No prefix entries: siblings and children of a public route stay gated. */
+  it.each([
+    "/api/auth",
+    "/api/auth/anything-else",
+    "/api/public",
+    "/api/public/new-endpoint",
+    "/api/public/quote-request/abc/extra",
+    "/pod/share",
+    "/pod/share/abc/extra",
+    "/quotation/share/abc/extra",
+    "/auth/confirm/extra",
+    "/driver/jobs/abc",
+    "/api/accounts/accounting/xero/callback",
+  ])("denies the non-public neighbour %s", (path) => {
     expect(isPublicPath(path)).toBe(false);
   });
 
