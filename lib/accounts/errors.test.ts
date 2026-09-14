@@ -1,5 +1,49 @@
 import { describe, expect, it } from "vitest";
-import { AccountsHttpError, isMissingFunctionError, rpcBusinessCode, toErrorResponse } from "./errors";
+import {
+  AccountsHttpError,
+  isMissingFunctionError,
+  readJsonObject,
+  rpcBusinessCode,
+  rpcFailure,
+  toErrorResponse,
+} from "./errors";
+
+describe("rpcFailure", () => {
+  const messages = { invoice_locked: [409, "Locked."] } as const;
+
+  it("refuses clearly when the migration is missing", () => {
+    const error = rpcFailure({ code: "PGRST202", message: "Could not find the function" }, messages, "prodfix_43.sql");
+    expect(error).toBeInstanceOf(AccountsHttpError);
+    expect((error as AccountsHttpError).status).toBe(503);
+    expect((error as AccountsHttpError).code).toBe("migration_required");
+  });
+
+  it("maps a known business code", () => {
+    const error = rpcFailure({ code: "P0001", message: "invoice_locked" }, messages, "x.sql") as AccountsHttpError;
+    expect(error.status).toBe(409);
+    expect(error.message).toBe("Locked.");
+  });
+
+  it("keeps unknown database errors internal", () => {
+    const error = rpcFailure({ code: "23505", message: "duplicate key" }, messages, "x.sql");
+    expect(error).not.toBeInstanceOf(AccountsHttpError);
+    expect(toErrorResponse(error, () => {}).status).toBe(500);
+  });
+});
+
+describe("readJsonObject", () => {
+  const post = (body: string) => new Request("http://x.test", { method: "POST", body });
+
+  it("returns an object body", async () => {
+    await expect(readJsonObject(post('{"a":1}'))).resolves.toEqual({ a: 1 });
+  });
+
+  it("answers 400 for malformed or non-object bodies", async () => {
+    for (const body of ["not json", "[1]", "null", "3"]) {
+      await expect(readJsonObject(post(body))).rejects.toMatchObject({ status: 400 });
+    }
+  });
+});
 
 describe("toErrorResponse", () => {
   it("passes through messages we wrote", () => {

@@ -3,7 +3,9 @@ import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { isRoleAuthorized } from "./authz";
 import { authorizeTenant, TenantAccessError } from "../auth/serverTenantAccess";
+import { toErrorResponse } from "./errors";
 export { ACCOUNTS_ADMIN_ROLES } from "./authz";
+export { AccountsHttpError } from "./errors";
 
 export async function createUserClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -85,17 +87,11 @@ export async function requireTenantAccess(
   return { admin, user, role, tier: authorized.tier };
 }
 
+/**
+  Safe HTTP mapping for every accounts route (review ACC-15). Messages from
+  AccountsHttpError are shown; anything else is logged and replaced by a
+  generic message with a reference. See lib/accounts/errors.ts.
+*/
 export function errorResponse(error: unknown) {
-  const message =
-    error instanceof Error ? error.message : "Unexpected server error.";
-
-  if (message === "UNAUTHENTICATED") {
-    return { status: 401, body: { error: "You must be signed in." } };
-  }
-
-  if (message === "FORBIDDEN") {
-    return { status: 403, body: { error: "You do not have access to this tenant." } };
-  }
-
-  return { status: 500, body: { error: message } };
+  return toErrorResponse(error);
 }

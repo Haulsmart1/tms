@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ACCOUNTS_ADMIN_ROLES, errorResponse, requireTenantAccess } from "../../../../lib/accounts/server";
+import { AccountsHttpError, readJsonObject } from "../../../../lib/accounts/errors";
+import { parseTaxTypeMap } from "../../../../lib/accounts/xeroTax";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +13,27 @@ const PROVIDERS = new Set([
   "csv",
   "manual",
 ]);
+
+function code(value: unknown, max = 40): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") {
+    throw new AccountsHttpError(400, "Account and tax codes must be text.", "invalid_code");
+  }
+  const trimmed = value.trim();
+  if (trimmed.length > max) {
+    throw new AccountsHttpError(400, "Account or tax code is too long.", "invalid_code");
+  }
+  return trimmed || null;
+}
+
+function currency(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "GBP";
+  const text = String(value).trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(text)) {
+    throw new AccountsHttpError(400, "Currency must be a three-letter code.", "invalid_currency");
+  }
+  return text;
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -37,9 +60,15 @@ export async function GET(request: NextRequest) {
   }
 }
 
+/*
+  Review ACC-16: this route saves provider CONFIGURATION only. A connection
+  (connection_status "connected", external organisation id, connected_at) is
+  written exclusively by the provider's OAuth callback, so it can no longer be
+  faked here, and saving account codes no longer wipes an existing connection.
+*/
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await readJsonObject(request);
     const tenantId = String(body.tenantId ?? "").trim();
     const provider = String(body.provider ?? "").trim().toLowerCase();
 
@@ -52,45 +81,82 @@ export async function POST(request: NextRequest) {
 
     const { admin, user } = await requireTenantAccess(tenantId, ACCOUNTS_ADMIN_ROLES);
 
-    const payload = {
-      tenant_id: tenantId,
-      provider,
-      display_name: body.displayName || provider,
-      active: body.active !== false,
-      connection_status:
-        provider === "csv" || provider === "manual"
-          ? "available"
-          : body.connectionStatus || "not_connected",
-      external_tenant_id: body.externalTenantId || null,
-      external_tenant_name: body.externalTenantName || null,
-      default_sales_account_code: body.defaultSalesAccountCode || null,
-      default_purchase_account_code: body.defaultPurchaseAccountCode || null,
-      default_tax_code: body.defaultTaxCode || null,
-      default_currency: body.defaultCurrency || "GBP",
-      settings: body.settings || {},
-      connected_by: user.id,
-      connected_at:
-        body.connectionStatus === "connected" ? new Date().toISOString() : null,
-    };
+    if (body.connectionStatus === "connected") {
+      throw new AccountsHttpError(
+        400,
+        "Connect an accounting provider through its sign-in flow, not by saving settings.",
+        "connection_not_allowed"
+      );
+    }
 
     const { data: existing, error: existingError } = await admin
       .from("accounting_integrations")
-      .select("id")
+      .select("id,settings")
       .eq("tenant_id", tenantId)
       .eq("provider", provider)
       .maybeSingle();
 
     if (existingError) throw new Error(existingError.message);
 
+    const displayName =
+      typeof body.displayName === "string" && body.displayName.trim()
+        ? body.displayName.trim().slice(0, 100)
+        : provider;
+
+    const config: Record<string, unknown> = {
+      display_name: displayName,
+      default_sales_account_code: code(body.defaultSalesAccountCode),
+      default_purchase_account_code: code(body.defaultPurchaseAccountCode),
+      default_tax_code: code(body.defaultTaxCode),
+      default_currency: currency(body.defaultCurrency),
+      updated_at: new Date().toISOString(),
+    };
+
+    const existingSettings =
+      existing?.settings && typeof existing.settings === "object" && !Array.isArray(existing.settings)
+        ? (existing.settings as Record<string, unknown>)
+        : {};
+
+    const requestedSettings =
+      body.settings && typeof body.settings === "object" && !Array.isArray(body.settings)
+        ? (body.settings as Record<string, unknown>)
+        : null;
+
+    if (requestedSettings) {
+      if (provider === "xero") {
+        // Only the per-rate tax mapping is configurable for Xero (review ACC-6).
+        config.settings = {
+          ...existingSettings,
+          xeroTaxTypes: parseTaxTypeMap(requestedSettings),
+        };
+      } else {
+        config.settings = requestedSettings;
+      }
+    }
+
     if (existing) {
       const { error } = await admin
         .from("accounting_integrations")
-        .update(payload)
-        .eq("id", existing.id);
+        .update(config)
+        .eq("id", existing.id)
+        .eq("tenant_id", tenantId);
 
       if (error) throw new Error(error.message);
     } else {
-      const { error } = await admin.from("accounting_integrations").insert(payload);
+      const { error } = await admin.from("accounting_integrations").insert({
+        ...config,
+        tenant_id: tenantId,
+        provider,
+        active: true,
+        connection_status:
+          provider === "csv" || provider === "manual" ? "available" : "not_connected",
+        external_tenant_id: null,
+        external_tenant_name: null,
+        settings: config.settings ?? {},
+        connected_by: user.id,
+        connected_at: null,
+      });
+
       if (error) throw new Error(error.message);
     }
 

@@ -4,8 +4,43 @@ import {
   errorResponse,
   requireTenantAccess,
 } from "../../../../lib/accounts/server";
+import {
+  AccountsHttpError,
+  readJsonObject,
+  rpcFailure,
+  type RpcMessages,
+} from "../../../../lib/accounts/errors";
+import { isCreditableInvoiceStatus } from "../../../../lib/accounts/invoiceStatus";
+import { isIsoDate } from "../../../../lib/accounts/payments";
+import { isUuid } from "../../../../lib/auth/serverTenantAccess";
 
 export const dynamic = "force-dynamic";
+
+/*
+  Review ACC-8:
+  - credit notes can only be raised against invoices that reached the customer
+    (lib/accounts/invoiceStatus CREDITABLE_INVOICE_STATUSES);
+  - numbers come from a per-tenant allocator, never a timestamp or the request
+    (docs/sql/prodfix_42);
+  - approval is one transaction that locks the note and its invoice, re-checks
+    the remaining creditable amount and inserts the allocation, so a double
+    submit cannot credit an invoice twice.
+*/
+const APPROVE_MESSAGES: RpcMessages = {
+  credit_note_not_found: [404, "Credit note not found."],
+  credit_note_not_draft: [409, "Only draft credit notes can be approved."],
+  credit_note_no_invoice: [409, "Credit note has no original invoice."],
+  invoice_not_found: [404, "Original invoice not found."],
+  invoice_not_creditable: [409, "Credit notes can only be approved against an approved or sent invoice."],
+  credit_note_already_allocated: [409, "This credit note is already allocated."],
+  credit_note_total_invalid: [409, "Credit note total must be greater than zero."],
+  credit_exceeds_remaining: [409, "The credit total exceeds the remaining creditable amount on the invoice."],
+};
+
+const NUMBER_MESSAGES: RpcMessages = {
+  document_number_invalid: [500, "Credit note number allocation failed. Please try again."],
+  document_number_exhausted: [500, "Credit note number allocation failed. Please try again."],
+};
 
 type CreditLineInput = {
   invoiceLineId: string;
@@ -33,8 +68,49 @@ type CalculatedCreditLine = {
   gross_amount: number;
 };
 
+type AdminClient = Awaited<ReturnType<typeof requireTenantAccess>>["admin"];
+
+const CREDIT_NOTE_SELECT = `
+  *,
+  customers (
+    id,
+    name
+  ),
+  invoices (
+    id,
+    invoice_number,
+    total,
+    credit_total,
+    balance_due,
+    currency
+  ),
+  credit_note_lines (
+    id,
+    invoice_line_id,
+    job_id,
+    description,
+    quantity,
+    unit_price,
+    vat_rate,
+    net_amount,
+    vat_amount,
+    gross_amount,
+    created_at
+  ),
+  credit_note_allocations (
+    id,
+    invoice_id,
+    amount,
+    allocated_at
+  )
+`;
+
 function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function badRequest(message: string, code = "invalid_credit_note"): AccountsHttpError {
+  return new AccountsHttpError(400, message, code);
 }
 
 function parseCreditLines(value: unknown): CreditLineInput[] {
@@ -52,7 +128,7 @@ function parseCreditLines(value: unknown): CreditLineInput[] {
       const invoiceLineId = String(raw.invoiceLineId ?? "").trim();
       const quantity = Number(raw.quantity ?? 0);
 
-      if (!invoiceLineId || !Number.isFinite(quantity)) {
+      if (!isUuid(invoiceLineId) || !Number.isFinite(quantity)) {
         return null;
       }
 
@@ -64,8 +140,30 @@ function parseCreditLines(value: unknown): CreditLineInput[] {
     .filter((row): row is CreditLineInput => row !== null);
 }
 
+function parseIssueDate(value: unknown): string {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return new Date().toISOString().slice(0, 10);
+  }
+  if (!isIsoDate(text)) {
+    throw badRequest("Issue date must be a valid date.", "invalid_date");
+  }
+  return text;
+}
+
+function parseReason(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const text = String(value).trim();
+  if (text.length > 2000) {
+    throw badRequest("Reason is too long.");
+  }
+  return text || null;
+}
+
 async function getExistingAllocatedTotal(
-  admin: Awaited<ReturnType<typeof requireTenantAccess>>["admin"],
+  admin: AdminClient,
   tenantId: string,
   invoiceId: string,
   excludeCreditNoteId?: string
@@ -95,7 +193,7 @@ async function getExistingAllocatedTotal(
 }
 
 async function calculateCreditLines(
-  admin: Awaited<ReturnType<typeof requireTenantAccess>>["admin"],
+  admin: AdminClient,
   tenantId: string,
   invoiceId: string,
   requestedLines: CreditLineInput[],
@@ -107,7 +205,7 @@ async function calculateCreditLines(
   total: number;
 }> {
   if (requestedLines.length === 0) {
-    throw new Error("Add at least one credit-note line.");
+    throw badRequest("Add at least one credit-note line.");
   }
 
   const requestedIds = Array.from(
@@ -115,14 +213,12 @@ async function calculateCreditLines(
   );
 
   if (requestedIds.length !== requestedLines.length) {
-    throw new Error("Each invoice line can only appear once in a credit note.");
+    throw badRequest("Each invoice line can only appear once in a credit note.");
   }
 
   const { data: invoiceLines, error: invoiceLinesError } = await admin
     .from("invoice_lines")
-    .select(
-      "id,job_id,description,quantity,unit_price,vat_rate"
-    )
+    .select("id,job_id,description,quantity,unit_price,vat_rate")
     .eq("tenant_id", tenantId)
     .eq("invoice_id", invoiceId)
     .in("id", requestedIds);
@@ -132,7 +228,7 @@ async function calculateCreditLines(
   }
 
   if ((invoiceLines ?? []).length !== requestedIds.length) {
-    throw new Error("One or more invoice lines could not be found.");
+    throw badRequest("One or more invoice lines could not be found.");
   }
 
   const invoiceLineMap = new Map(
@@ -187,7 +283,7 @@ async function calculateCreditLines(
     const sourceLine = invoiceLineMap.get(requestedLine.invoiceLineId);
 
     if (!sourceLine) {
-      throw new Error("Invoice line not found.");
+      throw badRequest("Invoice line not found.");
     }
 
     const originalQuantity = Number(sourceLine.quantity ?? 0);
@@ -196,23 +292,19 @@ async function calculateCreditLines(
       alreadyCreditedByInvoiceLine.get(sourceLine.id) ?? 0
     );
 
-    const remainingQuantity = Math.max(
-      originalQuantity - alreadyCredited,
-      0
-    );
+    const remainingQuantity = Math.max(originalQuantity - alreadyCredited, 0);
 
-    if (
-      !Number.isFinite(requestedQuantity) ||
-      requestedQuantity <= 0
-    ) {
-      throw new Error(
+    if (!Number.isFinite(requestedQuantity) || requestedQuantity <= 0) {
+      throw badRequest(
         `Credit quantity for "${sourceLine.description}" must be greater than zero.`
       );
     }
 
     if (requestedQuantity > remainingQuantity + 0.000001) {
-      throw new Error(
-        `Credit quantity for "${sourceLine.description}" exceeds the remaining creditable quantity of ${remainingQuantity}.`
+      throw new AccountsHttpError(
+        409,
+        `Credit quantity for "${sourceLine.description}" exceeds the remaining creditable quantity of ${remainingQuantity}.`,
+        "credit_exceeds_remaining"
       );
     }
 
@@ -220,14 +312,18 @@ async function calculateCreditLines(
     const vatRate = Number(sourceLine.vat_rate ?? 0);
 
     if (!Number.isFinite(unitPrice) || unitPrice < 0) {
-      throw new Error(
-        `Invoice line "${sourceLine.description}" has an invalid unit price.`
+      throw new AccountsHttpError(
+        409,
+        `Invoice line "${sourceLine.description}" has an invalid unit price.`,
+        "invalid_invoice_line"
       );
     }
 
     if (!Number.isFinite(vatRate) || vatRate < 0) {
-      throw new Error(
-        `Invoice line "${sourceLine.description}" has an invalid VAT rate.`
+      throw new AccountsHttpError(
+        409,
+        `Invoice line "${sourceLine.description}" has an invalid VAT rate.`,
+        "invalid_invoice_line"
       );
     }
 
@@ -248,67 +344,18 @@ async function calculateCreditLines(
     };
   });
 
-  const subtotal = roundMoney(
-    calculatedLines.reduce((sum, line) => sum + line.net_amount, 0)
-  );
-
-  const vatTotal = roundMoney(
-    calculatedLines.reduce((sum, line) => sum + line.vat_amount, 0)
-  );
-
-  const total = roundMoney(
-    calculatedLines.reduce((sum, line) => sum + line.gross_amount, 0)
-  );
-
   return {
     lines: calculatedLines,
-    subtotal,
-    vatTotal,
-    total,
+    subtotal: roundMoney(calculatedLines.reduce((sum, line) => sum + line.net_amount, 0)),
+    vatTotal: roundMoney(calculatedLines.reduce((sum, line) => sum + line.vat_amount, 0)),
+    total: roundMoney(calculatedLines.reduce((sum, line) => sum + line.gross_amount, 0)),
   };
 }
 
-async function loadCreditNote(
-  admin: Awaited<ReturnType<typeof requireTenantAccess>>["admin"],
-  tenantId: string,
-  creditNoteId: string
-) {
+async function loadCreditNote(admin: AdminClient, tenantId: string, creditNoteId: string) {
   const { data, error } = await admin
     .from("credit_notes")
-    .select(`
-      *,
-      customers (
-        id,
-        name
-      ),
-      invoices (
-        id,
-        invoice_number,
-        total,
-        credit_total,
-        balance_due,
-        currency
-      ),
-      credit_note_lines (
-        id,
-        invoice_line_id,
-        job_id,
-        description,
-        quantity,
-        unit_price,
-        vat_rate,
-        net_amount,
-        vat_amount,
-        gross_amount,
-        created_at
-      ),
-      credit_note_allocations (
-        id,
-        invoice_id,
-        amount,
-        allocated_at
-      )
-    `)
+    .select(CREDIT_NOTE_SELECT)
     .eq("tenant_id", tenantId)
     .eq("id", creditNoteId)
     .maybeSingle();
@@ -320,110 +367,69 @@ async function loadCreditNote(
   return data;
 }
 
+function exceedsRemaining(total: number, remainingGross: number): AccountsHttpError {
+  return new AccountsHttpError(
+    409,
+    `Credit total ${total.toFixed(2)} exceeds the remaining invoice creditable amount ${remainingGross.toFixed(2)}.`,
+    "credit_exceeds_remaining"
+  );
+}
+
 export async function GET(request: NextRequest) {
   try {
-    const tenantId =
-      request.nextUrl.searchParams.get("tenantId")?.trim() ?? "";
+    const tenantId = request.nextUrl.searchParams.get("tenantId")?.trim() ?? "";
 
     if (!tenantId) {
-      return NextResponse.json(
-        {
-          error: "tenantId is required.",
-        },
-        {
-          status: 400,
-        }
-      );
+      return NextResponse.json({ error: "tenantId is required." }, { status: 400 });
     }
 
     const { admin } = await requireTenantAccess(tenantId);
 
     const { data, error } = await admin
       .from("credit_notes")
-      .select(`
-        *,
-        customers (
-          id,
-          name
-        ),
-        invoices (
-          id,
-          invoice_number,
-          total,
-          credit_total,
-          balance_due,
-          currency
-        ),
-        credit_note_lines (
-          id,
-          invoice_line_id,
-          job_id,
-          description,
-          quantity,
-          unit_price,
-          vat_rate,
-          net_amount,
-          vat_amount,
-          gross_amount,
-          created_at
-        ),
-        credit_note_allocations (
-          id,
-          invoice_id,
-          amount,
-          allocated_at
-        )
-      `)
+      .select(CREDIT_NOTE_SELECT)
       .eq("tenant_id", tenantId)
-      .order("created_at", {
-        ascending: false,
-      });
+      .order("created_at", { ascending: false });
 
     if (error) {
       throw new Error(error.message);
     }
 
-    return NextResponse.json({
-      creditNotes: data ?? [],
-    });
+    return NextResponse.json({ creditNotes: data ?? [] });
   } catch (error) {
     const result = errorResponse(error);
-
-    return NextResponse.json(
-      result.body,
-      {
-        status: result.status,
-      }
-    );
+    return NextResponse.json(result.body, { status: result.status });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await readJsonObject(request);
 
     const tenantId = String(body.tenantId ?? "").trim();
     const invoiceId = String(body.invoiceId ?? "").trim();
     const requestedLines = parseCreditLines(body.lines);
 
     if (!tenantId || !invoiceId) {
-      return NextResponse.json(
-        {
-          error: "tenantId and invoiceId are required.",
-        },
-        {
-          status: 400,
-        }
-      );
+      return NextResponse.json({ error: "tenantId and invoiceId are required." }, { status: 400 });
     }
 
     const { admin, user } = await requireTenantAccess(tenantId);
 
+    if (!isUuid(invoiceId)) {
+      return NextResponse.json({ error: "Invoice not found." }, { status: 404 });
+    }
+
+    if (body.creditNoteNumber !== undefined && body.creditNoteNumber !== null && body.creditNoteNumber !== "") {
+      throw badRequest("Credit note numbers are allocated automatically.", "number_not_allowed");
+    }
+
+    const issueDate = parseIssueDate(body.issueDate);
+    const reason = parseReason(body.reason);
+
     const { data: invoice, error: invoiceError } = await admin
       .from("invoices")
-      .select(
-        "id,customer_id,invoice_number,total,credit_total,balance_due,currency"
-      )
+      .select("id,customer_id,invoice_number,status,total,credit_total,balance_due,currency")
       .eq("id", invoiceId)
       .eq("tenant_id", tenantId)
       .maybeSingle();
@@ -433,53 +439,39 @@ export async function POST(request: NextRequest) {
     }
 
     if (!invoice?.customer_id) {
-      return NextResponse.json(
-        {
-          error: "Invoice not found.",
-        },
-        {
-          status: 404,
-        }
+      return NextResponse.json({ error: "Invoice not found." }, { status: 404 });
+    }
+
+    if (!isCreditableInvoiceStatus(invoice.status)) {
+      throw new AccountsHttpError(
+        409,
+        "Credit notes can only be raised against an approved or sent invoice.",
+        "invoice_not_creditable"
       );
     }
 
-    const calculated = await calculateCreditLines(
-      admin,
-      tenantId,
-      invoiceId,
-      requestedLines
-    );
+    const calculated = await calculateCreditLines(admin, tenantId, invoiceId, requestedLines);
 
-    const allocatedTotal = await getExistingAllocatedTotal(
-      admin,
-      tenantId,
-      invoiceId
-    );
+    const allocatedTotal = await getExistingAllocatedTotal(admin, tenantId, invoiceId);
 
-    const invoiceTotal = Number(invoice.total ?? 0);
-
-    const remainingGross = roundMoney(
-      Math.max(invoiceTotal - allocatedTotal, 0)
-    );
+    const remainingGross = roundMoney(Math.max(Number(invoice.total ?? 0) - allocatedTotal, 0));
 
     if (calculated.total > remainingGross + 0.009) {
-      return NextResponse.json(
-        {
-          error:
-            `Credit total ${calculated.total.toFixed(2)} exceeds the remaining invoice creditable amount ${remainingGross.toFixed(2)}.`,
-        },
-        {
-          status: 409,
-        }
-      );
+      throw exceedsRemaining(calculated.total, remainingGross);
     }
 
-    const creditNumber =
-      String(body.creditNoteNumber ?? "").trim() ||
-      `CN-${new Date()
-        .toISOString()
-        .replace(/\D/g, "")
-        .slice(0, 14)}`;
+    const { data: creditNumber, error: numberError } = await admin.rpc("accounts_next_document_number", {
+      p_tenant_id: tenantId,
+      p_document_type: "credit_note",
+      p_prefix: "CN",
+      p_date: issueDate,
+    });
+
+    if (numberError || !creditNumber) {
+      throw numberError
+        ? rpcFailure(numberError, NUMBER_MESSAGES, "prodfix_42_accounts_credit_notes.sql")
+        : new Error("accounts_next_document_number returned no value");
+    }
 
     const { data: creditNote, error: creditError } = await admin
       .from("credit_notes")
@@ -487,14 +479,10 @@ export async function POST(request: NextRequest) {
         tenant_id: tenantId,
         customer_id: invoice.customer_id,
         original_invoice_id: invoiceId,
-        credit_note_number: creditNumber,
+        credit_note_number: String(creditNumber),
         status: "draft",
-        issue_date:
-          String(body.issueDate ?? "").trim() ||
-          new Date().toISOString().slice(0, 10),
-        reason:
-          String(body.reason ?? "").trim() ||
-          null,
+        issue_date: issueDate,
+        reason,
         subtotal: calculated.subtotal,
         vat_total: calculated.vatTotal,
         total: calculated.total,
@@ -508,79 +496,50 @@ export async function POST(request: NextRequest) {
       throw new Error(creditError.message);
     }
 
-    const { error: lineInsertError } = await admin
-      .from("credit_note_lines")
-      .insert(
-        calculated.lines.map((line) => ({
-          tenant_id: tenantId,
-          credit_note_id: creditNote.id,
-          ...line,
-        }))
-      );
+    const { error: lineInsertError } = await admin.from("credit_note_lines").insert(
+      calculated.lines.map((line) => ({
+        tenant_id: tenantId,
+        credit_note_id: creditNote.id,
+        ...line,
+      }))
+    );
 
     if (lineInsertError) {
-      await admin
-        .from("credit_notes")
-        .delete()
-        .eq("tenant_id", tenantId)
-        .eq("id", creditNote.id);
+      await admin.from("credit_notes").delete().eq("tenant_id", tenantId).eq("id", creditNote.id);
 
       throw new Error(lineInsertError.message);
     }
 
-    const completed = await loadCreditNote(
-      admin,
-      tenantId,
-      creditNote.id
-    );
+    const completed = await loadCreditNote(admin, tenantId, creditNote.id);
 
-    return NextResponse.json(
-      {
-        ok: true,
-        creditNote: completed,
-      },
-      {
-        status: 201,
-      }
-    );
+    return NextResponse.json({ ok: true, creditNote: completed }, { status: 201 });
   } catch (error) {
     const result = errorResponse(error);
-
-    return NextResponse.json(
-      result.body,
-      {
-        status: result.status,
-      }
-    );
+    return NextResponse.json(result.body, { status: result.status });
   }
 }
 
 export async function PATCH(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await readJsonObject(request);
 
     const tenantId = String(body.tenantId ?? "").trim();
     const creditNoteId = String(body.creditNoteId ?? "").trim();
     const action = String(body.action ?? "save").trim().toLowerCase();
 
     if (!tenantId || !creditNoteId) {
-      return NextResponse.json(
-        {
-          error: "tenantId and creditNoteId are required.",
-        },
-        {
-          status: 400,
-        }
-      );
+      return NextResponse.json({ error: "tenantId and creditNoteId are required." }, { status: 400 });
     }
 
     const { admin, user } = await requireTenantAccess(tenantId);
 
+    if (!isUuid(creditNoteId)) {
+      return NextResponse.json({ error: "Credit note not found." }, { status: 404 });
+    }
+
     const { data: creditNote, error: creditNoteError } = await admin
       .from("credit_notes")
-      .select(
-        "id,status,original_invoice_id,total,customer_id,currency"
-      )
+      .select("id,status,original_invoice_id,total,customer_id,currency")
       .eq("tenant_id", tenantId)
       .eq("id", creditNoteId)
       .maybeSingle();
@@ -590,239 +549,65 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (!creditNote) {
-      return NextResponse.json(
-        {
-          error: "Credit note not found.",
-        },
-        {
-          status: 404,
-        }
-      );
+      return NextResponse.json({ error: "Credit note not found." }, { status: 404 });
     }
 
     if (action === "cancel") {
       if (creditNote.status !== "draft") {
-        return NextResponse.json(
-          {
-            error: "Only draft credit notes can be cancelled.",
-          },
-          {
-            status: 409,
-          }
-        );
+        return NextResponse.json({ error: "Only draft credit notes can be cancelled." }, { status: 409 });
       }
 
-      const { error: cancelError } = await admin
+      const { data: cancelled, error: cancelError } = await admin
         .from("credit_notes")
-        .update({
-          status: "cancelled",
-        })
+        .update({ status: "cancelled" })
         .eq("tenant_id", tenantId)
-        .eq("id", creditNoteId);
+        .eq("id", creditNoteId)
+        .eq("status", "draft")
+        .select("id");
 
       if (cancelError) {
         throw new Error(cancelError.message);
       }
 
-      const completed = await loadCreditNote(
-        admin,
-        tenantId,
-        creditNoteId
-      );
+      if (!cancelled || cancelled.length === 0) {
+        throw new AccountsHttpError(409, "The credit note changed while you were saving. Reload and try again.", "credit_note_changed");
+      }
 
-      return NextResponse.json({
-        ok: true,
-        creditNote: completed,
-      });
+      const completed = await loadCreditNote(admin, tenantId, creditNoteId);
+
+      return NextResponse.json({ ok: true, creditNote: completed });
     }
 
     if (action === "approve") {
-      if (creditNote.status !== "draft") {
-        return NextResponse.json(
-          {
-            error: "Only draft credit notes can be approved.",
-          },
-          {
-            status: 409,
-          }
-        );
-      }
-
-      if (!creditNote.original_invoice_id) {
-        return NextResponse.json(
-          {
-            error: "Credit note has no original invoice.",
-          },
-          {
-            status: 409,
-          }
-        );
-      }
-
-      const { data: existingAllocation, error: allocationLookupError } =
-        await admin
-          .from("credit_note_allocations")
-          .select("id,amount")
-          .eq("tenant_id", tenantId)
-          .eq("credit_note_id", creditNoteId)
-          .maybeSingle();
-
-      if (allocationLookupError) {
-        throw new Error(allocationLookupError.message);
-      }
-
-      if (existingAllocation) {
-        return NextResponse.json(
-          {
-            error: "This credit note is already allocated.",
-          },
-          {
-            status: 409,
-          }
-        );
-      }
-
-      const { data: invoice, error: invoiceError } = await admin
-        .from("invoices")
-        .select("id,total")
-        .eq("tenant_id", tenantId)
-        .eq("id", creditNote.original_invoice_id)
-        .maybeSingle();
-
-      if (invoiceError) {
-        throw new Error(invoiceError.message);
-      }
-
-      if (!invoice) {
-        return NextResponse.json(
-          {
-            error: "Original invoice not found.",
-          },
-          {
-            status: 404,
-          }
-        );
-      }
-
-      const allocatedTotal = await getExistingAllocatedTotal(
-        admin,
-        tenantId,
-        creditNote.original_invoice_id,
-        creditNoteId
-      );
-
-      const invoiceTotal = Number(invoice.total ?? 0);
-      const remainingGross = roundMoney(
-        Math.max(invoiceTotal - allocatedTotal, 0)
-      );
-
-      const creditTotal = roundMoney(Number(creditNote.total ?? 0));
-
-      if (creditTotal <= 0) {
-        return NextResponse.json(
-          {
-            error: "Credit note total must be greater than zero.",
-          },
-          {
-            status: 409,
-          }
-        );
-      }
-
-      if (creditTotal > remainingGross + 0.009) {
-        return NextResponse.json(
-          {
-            error:
-              `Credit total ${creditTotal.toFixed(2)} exceeds the remaining invoice creditable amount ${remainingGross.toFixed(2)}.`,
-          },
-          {
-            status: 409,
-          }
-        );
-      }
-
-      const { data: allocation, error: allocationError } = await admin
-        .from("credit_note_allocations")
-        .insert({
-          tenant_id: tenantId,
-          credit_note_id: creditNoteId,
-          invoice_id: creditNote.original_invoice_id,
-          amount: creditTotal,
-          allocated_by: user.id,
-        })
-        .select("id")
-        .single();
-
-      if (allocationError) {
-        throw new Error(allocationError.message);
-      }
-
-      const approvedAt = new Date().toISOString();
-
-      const { error: approveError } = await admin
-        .from("credit_notes")
-        .update({
-          status: "approved",
-          approved_by: user.id,
-          approved_at: approvedAt,
-        })
-        .eq("tenant_id", tenantId)
-        .eq("id", creditNoteId);
+      const { error: approveError } = await admin.rpc("accounts_approve_credit_note", {
+        p_tenant_id: tenantId,
+        p_credit_note_id: creditNoteId,
+        p_user_id: user.id,
+      });
 
       if (approveError) {
-        await admin
-          .from("credit_note_allocations")
-          .delete()
-          .eq("tenant_id", tenantId)
-          .eq("id", allocation.id);
-
-        throw new Error(approveError.message);
+        throw rpcFailure(approveError, APPROVE_MESSAGES, "prodfix_42_accounts_credit_notes.sql");
       }
 
-      const completed = await loadCreditNote(
-        admin,
-        tenantId,
-        creditNoteId
-      );
+      const completed = await loadCreditNote(admin, tenantId, creditNoteId);
 
-      return NextResponse.json({
-        ok: true,
-        creditNote: completed,
-      });
+      return NextResponse.json({ ok: true, creditNote: completed });
     }
 
     if (action !== "save") {
-      return NextResponse.json(
-        {
-          error: "Invalid credit-note action.",
-        },
-        {
-          status: 400,
-        }
-      );
+      return NextResponse.json({ error: "Invalid credit-note action." }, { status: 400 });
     }
 
     if (creditNote.status !== "draft") {
-      return NextResponse.json(
-        {
-          error: "Only draft credit notes can be edited.",
-        },
-        {
-          status: 409,
-        }
-      );
+      return NextResponse.json({ error: "Only draft credit notes can be edited." }, { status: 409 });
     }
 
     if (!creditNote.original_invoice_id) {
-      return NextResponse.json(
-        {
-          error: "Credit note has no original invoice.",
-        },
-        {
-          status: 409,
-        }
-      );
+      return NextResponse.json({ error: "Credit note has no original invoice." }, { status: 409 });
     }
+
+    const issueDate = body.issueDate === undefined ? undefined : parseIssueDate(body.issueDate);
+    const reason = body.reason === undefined ? undefined : parseReason(body.reason);
 
     const requestedLines = parseCreditLines(body.lines);
 
@@ -853,30 +638,13 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (!invoice) {
-      return NextResponse.json(
-        {
-          error: "Original invoice not found.",
-        },
-        {
-          status: 404,
-        }
-      );
+      return NextResponse.json({ error: "Original invoice not found." }, { status: 404 });
     }
 
-    const remainingGross = roundMoney(
-      Math.max(Number(invoice.total ?? 0) - allocatedTotal, 0)
-    );
+    const remainingGross = roundMoney(Math.max(Number(invoice.total ?? 0) - allocatedTotal, 0));
 
     if (calculated.total > remainingGross + 0.009) {
-      return NextResponse.json(
-        {
-          error:
-            `Credit total ${calculated.total.toFixed(2)} exceeds the remaining invoice creditable amount ${remainingGross.toFixed(2)}.`,
-        },
-        {
-          status: 409,
-        }
-      );
+      throw exceedsRemaining(calculated.total, remainingGross);
     }
 
     const { data: oldLines, error: oldLinesError } = await admin
@@ -891,6 +659,20 @@ export async function PATCH(request: NextRequest) {
       throw new Error(oldLinesError.message);
     }
 
+    async function restoreOldLines() {
+      await admin.from("credit_note_lines").delete().eq("tenant_id", tenantId).eq("credit_note_id", creditNoteId);
+
+      if ((oldLines ?? []).length > 0) {
+        await admin.from("credit_note_lines").insert(
+          (oldLines ?? []).map((line) => ({
+            tenant_id: tenantId,
+            credit_note_id: creditNoteId,
+            ...line,
+          }))
+        );
+      }
+    }
+
     const { error: deleteLinesError } = await admin
       .from("credit_note_lines")
       .delete()
@@ -901,107 +683,48 @@ export async function PATCH(request: NextRequest) {
       throw new Error(deleteLinesError.message);
     }
 
-    const { error: insertLinesError } = await admin
-      .from("credit_note_lines")
-      .insert(
-        calculated.lines.map((line) => ({
-          tenant_id: tenantId,
-          credit_note_id: creditNoteId,
-          ...line,
-        }))
-      );
+    const { error: insertLinesError } = await admin.from("credit_note_lines").insert(
+      calculated.lines.map((line) => ({
+        tenant_id: tenantId,
+        credit_note_id: creditNoteId,
+        ...line,
+      }))
+    );
 
     if (insertLinesError) {
-      if ((oldLines ?? []).length > 0) {
-        await admin
-          .from("credit_note_lines")
-          .insert(
-            (oldLines ?? []).map((line) => ({
-              tenant_id: tenantId,
-              credit_note_id: creditNoteId,
-              invoice_line_id: line.invoice_line_id,
-              job_id: line.job_id,
-              description: line.description,
-              quantity: line.quantity,
-              unit_price: line.unit_price,
-              vat_rate: line.vat_rate,
-              net_amount: line.net_amount,
-              vat_amount: line.vat_amount,
-              gross_amount: line.gross_amount,
-            }))
-          );
-      }
-
+      await restoreOldLines();
       throw new Error(insertLinesError.message);
     }
 
-    const { error: updateError } = await admin
+    const { data: saved, error: updateError } = await admin
       .from("credit_notes")
       .update({
-        issue_date:
-          body.issueDate === undefined
-            ? undefined
-            : String(body.issueDate ?? "").trim() ||
-              new Date().toISOString().slice(0, 10),
-        reason:
-          body.reason === undefined
-            ? undefined
-            : String(body.reason ?? "").trim() || null,
+        issue_date: issueDate,
+        reason,
         subtotal: calculated.subtotal,
         vat_total: calculated.vatTotal,
         total: calculated.total,
       })
       .eq("tenant_id", tenantId)
-      .eq("id", creditNoteId);
+      .eq("id", creditNoteId)
+      .eq("status", "draft")
+      .select("id");
 
-    if (updateError) {
-      await admin
-        .from("credit_note_lines")
-        .delete()
-        .eq("tenant_id", tenantId)
-        .eq("credit_note_id", creditNoteId);
+    if (updateError || !saved || saved.length === 0) {
+      await restoreOldLines();
 
-      if ((oldLines ?? []).length > 0) {
-        await admin
-          .from("credit_note_lines")
-          .insert(
-            (oldLines ?? []).map((line) => ({
-              tenant_id: tenantId,
-              credit_note_id: creditNoteId,
-              invoice_line_id: line.invoice_line_id,
-              job_id: line.job_id,
-              description: line.description,
-              quantity: line.quantity,
-              unit_price: line.unit_price,
-              vat_rate: line.vat_rate,
-              net_amount: line.net_amount,
-              vat_amount: line.vat_amount,
-              gross_amount: line.gross_amount,
-            }))
-          );
+      if (updateError) {
+        throw new Error(updateError.message);
       }
 
-      throw new Error(updateError.message);
+      throw new AccountsHttpError(409, "The credit note changed while you were saving. Reload and try again.", "credit_note_changed");
     }
 
-    const completed = await loadCreditNote(
-      admin,
-      tenantId,
-      creditNoteId
-    );
+    const completed = await loadCreditNote(admin, tenantId, creditNoteId);
 
-    return NextResponse.json({
-      ok: true,
-      creditNote: completed,
-    });
+    return NextResponse.json({ ok: true, creditNote: completed });
   } catch (error) {
     const result = errorResponse(error);
-
-    return NextResponse.json(
-      result.body,
-      {
-        status: result.status,
-      }
-    );
+    return NextResponse.json(result.body, { status: result.status });
   }
 }

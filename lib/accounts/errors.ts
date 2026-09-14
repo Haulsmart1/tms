@@ -94,3 +94,38 @@ export function rpcBusinessCode<T extends string>(
   const message = String(error?.message ?? "").trim();
   return (known as readonly string[]).includes(message) ? (message as T) : null;
 }
+
+export type RpcMessages = Record<string, readonly [status: number, message: string]>;
+
+/**
+  Turns a failed accounts RPC into the error to throw: a migration refusal when
+  the function is missing, a user-facing AccountsHttpError for a known business
+  code, and otherwise a plain Error (logged, shown generically).
+*/
+export function rpcFailure(
+  error: { code?: string | null; message?: string | null },
+  messages: RpcMessages,
+  sqlFile: string,
+): Error {
+  if (isMissingFunctionError(error)) return migrationRequired(sqlFile);
+  const code = rpcBusinessCode(error, Object.keys(messages));
+  if (code) {
+    const [status, message] = messages[code];
+    return new AccountsHttpError(status, message, code);
+  }
+  return new Error(`accounts rpc failed (${sqlFile}): ${error.code ?? "?"} ${error.message ?? ""}`);
+}
+
+/** Reads a JSON object body, answering 400 instead of 500 for anything else. */
+export async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    throw new AccountsHttpError(400, "The request body must be JSON.", "invalid_body");
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new AccountsHttpError(400, "The request body must be a JSON object.", "invalid_body");
+  }
+  return body as Record<string, unknown>;
+}
