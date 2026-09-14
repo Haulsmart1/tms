@@ -6,8 +6,9 @@
    locally with the service-role key.
 
    It is NOT an auth bypass. admin.generateLink returns the identical
-   `token_hash` a real magic link carries, and the URL it prints goes through
-   app/api/auth/callback/route.ts's normal verifyOtp branch. The token is
+   `token_hash` a real magic link carries, and the URL it prints opens the same
+   scanner-safe /auth/confirm page a real email does; pressing Continue POSTs
+   to app/api/auth/callback/route.ts's normal verifyOtp branch. The token is
    SINGLE-USE and expires, so browser automation must sign in once and reuse the
    one context.
 
@@ -106,7 +107,9 @@ if (!email) {
     process.exit(1);
   }
 
-  const signInUrl = new URL("/api/auth/callback", ORIGIN);
+  /* /auth/confirm, not /api/auth/callback: the callback no longer verifies a
+     token_hash on GET (review AUTH-6), it forwards it to this page. */
+  const signInUrl = new URL("/auth/confirm", ORIGIN);
   signInUrl.searchParams.set("token_hash", hashedToken);
   signInUrl.searchParams.set("type", "magiclink");
   signInUrl.searchParams.set("next", nextPath);

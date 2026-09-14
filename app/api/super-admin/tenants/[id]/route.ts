@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { withSuperAdmin, logSuperAdminEdit } from "../../../../../lib/superAdmin/guard";
 import { normalizeTenantEdit } from "../../../../../lib/superAdmin/tenantEdit";
+import { recordSuperAdminAudit } from "../../../../../lib/superAdmin/audit";
+import { interpretMoveTenantError, readProfilesMoved } from "../../../../../lib/superAdmin/tenantMove";
 import { isUuid } from "../../../../../lib/uuid";
 import { countBillableVehicles } from "../../../../../lib/billing/vehicleCount";
 
@@ -47,14 +49,19 @@ const POSTGREST_ROW_CAP = 1000;
    suppress that charge: inventing coverage the new company never paid for
    would be a silent write-off of revenue nobody agreed to.
 
-   Neither the existence check nor the update below runs inside a
-   transaction, and the audit log call runs after both. A process death
-   between the existence check and the update leaves a write this route
-   attempted but logSuperAdminEdit never records, because there is nothing
-   left to run it. The real fix is a SECURITY DEFINER Postgres function that
-   does the check, the write and an audit insert atomically -- deferred here
-   because no migration in this feature has been applied yet, so there is
-   nowhere for that function to live. */
+   A MOVE goes through public.super_admin_move_tenant
+   (docs/sql/prodfix_10_super_admin_tenant_move.sql), which in one
+   transaction moves the tenant, moves profiles.company_id for every user
+   whose home tenant it is, and writes a durable super_admin_audit row
+   (AUTH-3, AUTH-15). Moving tenants.company_id alone locked every one of
+   those users out: get_tenant_context() requires their profile's company to
+   match their home tenant's. The function refuses the move while a
+   company-wide admin has this tenant as home, because carrying them over
+   would make them admin of every tenant in the new company. Until the
+   migration is applied a move answers 503 and changes nothing.
+
+   A RENAME stays a plain service-role update (nothing else depends on the
+   name) and writes its audit row afterwards, best effort. */
 
 export const PATCH = withSuperAdmin(
   async (actorId: string, request: NextRequest, context: { params: Promise<{ id: string }> }) => {
@@ -175,13 +182,10 @@ export const PATCH = withSuperAdmin(
         // over-count. { count: "exact", head: true } asks PostgREST for the
         // count only -- no profile rows cross the wire for this one.
         //
-        // profiles.company_id is deliberately left untouched by this route,
-        // not forgotten: app/api/settings/users/invite/route.ts:137 reads
-        // that column, but nothing in the codebase writes it on an ordinary
-        // tenant assignment (it only ever gets set by hand, per
-        // lib/superAdmin/summary.ts's own comment on the same column), so
-        // there is no maintained value here for a re-parent to keep in step
-        // with. Writing to it would be inventing a write nobody asked for.
+        // profiles.company_id IS moved, by super_admin_move_tenant below, for
+        // exactly this same one-way set. get_my_company_id() reads it, and
+        // get_tenant_context() and every admin RLS branch compare it with
+        // tenants.company_id, so leaving it behind locks these users out.
         admin.from("profiles").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId),
       ]);
 
@@ -254,11 +258,46 @@ export const PATCH = withSuperAdmin(
     if (normalized.name !== undefined) patch.name = normalized.name;
     if (normalized.companyId !== undefined) patch.company_id = normalized.companyId;
 
-    const { error: updateError } = await admin.from("tenants").update(patch).eq("id", tenantId);
+    if (isMoving) {
+      // Every move, including a no-op to the current company, goes through
+      // the function: it also repairs profiles whose company_id had drifted
+      // from their home tenant's, and it is where the audit row is written.
+      const { data: moveResult, error: moveError } = await admin.rpc("super_admin_move_tenant", {
+        p_actor: actorId,
+        p_tenant: tenantId,
+        p_new_company: normalized.companyId,
+        p_new_name: normalized.name ?? null,
+      });
 
-    if (updateError) {
-      console.error("super-admin tenant update: write failed", updateError);
-      return NextResponse.json({ error: "Unable to update this tenant." }, { status: 500 });
+      if (moveError) {
+        const failure = interpretMoveTenantError(moveError);
+        console.error("super-admin tenant move: rpc failed", { code: moveError.code, status: failure.status });
+        return NextResponse.json(
+          failure.field ? { error: failure.error, field: failure.field } : { error: failure.error },
+          { status: failure.status },
+        );
+      }
+
+      // The function's own count is authoritative for users: it is taken in
+      // the same transaction as the move.
+      const profilesMoved = readProfilesMoved(moveResult);
+      if (moved && profilesMoved !== null) moved = { ...moved, users: profilesMoved };
+    } else {
+      const { error: updateError } = await admin.from("tenants").update(patch).eq("id", tenantId);
+
+      if (updateError) {
+        console.error("super-admin tenant update: write failed", updateError);
+        return NextResponse.json({ error: "Unable to update this tenant." }, { status: 500 });
+      }
+
+      await recordSuperAdminAudit(admin, {
+        actorId,
+        action: "tenant.rename",
+        targetType: "tenant",
+        targetId: tenantId,
+        changedFields: Object.keys(patch),
+        result: "ok",
+      });
     }
 
     // changedFields records fields PRESENT IN THE REQUEST (patch's keys),

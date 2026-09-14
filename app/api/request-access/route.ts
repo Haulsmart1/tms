@@ -2,73 +2,56 @@ import { NextResponse } from "next/server";
 import { Resend } from "resend";
 import { RequestAccessValidation } from "../../../lib/validation/requestAccess";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { RATE_LIMITS, checkRateLimit, clientIp } from "../../../lib/rateLimit";
+import {
+  REQUEST_ACCESS_DEDUPE_HOURS,
+  REQUEST_ACCESS_PER_EMAIL,
+  escapeLikePattern,
+  leadClientKey,
+  normalizeLeadEmail,
+  vehicleCountError,
+} from "../../../lib/auth/leadIntake";
 
-/* ABUSE PROTECTION.
-   This endpoint is public and unauthenticated, and sends an email on every
-   valid POST, so it is a target for inbox spam and Resend quota burn.
+/* ABUSE PROTECTION (AUTH-8).
+   This endpoint is public and unauthenticated, and sends a Teams card and an
+   email on every accepted POST, so it is a target for lead spam and Resend
+   quota burn.
 
    1. Honeypot: a field real users never see and never fill. If it arrives
       non-empty we return 200 WITHOUT sending, so a bot cannot tell it was
       rejected and will not simply retry with the field removed.
-   2. Rate limit: per client IP, held in memory. Know the limits of this. The
-      map is per server instance and resets on redeploy, so on serverless it is
-      a speed bump against trivial loops rather than a real limiter. If abuse
-      actually materialises, move to a shared store (Redis/Upstash) or put
-      Turnstile in front of the form. */
+   2. Durable rate limits (lib/rateLimit.ts, docs/sql/prodfix_01): per client
+      IP, and per lowercased email. The old limiter was an in-memory Map, per
+      serverless instance and reset on every cold start.
+   3. Dedupe: the same email inside REQUEST_ACCESS_DEDUPE_HOURS is answered ok
+      without storing or notifying again.
+   4. A ceiling on the vehicle count, which otherwise 500s at the int column.
+
+   Turnstile in front of the form is still the stronger control if a
+   distributed bot appears; it needs a site key (manual step). */
 const HONEYPOT_FIELD = "companyWebsite";
-const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX = 5;
-const RATE_LIMIT_MAX_KEYS = 10_000;
-const OVERFLOW_KEY = "__overflow__";
-const recentHits = new Map<string, number[]>();
-let lastPrune = 0;
-
-/* Identify the caller from a header the CLIENT CANNOT FORGE.
-   A raw x-forwarded-for is client-supplied on any proxy that appends rather
-   than overwrites, so keying on its leftmost value makes the limiter trivially
-   bypassable: a fresh spoofed value per request means every request looks like
-   a new client. We therefore trust only platform-set headers and otherwise fall
-   back to a single shared bucket, which fails CLOSED (everyone unidentifiable
-   shares one allowance) rather than open. */
-function clientKey(request: Request): string {
-  const trusted =
-    request.headers.get("x-vercel-forwarded-for") ?? request.headers.get("x-real-ip");
-  const value = trusted?.split(",")[0]?.trim();
-  return value && value.length > 0 ? value : "unidentified";
-}
-
-function isRateLimited(key: string): boolean {
-  const now = Date.now();
-
-  /* Prune at most once per window. The previous version walked the entire map
-     on every request, which is O(n^2) under a flood and turns the limiter into
-     its own denial-of-service vector. */
-  if (now - lastPrune > RATE_LIMIT_WINDOW_MS) {
-    lastPrune = now;
-    for (const [k, times] of recentHits) {
-      if (times.every((t) => now - t >= RATE_LIMIT_WINDOW_MS)) recentHits.delete(k);
-    }
-  }
-
-  /* Hard cap on distinct keys so a flood cannot exhaust memory. Once full, new
-     keys share one overflow bucket, so the worst case is a global 429 rather
-     than unbounded growth. */
-  const effectiveKey =
-    recentHits.has(key) || recentHits.size < RATE_LIMIT_MAX_KEYS ? key : OVERFLOW_KEY;
-
-  const mine = (recentHits.get(effectiveKey) ?? []).filter(
-    (t) => now - t < RATE_LIMIT_WINDOW_MS,
-  );
-  // Pushing past the threshold changes no decision; capping keeps one
-  // flooding key from growing its array without bound.
-  if (mine.length <= RATE_LIMIT_MAX) mine.push(now);
-  recentHits.set(effectiveKey, mine);
-  return mine.length > RATE_LIMIT_MAX;
-}
 
 export async function POST(request: Request) {
-  // Cheapest check first, before any parsing work.
-  if (isRateLimited(clientKey(request))) {
+  /* The admin client is needed first now, because the limiter lives in the
+     database. createAdminClient() throws when the service key is missing. */
+  let supabase;
+  try {
+    supabase = createAdminClient();
+  } catch (err) {
+    console.error("request-access: Supabase admin client unavailable", err);
+    return NextResponse.json(
+      { ok: false, error: "Server is not configured to receive requests." },
+      { status: 500 },
+    );
+  }
+
+  // Cheapest abuse check first, before any parsing work.
+  const ipLimit = await checkRateLimit(
+    supabase,
+    RATE_LIMITS.requestAccessPerIp,
+    leadClientKey(request.headers, clientIp),
+  );
+  if (!ipLimit.allowed) {
     return NextResponse.json(
       { ok: false, error: "Too many requests. Please try again shortly." },
       { status: 429 },
@@ -95,7 +78,43 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, fieldErrors }, { status: 400 });
   }
 
-  const { companyName, contactName, email, phone, vehicles, notes } = parsed.data;
+  const { companyName, contactName, phone, vehicles, notes } = parsed.data;
+  /* Stored lowercased, so dedupe and the per-email limit cannot be dodged by
+     changing case, and the super-admin list does not show one lead twice. */
+  const email = normalizeLeadEmail(parsed.data.email);
+
+  const vehiclesError = vehicleCountError(vehicles);
+  if (vehiclesError) {
+    return NextResponse.json({ ok: false, fieldErrors: { vehicles: [vehiclesError] } }, { status: 400 });
+  }
+
+  const emailLimit = await checkRateLimit(supabase, REQUEST_ACCESS_PER_EMAIL, email);
+  if (!emailLimit.allowed) {
+    return NextResponse.json(
+      { ok: false, error: "Too many requests. Please try again shortly." },
+      { status: 429 },
+    );
+  }
+
+  /* Case-insensitive, because rows stored before this change kept the email
+     as typed. A lookup failure does not block the lead: losing a real prospect
+     is worse than one duplicate notification, and the rate limits above still
+     bound the damage. */
+  const since = new Date(Date.now() - REQUEST_ACCESS_DEDUPE_HOURS * 3600 * 1000).toISOString();
+  const { data: recent, error: dedupeError } = await supabase
+    .from("registration_requests")
+    .select("id")
+    .ilike("email", escapeLikePattern(email))
+    .gte("created_at", since)
+    .limit(1);
+
+  if (dedupeError) {
+    console.error("request-access: duplicate check failed; storing anyway", dedupeError.code);
+  } else if ((recent ?? []).length > 0) {
+    // Same shape as a real success, so a resubmission looks identical to the
+    // visitor, and nobody is notified twice for one prospect.
+    return NextResponse.json({ ok: true, notified: true });
+  }
 
   /* The database is the system of record, not the email. Store the lead first
      and only then try to notify. If we emailed first and the send failed, the
@@ -104,17 +123,6 @@ export async function POST(request: Request) {
      `status` is deliberately omitted so the column default applies.
      No `.select()` is chained: that would ask PostgREST to read the row back,
      which is a different permission from writing it. */
-  let supabase;
-  try {
-    supabase = createAdminClient();
-  } catch (err) {
-    console.error("request-access: Supabase admin client unavailable", err);
-    return NextResponse.json(
-      { ok: false, error: "Server is not configured to receive requests." },
-      { status: 500 },
-    );
-  }
-
   const { error: insertError } = await supabase.from("registration_requests").insert({
     company_name: companyName,
     contact_name: contactName,
