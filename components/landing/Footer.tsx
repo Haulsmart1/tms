@@ -8,13 +8,10 @@ export default function Footer() {
           <span className="h-4 w-4 rounded bg-line-strong" aria-hidden />
           TMS Wizzard · Cloud transport management
         </div>
+        {/* Privacy and Terms are hidden, not faked (review SET-26). They were
+            href="#" placeholders that went nowhere. Restore them once real
+            privacy notice and terms pages are published. */}
         <nav className="flex gap-4" aria-label="Footer">
-          <a href="#" className="hover:text-ink-2">
-            Privacy
-          </a>
-          <a href="#" className="hover:text-ink-2">
-            Terms
-          </a>
           <a href="#request-access" className="hover:text-ink-2">
             Contact
           </a>
