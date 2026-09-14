@@ -5,8 +5,11 @@
 // revenue a year, which is why the cycle is a fixed 28 days rather than a
 // calendar month. See lib/billing/schedule.ts.
 
+import { VAT_RATE_PERCENT } from "./vat";
+
 export const WEEKS_PER_CYCLE = 4;
-export const VAT_RATE = 20; // percent
+// One source for the rate, shared with period billing: see ./vat.ts.
+export const VAT_RATE = VAT_RATE_PERCENT; // percent
 
 export type PriceTier = {
   /** Inclusive last vehicle position in this band; null means no ceiling. */
