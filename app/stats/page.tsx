@@ -1,11 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
 import { applyTenantFilter } from "../../lib/tenant/filter";
 import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
+import { fetchAllRows } from "../../lib/loading/paginate";
+import { countBillableVehicles } from "../../lib/billing/vehicleCount";
+import { isCollectableInvoiceStatus } from "../../lib/dashboard/days";
 import Button from "../../components/Button";
 import Card from "../../components/Card";
 import Skeleton from "../../components/Skeleton";
@@ -77,7 +80,7 @@ type Vehicle = {
   make: string | null;
   model: string | null;
   active: boolean | null;
-  billable: boolean | null;
+  tenant_id: string | null;
   vehicle_type: string | null;
 };
 
@@ -96,6 +99,7 @@ type Customer = {
 
 type VehicleLicence = {
   id: string;
+  vehicle_id: string | null;
   active: boolean | null;
   expiry_date: string | null;
 };
@@ -345,8 +349,13 @@ export default function StatsPage() {
   const [speedReadings, setSpeedReadings] =
     useState<SpeedReading[]>([]);
 
+  /* SET-13: latest request wins. A slower, bigger "All tenants" load must
+     not land after the selected tenant's figures and replace them. */
+  const loadSeqRef = useRef(0);
+
   const loadStats = useCallback(
     async (tenantId: string | null) => {
+      const seq = ++loadSeqRef.current;
       setStatus("loading");
       setMessage("");
 
@@ -367,6 +376,7 @@ export default function StatsPage() {
           speedRes,
           activityRes,
         ] = await Promise.all([
+          fetchAllRows((from, to) =>
           applyTenantFilter(
             supabase
               .from("jobs")
@@ -396,8 +406,9 @@ export default function StatsPage() {
             tenantId,
           ).order("created_at", {
             ascending: false,
-          }),
+          }).order("id").range(from, to)),
 
+          fetchAllRows((from, to) =>
           applyTenantFilter(
             supabase
               .from("invoices")
@@ -412,8 +423,9 @@ export default function StatsPage() {
             tenantId,
           ).order("created_at", {
             ascending: false,
-          }),
+          }).order("id").range(from, to)),
 
+          fetchAllRows((from, to) =>
           applyTenantFilter(
             supabase
               .from("vehicles")
@@ -423,14 +435,15 @@ export default function StatsPage() {
                 make,
                 model,
                 active,
-                billable,
+                tenant_id,
                 vehicle_type
               `),
             tenantId,
           ).order("registration", {
             ascending: true,
-          }),
+          }).order("id").range(from, to)),
 
+          fetchAllRows((from, to) =>
           applyTenantFilter(
             supabase
               .from("drivers")
@@ -442,8 +455,9 @@ export default function StatsPage() {
             tenantId,
           ).order("name", {
             ascending: true,
-          }),
+          }).order("id").range(from, to)),
 
+          fetchAllRows((from, to) =>
           applyTenantFilter(
             supabase
               .from("customers")
@@ -456,19 +470,26 @@ export default function StatsPage() {
             tenantId,
           ).order("name", {
             ascending: true,
-          }),
+          }).order("id").range(from, to)),
 
-          applyTenantFilter(
+          /* Active licences only, scoped below through the loaded vehicles
+             (lib/billing/vehicleCount.ts reads vehicles.tenant_id, never the
+             licence's own tenant_id). RLS still bounds what is returned. */
+          fetchAllRows((from, to) =>
             supabase
               .from("vehicle_licences")
               .select(`
                 id,
+                vehicle_id,
                 active,
                 expiry_date
-              `),
-            tenantId,
+              `)
+              .eq("active", true)
+              .order("id")
+              .range(from, to)
           ),
 
+          fetchAllRows((from, to) =>
           applyTenantFilter(
             supabase
               .from("vehicle_locations")
@@ -486,8 +507,10 @@ export default function StatsPage() {
             .order("recorded_at", {
               ascending: false,
             })
-            .limit(1000),
+            .order("id")
+            .range(from, to), { maxRows: 20000 }),
 
+          fetchAllRows((from, to) =>
           applyTenantFilter(
             supabase
               .from("driver_activity_logs")
@@ -505,8 +528,11 @@ export default function StatsPage() {
             .order("start_time", {
               ascending: false,
             })
-            .limit(1000),
+            .order("id")
+            .range(from, to), { maxRows: 20000 }),
         ]);
+
+        if (seq !== loadSeqRef.current) return;
 
         const failures: Array<
           [string, { message: string } | null]
@@ -575,10 +601,30 @@ export default function StatsPage() {
             []) as ActivityLog[]
         );
 
+        const truncated = [
+          ["jobs", jobsRes.truncated],
+          ["invoices", invoicesRes.truncated],
+          ["vehicles", vehiclesRes.truncated],
+          ["drivers", driversRes.truncated],
+          ["customers", customersRes.truncated],
+          ["licences", licencesRes.truncated],
+          ["speed readings", speedRes.truncated],
+          ["driver activity", activityRes.truncated],
+        ]
+          .filter(([, cut]) => cut)
+          .map(([label]) => label);
+
+        if (truncated.length > 0) {
+          setMessage(
+            `Some figures are incomplete: only the newest records were loaded for ${truncated.join(", ")}.`
+          );
+        }
+
         setDataTenantId(tenantId);
         setStatus("ready");
         setHasLoaded(true);
       } catch (error) {
+        if (seq !== loadSeqRef.current) return;
         setMessage(
           error instanceof Error
             ? error.message
@@ -601,6 +647,11 @@ export default function StatsPage() {
   });
 
   useEffect(() => {
+    /* SET-13: before the tenant resolves, activeTenantId is null, which
+       would load unscoped "All tenants" figures for an admin whose saved
+       selection is one tenant. */
+    if (tenant.status !== "ready") return;
+
     let cancelled = false;
 
     async function initialise() {
@@ -641,6 +692,7 @@ export default function StatsPage() {
   }, [
     loadStats,
     tenant.activeTenantId,
+    tenant.status,
   ]);
 
   const start = periodStart(period);
@@ -794,10 +846,8 @@ export default function StatsPage() {
         return false;
       }
 
-      if (
-        invoice.status === "paid" ||
-        invoice.status === "draft"
-      ) {
+      /* Void, credited, cancelled and draft invoices are not money owed. */
+      if (!isCollectableInvoiceStatus(invoice.status)) {
         return false;
       }
 
@@ -941,12 +991,38 @@ export default function StatsPage() {
         vehicle.active === true
     ).length;
 
+  /* There is no vehicles.billable column. Billable is defined once, in
+     lib/billing/vehicleCount.ts: a vehicle with at least one active
+     licence. Licences are scoped through the vehicles loaded above. */
+  const scopedVehicleIds = new Set(
+    vehicles.map((vehicle) => vehicle.id)
+  );
+
+  const scopedLicences = licences.filter(
+    (licence) =>
+      licence.vehicle_id !== null &&
+      scopedVehicleIds.has(licence.vehicle_id)
+  );
+
   const billableVehicles =
-    vehicles.filter(
-      (vehicle) =>
-        vehicle.active === true &&
-        vehicle.billable === true
-    ).length;
+    countBillableVehicles({
+      companyId: "",
+      companyTenantIds: Array.from(
+        new Set(
+          vehicles
+            .map((vehicle) => vehicle.tenant_id)
+            .filter((id): id is string => Boolean(id))
+        )
+      ),
+      vehicles: vehicles.map((vehicle) => ({
+        id: vehicle.id,
+        tenant_id: vehicle.tenant_id,
+      })),
+      licences: scopedLicences.map((licence) => ({
+        vehicle_id: licence.vehicle_id as string,
+        active: licence.active,
+      })),
+    });
 
   const vehiclesOffRoad =
     vehicles.filter(
@@ -967,7 +1043,7 @@ export default function StatsPage() {
   );
 
   const licencesExpiringSoon =
-    licences.filter((licence) => {
+    scopedLicences.filter((licence) => {
       if (
         licence.active !== true ||
         !licence.expiry_date
@@ -1325,7 +1401,7 @@ export default function StatsPage() {
                     billableVehicles
                   }
                   title="Billable vehicles"
-                  caption="Active vehicles marked billable"
+                  caption="Vehicles with at least one active licence"
                 />
 
                 <StatCard
