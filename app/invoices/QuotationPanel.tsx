@@ -1707,6 +1707,7 @@ export default function QuotationPanel({
         deliveryLogId?: string;
         id?: string | null;
         error?: string;
+        warnings?: unknown;
       };
 
       if (!response.ok) {
@@ -1715,6 +1716,16 @@ export default function QuotationPanel({
           "Unable to email quotation."
         );
       }
+
+      /* The email went out; follow-up bookkeeping that failed comes back as
+         warnings (INV-17, INV-25) and must be visible, not swallowed. */
+      const warningText =
+        Array.isArray(body.warnings)
+          ? body.warnings
+              .filter((item): item is string => typeof item === "string" && item.trim() !== "")
+              .map((item) => ` Warning: ${item}`)
+              .join("")
+          : "";
 
       const acknowledgement =
         body.id
@@ -1728,7 +1739,7 @@ export default function QuotationPanel({
         } emailed to ${
           body.recipient ||
           "the customer"
-        }. PDF and secure acceptance link included.${acknowledgement}`
+        }. PDF and secure acceptance link included.${acknowledgement}${warningText}`
       );
 
       await load();
@@ -3168,35 +3179,22 @@ export default function QuotationPanel({
                           {["draft", "sent"].includes(
                             quotation.status
                           ) ? (
-                            <>
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                disabled={working}
-                                onClick={() =>
-                                  void setStatus(
-                                    quotation,
-                                    "accepted"
-                                  )
-                                }
-                              >
-                                Accept
-                              </Button>
-
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                disabled={working}
-                                onClick={() =>
-                                  void setStatus(
-                                    quotation,
-                                    "declined"
-                                  )
-                                }
-                              >
-                                Decline
-                              </Button>
-                            </>
+                            /* No manual Accept (ACC-22 / INV-4): only the
+                               customer acceptance portal accepts a quotation,
+                               and the server refuses it with 409. */
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              disabled={working}
+                              onClick={() =>
+                                void setStatus(
+                                  quotation,
+                                  "declined"
+                                )
+                              }
+                            >
+                              Decline
+                            </Button>
                           ) : null}
 
                           {quotation.status === "accepted" &&
