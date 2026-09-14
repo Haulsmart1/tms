@@ -10,7 +10,11 @@ import {
 import {
   isValidIanaTimeZone,
   operatorDayInTimeZone,
+  resolveTimeZone,
+  utcRegulationWeekStart,
 } from "../time";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const PLANNING_DRIVER_ACTIVITY_ROW_LIMIT = 5000;
 
@@ -114,28 +118,6 @@ function parseLocalTime(
   }
 
   return result;
-}
-
-function addCalendarDays(value: string, days: number): string {
-  const parsed = parseLocalDay(value);
-
-  const date = new Date(
-    Date.UTC(
-      parsed.year,
-      parsed.month - 1,
-      parsed.day + days
-    )
-  );
-
-  return date.toISOString().slice(0, 10);
-}
-
-function localWeekday(value: string): number {
-  const parsed = parseLocalDay(value);
-
-  return new Date(
-    Date.UTC(parsed.year, parsed.month - 1, parsed.day)
-  ).getUTCDay();
 }
 
 function zonedParts(
@@ -302,30 +284,98 @@ export function planningStartForLocalDate(
   );
 }
 
-function zonedMidnight(
-  value: string,
+export type PlanningStartIssue =
+  | "invalid_time_zone"
+  | "invalid_date"
+  | "missing_start_time"
+  | "clock_change_gap";
+
+/**
+ * Why planningStartForLocalDate returned null, so the page can say the right
+ * thing (review PLAN-20). A start time inside the spring-forward gap (for
+ * example 01:30 on the last Sunday of March in London) is a real, valid
+ * driver setting that simply does not exist on that one day; blaming the
+ * driver profile for it is wrong.
+ */
+export function planningStartIssue(
+  localDate: string,
+  normalStartTime: string | null,
   timeZone: string
-): Date {
-  const target = parseLocalDay(value);
-
-  const result = resolveZonedDateTime(
-    {
-      ...target,
-      hour: 0,
-      minute: 0,
-      second: 0,
-    },
-    timeZone
-  );
-
-  if (!result) {
-    throw new RangeError(
-      `Unable to resolve ${value} in timezone ${timeZone}`
-    );
+): PlanningStartIssue | null {
+  if (!isValidIanaTimeZone(timeZone)) {
+    return "invalid_time_zone";
   }
 
-  return result;
+  let day: LocalDateParts;
+
+  try {
+    day = parseLocalDay(localDate);
+  } catch {
+    return "invalid_date";
+  }
+
+  const time = parseLocalTime(normalStartTime);
+
+  if (!time) {
+    return "missing_start_time";
+  }
+
+  return resolveZonedDateTime({ ...day, ...time }, timeZone)
+    ? null
+    : "clock_change_gap";
 }
+
+export type PlanningHoursInstant =
+  | {
+      /** Hours can be evaluated as at `instant`, which has already happened. */
+      kind: "known";
+      instant: Date;
+      /** True when the planning day is today and the start time has passed. */
+      rebasedToNow: boolean;
+    }
+  | {
+      /** The planning start is still in the future, so the hours in between are unknown. */
+      kind: "future";
+      planningStart: Date;
+    };
+
+/**
+ * The instant the driver's hours state is evaluated at, and the schedule
+ * starts from (review PLAN-2).
+ *
+ * planningStart is the selected day at the driver's normal start time. When
+ * the planner is working on TODAY after that time, the driver may already
+ * have driven. Evaluating at planningStart would drop everything recorded
+ * since, so an 06:00 start re-planned at 15:00 after 8 h 30 m of driving
+ * would show 9 h available. So for today, once the start has passed, the
+ * instant is "now": all recorded driving and duty up to now counts, including
+ * continuous driving since the last qualifying break, and ETAs start from now.
+ *
+ * A past day keeps its planned start (a historical view), and a future start
+ * is reported as such because the hours between now and then are unknown.
+ */
+export function planningHoursInstant(
+  planningDate: string,
+  planningStart: Date,
+  now: Date,
+  timeZone: string
+): PlanningHoursInstant {
+  if (planningStart.getTime() > now.getTime()) {
+    return { kind: "future", planningStart };
+  }
+
+  const today = operatorDayInTimeZone(
+    now,
+    resolveTimeZone(timeZone).timeZone
+  );
+
+  if (planningDate === today) {
+    return { kind: "known", instant: new Date(now.getTime()), rebasedToNow: true };
+  }
+
+  return { kind: "known", instant: planningStart, rebasedToNow: false };
+}
+
 
 export function planningDriverHoursBoundaries(
   planningStart: Date,
@@ -339,44 +389,26 @@ export function planningDriverHoursBoundaries(
     throw new RangeError(`Invalid IANA timezone: ${timeZone}`);
   }
 
-  const localDay = operatorDayInTimeZone(
-    planningStart,
-    timeZone
+  /*
+   * Weekly and two-week driving buckets use the UTC regulation week, Monday
+   * 00:00 to Sunday 24:00 UTC (EC 561/2006 Art 4(i), as recorded by digital
+   * tachographs), not Monday midnight in the operator zone. During BST the
+   * local week starts an hour earlier and would count that hour in a
+   * different week from enforcement analysis (review PLAN-17). The timezone
+   * still governs how local activity rows are read and how times display.
+   */
+  const currentWeekStart = utcRegulationWeekStart(planningStart);
+  const previousWeekStart = new Date(
+    currentWeekStart.getTime() - 7 * DAY_MS
   );
-
-  const weekday = localWeekday(localDay);
-
-  // JavaScript Sunday=0; convert to days since Monday.
-  const daysSinceMonday = (weekday + 6) % 7;
-
-  const currentWeekLocalStart = addCalendarDays(
-    localDay,
-    -daysSinceMonday
-  );
-
-  const previousWeekLocalStart = addCalendarDays(
-    currentWeekLocalStart,
-    -7
-  );
-
-  const historyLocalStart = addCalendarDays(
-    previousWeekLocalStart,
-    -HISTORY_BUFFER_DAYS
+  const historyCoverageStart = new Date(
+    previousWeekStart.getTime() - HISTORY_BUFFER_DAYS * DAY_MS
   );
 
   return {
-    historyCoverageStart: zonedMidnight(
-      historyLocalStart,
-      timeZone
-    ),
-    previousWeekStart: zonedMidnight(
-      previousWeekLocalStart,
-      timeZone
-    ),
-    currentWeekStart: zonedMidnight(
-      currentWeekLocalStart,
-      timeZone
-    ),
+    historyCoverageStart,
+    previousWeekStart,
+    currentWeekStart,
   };
 }
 

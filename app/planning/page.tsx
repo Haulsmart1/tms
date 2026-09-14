@@ -36,7 +36,9 @@ import { buildPlanningPhysicalItinerary } from "../../lib/planning/physicalItine
 import {
   buildPlanningDriverHoursState,
   planningDriverHoursBoundaries,
+  planningHoursInstant,
   planningStartForLocalDate,
+  planningStartIssue,
   PLANNING_DRIVER_ACTIVITY_ROW_LIMIT,
   type PlanningDriverActivityRow,
 } from "../../lib/planning/planningDriverActivity";
@@ -71,6 +73,7 @@ import { createSupabasePositionSource } from "../../lib/tracking/supabasePositio
 import type { PositionReading } from "../../lib/tracking/position";
 import {
   evaluatePlanningCompliance,
+  PLANNING_CHECKS_NOT_PERFORMED,
   type PlanningCompliance,
   type PlanningComplianceDriver,
 } from "../../lib/planning/compliance";
@@ -110,6 +113,8 @@ type Driver = PlanningComplianceDriver & {
    larger with a 400 (it does not truncate), so the client chunks. */
 const GEOCODE_BATCH = 100;
 const POSITION_POLL_MS = 30_000;
+/* How often today's driver-hours state is re-evaluated against "now". */
+const HOURS_REFRESH_MS = 5 * 60_000;
 
 export default function PlanningPage() {
   const router = useRouter();
@@ -156,6 +161,10 @@ export default function PlanningPage() {
     useState<string | null>(null);
   const [driverScheduleLoading, setDriverScheduleLoading] =
     useState(false);
+  /* Assumptions behind the preview the planner must see (PLAN-2, PLAN-24). */
+  const [driverScheduleNotes, setDriverScheduleNotes] =
+    useState<string[]>([]);
+  const [hoursClock, setHoursClock] = useState(() => Date.now());
   const [pendingItineraries, setPendingItineraries] = useState<
     Record<string, PendingPlanningItinerary>
   >({});
@@ -1827,6 +1836,11 @@ export default function PlanningPage() {
      * Activity can only establish legal state up to an instant that has
      * actually happened. A future planning start necessarily contains an
      * unknown interval of future activity, so it remains incomplete.
+     *
+     * When planning TODAY after the driver's start time, the state is
+     * evaluated at now, not at the start time, so driving and duty already
+     * recorded today count (review PLAN-2). hoursClock re-runs this every few
+     * minutes so "now" does not freeze while the tab stays open.
      */
     const activityKnownThrough = new Date();
 
@@ -1847,15 +1861,25 @@ export default function PlanningPage() {
             planningTimeZone
           );
 
-          if (
-            !planningStart ||
-            planningStart.getTime() > activityKnownThrough.getTime()
-          ) {
+          if (!planningStart) {
             return [driverId, null] as const;
           }
 
-          const boundaries = planningDriverHoursBoundaries(
+          const hoursWindow = planningHoursInstant(
+            date,
             planningStart,
+            activityKnownThrough,
+            planningTimeZone
+          );
+
+          if (hoursWindow.kind === "future") {
+            return [driverId, null] as const;
+          }
+
+          const evaluatedAt = hoursWindow.instant;
+
+          const boundaries = planningDriverHoursBoundaries(
+            evaluatedAt,
             planningTimeZone
           );
 
@@ -1877,7 +1901,7 @@ export default function PlanningPage() {
               "end_time",
               boundaries.historyCoverageStart.toISOString()
             )
-            .lt("start_time", planningStart.toISOString())
+            .lt("start_time", evaluatedAt.toISOString())
             .order("start_time", { ascending: true })
             .limit(PLANNING_DRIVER_ACTIVITY_ROW_LIMIT);
 
@@ -1899,7 +1923,7 @@ export default function PlanningPage() {
             driverId,
             buildPlanningDriverHoursState(
               rows,
-              planningStart,
+              evaluatedAt,
               planningTimeZone
             ),
           ] as const;
@@ -1924,12 +1948,24 @@ export default function PlanningPage() {
     laneDrivers,
     planningTimeZone,
     supabase,
+    hoursClock,
   ]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        setHoursClock(Date.now());
+      }
+    }, HOURS_REFRESH_MS);
+
+    return () => window.clearInterval(timer);
+  }, []);
 
 
   useEffect(() => {
     setSelectedDriverSchedule(null);
     setDriverScheduleNotice(null);
+    setDriverScheduleNotes([]);
     setDriverScheduleLoading(false);
 
     if (!selectedVehicleId) return;
@@ -1978,9 +2014,44 @@ export default function PlanningPage() {
 
     if (!planningStart) {
       setDriverScheduleNotice(
-        "Set a valid normal start time for this driver before calculating driver hours."
+        planningStartIssue(
+          date,
+          driver.normal_start_time,
+          planningTimeZone
+        ) === "clock_change_gap"
+          ? `The driver's normal start time ${driver.normal_start_time?.slice(0, 5)} does not exist on ${date} in ${planningTimeZone}, because the clocks go forward then. The driver profile is fine; this day needs a start after the change.`
+          : "Set a valid normal start time for this driver before calculating driver hours."
       );
       return;
+    }
+
+    const scheduleNow = new Date();
+    const hoursWindow = planningHoursInstant(
+      date,
+      planningStart,
+      scheduleNow,
+      planningTimeZone
+    );
+    /* Today, after the start time: ETAs start from now (review PLAN-2). */
+    const scheduleStart =
+      hoursWindow.kind === "known" ? hoursWindow.instant : planningStart;
+    /* A later day: the vehicle's current GPS fix says nothing about where it
+       starts that day (review PLAN-24), and no depot coordinate exists. */
+    const futureDay =
+      date > operatorDayInTimeZone(scheduleNow, planningTimeZone);
+
+    const scheduleNotes: string[] = [];
+
+    if (hoursWindow.kind === "known" && hoursWindow.rebasedToNow) {
+      scheduleNotes.push(
+        "Today's start time has passed, so ETAs start from now and the driving already recorded today is counted."
+      );
+    }
+
+    if (futureDay) {
+      scheduleNotes.push(
+        "This is a future day, so travel to the first stop is not included: the vehicle's start location for that day is unknown. Recorded driver hours before that day are not applied either."
+      );
     }
 
     const regime = laneRegimeByVehicle.get(selectedVehicleId);
@@ -2007,9 +2078,10 @@ export default function PlanningPage() {
     const reading = positions.get(selectedVehicleId);
 
     if (
-      !reading ||
-      !Number.isFinite(reading.lat) ||
-      !Number.isFinite(reading.lng)
+      !futureDay &&
+      (!reading ||
+        !Number.isFinite(reading.lat) ||
+        !Number.isFinite(reading.lng))
     ) {
       setDriverScheduleNotice(
         "Driver-hours preview needs the vehicle's last-known position."
@@ -2035,10 +2107,12 @@ export default function PlanningPage() {
         const firstPoint = canonical.orderedVisits[0].point;
 
         const firstTravelSeconds =
-          await loadPointToPointTravelSeconds(
-            { lat: reading.lat, lng: reading.lng },
-            firstPoint
-          );
+          futureDay || !reading
+            ? 0
+            : await loadPointToPointTravelSeconds(
+                { lat: reading.lat, lng: reading.lng },
+                firstPoint
+              );
 
         if (cancelled) return;
 
@@ -2057,9 +2131,12 @@ export default function PlanningPage() {
           firstTravelSeconds,
           planningProfile: driver.planning_profile,
           planningDate: date,
-          planningStart,
-          driverHoursState: driverHoursById[driverId] ?? null,
+          planningStart: scheduleStart,
+          driverHoursState: futureDay
+            ? null
+            : driverHoursById[driverId] ?? null,
           activityDataAvailable:
+            !futureDay &&
             driverHoursById[driverId]?.complete === true,
           startLocationId: `vehicle:${selectedVehicleId}`,
           regime: regime.regime,
@@ -2087,6 +2164,7 @@ export default function PlanningPage() {
         }
 
         setSelectedDriverSchedule(result.preview);
+        setDriverScheduleNotes(scheduleNotes);
         setDriverScheduleNotice(null);
       } catch {
         if (!cancelled) {
@@ -2138,9 +2216,10 @@ export default function PlanningPage() {
             jobCount === 0
               ? 0
               : route?.totalTravelTimeSeconds ?? null,
-          activityDataAvailable:
-            driverId !== null &&
-            driverHoursById[driverId]?.complete === true,
+          driverHours:
+            driverId !== null
+              ? driverHoursById[driverId] ?? null
+              : null,
           today,
         })
       );
@@ -2305,9 +2384,11 @@ export default function PlanningPage() {
             </div>
 
             <p className="sm:col-span-2 xl:col-span-5 text-xs text-ink-3">
-              Advisory mode: no hard dispatch blocks. Actual driving,
-              remaining hours, breaks and WTD stay unknown until driver
-              activity data is available.
+              Advisory only: nothing here blocks dispatch or confirms a plan
+              is legal. With complete driver activity data each lane checks
+              daily (9 h), weekly (56 h) and two-week (90 h) driving and when
+              a 45 min break is due; without it, hours are not checked at all.{" "}
+              {PLANNING_CHECKS_NOT_PERFORMED}
             </p>
           </section>
 
@@ -2505,7 +2586,18 @@ export default function PlanningPage() {
                         <p className="mt-2 text-xs text-ink-3">
                           Advisory planning only. The rule profile is deliberately
                           unverified, so this does not assert legal compliance.
+                          It places 45 min breaks and a daily rest when 9 h of
+                          driving would be passed; loading and service time never
+                          trigger a break or rest. {PLANNING_CHECKS_NOT_PERFORMED}
                         </p>
+
+                        {driverScheduleNotes.length > 0 ? (
+                          <div className="mt-2 space-y-1 text-xs text-ink-2">
+                            {driverScheduleNotes.map((note) => (
+                              <p key={note}>{note}</p>
+                            ))}
+                          </div>
+                        ) : null}
 
                         <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink-2">
                           <span>
@@ -2673,7 +2765,7 @@ export default function PlanningPage() {
                           driver: null,
                           hasPlannedJobs: false,
                           plannedDrivingSeconds: 0,
-                          activityDataAvailable: false,
+                          driverHours: null,
                           today: operatorDayInTimeZone(
                             positionNow,
                             planningTimeZone

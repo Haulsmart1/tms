@@ -147,35 +147,37 @@ export default function VehicleLane({
                   : "text-ink-2"
             }`}
           >
-            Wizard: {compliance.statusLabel}
+            Driver hours: {compliance.statusLabel}
           </span>
 
-          <span className="text-xs text-ink-2">
-            Planned drive{" "}
+          <span
+            className="text-xs text-ink-2"
+            title="Car-routing estimate without traffic between this lane's stops. HGV speeds, restrictions and travel to the first stop are not included."
+          >
+            Planned drive (car estimate){" "}
             {compliance.plannedDrivingSeconds === null
               ? "route pending"
               : formatDuration(compliance.plannedDrivingSeconds)}
           </span>
 
+          {/* Real values from the driver's recorded hours, or plainly unknown.
+              These used to read "calculated" when nothing was (PLAN-1). */}
           <span className="text-xs text-ink-3">
-            Actual drive{" "}
-            {compliance.dataComplete
-              ? "available"
-              : "no activity data"}
+            Daily drive left{" "}
+            {compliance.dailyDrivingRemainingSeconds === null
+              ? "unknown"
+              : formatDuration(compliance.dailyDrivingRemainingSeconds)}
           </span>
 
           <span className="text-xs text-ink-3">
-            Break due{" "}
-            {compliance.dataComplete
-              ? "calculated"
-              : "cannot calculate"}
+            Break due after{" "}
+            {compliance.breakDueAfterSeconds === null
+              ? "unknown"
+              : formatDuration(compliance.breakDueAfterSeconds)}
           </span>
 
           <span className="text-xs text-ink-3">
-            WTD{" "}
-            {compliance.dataComplete
-              ? "calculated"
-              : "cannot calculate"}
+            Rest and WTD not checked
           </span>
         </div>
 
