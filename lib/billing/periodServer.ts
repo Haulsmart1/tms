@@ -26,6 +26,7 @@ import { refundPeriodMinimum } from "./periodPaymentServer";
 import { roundHalfUpDiv } from "./pence";
 import type { PeriodPaymentProvider } from "./periodPayment";
 import { londonDateISO, nextRetryOn } from "./schedule";
+import { NEW_COMPANY_BILLING_MODEL, PERIOD_MINIMUM_PENCE } from "./rateCard";
 
 // Mirrors lib/billing/server.ts. PostgREST caps an unscoped select at 1000
 // rows by default, and a truncated result here would silently under-bill, so
@@ -755,7 +756,25 @@ export async function resolveActivation(
       })
     | null;
 
-  if (!settings || settings.billing_model !== "v2_period") {
+  /* No row goes through the pure decision rather than straight to legacy.
+     On a v2 default it is refused there; see selectActivationAction. Sent with
+     no period and no pending minimum because a company with no billing row
+     cannot have either. */
+  if (!settings) {
+    return {
+      action: selectActivationAction({
+        billingRow: null,
+        openPeriod: null,
+        openPeriodMinimumPending: false,
+        todayISO,
+        minimumPence: PERIOD_MINIMUM_PENCE,
+        newCompanyBillingModel: NEW_COMPANY_BILLING_MODEL,
+      }),
+      settings: null,
+    };
+  }
+
+  if (settings.billing_model !== "v2_period") {
     return { action: { kind: "legacy" }, settings: null };
   }
 
@@ -804,6 +823,8 @@ export async function resolveActivation(
       openPeriodMinimumPending,
       todayISO,
       minimumPence: settings.min_invoice_pence,
+      // Not consulted: billingRow is non-null here. Required by the type.
+      newCompanyBillingModel: NEW_COMPANY_BILLING_MODEL,
     }),
     settings,
   };

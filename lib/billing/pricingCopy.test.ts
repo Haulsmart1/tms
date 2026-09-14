@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { formatPence } from "./format";
 import {
   DISCOUNT_BANDS,
   PERIOD_DAYS,
@@ -8,6 +9,7 @@ import {
 } from "./rateCard";
 import {
   BILLING_BASIS_SENTENCE,
+  CARD_SETUP_SENTENCE,
   THRESHOLD_PARITY_SENTENCE,
   includedVehicleCount,
   pricingBandRows,
@@ -123,5 +125,23 @@ describe("THRESHOLD_PARITY_SENTENCE", () => {
     }
     expect(parity).toContain(9);
     expect(parity).toContain(19);
+  });
+});
+
+describe("CARD_SETUP_SENTENCE", () => {
+  // Shown beside the card form to a company with no card yet. The v1 wording
+  // it replaces on v2 said "Your first charge is taken today", which is false
+  // for a model that takes nothing until a vehicle is activated.
+  it("does not claim a charge is taken today", () => {
+    expect(CARD_SETUP_SENTENCE).not.toMatch(/taken today/i);
+    expect(CARD_SETUP_SENTENCE).toMatch(/nothing is charged/i);
+  });
+
+  it("names the minimum from the rate card, not a literal", () => {
+    expect(CARD_SETUP_SENTENCE).toContain(formatPence(PERIOD_MINIMUM_PENCE));
+  });
+
+  it("names the trigger that takes the first payment", () => {
+    expect(CARD_SETUP_SENTENCE).toMatch(/first vehicle/i);
   });
 });

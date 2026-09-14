@@ -12,6 +12,7 @@ import { requireCompanyAdmin } from "../../../../lib/billing/server";
 import { previewPeriodInvoice } from "../../../../lib/billing/periodServer";
 import type { CompanyBillingSettings } from "../../../../lib/billing/periodServer";
 import { balanceDue } from "../../../../lib/billing/periodPayment";
+import { billingModelForRow } from "../../../../lib/billing/rateCard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,12 +53,22 @@ export async function GET() {
     const settings = settingsRes.data as CompanyBillingSettings | null;
 
     /* Refused rather than answered with v1 figures. A v1 company rendering a
-       v2 projection would show a bill that will never be raised. */
-    if (!settings || settings.billing_model !== "v2_period") {
+       v2 projection would show a bill that will never be raised. The same
+       rule the billing page shell forks on, so the two cannot disagree about
+       which model a company is on. */
+    if (billingModelForRow(settings) !== "v2_period") {
       return NextResponse.json(
         { error: "This account is not on period billing." },
         { status: 409 }
       );
+    }
+
+    /* No row, on a v2 default: a company that has not added a card yet. It
+       cannot have a period, and a 409 here would put a red "could not load"
+       banner in front of a new customer on their first visit. Same steady
+       state as the no-period answer below. */
+    if (!settings) {
+      return NextResponse.json({ ok: true, period: null });
     }
 
     /* maybeSingle is safe: billing_06 carries a partial unique index allowing

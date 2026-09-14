@@ -50,11 +50,27 @@ export function selectActivationAction(args: {
   openPeriodMinimumPending: boolean;
   todayISO: string;
   minimumPence: number;
+  /**
+   * NEW_COMPANY_BILLING_MODEL, passed in rather than imported so each test
+   * states which world it is in and none silently changes meaning when the
+   * default does.
+   */
+  newCompanyBillingModel: "v1_immediate" | "v2_period";
 }): ActivationAction {
-  // The model flag lives on company_billing, so no row means the company
-  // cannot be on v2. Falling through rather than blocking is what keeps every
-  // existing customer working while v2 rolls out one company at a time.
-  if (!args.billingRow) return { kind: "legacy" };
+  // No row means the company has not added a card. On a v1 default it falls
+  // through to the v1 path, whose first card save charges the whole fleet.
+  //
+  // On a v2 default that would be a leak. The v1 path treats no row as a free
+  // no_subscription activation, but v2's card save takes nothing and only an
+  // activation opens a period, so vehicles activated before the card would
+  // never be billed. Refused instead, with the reason v2 already uses for a
+  // company that has no card: its first activation charges the minimum, and
+  // needs one.
+  if (!args.billingRow) {
+    return args.newCompanyBillingModel === "v2_period"
+      ? { kind: "blocked", reason: "no_payment_method" }
+      : { kind: "legacy" };
+  }
   if (args.billingRow.billingModel !== "v2_period") return { kind: "legacy" };
 
   // Suspension gates, mirroring selectAddonAction's. Under arrears a company

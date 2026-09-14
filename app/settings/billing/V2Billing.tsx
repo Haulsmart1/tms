@@ -34,6 +34,7 @@ import {
 } from "../../../lib/billing/periodView";
 import {
   BILLING_BASIS_SENTENCE,
+  CARD_SETUP_SENTENCE,
   pricingHeadline,
 } from "../../../lib/billing/pricingCopy";
 import PaymentMethodCard, { type BillingRow } from "./PaymentMethodCard";
@@ -409,7 +410,11 @@ export default function V2Billing() {
             wrong diagnosis is the worst thing it can do: the operator is here
             precisely because a charge did not happen, and this card would send
             them looking in the wrong place. */}
-        {!busy && !loadError?.preview && preview && !period && !migrationMissing ? (
+        {/* Also gated on a company_billing row existing. With no row the
+            company has not added a card yet, and three reasons a charge did
+            not happen answers a question nobody has asked. The card form below
+            says what happens next instead. */}
+        {!busy && !loadError?.preview && preview && !period && !migrationMissing && billing ? (
           <Card kicker="No open period" className="mb-6">
             <p className="m-0 text-sm text-ink-2">
               Nothing is being billed right now. A period opens when the first
@@ -492,6 +497,7 @@ export default function V2Billing() {
             billing={billing}
             loadError={Boolean(loadError?.billing)}
             showForm={showCardForm}
+            setupNotice={CARD_SETUP_SENTENCE}
             onReplace={() => {
               setNotice(null);
               setShowCardForm(true);
@@ -503,13 +509,22 @@ export default function V2Billing() {
                  the period is charged when it closes. A "subscription started,
                  £X charged" notice here would announce a payment that did not
                  happen. */
+              /* model is only present on a FIRST save (the route's new-company
+                 branch). Saying "Card updated" there is wrong twice over: no
+                 card was updated, and it leaves the customer wondering whether
+                 they were charged. */
               setNotice(
                 response.retried && response.succeeded === false
                   ? {
                       tone: "warning",
                       text: `New card saved, but the outstanding charge was declined (${String(response.failureCode ?? "declined")}). It will be retried automatically.`,
                     }
-                  : { tone: "success", text: "Card updated." }
+                  : response.model === "v2_period"
+                    ? {
+                        tone: "success",
+                        text: "Card saved. Nothing has been charged. Your first payment is taken when you activate your first vehicle for billing.",
+                      }
+                    : { tone: "success", text: "Card updated." }
               );
               void load();
             }}

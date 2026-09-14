@@ -179,3 +179,41 @@ function pricedBands(
     )
   );
 }
+
+/**
+ * The billing model a BRAND NEW company is created on.
+ *
+ * Which model a new company gets cannot be read from a company_billing row,
+ * because at signup there is not one yet. So it is a constant, in one place,
+ * and switching the product's default pricing is a one-line reviewable change
+ * rather than a hunt through the signup path.
+ *
+ * Existing companies are unaffected: their row already carries a
+ * billing_model, and nothing here rewrites it. Use
+ * scripts/migrate-company-to-period-billing.mjs to move one.
+ */
+export const NEW_COMPANY_BILLING_MODEL: "v1_immediate" | "v2_period" =
+  "v2_period";
+
+/**
+ * Which model a company's billing page should render, given its
+ * company_billing row as read with select("*").
+ *
+ * Two absences look alike and must not be merged:
+ *
+ *   - NO ROW: the company has not added a card yet. It will be created on
+ *     NEW_COMPANY_BILLING_MODEL, so that is the price its page must show.
+ *   - A ROW WITHOUT THE COLUMN: billing_06 is not applied, so billing_model
+ *     does not exist, and that company is on v1. Treating this as "no row"
+ *     would render every existing company as v2 the moment the default flips.
+ *
+ * Anything that is not exactly "v2_period" fails closed to v1. A company
+ * wrongly shown v1 sees a stale but harmless page; one wrongly shown v2 sees a
+ * bill that does not exist.
+ */
+export function billingModelForRow(
+  row: { billing_model?: string | null } | null
+): "v1_immediate" | "v2_period" {
+  if (row === null) return NEW_COMPANY_BILLING_MODEL;
+  return row.billing_model === "v2_period" ? "v2_period" : "v1_immediate";
+}

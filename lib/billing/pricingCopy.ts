@@ -119,3 +119,17 @@ export const BILLING_BASIS_SENTENCE =
 export const THRESHOLD_PARITY_SENTENCE =
   "A fleet just below a discount threshold pays the threshold price, so " +
   "growing never costs you more.";
+
+/**
+ * Beside the card form, for a company that has not added a card yet.
+ *
+ * v2 takes NO money when a card is saved: the minimum is charged when the
+ * first vehicle is activated for billing, and that activation opens the first
+ * period. The shared card component's v1 wording, "Your first charge is taken
+ * today", is false here, and it is false at the one moment a new customer is
+ * deciding whether to trust us with a card.
+ */
+export const CARD_SETUP_SENTENCE =
+  `Add a card to set up billing. Nothing is charged today: your first ` +
+  `payment, the ${formatPence(PERIOD_MINIMUM_PENCE)} minimum plus VAT, is ` +
+  `taken when you activate your first vehicle for billing.`;

@@ -23,6 +23,7 @@ function action(overrides: Partial<Parameters<typeof selectActivationAction>[0]>
     openPeriodMinimumPending: false,
     todayISO: TODAY,
     minimumPence: 12900,
+    newCompanyBillingModel: "v1_immediate",
     ...overrides,
   });
 }
@@ -32,7 +33,22 @@ describe("selectActivationAction routing", () => {
   // v2 and must fall through to the path that exists today. This is the branch
   // that keeps every current customer working while v2 rolls out.
   it("falls through to v1 for a company with no billing row", () => {
-    expect(action({ billingRow: null })).toEqual({ kind: "legacy" });
+    expect(
+      action({ billingRow: null, newCompanyBillingModel: "v1_immediate" })
+    ).toEqual({ kind: "legacy" });
+  });
+
+  // With v2 as the default, no row means a company that has not added a card
+  // yet, and falling through would reach selectAddonAction's free
+  // no_subscription branch. That was safe on v1, because the first card save
+  // charged the whole fleet. On v2 the card save takes nothing and only an
+  // activation opens a period, so every vehicle activated before the card
+  // would be billable and never billed. The first v2 activation has to charge
+  // the minimum anyway, so it needs a card first.
+  it("refuses a no-row company when new companies are created on v2", () => {
+    expect(
+      action({ billingRow: null, newCompanyBillingModel: "v2_period" })
+    ).toEqual({ kind: "blocked", reason: "no_payment_method" });
   });
 
   it("falls through to v1 for a company still on the old model", () => {
