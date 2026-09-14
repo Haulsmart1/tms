@@ -1,8 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
   canDeleteJobStatus,
+  hasOperationalJobRecords,
   hasProtectedJobLinks,
 } from "./deletePolicy";
+
+describe("hasOperationalJobRecords", () => {
+  it("allows deletion with no POD evidence or scans", () => {
+    expect(hasOperationalJobRecords({ podEvidence: 0, itemScans: 0 })).toBe(false);
+  });
+
+  it("blocks a job with POD evidence, whose files would be orphaned", () => {
+    expect(hasOperationalJobRecords({ podEvidence: 1, itemScans: 0 })).toBe(true);
+  });
+
+  it("blocks a job with barcode scans", () => {
+    expect(hasOperationalJobRecords({ podEvidence: 0, itemScans: 3 })).toBe(true);
+  });
+});
 
 describe("canDeleteJobStatus", () => {
   it("allows pending acceptance jobs", () => {

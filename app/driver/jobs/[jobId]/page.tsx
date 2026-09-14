@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import BarcodeVerification from "./BarcodeVerification";
+import { preparePodPhoto } from "./downscaleImage";
 import {
   type ChangeEvent,
   use,
@@ -10,6 +11,12 @@ import {
   useRef,
   useState,
 } from "react";
+import { createClient } from "../../../../lib/supabase/browser";
+import {
+  errorFromBody,
+  readJsonSafe,
+  uploadEvidenceViaSignedUrl,
+} from "../../../../lib/pod/uploadClient";
 
 type PodEvidence = {
   id: string;
@@ -78,14 +85,7 @@ type Job = {
   stops: Stop[];
 };
 
-type JobResponse = {
-  job?: Job;
-  error?: string;
-};
-
-type ApiResponse = {
-  error?: string;
-};
+const POD_BUCKET = "pod-files";
 
 export default function DriverJobPage({
   params,
@@ -103,9 +103,18 @@ export default function DriverJobPage({
   const [message, setMessage] =
     useState("");
 
+  /* The full-page loader shows on the FIRST load only (review POD-11).
+     Refreshing after an upload or scan used to swap the whole page for
+     "Loading job...", which unmounted every stop card: the typed recipient
+     name and notes were lost and the camera scanner closed after each scan.
+     A refresh now keeps the job on screen and updates it in place. */
+  const hasJob = useRef(false);
+
   const loadJob =
     useCallback(async () => {
-      setLoading(true);
+      if (!hasJob.current) {
+        setLoading(true);
+      }
 
       try {
         const response =
@@ -117,22 +126,28 @@ export default function DriverJobPage({
           );
 
         const body =
-          (await response.json()) as JobResponse;
+          await readJsonSafe(response);
 
         if (
           !response.ok ||
           !body.job
         ) {
           throw new Error(
-            body.error ||
+            errorFromBody(
+              body,
+              response.status,
               "Unable to load this job.",
+            ),
           );
         }
 
-        setJob(body.job);
+        setJob(body.job as Job);
+        hasJob.current = true;
         setMessage("");
       } catch (error) {
-        setJob(null);
+        if (!hasJob.current) {
+          setJob(null);
+        }
 
         setMessage(
           error instanceof Error
@@ -148,7 +163,7 @@ export default function DriverJobPage({
     void loadJob();
   }, [loadJob]);
 
-  if (loading) {
+  if (loading && !job) {
     return (
       <main className="min-h-screen bg-slate-100 px-4 py-6 text-slate-950">
         <div className="mx-auto max-w-2xl">
@@ -192,6 +207,12 @@ export default function DriverJobPage({
         >
           ← Today's jobs
         </Link>
+
+        {message ? (
+          <div className="mt-2 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-900">
+            {message}
+          </div>
+        ) : null}
 
         <section className="mt-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -334,11 +355,13 @@ function StopCard({
 
   useEffect(() => {
     setRecipientName(
-      stop.recipient_name ?? "",
+      (current) =>
+        stop.recipient_name ?? current,
     );
 
     setPodNotes(
-      stop.pod_notes ?? "",
+      (current) =>
+        stop.pod_notes ?? current,
     );
   }, [
     stop.recipient_name,
@@ -355,6 +378,9 @@ function StopCard({
 
   const navigationUrl =
     `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`;
+
+  const stopEndpoint =
+    `/api/driver/jobs/${encodeURIComponent(jobId)}/stops/${encodeURIComponent(stop.id)}`;
 
   async function uploadPhoto(
     event:
@@ -374,32 +400,25 @@ function StopCard({
     setMessage("");
 
     try {
-      const formData =
-        new FormData();
+      // Shrink large camera photos on the phone, then send the bytes straight
+      // to storage with a server-issued signed URL (review POD-2).
+      const photo =
+        await preparePodPhoto(file);
 
-      formData.append(
-        "file",
-        file,
-      );
-
-      const response =
-        await fetch(
-          `/api/driver/jobs/${encodeURIComponent(jobId)}/stops/${encodeURIComponent(stop.id)}/evidence`,
-          {
-            method: "POST",
-            body: formData,
-          },
-        );
-
-      const body =
-        (await response.json()) as ApiResponse;
-
-      if (!response.ok) {
-        throw new Error(
-          body.error ||
-            "Unable to upload POD photo.",
-        );
-      }
+      await uploadEvidenceViaSignedUrl({
+        fetchImpl: fetch,
+        storage:
+          createClient().storage.from(
+            POD_BUCKET,
+          ),
+        uploadUrlEndpoint:
+          `${stopEndpoint}/evidence/upload-url`,
+        recordEndpoint:
+          `${stopEndpoint}/evidence`,
+        file: photo.blob,
+        filename: photo.filename,
+        mimeType: photo.mimeType,
+      });
 
       setMessage(
         "POD photo uploaded.",
@@ -425,7 +444,7 @@ function StopCard({
     try {
       const response =
         await fetch(
-          `/api/driver/jobs/${encodeURIComponent(jobId)}/stops/${encodeURIComponent(stop.id)}/complete`,
+          `${stopEndpoint}/complete`,
           {
             method: "POST",
             headers: {
@@ -442,12 +461,15 @@ function StopCard({
         );
 
       const body =
-        (await response.json()) as ApiResponse;
+        await readJsonSafe(response);
 
       if (!response.ok) {
         throw new Error(
-          body.error ||
+          errorFromBody(
+            body,
+            response.status,
             "Unable to complete delivery.",
+          ),
         );
       }
 
@@ -544,13 +566,16 @@ function StopCard({
           />
         </div>
 
-        <BarcodeVerification
-          jobId={jobId}
-          stopId={stop.id}
-          items={items}
-          scans={scans}
-          onChanged={onChanged}
-        />
+        {/* Scans are taken at delivery stops that are still open (review POD-20). */}
+        {isDelivery && !delivered ? (
+          <BarcodeVerification
+            jobId={jobId}
+            stopId={stop.id}
+            items={items}
+            scans={scans}
+            onChanged={onChanged}
+          />
+        ) : null}
 
         {isDelivery ? (
           <div className="mt-5 border-t border-slate-100 pt-5">
@@ -792,7 +817,7 @@ function Info({
       </div>
 
       <div className="mt-1 break-words text-sm font-bold">
-        {value || "—"}
+        {value || "-"}
       </div>
     </div>
   );

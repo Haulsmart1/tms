@@ -31,7 +31,7 @@ export async function GET(
       );
     }
 
-    const session = await requireDriverSession();
+    const session = await requireDriverSession({ jobId });
     const admin = createAdminClient();
 
     let jobQuery = admin
