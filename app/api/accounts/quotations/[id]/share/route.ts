@@ -22,47 +22,32 @@ import {
   hashQuotationShareToken,
 } from "../../../../../../lib/quotations/shareToken";
 
+import {
+  quotationShareExpiry,
+} from "../../../../../../lib/quotations/shareExpiry";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const DEFAULT_LIFETIME_SECONDS =
   14 * 24 * 60 * 60;
 
+// Ends with valid_until in Europe/London, not UTC (lib/quotations/shareExpiry.ts).
 function expiryFromQuotation(
   validUntil: string | null
 ): number {
-  const nowSeconds =
-    Math.floor(Date.now() / 1000);
+  const result = quotationShareExpiry({
+    validUntil,
+    fallbackLifetimeSeconds: DEFAULT_LIFETIME_SECONDS,
+  });
 
-  if (!validUntil) {
-    return (
-      nowSeconds +
-      DEFAULT_LIFETIME_SECONDS
-    );
+  if (!result.ok) {
+    throw result.reason === "quotation_expired"
+      ? new AccountsHttpError(409, "Quotation validity has expired. Extend the valid-until date first.", "quotation_expired")
+      : new AccountsHttpError(409, "Quotation has an invalid valid-until date.", "invalid_valid_until");
   }
 
-  const endOfValidity =
-    new Date(
-      `${validUntil}T23:59:59.999Z`
-    ).getTime();
-
-  if (!Number.isFinite(endOfValidity)) {
-    throw new AccountsHttpError(409, "Quotation has an invalid valid-until date.", "invalid_valid_until");
-  }
-
-  const expirySeconds =
-    Math.floor(
-      endOfValidity / 1000
-    );
-
-  if (
-    expirySeconds <=
-    nowSeconds
-  ) {
-    throw new AccountsHttpError(409, "Quotation validity has expired. Extend the valid-until date first.", "quotation_expired");
-  }
-
-  return expirySeconds;
+  return result.expiresAt;
 }
 
 export async function POST(

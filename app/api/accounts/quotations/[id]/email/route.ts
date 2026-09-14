@@ -45,6 +45,10 @@ import {
   buildDocumentEmailHtml,
 } from "../../../../../../lib/documents/emailTemplate";
 
+import {
+  quotationShareExpiry,
+} from "../../../../../../lib/quotations/shareExpiry";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -73,56 +77,26 @@ function renderTemplate(
     );
 }
 
+// Ends with valid_until in Europe/London, not UTC, and never outlives the
+// template's default validity (lib/quotations/shareExpiry.ts).
 function calculateExpiry(
   validUntil: string | null,
   defaultValidDays: number
 ): number {
-  const nowSeconds =
-    Math.floor(Date.now() / 1000);
+  const lifetimeSeconds = Math.max(1, defaultValidDays) * 24 * 60 * 60;
+  const result = quotationShareExpiry({
+    validUntil,
+    fallbackLifetimeSeconds: lifetimeSeconds,
+    maxLifetimeSeconds: lifetimeSeconds,
+  });
 
-  const fallbackExpiry =
-    nowSeconds +
-    Math.max(
-      1,
-      defaultValidDays
-    ) *
-      24 *
-      60 *
-      60;
-
-  if (!validUntil) {
-    return fallbackExpiry;
+  if (!result.ok) {
+    throw result.reason === "quotation_expired"
+      ? new AccountsHttpError(409, "Quotation validity has expired. Extend the valid-until date first.", "quotation_expired")
+      : new AccountsHttpError(409, "Quotation has an invalid valid-until date.", "invalid_valid_until");
   }
 
-  const validityMilliseconds =
-    new Date(
-      `${validUntil}T23:59:59.999Z`
-    ).getTime();
-
-  if (
-    !Number.isFinite(
-      validityMilliseconds
-    )
-  ) {
-    throw new AccountsHttpError(409, "Quotation has an invalid valid-until date.", "invalid_valid_until");
-  }
-
-  const validityExpiry =
-    Math.floor(
-      validityMilliseconds / 1000
-    );
-
-  if (
-    validityExpiry <=
-    nowSeconds
-  ) {
-    throw new AccountsHttpError(409, "Quotation validity has expired. Extend the valid-until date first.", "quotation_expired");
-  }
-
-  return Math.min(
-    validityExpiry,
-    fallbackExpiry
-  );
+  return result.expiresAt;
 }
 
 export async function POST(
