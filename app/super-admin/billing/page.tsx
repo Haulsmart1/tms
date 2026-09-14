@@ -6,7 +6,6 @@ import { countBillableVehicles } from "../../../lib/billing/vehicleCount";
 import { computeChargeAmounts, formatPence } from "../../../lib/billing/money";
 import { pricingHeadline } from "../../../lib/billing/pricingCopy";
 import Badge from "../../../components/Badge";
-import Button from "../../../components/Button";
 import MessageBanner from "../../../components/MessageBanner";
 import Skeleton from "../../../components/Skeleton";
 
@@ -158,26 +157,15 @@ export default function SuperAdminBillingPage() {
         });
     }, [companies, tenants, vehicles, licences, invoices]);
 
-    async function createInvoice(companyId: string, vehicleCount: number, amount: number) {
-        setMessage("");
-
-        const { error } = await supabase.from("invoices").insert([
-            {
-                company_id: companyId,
-                vehicle_count: vehicleCount,
-                amount,
-                status: "pending",
-            },
-        ]);
-
-        if (error) {
-            setMessage(error.message);
-            return;
-        }
-
-        setMessage("Invoice created.");
-        await loadData();
-    }
+    /* READ-ONLY on purpose (AUTH-16, BILL1-8). This page used to have a
+       "Create Invoice" button that inserted a row into `invoices` straight
+       from the browser, priced with v1's computeChargeAmounts for every
+       company, v2 included. `invoices` is the CUSTOMER invoicing ledger that
+       Xero sync, credit notes and chase letters read, so a platform charge
+       landing there at the wrong price could be synced or chased as if it
+       were a haulier's own invoice, and a double click made two. Platform
+       charges are raised by the billing cron (v1 platform_charges, v2
+       billing_periods), not by hand here. Do not reintroduce a client write. */
 
     return (
         /* Matches /super-admin/requests. The photo background and dark scrim
@@ -314,22 +302,6 @@ export default function SuperAdminBillingPage() {
                                                     : "None"}
                                             </span>
                                         </div>
-                                    </div>
-
-                                    <div className="mt-3">
-                                        <Button
-                                            type="button"
-                                            size="sm"
-                                            onClick={() =>
-                                                createInvoice(
-                                                    row.company.id,
-                                                    row.billableVehicleCount,
-                                                    row.cycleChargePounds
-                                                )
-                                            }
-                                        >
-                                            Create Invoice
-                                        </Button>
                                     </div>
                                 </div>
                             );
