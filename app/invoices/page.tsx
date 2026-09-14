@@ -21,6 +21,9 @@ import Tabs from "../../components/Tabs";
 import QuotationPanel from "./QuotationPanel";
 import { isOverdue, operatorToday } from "../../lib/invoices/dates";
 import { mayBeTruncated } from "../../lib/invoices/listLimits";
+import { appendPage, type ListPageInfo } from "../../lib/accounts/listPaging";
+import type { InvoiceTotals } from "../../lib/invoices/totals";
+import { invoiceResendWarning } from "../../lib/invoices/resend";
 import {
   calculateLineAmounts,
   roundMoney,
@@ -74,6 +77,7 @@ type Invoice = {
   notes?: string | null;
   accounting_invoice_id?: string | null;
   accounting_sync_status?: string | null;
+  sent_at?: string | null;
 };
 
 type InvoiceLine = {
@@ -262,6 +266,13 @@ export default function CustomerAccountsPage() {
   const [tab, setTab] = useState<Tab>("ready");
   const [readyJobs, setReadyJobs] = useState<ReadyJob[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  /* INV-11: lists arrive one page at a time; the KPIs come from server
+     totals computed across every invoice, not from the loaded page. */
+  const [readyPage, setReadyPage] = useState<ListPageInfo | null>(null);
+  const [invoicesPage, setInvoicesPage] = useState<ListPageInfo | null>(null);
+  const [rowsPage, setRowsPage] = useState<ListPageInfo | null>(null);
+  const [invoiceTotals, setInvoiceTotals] = useState<InvoiceTotals | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [subcontractors, setSubcontractors] = useState<Subcontractor[]>([]);
   const [rows, setRows] = useState<GenericRow[]>([]);
@@ -491,6 +502,7 @@ export default function CustomerAccountsPage() {
         if (!isCurrent()) return;
 
         setReadyJobs(body.jobs ?? []);
+        setReadyPage(body.pagination ?? null);
         setRows([]);
         setDataTenantId(tenantId);
         return;
@@ -511,6 +523,8 @@ export default function CustomerAccountsPage() {
         if (!isCurrent()) return;
 
         setInvoices(body.invoices ?? []);
+        setInvoicesPage(body.pagination ?? null);
+        if (body.totals) setInvoiceTotals(body.totals);
         setRows([]);
         setDataTenantId(tenantId);
         return;
@@ -566,7 +580,7 @@ export default function CustomerAccountsPage() {
         const invoiceResponse = await fetch(
           `/api/accounts/invoices?tenantId=${encodeURIComponent(
             tenantId
-          )}`,
+          )}&pageSize=500`,
           {
             cache: "no-store",
           }
@@ -584,7 +598,10 @@ export default function CustomerAccountsPage() {
         if (!isCurrent()) return;
 
         setInvoices(invoiceBody.invoices ?? []);
+        setInvoicesPage(invoiceBody.pagination ?? null);
+        if (invoiceBody.totals) setInvoiceTotals(invoiceBody.totals);
       } else {
+        setRowsPage(body.pagination ?? null);
         setRows(
           body.payments ??
             body.statements ??
@@ -678,20 +695,80 @@ export default function CustomerAccountsPage() {
     isOverdue(invoice.due_date, operatorDayToday)
   );
 
+  /* Server totals cover every invoice (INV-11). The loaded page is only a
+     fallback before the Invoices tab has been opened. */
   const outstandingTotal =
+    invoiceTotals?.outstandingTotal ??
     openInvoices.reduce(
       (sum, invoice) => sum + toPence(invoice.balance_due),
       0
     ) / 100;
 
-  /* INV-11: the list endpoints are not paginated yet, so a list that hits
-     the PostgREST row cap is silently missing rows, and the KPIs above are
-     computed from it. Say so rather than show a confident number. */
+  const overdueInvoiceCount =
+    invoiceTotals?.overdueCount ?? overdueInvoices.length;
+
+  const readyJobCount = readyPage?.total ?? readyJobs.length;
+
+  /* Invoices, ready jobs and payments now page completely. Credit notes are
+     not paged yet, and the credit-note invoice picker loads the largest page
+     only, so those can still be incomplete. */
   const listsMayBeTruncated =
-    mayBeTruncated(invoices.length) ||
-    mayBeTruncated(readyJobs.length) ||
-    mayBeTruncated(rows.length) ||
-    mayBeTruncated(creditNotes.length);
+    tab === "credits" &&
+    (mayBeTruncated(creditNotes.length) || invoicesPage?.hasMore === true);
+
+  async function loadMore(kind: "ready" | "invoices" | "payments") {
+    const info =
+      kind === "ready" ? readyPage : kind === "invoices" ? invoicesPage : rowsPage;
+
+    if (!tenantId || !info?.hasMore || loadingMore) return;
+
+    const requestId = loadRequestRef.current;
+    const endpoint = kind === "ready" ? "ready-to-invoice" : kind;
+
+    setLoadingMore(true);
+
+    try {
+      const response = await fetch(
+        `/api/accounts/${endpoint}?tenantId=${encodeURIComponent(
+          tenantId
+        )}&page=${info.page + 1}&pageSize=${info.pageSize}`,
+        { cache: "no-store" }
+      );
+
+      const body = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(body.error || "Unable to load more records.");
+      }
+
+      // A tenant or tab change started a fresh load; drop this page.
+      if (requestId !== loadRequestRef.current) return;
+
+      if (kind === "ready") {
+        setReadyJobs((current) =>
+          appendPage(current, (body.jobs ?? []) as ReadyJob[], (job) => job.job_id)
+        );
+        setReadyPage(body.pagination ?? null);
+      } else if (kind === "invoices") {
+        setInvoices((current) =>
+          appendPage(current, (body.invoices ?? []) as Invoice[], (invoice) => invoice.id)
+        );
+        setInvoicesPage(body.pagination ?? null);
+      } else {
+        setRows((current) =>
+          appendPage(current, (body.payments ?? []) as GenericRow[], (row) => String(row.id))
+        );
+        setRowsPage(body.pagination ?? null);
+      }
+    } catch (error) {
+      if (requestId !== loadRequestRef.current) return;
+      setMessage(
+        error instanceof Error ? error.message : "Unable to load more records."
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   const paymentAllocationInvoice = paymentInvoiceId
     ? openInvoices.find((invoice) => invoice.id === paymentInvoiceId) ?? null
@@ -952,9 +1029,16 @@ export default function CustomerAccountsPage() {
     const podAttachmentRequired =
       invoiceCustomer?.invoice_pod_attachment_required === true;
 
+    /* INV-25: an already-sent invoice needs a deliberate second send. */
+    const resendWarning = invoiceResendWarning({
+      invoiceNumber: invoice.invoice_number,
+      status,
+      sentAt: invoice.sent_at,
+    });
+
     if (
       !window.confirm(
-        `Email ${
+        `${resendWarning ? `${resendWarning}\n\n` : ""}Email ${
           invoice.invoice_number || "this invoice"
         } with the invoice PDF${
           podAttachmentRequired
@@ -985,7 +1069,7 @@ export default function CustomerAccountsPage() {
         }
       );
 
-      const body = (await response.json()) as {
+      const body = (await response.json().catch(() => ({}))) as {
         ok?: boolean;
         invoiceId?: string;
         invoiceNumber?: string;
@@ -1000,8 +1084,27 @@ export default function CustomerAccountsPage() {
           reference: string;
           podStatus: string;
         }>;
+        skippedPodJobs?: Array<{
+          id: string;
+          reference: string;
+          podStatus: string;
+        }>;
+        warnings?: unknown;
         error?: string;
       };
+
+      /* 503 means a database update the route depends on is not applied yet.
+         Nothing was sent, and retrying will not help until it is. */
+      if (response.status === 503) {
+        throw new Error(
+          `${
+            invoice.invoice_number || "The invoice"
+          } was not sent. ${
+            body.error ||
+            "Emailing invoices is unavailable until a pending database update is applied. Please contact support."
+          }`
+        );
+      }
 
       if (!response.ok) {
         if (
@@ -1039,6 +1142,23 @@ export default function CustomerAccountsPage() {
           ? ` Provider acknowledgement: ${body.providerMessageId}.`
           : "";
 
+      const skippedPodText =
+        Array.isArray(body.skippedPodJobs) && body.skippedPodJobs.length > 0
+          ? ` POD not attached (not ready): ${body.skippedPodJobs
+              .map((job) => `${job.reference} (${job.podStatus})`)
+              .join(", ")}.`
+          : "";
+
+      const warningText = Array.isArray(body.warnings)
+        ? body.warnings
+            .filter(
+              (item): item is string =>
+                typeof item === "string" && item.trim() !== ""
+            )
+            .map((item) => ` Warning: ${item}`)
+            .join("")
+        : "";
+
       setMessage(
         `${
           body.invoiceNumber ||
@@ -1054,7 +1174,7 @@ export default function CustomerAccountsPage() {
                 podCount === 1 ? "" : "s"
               }`
             : ""
-        }.${acknowledgement}`
+        }.${acknowledgement}${skippedPodText}${warningText}`
       );
 
       setPreviewInvoice(null);
@@ -2402,11 +2522,11 @@ export default function CustomerAccountsPage() {
               />
               <Stat
                 label="Overdue invoices"
-                value={String(overdueInvoices.length)}
+                value={String(overdueInvoiceCount)}
               />
               <Stat
                 label="Ready to invoice"
-                value={String(readyJobs.length)}
+                value={String(readyJobCount)}
               />
             </div>
           </header>
@@ -2424,9 +2544,8 @@ export default function CustomerAccountsPage() {
 
           {listsMayBeTruncated ? (
             <MessageBanner tone="neutral">
-              Some lists reached the 1,000 row limit, so older records may be
-              missing here and the Outstanding and Overdue figures may be
-              understated.
+              Older credit notes or invoices may be missing from this tab. The
+              Outstanding and Overdue figures above still cover every invoice.
             </MessageBanner>
           ) : null}
 
@@ -2503,6 +2622,26 @@ export default function CustomerAccountsPage() {
                     setEditingInvoice(null);
                     setEditingLines([]);
                   }}
+                />
+              ) : null}
+
+              {tab === "ready" ? (
+                <LoadMoreRow
+                  info={readyPage}
+                  shown={readyJobs.length}
+                  noun="jobs"
+                  loading={loadingMore}
+                  onLoadMore={() => void loadMore("ready")}
+                />
+              ) : null}
+
+              {tab === "invoices" ? (
+                <LoadMoreRow
+                  info={invoicesPage}
+                  shown={invoices.length}
+                  noun="invoices"
+                  loading={loadingMore}
+                  onLoadMore={() => void loadMore("invoices")}
                 />
               ) : null}
 
@@ -2604,6 +2743,13 @@ export default function CustomerAccountsPage() {
                   </div>
 
                   <RecordCards rows={rows} />
+                  <LoadMoreRow
+                    info={rowsPage}
+                    shown={rows.length}
+                    noun="payments"
+                    loading={loadingMore}
+                    onLoadMore={() => void loadMore("payments")}
+                  />
                 </section>
               ) : null}
 
@@ -4800,6 +4946,45 @@ function InvoicesPanel({
     </section>
   );
 }
+function LoadMoreRow({
+  info,
+  shown,
+  noun,
+  loading,
+  onLoadMore,
+}: {
+  info: ListPageInfo | null;
+  shown: number;
+  noun: string;
+  loading: boolean;
+  onLoadMore: () => void;
+}) {
+  if (!info || (!info.hasMore && (info.total === null || info.total <= shown))) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-ink-3">
+      <span className="font-mono tabular-nums">
+        {info.total !== null
+          ? `Showing ${shown} of ${info.total} ${noun}`
+          : `Showing ${shown} ${noun}`}
+      </span>
+
+      {info.hasMore ? (
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={loading}
+          onClick={onLoadMore}
+        >
+          {loading ? "Loading..." : "Load more"}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 function RecordCards({
   rows,
   documentType,

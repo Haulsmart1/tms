@@ -1,5 +1,6 @@
 "use client";
 
+import { appendPage, type ListPageInfo } from "../../lib/accounts/listPaging";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Button from "../../components/Button";
 import { addCalendarDays, operatorToday } from "../../lib/invoices/dates";
@@ -198,6 +199,9 @@ export default function QuotationPanel({
     });
 
   const [quotations, setQuotations] = useState<Quotation[]>([]);
+  /* INV-11: quotations arrive a page at a time. */
+  const [quotationsPage, setQuotationsPage] = useState<ListPageInfo | null>(null);
+  const [loadingMoreQuotations, setLoadingMoreQuotations] = useState(false);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState("");
@@ -302,6 +306,7 @@ export default function QuotationPanel({
       }
 
       setQuotations(body.quotations ?? []);
+      setQuotationsPage(body.pagination ?? null);
     } catch (error) {
       if (requestId !== loadRequestRef.current) {
         return;
@@ -322,6 +327,57 @@ export default function QuotationPanel({
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function loadMoreQuotations() {
+    const info = quotationsPage;
+
+    if (!info?.hasMore || loadingMoreQuotations) {
+      return;
+    }
+
+    const requestId = loadRequestRef.current;
+    setLoadingMoreQuotations(true);
+
+    try {
+      const response = await fetch(
+        `/api/accounts/quotations?tenantId=${encodeURIComponent(
+          tenantId
+        )}&page=${info.page + 1}&pageSize=${info.pageSize}`,
+        {
+          cache: "no-store",
+        }
+      );
+
+      const body = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          body.error || "Unable to load more quotations."
+        );
+      }
+
+      if (requestId !== loadRequestRef.current) {
+        return;
+      }
+
+      setQuotations((current) =>
+        appendPage(
+          current,
+          (body.quotations ?? []) as Quotation[],
+          (quotation) => quotation.id
+        )
+      );
+      setQuotationsPage(body.pagination ?? null);
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to load more quotations."
+      );
+    } finally {
+      setLoadingMoreQuotations(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -3238,6 +3294,25 @@ export default function QuotationPanel({
           </div>
         )}
       </div>
+
+      {quotationsPage?.hasMore ? (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-ink-3">
+          <span className="font-mono tabular-nums">
+            {quotationsPage.total !== null
+              ? `Showing ${quotations.length} of ${quotationsPage.total} quotations`
+              : `Showing ${quotations.length} quotations`}
+          </span>
+
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={loadingMoreQuotations}
+            onClick={() => void loadMoreQuotations()}
+          >
+            {loadingMoreQuotations ? "Loading..." : "Load more"}
+          </Button>
+        </div>
+      ) : null}
       <style jsx>{`
         .control {
           height: 2.5rem;

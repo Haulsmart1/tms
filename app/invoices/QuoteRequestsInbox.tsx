@@ -1,5 +1,6 @@
 "use client";
 
+import { appendPage, type ListPageInfo } from "../../lib/accounts/listPaging";
 import {
   useCallback,
   useEffect,
@@ -85,6 +86,19 @@ export default function QuoteRequestsInbox({
     []
   );
 
+  /* INV-11: requests arrive a page at a time. */
+  const [
+    pageInfo,
+    setPageInfo,
+  ] = useState<ListPageInfo | null>(
+    null
+  );
+
+  const [
+    loadingMore,
+    setLoadingMore,
+  ] = useState(false);
+
   const [
     loading,
     setLoading,
@@ -148,6 +162,11 @@ export default function QuoteRequestsInbox({
             body.quoteRequests ??
               []
           );
+
+          setPageInfo(
+            body.pagination ??
+              null
+          );
         }
         catch (loadError) {
           if (
@@ -182,6 +201,75 @@ export default function QuoteRequestsInbox({
   }, [
     load,
   ]);
+
+  async function loadMore() {
+    if (
+      !pageInfo?.hasMore ||
+      loadingMore
+    ) {
+      return;
+    }
+
+    const requestId =
+      loadRequestRef.current;
+
+    setLoadingMore(true);
+
+    try {
+      const response =
+        await fetch(
+          `/api/accounts/quote-requests?tenantId=${encodeURIComponent(
+            tenantId
+          )}&page=${pageInfo.page + 1}&pageSize=${pageInfo.pageSize}`,
+          {
+            cache:
+              "no-store",
+          }
+        );
+
+      const body =
+        await response
+          .json()
+          .catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          body.error ||
+            "Unable to load more quote requests."
+        );
+      }
+
+      if (
+        requestId !==
+        loadRequestRef.current
+      ) {
+        return;
+      }
+
+      setRows((current) =>
+        appendPage(
+          current,
+          (body.quoteRequests ?? []) as QuoteRequestRow[],
+          (row) => row.id
+        )
+      );
+
+      setPageInfo(
+        body.pagination ??
+          null
+      );
+    }
+    catch (loadError) {
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Unable to load more quote requests."
+      );
+    }
+    finally {
+      setLoadingMore(false);
+    }
+  }
 
   async function updateStatus(
     requestId: string,
@@ -488,6 +576,25 @@ export default function QuoteRequestsInbox({
           )}
         </div>
       )}
+
+      {pageInfo?.hasMore ? (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-ink-3">
+          <span className="font-mono tabular-nums">
+            {pageInfo.total !== null
+              ? `Showing ${rows.length} of ${pageInfo.total} requests`
+              : `Showing ${rows.length} requests`}
+          </span>
+
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={loadingMore}
+            onClick={() => void loadMore()}
+          >
+            {loadingMore ? "Loading..." : "Load more"}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }
