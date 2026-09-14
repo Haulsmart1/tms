@@ -45,9 +45,18 @@ export function selectDueAction(
 // MAX_ATTEMPTS: the DB constraint allows any attempt >= 1). canceled and
 // clean-active companies have nothing to retry.
 export function selectRecoveryAction(
-  row: Pick<CompanyBillingRow, "status" | "next_charge_on" | "retry_at" | "retry_count">
+  row: Pick<CompanyBillingRow, "status" | "next_charge_on" | "retry_at" | "retry_count"> & {
+    billing_model?: string | null;
+  }
 ): DueAction {
   if (row.status === "canceled") return { kind: "none" };
+  // Everything below is v1 dunning: it retries a cycle keyed on next_charge_on.
+  // A v2 company can be past_due too (closeDuePeriods sets it when period
+  // dunning runs out), but its debt is an unpaid period, which the period's own
+  // retry ladder collects on the daily cron. Answering "charge" here would send
+  // it through runChargeCycle at v1 prices. Missing means v1, matching the
+  // column default in billing_06.
+  if (row.billing_model === "v2_period") return { kind: "none" };
   if (row.status === "past_due" || row.retry_at !== null) {
     return {
       kind: "charge",

@@ -7,6 +7,7 @@ import {
   runChargeCycle,
 } from "../../../../lib/billing/server";
 import { applyChargeOutcome, selectRecoveryAction } from "../../../../lib/billing/run";
+import { NEW_COMPANY_BILLING_MODEL } from "../../../../lib/billing/rateCard";
 import {
   addDays,
   computeNextChargeOn,
@@ -167,6 +168,45 @@ export async function POST(request: NextRequest) {
         });
       }
 
+      /* v2 bills in ARREARS, so saving a card takes no money. The period opens
+         and the minimum is charged when the first vehicle is activated, in
+         openPeriodAndChargeMinimum, not here.
+
+         Placed after orphan recovery, not before it: a succeeded v1 charge that
+         crashed before its insert is still real money, and must be recorded
+         even if the default has since moved to v2.
+
+         Returning early rather than falling through matters: runChargeCycle
+         below writes platform_charges and prices with lib/billing/money.ts,
+         which is v1's rate card. */
+      if (NEW_COMPANY_BILLING_MODEL === "v2_period") {
+        const { error: insertError } = await admin.from("company_billing").insert({
+          company_id: companyId,
+          ...cardFields,
+          status: "active",
+          billing_model: "v2_period",
+          /* Not null because the column is date NOT NULL (billing_01), and the
+             signup date rather than a sentinel because it is true: it is where
+             this company's billing began. It is inert. The v1 cron skips v2
+             rows explicitly (app/api/billing/run/route.ts) and
+             selectRecoveryAction answers "none" for them, which is the same
+             arrangement scripts/migrate-company-to-period-billing.mjs leaves a
+             migrated company in. */
+          next_charge_on: today,
+          retry_at: null,
+          retry_count: 0,
+        });
+        if (insertError) {
+          throw new Error(insertError.message);
+        }
+
+        return NextResponse.json({
+          ok: true,
+          firstCharge: false,
+          model: "v2_period",
+        });
+      }
+
       // First-time setup: immediate first charge; write company_billing only
       // on success so a declined card leaves no half-configured subscription.
       //
@@ -254,6 +294,7 @@ export async function POST(request: NextRequest) {
       next_charge_on: existing.next_charge_on as string,
       retry_at: existing.retry_at ?? null,
       retry_count: Number(existing.retry_count),
+      billing_model: existing.billing_model as string | null | undefined,
     });
 
     if (action.kind === "none") {

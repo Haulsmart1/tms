@@ -147,4 +147,30 @@ describe("selectRecoveryAction", () => {
     const r = row({ status: "canceled", retry_at: "2026-08-28", retry_count: 1 });
     expect(selectRecoveryAction(r)).toEqual({ kind: "none" });
   });
+
+  // A v2 company goes past_due through closeDuePeriods when period dunning
+  // runs out. Replacing its card must not reach runChargeCycle, which would
+  // debit a v1 amount against the stale next_charge_on, write platform_charges
+  // and flip status back to active while the v2 balance stays unpaid. The
+  // period's own dunning ladder retries on the next cron run instead.
+  it("never charges a past_due v2 company through the v1 path", () => {
+    const r = row({ status: "past_due", retry_count: 4 });
+    expect(
+      selectRecoveryAction({ ...r, billing_model: "v2_period" })
+    ).toEqual({ kind: "none" });
+  });
+
+  it("never charges a mid-dunning v2 company through the v1 path", () => {
+    const r = row({ retry_at: "2026-08-30", retry_count: 2 });
+    expect(
+      selectRecoveryAction({ ...r, billing_model: "v2_period" })
+    ).toEqual({ kind: "none" });
+  });
+
+  it("still retries a past_due company explicitly on v1", () => {
+    const r = row({ status: "past_due", retry_count: 4 });
+    expect(
+      selectRecoveryAction({ ...r, billing_model: "v1_immediate" })
+    ).toEqual({ kind: "charge", cycleDate: "2026-08-26", attempt: 5 });
+  });
 });

@@ -179,3 +179,18 @@ function pricedBands(
     )
   );
 }
+
+/**
+ * The billing model a BRAND NEW company is created on.
+ *
+ * Which model a new company gets cannot be read from a company_billing row,
+ * because at signup there is not one yet. So it is a constant, in one place,
+ * and switching the product's default pricing is a one-line reviewable change
+ * rather than a hunt through the signup path.
+ *
+ * Existing companies are unaffected: their row already carries a
+ * billing_model, and nothing here rewrites it. Use
+ * scripts/migrate-company-to-period-billing.mjs to move one.
+ */
+export const NEW_COMPANY_BILLING_MODEL: "v1_immediate" | "v2_period" =
+  "v1_immediate";
