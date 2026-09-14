@@ -16,7 +16,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { SquareError } from "square";
 import { getSquare, getSquareLocationId } from "../payments/square";
+import { reconcilePaymentByReference } from "../payments/squareLookup";
 import { addonIdempotencyKey, classifyPaymentResult } from "./money";
+import { paymentReferenceId } from "./reconcile";
 import { classifySquareThrow } from "./squareThrow";
 import { computeAddonAmounts } from "./prorata";
 
@@ -60,6 +62,8 @@ type ResolvedCharge = {
   /** Null only for rows written before the card columns existed. */
   squareCardId: string | null;
   squareCustomerId: string | null;
+  /** When the intent was recorded, for the Square lookup window. */
+  createdAt: string | null;
 };
 
 // The highest-numbered attempt that has not yet reached a terminal status, if
@@ -75,7 +79,7 @@ async function readPendingIntent(
   const { data, error } = await admin
     .from("vehicle_addon_charges")
     .select(
-      "attempt, covers_days, net_pence, vat_pence, gross_pence, square_card_id, square_customer_id"
+      "attempt, covers_days, net_pence, vat_pence, gross_pence, square_card_id, square_customer_id, created_at"
     )
     .eq("company_id", companyId)
     .eq("cycle_date", cycleDate)
@@ -99,6 +103,7 @@ async function readPendingIntent(
     grossPence: Number(row.gross_pence),
     squareCardId: (row.square_card_id as string | null) ?? null,
     squareCustomerId: (row.square_customer_id as string | null) ?? null,
+    createdAt: (row.created_at as string | null) ?? null,
   };
 }
 
@@ -135,6 +140,14 @@ export async function chargeVehicleAddon(
       `chargeVehicleAddon requires at least one day, got ${args.days} for company ${args.companyId} vehicle ${args.vehicleId}`
     );
   }
+
+  // Resolved BEFORE any intent row is written. Both throw when an env var is
+  // missing, which is a configuration outage with no request sent. Resolving
+  // them after the pending insert (as this used to) left a pending row for a
+  // request that never left the process, and the vehicle then read as "still
+  // settling" forever.
+  const square = getSquare();
+  const locationId = getSquareLocationId();
 
   let resolved: ResolvedCharge | null = null;
 
@@ -213,7 +226,31 @@ export async function chargeVehicleAddon(
     }
 
     const attempt = Number(attemptRows?.[0]?.attempt ?? 0) + 1;
-    const amounts = computeAddonAmounts(args.baselineCount, args.days);
+
+    // BILL1-10. Other vehicles being added in this cycle right now have an
+    // intent recorded but no licence and no coverage yet, so the caller's
+    // baseline cannot see them, and two tabs adding across a band edge were
+    // both priced at the higher marginal rate. Counting their intents prices
+    // this one after them. It errs toward the customer: a larger baseline is a
+    // cheaper band.
+    const { data: inFlight, error: inFlightError } = await admin
+      .from("vehicle_addon_charges")
+      .select("vehicle_id")
+      .eq("company_id", args.companyId)
+      .eq("cycle_date", args.cycleDate)
+      .eq("status", "pending")
+      .neq("vehicle_id", args.vehicleId);
+    if (inFlightError) {
+      throw new Error(`Unable to check in-flight additions: ${inFlightError.message}`);
+    }
+    const inFlightCount = new Set(
+      (inFlight ?? []).map((row) => row.vehicle_id as string)
+    ).size;
+
+    const amounts = computeAddonAmounts(
+      args.baselineCount + inFlightCount,
+      args.days
+    );
 
     // RECORD INTENT BEFORE SPENDING THE KEY. This is the divergence from
     // ./server.ts flagged in the file header, and it is the whole fix.
@@ -269,6 +306,7 @@ export async function chargeVehicleAddon(
         grossPence: amounts.grossPence,
         squareCardId: args.squareCardId,
         squareCustomerId: args.squareCustomerId,
+        createdAt: new Date().toISOString(),
       };
       break;
     }
@@ -316,12 +354,6 @@ export async function chargeVehicleAddon(
   // the band minimum is what makes charging unconditionally safe here; if a
   // free band is ever introduced, handle it in selectAddonAction so it returns
   // `free` and never reaches this function.
-  // Resolved BEFORE the try. Both throw when an env var is missing, which is a
-  // configuration outage with no request sent; inside the try that would be
-  // classified as an unknown payment outcome and the customer would be told
-  // their money may have moved for a call that never left the process.
-  const square = getSquare();
-  const locationId = getSquareLocationId();
 
   // charge.*, not args.*, for every field Square hashes into the idempotency
   // key. A replay must be byte-identical or Square answers
@@ -335,14 +367,20 @@ export async function chargeVehicleAddon(
   const sourceId = charge.squareCardId ?? args.squareCardId;
   const customerId = charge.squareCustomerId ?? args.squareCustomerId;
 
+  const idempotencyKey = addonIdempotencyKey(
+    args.companyId,
+    args.cycleDate,
+    args.vehicleId,
+    charge.attempt
+  );
+  const referenceId = paymentReferenceId(idempotencyKey);
+
   try {
     const response = await square.payments.create({
-      idempotencyKey: addonIdempotencyKey(
-        args.companyId,
-        args.cycleDate,
-        args.vehicleId,
-        charge.attempt
-      ),
+      idempotencyKey,
+      // Derived from the key, so a replay sends the same value; it is how a
+      // refused replay is found at Square below.
+      referenceId,
       sourceId,
       customerId,
       locationId,
@@ -357,13 +395,28 @@ export async function chargeVehicleAddon(
     });
     payment = response.payment;
   } catch (error) {
-    if (
+    const keyReused =
       error instanceof SquareError &&
-      error.errors[0]?.code === "IDEMPOTENCY_KEY_REUSED"
-    ) {
-      throw new Error(
-        `PAYMENT_INDETERMINATE: idempotency key already used for company ${args.companyId} vehicle ${args.vehicleId} cycle ${args.cycleDate} attempt ${charge.attempt}; a payment exists with unknown outcome, try again later`
-      );
+      error.errors[0]?.code === "IDEMPOTENCY_KEY_REUSED";
+
+    if (keyReused) {
+      // A payment exists under this key with a body that no longer matches.
+      // Ask Square what it was; record only what it can prove.
+      const found = await reconcilePaymentByReference(square, {
+        locationId,
+        referenceId,
+        amountPence: charge.grossPence,
+        sinceISO: charge.createdAt,
+      });
+      if (found.kind === "unresolved") {
+        throw new Error(
+          `PAYMENT_INDETERMINATE: idempotency key already used for company ${args.companyId} vehicle ${args.vehicleId} cycle ${args.cycleDate} attempt ${charge.attempt} and Square could not confirm the outcome (${found.reason}); MANUAL REVIEW: reconcile reference ${referenceId}`
+        );
+      }
+      payment =
+        found.kind === "succeeded"
+          ? { id: found.paymentId, receiptUrl: found.receiptUrl ?? undefined, status: "COMPLETED" }
+          : { status: found.failureCode };
     }
 
     // ONLY POSITIVE EVIDENCE OF A REFUSAL IS A DECLINE. classifySquareThrow
@@ -379,16 +432,18 @@ export async function chargeVehicleAddon(
     // it is. The next call finds it, replays the same key with the same body
     // and the same card, and observes the real outcome from Square instead of
     // guessing at one.
-    const thrown = classifySquareThrow(error);
-    if (thrown.kind === "indeterminate") {
-      throw new Error(
-        `PAYMENT_INDETERMINATE: no usable answer from Square for company ${args.companyId} vehicle ${args.vehicleId} cycle ${args.cycleDate} attempt ${charge.attempt}: ${thrown.reason}; the payment may have been taken, try again shortly`
-      );
-    }
+    if (!keyReused) {
+      const thrown = classifySquareThrow(error);
+      if (thrown.kind === "indeterminate") {
+        throw new Error(
+          `PAYMENT_INDETERMINATE: no usable answer from Square for company ${args.companyId} vehicle ${args.vehicleId} cycle ${args.cycleDate} attempt ${charge.attempt}: ${thrown.reason}; the payment may have been taken, try again shortly`
+        );
+      }
 
-    callThrew = true;
-    succeeded = false;
-    failureCode = thrown.failureCode;
+      callThrew = true;
+      succeeded = false;
+      failureCode = thrown.failureCode;
+    }
   }
 
   // Outside the try/catch on purpose: the catch only sees network and SDK

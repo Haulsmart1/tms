@@ -158,26 +158,11 @@ export default function SuperAdminBillingPage() {
         });
     }, [companies, tenants, vehicles, licences, invoices]);
 
-    async function createInvoice(companyId: string, vehicleCount: number, amount: number) {
-        setMessage("");
-
-        const { error } = await supabase.from("invoices").insert([
-            {
-                company_id: companyId,
-                vehicle_count: vehicleCount,
-                amount,
-                status: "pending",
-            },
-        ]);
-
-        if (error) {
-            setMessage(error.message);
-            return;
-        }
-
-        setMessage("Invoice created.");
-        await loadData();
-    }
+    /* The "Create Invoice" button that lived here is gone (review BILL1-8). It
+       inserted a v1-priced row into `invoices`, the CUSTOMER invoicing table
+       that accounts, credit notes and Xero sync read, for every company
+       including v2 ones, at the wrong price. Platform charges are recorded by
+       the billing routes themselves (platform_charges, period_charges). */
 
     return (
         /* Matches /super-admin/requests. The photo background and dark scrim
@@ -314,22 +299,6 @@ export default function SuperAdminBillingPage() {
                                                     : "None"}
                                             </span>
                                         </div>
-                                    </div>
-
-                                    <div className="mt-3">
-                                        <Button
-                                            type="button"
-                                            size="sm"
-                                            onClick={() =>
-                                                createInvoice(
-                                                    row.company.id,
-                                                    row.billableVehicleCount,
-                                                    row.cycleChargePounds
-                                                )
-                                            }
-                                        >
-                                            Create Invoice
-                                        </Button>
                                     </div>
                                 </div>
                             );

@@ -55,11 +55,29 @@ function licenceAddedMessage(
         grossPence?: number;
         days?: number;
         alreadyPaid?: boolean;
+        reason?: unknown;
     },
     base = "Licence added."
 ): string {
+    /* Review BILL2-14. Four different "nothing was charged" outcomes used to
+       read identically as "Licence added.", which is why a real billing fault
+       in 2026-09 could not be told apart from correct behaviour. Each now says
+       which one it was. */
     if (!payload.charged || payload.grossPence == null) {
-        return base;
+        switch (payload.reason) {
+            case "period_billing":
+                return `${base} Nothing is charged now: this vehicle is billed for its days when the current billing period closes.`;
+            case "already_billable":
+                return `${base} Nothing extra is charged: this vehicle is already billable through another active licence.`;
+            case "not_active":
+                return `${base} It is not active for billing, so it is a compliance record only and costs nothing.`;
+            case "already_active":
+                return `${base} It was already active, so nothing changed.`;
+            case "period_opened":
+                return `${base} No new charge was needed: the minimum for this billing period had already been collected.`;
+            default:
+                return base;
+        }
     }
     /* v2 opening charge. The period_opened response carries an amount but no
        `days`, because opening a period is not a pro-rata top-up: it collects

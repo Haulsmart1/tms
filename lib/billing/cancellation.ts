@@ -14,6 +14,12 @@ export type CancellationBillingRow = {
   status: "active" | "past_due" | "canceled";
   /** Non-null means the one cooling-off refund has been used. */
   coolingOffRefundedAt: string | null;
+  /**
+   * True when the card on file has already had a cooling-off refund on ANY
+   * company. BILL2-10: once per company alone let the same card sign up again
+   * under a new company name.
+   */
+  coolingOffUsedByCard?: boolean;
 };
 
 export type CancellablePeriod = {
@@ -25,12 +31,25 @@ export type CancellablePeriod = {
   /** What was collected up front. 0 on a period opened by rollover. */
   prepaidPence: number;
   minimumChargePending: boolean;
+  /**
+   * True when this is the company's first ever billing period. BILL2-10: the
+   * spec grants cooling-off at FIRST activation only, and every
+   * activation-opened period (a return from dormancy, a re-open) also has
+   * prepaid_pence > 0.
+   */
+  isFirstPeriod: boolean;
 };
 
 export type CancellationAction =
   | { kind: "legacy" }
   /** Refund the minimum in full and raise no invoice. */
   | { kind: "cooling_off"; periodId: string; refundNetPence: number }
+  /**
+   * The open period has not started yet: a migrated company whose first v2
+   * period begins at its seam date. Nothing has been used under v2, and v1
+   * already covered the days until the seam. BILL2-13.
+   */
+  | { kind: "void_future_period"; periodId: string }
   /** Cut the period short, invoice what was used, take the balance. */
   | { kind: "close_early"; periodId: string; periodEndISO: string }
   /** Nothing to bill; just end the subscription. */
@@ -61,6 +80,13 @@ export function selectCancellationAction(args: {
     return { kind: "blocked", reason: "payment_settling" };
   }
 
+  // BILL2-13. Cutting a period that has not begun would set its end before its
+  // start, which billing_periods_end_after_start rejects, and the customer got
+  // a 500 telling them to contact support.
+  if (args.openPeriod.periodStartISO > args.todayISO) {
+    return { kind: "void_future_period", periodId: args.openPeriod.id };
+  }
+
   // COOLING OFF. A customer who activates and cancels the same day has paid
   // GBP 129 for one day. That is the minimum working as designed and it is
   // defensible, but it is also the most likely complaint this model will ever
@@ -80,9 +106,15 @@ export function selectCancellationAction(args: {
     (Date.parse(args.nowISO) - Date.parse(args.openPeriod.openedAtISO)) /
     3_600_000;
 
+  //   first period         the spec's FIRST activation. A later
+  //                        activation-opened period is not a signup mistake.
+  //   card not used        the refund is per card as well as per company, so
+  //                        a new company name on the same card gets nothing.
   if (
     args.openPeriod.prepaidPence > 0 &&
+    args.openPeriod.isFirstPeriod &&
     args.billingRow.coolingOffRefundedAt === null &&
+    !args.billingRow.coolingOffUsedByCard &&
     hoursOpen <= COOLING_OFF_HOURS
   ) {
     return {
@@ -108,4 +140,33 @@ export function selectCancellationAction(args: {
       : cancelEndISO;
 
   return { kind: "close_early", periodId: args.openPeriod.id, periodEndISO };
+}
+
+export type V1CancellationAction =
+  | { kind: "cancel" }
+  | { kind: "blocked"; reason: "already_canceled" | "payment_settling" };
+
+/**
+ * Cancelling a company still on v1 (charge in advance). Review BILL1-14.
+ *
+ * v1 is prepaid, so there is nothing to invoice on the way out and no refund:
+ * the cycle in progress was paid for and runs to its end. Cancelling stops the
+ * cron charging again (it skips canceled rows) and stops add-on charges (the
+ * activate route blocks canceled).
+ *
+ * A charge whose outcome is unknown blocks it, for the same reason as v2: the
+ * card may have been charged, and cancelling across an unrecorded payment
+ * leaves nobody able to say what the customer paid for.
+ */
+export function selectV1CancellationAction(args: {
+  status: string;
+  hasUnsettledCharge: boolean;
+}): V1CancellationAction {
+  if (args.status === "canceled") {
+    return { kind: "blocked", reason: "already_canceled" };
+  }
+  if (args.hasUnsettledCharge) {
+    return { kind: "blocked", reason: "payment_settling" };
+  }
+  return { kind: "cancel" };
 }
