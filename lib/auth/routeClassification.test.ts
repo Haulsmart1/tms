@@ -80,6 +80,7 @@ const PROTECTED_ROUTES = [
   "/api/licences/activate",
   "/api/licences/estimate",
   "/api/load-manifests",
+  "/api/vehicles/[id]",
   "/api/pod/share",
   "/api/pod/share/email",
   "/api/pod/share/revoke",

@@ -238,8 +238,14 @@ create index if not exists billing_periods_company_start_idx
   on public.billing_periods (company_id, period_start desc);
 
 -- At most one period per company may be open at a time. Without this, a race
--- in ensure_open_billing_period could open two overlapping periods and bill
--- the same days twice.
+-- in ensureOpenPeriod (lib/billing/periodServer.ts) could open two overlapping
+-- periods and bill the same days twice.
+--
+-- CORRECTION (prodfix_33, review BILL2-20). The spec refers to an
+-- ensure_open_billing_period SQL function carrying the suspension, failed-period
+-- and cancellation guards. It was never created here. The application checks
+-- those rules, and docs/sql/prodfix_33_billing_integrity.sql STEP 6 enforces
+-- them with the guard_billing_period_open trigger.
 create unique index if not exists billing_periods_one_open
   on public.billing_periods (company_id)
   where status = 'open';
@@ -515,12 +521,20 @@ commit;
 --    -- both of the above must succeed: two null vehicle_ids in one period
 --    rollback;
 --
--- 5. The kind/vehicle_id agreement check bites. This must FAIL with 23514:
+-- 5. The kind/vehicle_id agreement check bites on the kind it constrains. A
+--    DISCOUNT or MINIMUM line carrying a vehicle_id must FAIL with 23514:
 --
 --    begin;
---    insert into public.period_invoice_lines (company_id, billing_period_id, kind, net_pence, description)
---    select company_id, id, 'vehicle', 100, 'no vehicle id' from public.billing_periods limit 1;
+--    insert into public.period_invoice_lines (company_id, billing_period_id, kind, vehicle_id, net_pence, description)
+--    select bp.company_id, bp.id, 'volume_discount', v.id, -100, 'x'
+--    from public.billing_periods bp cross join (select id from public.vehicles limit 1) v
+--    limit 1;
 --    rollback;
+--
+--    CORRECTED (review BILL2-20). This step used to say a 'vehicle' line with
+--    a NULL vehicle_id must fail. The constraint above deliberately ALLOWS that
+--    (the vehicle FK nulls the column when a vehicle is deleted), and
+--    billing_06_verify.sql asserts it is allowed. The two now agree.
 --
 -- WHAT BREAKS IF THIS IS NOT APPLIED.
 --

@@ -12,6 +12,7 @@ import { requireCompanyAdmin } from "../../../../lib/billing/server";
 import { previewPeriodInvoice } from "../../../../lib/billing/periodServer";
 import type { CompanyBillingSettings } from "../../../../lib/billing/periodServer";
 import { balanceDue } from "../../../../lib/billing/periodPayment";
+import { VAT_RATE_PERCENT } from "../../../../lib/billing/vat";
 import { billingModelForRow } from "../../../../lib/billing/rateCard";
 
 export const runtime = "nodejs";
@@ -117,7 +118,7 @@ export async function GET() {
 
        Same vat_rate fallback as collectPeriod: neither this route's select nor
        closeDuePeriods' asks for the column, so both land on 20. */
-    const vatRatePercent = settings.vat_rate ?? 20;
+    const vatRatePercent = VAT_RATE_PERCENT;
     const prepaidPence = Number(period.prepaid_pence ?? 0);
     const balance = balanceDue(invoice.netPence, prepaidPence, vatRatePercent);
 

@@ -6,65 +6,109 @@ import type { CompanyBillingRow } from "../../../../lib/billing/run";
 import { londonDateISO } from "../../../../lib/billing/schedule";
 import { closeDuePeriods } from "../../../../lib/billing/periodServer";
 import { createSquarePeriodPaymentProvider } from "../../../../lib/billing/periodPaymentServer";
+import {
+  checkCronAuthorization,
+  withinBudget,
+} from "../../../../lib/billing/cronAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 // Charging many companies serially can exceed the default limit.
 export const maxDuration = 300;
 
-export async function GET(request: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  const authHeader = request.headers.get("authorization");
+// BILL1-7. Work stops STARTING at these points so the function finishes before
+// Vercel kills it at maxDuration, which would leave a payment mid-flight and
+// unrecorded. The v2 close runs FIRST with its own share, so a slow v1 run can
+// no longer stop periods closing. A Square call is bounded at about 50 seconds
+// (lib/payments/square.ts), hence the margin at the end.
+const V2_BUDGET_MS = 110_000;
+const TOTAL_BUDGET_MS = 230_000;
 
-  // This endpoint charges cards. No secret configured means no access at all.
-  if (!secret || authHeader !== `Bearer ${secret}`) {
+const PAGE_SIZE = 1000;
+const MAX_PAGES = 50;
+
+export async function GET(request: NextRequest) {
+  const startedAt = Date.now();
+
+  // BILL1-4 and BILL1-11. A deployment with no CRON_SECRET is an outage (no
+  // renewals, no period closes, no dunning), and it used to look exactly like
+  // an ordinary unauthorised request. The comparison is constant-time.
+  const auth = checkCronAuthorization(
+    process.env.CRON_SECRET,
+    request.headers.get("authorization")
+  );
+  if (auth === "misconfigured") {
+    console.error(
+      "billing cron: CRON_SECRET is not configured; NO BILLING IS RUNNING. Set it in the Vercel project environment."
+    );
+    return NextResponse.json(
+      { error: "Billing is not configured on this deployment." },
+      { status: 500 }
+    );
+  }
+  if (auth !== "ok") {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
   const admin = createAdminClient();
   const today = londonDateISO(new Date());
 
-  const { data: rows, error } = await admin
-    .from("company_billing")
-    .select("*")
-    .neq("status", "canceled")
-    .order("next_charge_on", { ascending: true });
+  // v2 FIRST. Independent of v1 (a company is on exactly one model), so
+  // neither can charge the other's customers and a failure in one must not
+  // stop the other.
+  let periodOutcomes: Awaited<ReturnType<typeof closeDuePeriods>> = [];
+  let periodError: string | null = null;
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  // PostgREST caps unscoped selects at 1000 rows by default. Hitting this cap
-  // means some due companies are silently missing from this run; refuse
-  // rather than under-charge. Same discipline as fetchBillableVehicles.
-  if ((rows ?? []).length >= 1000) {
-    return NextResponse.json(
+  try {
+    periodOutcomes = await closeDuePeriods(
+      admin,
+      createSquarePeriodPaymentProvider(admin),
       {
-        error:
-          "Billing refused: company_billing query hit the 1000-row cap; results may be truncated.",
-      },
-      { status: 500 }
+        todayISO: today,
+        nowISO: new Date().toISOString(),
+        deadlineMs: startedAt + V2_BUDGET_MS,
+      }
     );
+  } catch (error) {
+    periodError = error instanceof Error ? error.message : String(error);
+    console.error("billing cron: period close run failed:", periodError);
   }
+
+  // BILL1-11. Paged by company_id rather than refused at the 1000-row cap,
+  // which used to stop ALL billing once the platform had 1000 billing rows.
+  const rows: Array<Record<string, any>> = [];
+  let v1Error: string | null = null;
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const from = page * PAGE_SIZE;
+    const { data, error } = await admin
+      .from("company_billing")
+      .select("*")
+      .neq("status", "canceled")
+      .order("company_id", { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) {
+      v1Error = error.message;
+      break;
+    }
+    rows.push(...(data ?? []));
+    if ((data ?? []).length < PAGE_SIZE) break;
+    if (page === MAX_PAGES - 1) {
+      v1Error = `company_billing has more than ${MAX_PAGES * PAGE_SIZE} rows; the rest were not processed`;
+    }
+  }
+  if (v1Error) console.error("billing cron: company_billing read failed:", v1Error);
 
   const results: Array<Record<string, unknown>> = [];
   let succeeded = 0;
   let failed = 0;
   let skipped = 0;
   let conflicts = 0;
+  let deferred = 0;
   let v2Companies = 0;
 
-  for (const raw of rows ?? []) {
-    // A company on v2 is billed by the period close below, NOT here. Without
-    // this the two models both charge it: selectDueAction reads next_charge_on,
-    // which the switch-over deliberately leaves in place, so a migrated company
-    // would be charged a full v1 cycle on the very day its first v2 period
-    // begins. Filtered in the loop rather than in the query because the
-    // 1000-row cap check above must see every row, migrated or not.
+  for (const raw of rows) {
+    // A company on v2 is billed by the period close above, NOT here.
     if (raw.billing_model === "v2_period") {
-      // Counted separately. Folding these into `skipped` made that number
-      // unusable for reconciliation: it conflated "no v1 charge was due" with
-      // "this company is not on v1 at all".
       v2Companies += 1;
       continue;
     }
@@ -83,6 +127,12 @@ export async function GET(request: NextRequest) {
       continue;
     }
 
+    if (!withinBudget(startedAt, Date.now(), TOTAL_BUDGET_MS)) {
+      // Left for tomorrow; nothing about the row changes.
+      deferred += 1;
+      continue;
+    }
+
     // Per-company isolation: one company's failure never aborts the batch.
     try {
       const result = await runChargeCycle(admin, {
@@ -98,12 +148,11 @@ export async function GET(request: NextRequest) {
         cycleDate: action.cycleDate,
         attempt: action.attempt,
         succeeded: result.succeeded,
+        todayISO: today,
       });
 
-      // Compare-and-swap on the dunning state: if a concurrent card update
-      // already moved this row (the /api/billing/card route retries
-      // immediately on card replacement), skip rather than clobber its
-      // outcome with ours.
+      // Compare-and-swap on the dunning state: if a concurrent card update or
+      // a cancellation already moved this row, skip rather than clobber it.
       const { data: updatedRows, error: updateError } = await admin
         .from("company_billing")
         .update({ ...outcome, updated_at: new Date().toISOString() })
@@ -156,60 +205,44 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // v2 (period billing) runs AFTER the v1 cycle charges, in its own try. The
-  // two are independent: a company is on exactly one model, so neither can
-  // charge the other's customers, and a failure in one must not stop the
-  // other's run. Sequencing v2 second means a v1 outage cannot delay it past
-  // the day's window.
-  //
-  // Every v2 period is closed by this same daily cron rather than by pg_cron
-  // or an Edge Function, because neither exists in this project and the
-  // Vercel cron in vercel.json is already authenticated, already has
-  // maxDuration raised, and is already the thing an operator looks at when
-  // billing has not run.
-  let periodOutcomes: Awaited<ReturnType<typeof closeDuePeriods>> = [];
-  let periodError: string | null = null;
-
-  try {
-    periodOutcomes = await closeDuePeriods(
-      admin,
-      createSquarePeriodPaymentProvider(admin),
-      { todayISO: today, nowISO: new Date().toISOString() }
-    );
-  } catch (error) {
-    // A throw here is a whole-run failure (a row cap hit, a query error), not
-    // one company's. Reported rather than swallowed: the response is what the
-    // cron's own alerting reads.
-    periodError = error instanceof Error ? error.message : String(error);
-    console.error("billing cron: period close run failed:", periodError);
-  }
-
-  const periodsInvoiced = periodOutcomes.filter(
-    (o) => o.result === "invoiced"
-  ).length;
+  const periodsInvoiced = periodOutcomes.filter((o) => o.result === "invoiced").length;
   const periodsDeclined = periodOutcomes.filter(
     (o) => o.result === "declined" || o.result === "suspended"
   ).length;
-  const periodsErrored = periodOutcomes.filter(
-    (o) => o.result === "error"
+  const periodsErrored = periodOutcomes.filter((o) => o.result === "error").length;
+  const periodsDeferred = periodOutcomes.filter(
+    (o) => o.result === "skipped_time_budget"
   ).length;
 
-  return NextResponse.json({
-    ok: periodError === null,
-    date: today,
-    processed: (rows ?? []).length,
-    charged: succeeded,
-    failed,
-    skipped,
-    conflicts,
-    results,
-    v2Companies,
-    periods: {
-      invoiced: periodsInvoiced,
-      declined: periodsDeclined,
-      errored: periodsErrored,
-      error: periodError,
-      outcomes: periodOutcomes,
+  if (periodsErrored > 0 || failed > 0) {
+    console.error(
+      `billing cron: ${periodsErrored} period errors, ${failed} v1 failures on ${today}; see the response body`
+    );
+  }
+
+  const ok = periodError === null && v1Error === null;
+  return NextResponse.json(
+    {
+      ok,
+      date: today,
+      processed: rows.length,
+      charged: succeeded,
+      failed,
+      skipped,
+      conflicts,
+      deferred,
+      v1Error,
+      results,
+      v2Companies,
+      periods: {
+        invoiced: periodsInvoiced,
+        declined: periodsDeclined,
+        errored: periodsErrored,
+        deferred: periodsDeferred,
+        error: periodError,
+        outcomes: periodOutcomes,
+      },
     },
-  });
+    { status: ok ? 200 : 500 }
+  );
 }

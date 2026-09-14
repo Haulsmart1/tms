@@ -220,6 +220,91 @@ export function highWaterMark(args: {
 
 export type PeriodStatus = "open" | "closing" | "closed" | "invoiced" | "failed";
 
+/**
+ * How late a successor may still be opened at the previous period's end.
+ *
+ * A balance retried on the dunning ladder settles no later than day 6 after
+ * close (nextRetryOn: days 2, 4 and 6), plus a day of cron slack. Anything
+ * older is a company that went past_due and came back, and the spec says its
+ * suspended time is not billed: it re-enters through a fresh activation or the
+ * card route, which take the minimum again.
+ */
+export const SUCCESSOR_MAX_LAG_DAYS = 7;
+
+export type SuccessorDecision =
+  | { kind: "open"; startISO: string }
+  | { kind: "stale"; lagDays: number }
+  | {
+      kind: "none";
+      reason:
+        | "not_v2"
+        | "not_active"
+        | "has_open_period"
+        | "no_previous_period"
+        | "previous_not_settled"
+        | "previous_not_scheduled"
+        | "no_active_licence"
+        | "not_due";
+    };
+
+/**
+ * Should the company's next period be opened, and from when?
+ *
+ * Review findings BILL2-1 and BILL2-7. The successor used to open only inside
+ * the collection that settled the previous period, and a failure there was
+ * swallowed with "the next activation self-heals it", which a company with a
+ * stable fleet never does. So a 30-vehicle company could go unbilled forever.
+ * The same decision now runs both at settlement and as a daily sweep, which
+ * makes the rollover re-runnable.
+ *
+ * And it never rolls over a company that has left: not a cancelled company,
+ * and not out of a period that ended because of a cancellation or a cooling-off
+ * refund. That was BILL2-1, where a cancelled company kept being billed every
+ * 28 days.
+ *
+ * Dates compare as YYYY-MM-DD strings. `lagDays` is how far the previous
+ * period's end is behind today.
+ */
+export function selectSuccessorAction(args: {
+  billingModel: string;
+  companyStatus: string;
+  hasOpenPeriod: boolean;
+  latestPeriod: {
+    status: PeriodStatus;
+    closedReason: string | null;
+    periodEndISO: string;
+  } | null;
+  hasActiveLicence: boolean;
+  todayISO: string;
+  lagDays: number;
+}): SuccessorDecision {
+  if (args.billingModel !== "v2_period") return { kind: "none", reason: "not_v2" };
+  if (args.companyStatus !== "active") {
+    return { kind: "none", reason: "not_active" };
+  }
+  if (args.hasOpenPeriod) return { kind: "none", reason: "has_open_period" };
+  if (!args.latestPeriod) return { kind: "none", reason: "no_previous_period" };
+  if (args.latestPeriod.status !== "invoiced") {
+    return { kind: "none", reason: "previous_not_settled" };
+  }
+  if (
+    args.latestPeriod.closedReason !== null &&
+    args.latestPeriod.closedReason !== "scheduled"
+  ) {
+    return { kind: "none", reason: "previous_not_scheduled" };
+  }
+  if (args.latestPeriod.periodEndISO > args.todayISO) {
+    return { kind: "none", reason: "not_due" };
+  }
+  if (!args.hasActiveLicence) {
+    return { kind: "none", reason: "no_active_licence" };
+  }
+  if (args.lagDays > SUCCESSOR_MAX_LAG_DAYS) {
+    return { kind: "stale", lagDays: args.lagDays };
+  }
+  return { kind: "open", startISO: args.latestPeriod.periodEndISO };
+}
+
 export type CloseAction =
   /** Build the invoice from licence rows. */
   | { kind: "compute"; regenerateLines: boolean }

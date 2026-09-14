@@ -16,9 +16,39 @@
 // vehicle line reads at the headline rate, the discount is visible rather than
 // buried, and the arithmetic is checkable by hand.
 
-import { fleetDiscountBand, fleetPeriodPence } from "./rateCard";
+import { fleetBandForVehicleDays, PERIOD_DAYS } from "./rateCard";
 import { prorateLine } from "./invoiceLine";
 import { roundHalfUpDiv } from "./pence";
+import { daysBetween } from "./schedule";
+
+/**
+ * The floor a period's invoice is lifted to. Review finding BILL2-9.
+ *
+ * A scheduled period carries the full floor. A period cut short by
+ * CANCELLATION carries the floor prorated by the days the period actually ran,
+ * because the floor exists to price a period of service, and a rollover period
+ * collected nothing up front: without this a two-vehicle customer cancelling
+ * the day after a rollover paid the full GBP 154.80 for two days, which is the
+ * chargeback the day-exact cancellation rule was designed to avoid.
+ *
+ * An activation-opened period prepaid the full floor, and balanceDue never
+ * goes negative, so this does not refund anything: the spec's "two vehicles
+ * cancel on day 11, nothing owed, nothing refunded" example is unchanged.
+ */
+export function effectiveMinimumPence(args: {
+  minimumPence: number;
+  periodStartISO: string;
+  /** Exclusive. */
+  periodEndISO: string;
+  closedReason: string | null;
+}): number {
+  if (args.closedReason !== "cancellation") return args.minimumPence;
+  const days = Math.min(
+    Math.max(daysBetween(args.periodStartISO, args.periodEndISO), 0),
+    PERIOD_DAYS
+  );
+  return roundHalfUpDiv(args.minimumPence * days, PERIOD_DAYS);
+}
 
 export type InvoiceVehicle = {
   vehicleId: string;
@@ -192,21 +222,29 @@ export function assembleInvoice(
     };
   }
 
-  const band = fleetDiscountBand(vehicleCount, unitAmountPence);
+  // BANDED ON VEHICLE-DAYS, NOT ON LINE COUNT (review BILL2-3). A line count
+  // let a vehicle licensed for one day buy a whole vehicle's worth of band, and
+  // the band's discount then applied to the entire subtotal, so adding
+  // throwaway vehicles on the last day LOWERED the invoice. The full rule and
+  // why it is monotonic are on fleetBandForVehicleDays in rateCard.ts.
+  //
+  // Included-in-plan lines count toward the band (they are vehicles the
+  // company runs) but not toward the subtotal the ratio is applied to.
+  const periodDays = daysBetween(periodStartISO, periodEndISO);
+  const vehicleDays = lines.reduce((sum, line) => sum + line.billableDays, 0);
+  const banded = fleetBandForVehicleDays(vehicleDays, periodDays);
+  const band = banded.band;
   let netPence = subtotalPence;
 
   if (unitAmountPence > 0 && band.discountPercent > 0) {
-    // The discount is defined on a FULL period, so it is applied to the
-    // prorated subtotal as the ratio between the discounted and undiscounted
-    // full-period prices rather than as a bare percentage. That is what makes
-    // a fleet present all period land exactly on the rate card, which
-    // invoice.test.ts asserts across a dozen fleet sizes, while a part-period
-    // fleet is discounted in the same proportion.
-    const fullPeriodDiscounted = fleetPeriodPence(vehicleCount, unitAmountPence);
-    const fullPeriodUndiscounted = vehicleCount * unitAmountPence;
+    // Applied to the prorated subtotal as a ratio rather than as a bare
+    // percentage, so a band reached through the threshold cap discounts by
+    // exactly what the cap implies. A fleet present all period still lands
+    // exactly on the rate card, which invoice.test.ts asserts across a dozen
+    // fleet sizes.
     const discounted = roundHalfUpDiv(
-      subtotalPence * fullPeriodDiscounted,
-      fullPeriodUndiscounted
+      subtotalPence * banded.numerator,
+      banded.denominator
     );
 
     if (discounted !== subtotalPence) {
@@ -227,7 +265,7 @@ export function assembleInvoice(
         // is not that percentage of its own subtotal and printing it would put
         // a number on the line that does not match the amount beside it.
         description:
-          vehicleCount >= band.threshold
+          vehicleDays >= band.threshold * periodDays
             ? `Volume discount (${band.discountPercent}%)`
             : `Volume discount (priced at ${band.threshold} vehicles)`,
       });

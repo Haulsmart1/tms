@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { COOLING_OFF_HOURS, selectCancellationAction } from "./cancellation";
+import {
+  COOLING_OFF_HOURS,
+  selectCancellationAction,
+  selectV1CancellationAction,
+} from "./cancellation";
 import type { CancellationBillingRow, CancellablePeriod } from "./cancellation";
 
 const NOW = "2026-03-22T09:00:00.000Z";
@@ -18,7 +22,71 @@ const PERIOD: CancellablePeriod = {
   openedAtISO: "2026-03-21T14:00:00.000Z",
   prepaidPence: 12900,
   minimumChargePending: false,
+  isFirstPeriod: true,
 };
+
+describe("selectCancellationAction cooling-off limits (BILL2-10)", () => {
+  it("is not available on a later activation-opened period", () => {
+    expect(
+      action({ openPeriod: { ...PERIOD, isFirstPeriod: false } }).kind
+    ).toBe("close_early");
+  });
+
+  it("is not available on a card that already had one elsewhere", () => {
+    expect(
+      action({ billingRow: { ...V2, coolingOffUsedByCard: true } }).kind
+    ).toBe("close_early");
+  });
+});
+
+describe("selectCancellationAction before a migrated company's seam (BILL2-13)", () => {
+  it("voids a period that has not started instead of cutting it short", () => {
+    expect(
+      action({
+        openPeriod: {
+          ...PERIOD,
+          periodStartISO: "2026-03-30",
+          periodEndISO: "2026-04-27",
+          prepaidPence: 0,
+        },
+      })
+    ).toEqual({ kind: "void_future_period", periodId: "period-1" });
+  });
+
+  it("still closes a period that started today", () => {
+    expect(
+      action({
+        openPeriod: { ...PERIOD, periodStartISO: TODAY, prepaidPence: 0 },
+      }).kind
+    ).toBe("close_early");
+  });
+});
+
+describe("selectV1CancellationAction (BILL1-14)", () => {
+  it("cancels an active v1 company", () => {
+    expect(
+      selectV1CancellationAction({ status: "active", hasUnsettledCharge: false })
+    ).toEqual({ kind: "cancel" });
+  });
+
+  it("cancels a past due v1 company, which stops dunning", () => {
+    expect(
+      selectV1CancellationAction({ status: "past_due", hasUnsettledCharge: false })
+    ).toEqual({ kind: "cancel" });
+  });
+
+  it("refuses twice", () => {
+    expect(
+      selectV1CancellationAction({ status: "canceled", hasUnsettledCharge: false })
+    ).toEqual({ kind: "blocked", reason: "already_canceled" });
+  });
+
+  it("waits for a charge whose outcome is unknown", () => {
+    expect(
+      selectV1CancellationAction({ status: "active", hasUnsettledCharge: true })
+    ).toEqual({ kind: "blocked", reason: "payment_settling" });
+  });
+});
 
 function action(overrides: Partial<Parameters<typeof selectCancellationAction>[0]> = {}) {
   return selectCancellationAction({

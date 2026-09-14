@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { selectActivationAction } from "./activation";
+import { openPeriodNeedsMinimum, selectActivationAction } from "./activation";
 import type { ActivationBillingRow, OpenPeriod } from "./activation";
 
 const TODAY = "2026-03-21";
@@ -138,10 +138,51 @@ describe("selectActivationAction with an unsettled minimum", () => {
   // is billed the whole period again on top of a minimum they may already
   // have paid. Blocking is the honest answer, and the situation resolves the
   // moment the pending row is reconciled against Square.
-  it("blocks rather than joining a period whose minimum is still settling", () => {
+  // BILL2-4. It used to block forever, because nothing ever replayed the
+  // pending row. It now goes back through the charge for THIS period, which
+  // replays the stored request so a payment that went through is found rather
+  // than repeated.
+  it("replays the minimum rather than joining or blocking forever", () => {
     expect(
       action({ openPeriod: OPEN, openPeriodMinimumPending: true })
-    ).toEqual({ kind: "blocked", reason: "payment_settling" });
+    ).toEqual({
+      kind: "open_period_and_charge",
+      periodStartISO: "2026-03-01",
+      periodEndISO: "2026-03-29",
+      amountPence: 12900,
+    });
+  });
+
+  // The replay resends the card stored on the pending row.
+  it("replays a pending minimum even with no card on file", () => {
+    expect(
+      action({
+        billingRow: { ...V2_ACTIVE, hasPaymentMethod: false },
+        openPeriod: OPEN,
+        openPeriodMinimumPending: true,
+      }).kind
+    ).toBe("open_period_and_charge");
+  });
+
+  // BILL2-8: an orphaned period (inserted, then the request threw before any
+  // charge row existed) takes the minimum instead of admitting vehicles free.
+  it("charges the minimum on an orphaned open period", () => {
+    expect(
+      action({ openPeriod: OPEN, openPeriodNeedsMinimum: true })
+    ).toMatchObject({
+      kind: "open_period_and_charge",
+      periodStartISO: "2026-03-01",
+    });
+  });
+
+  it("needs a card to charge an orphaned period's minimum", () => {
+    expect(
+      action({
+        billingRow: { ...V2_ACTIVE, hasPaymentMethod: false },
+        openPeriod: OPEN,
+        openPeriodNeedsMinimum: true,
+      })
+    ).toEqual({ kind: "blocked", reason: "no_payment_method" });
   });
 
   it("joins normally once the minimum has settled", () => {
@@ -159,6 +200,55 @@ describe("selectActivationAction with an unsettled minimum", () => {
   });
 });
 
+describe("openPeriodNeedsMinimum", () => {
+  const BASE = {
+    prepaidPence: 0,
+    minimumChargeStatuses: [] as string[],
+    periodStartISO: "2026-03-01",
+    createdOnISO: "2026-03-01",
+    followsPreviousPeriod: false,
+  };
+
+  it("needs one for an activation-opened period that never charged", () => {
+    expect(openPeriodNeedsMinimum(BASE)).toBe(true);
+  });
+
+  it("needs one while the minimum is pending, so it is replayed", () => {
+    expect(
+      openPeriodNeedsMinimum({ ...BASE, minimumChargeStatuses: ["pending"] })
+    ).toBe(true);
+  });
+
+  it("needs a prepaid repair when the minimum succeeded but was not recorded", () => {
+    expect(
+      openPeriodNeedsMinimum({ ...BASE, minimumChargeStatuses: ["succeeded"] })
+    ).toBe(true);
+    expect(
+      openPeriodNeedsMinimum({
+        ...BASE,
+        prepaidPence: 12900,
+        minimumChargeStatuses: ["succeeded"],
+      })
+    ).toBe(false);
+  });
+
+  it("does not for a period rolled over from the previous one", () => {
+    expect(
+      openPeriodNeedsMinimum({ ...BASE, followsPreviousPeriod: true })
+    ).toBe(false);
+  });
+
+  it("does not for a migration period opened at a future seam", () => {
+    expect(
+      openPeriodNeedsMinimum({ ...BASE, periodStartISO: "2026-03-10" })
+    ).toBe(false);
+  });
+
+  it("does not once something was prepaid", () => {
+    expect(openPeriodNeedsMinimum({ ...BASE, prepaidPence: 12900 })).toBe(false);
+  });
+});
+
 describe("selectActivationAction blocked", () => {
   // Suspension. Under arrears a company that has not paid must not be able to
   // grow its fleet, or the debt simply accrues against a card that is already
@@ -173,6 +263,35 @@ describe("selectActivationAction blocked", () => {
     expect(action({ billingRow: { ...V2_ACTIVE, status: "canceled" } })).toEqual(
       { kind: "blocked", reason: "canceled" }
     );
+  });
+
+  // BILL2-6. Mid-dunning the company is still `active`; without this gate it
+  // opened a new period with a fresh minimum and left the gap unbilled.
+  it("blocks a company with an unpaid closed period", () => {
+    expect(action({ hasUncollectedPeriod: true })).toEqual({
+      kind: "blocked",
+      reason: "dunning",
+    });
+    expect(action({ hasUncollectedPeriod: true, openPeriod: OPEN })).toEqual({
+      kind: "blocked",
+      reason: "dunning",
+    });
+  });
+
+  it("waits while a period is being closed", () => {
+    expect(action({ hasPeriodBeingClosed: true })).toEqual({
+      kind: "blocked",
+      reason: "payment_settling",
+    });
+  });
+
+  it("reports the account problem before dunning", () => {
+    expect(
+      action({
+        billingRow: { ...V2_ACTIVE, status: "past_due" },
+        hasUncollectedPeriod: true,
+      })
+    ).toEqual({ kind: "blocked", reason: "past_due" });
   });
 
   // Fails CLOSED on anything outside the union, exactly as selectAddonAction

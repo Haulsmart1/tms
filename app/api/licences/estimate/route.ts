@@ -13,7 +13,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { errorResponse } from "../../../../lib/accounts/server";
-import { requireCompanyAdmin } from "../../../../lib/billing/server";
+import {
+  fetchBillableVehicles,
+  requireCompanyAdmin,
+} from "../../../../lib/billing/server";
+import {
+  loadV1AddonDecision,
+  quoteFromV1Decision,
+} from "../../../../lib/billing/addonResolve";
 import { quoteVehicleAddition } from "../../../../lib/billing/periodServer";
 import { londonDateISO } from "../../../../lib/billing/schedule";
 
@@ -68,12 +75,32 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const todayISO = londonDateISO(new Date());
     const quote = await quoteVehicleAddition(
       admin,
       companyId,
       parsed.data,
-      londonDateISO(new Date())
+      todayISO
     );
+
+    // BILL1-13. v1 activations charge a pro-rata amount on the spot, so v1
+    // gets a real quote from the same loader the activate route charges from.
+    if (quote.model === "v1_immediate") {
+      const billableIds = await fetchBillableVehicles(admin, companyId);
+      if (billableIds.has(parsed.data)) {
+        return NextResponse.json({
+          ok: true,
+          quote: { model: "v1_immediate", kind: "free", reason: "already_billable" },
+        });
+      }
+      const decision = await loadV1AddonDecision(admin, {
+        companyId,
+        vehicleId: parsed.data,
+        todayISO,
+        billableIds,
+      });
+      return NextResponse.json({ ok: true, quote: quoteFromV1Decision(decision) });
+    }
 
     return NextResponse.json({ ok: true, quote });
   } catch (error) {
