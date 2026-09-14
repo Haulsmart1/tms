@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
@@ -82,6 +82,7 @@ export default function VehiclesPage() {
 
   const [form, setForm] = useState(EMPTY_FORM);
   const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
+  const loadSeqRef = useRef(0);
 
   const showSkeleton = shouldShowSkeleton({
     tenantStatus: tenant.status,
@@ -115,8 +116,25 @@ export default function VehiclesPage() {
 
   const showEmpty = !showSkeleton && vehicles.length === 0;
 
+  /* SET-19: the tenant a vehicle's fleet policy must come from. Editing uses
+     the vehicle's own tenant; a new vehicle is written to writeTenantId. */
+  const policyTenantId: string | null = editingId
+    ? ((vehicles.find((vehicle) => vehicle.id === editingId) as
+        | { tenant_id?: string | null }
+        | undefined)?.tenant_id ?? null)
+    : tenant.writeTenantId;
+
+  function policiesForTenant(tenantId: string | null) {
+    if (!tenantId) return [];
+    return fleetPolicies.filter((policy) => policy.tenant_id === tenantId);
+  }
+
   async function loadVehicles() {
     if (tenant.status !== "ready") return;
+
+    /* SET-18: latest request wins, so a slow response for the tenant the
+       admin just switched away from cannot replace the new tenant's fleet. */
+    const seq = ++loadSeqRef.current;
 
     setLoading(true);
 
@@ -134,6 +152,8 @@ export default function VehiclesPage() {
         )
         .order("expiry_date", { ascending: true }),
     ]);
+
+    if (seq !== loadSeqRef.current) return;
 
     if (vehicleResult.error) {
       setMessage(vehicleResult.error.message);
@@ -491,6 +511,18 @@ export default function VehiclesPage() {
       home_country_code: homeCountryCode || null,
     };
 
+    /* SET-19: a fleet policy must belong to the same tenant as the vehicle. */
+    if (
+      payload.fleet_insurance_policy_id &&
+      !policiesForTenant(policyTenantId).some(
+        (policy) => policy.id === payload.fleet_insurance_policy_id
+      )
+    ) {
+      setMessage("Choose a fleet policy that belongs to this vehicle's tenant.");
+      setSaving(false);
+      return;
+    }
+
     let error: { message?: string } | null = null;
     const wasEditing = Boolean(editingId);
 
@@ -537,10 +569,37 @@ export default function VehiclesPage() {
 
     setMessage("");
 
-    const { error } = await supabase.from("vehicles").delete().eq("id", id);
+    /* SET-4: never delete from the browser. Deleting a vehicle cascades its
+       billing evidence (coverage and add-on charge rows), so the server
+       route decides, and answers 409 with a reason when billing history
+       prevents it. */
+    let response: Response;
+    try {
+      response = await fetch(`/api/vehicles/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+    } catch {
+      setMessage("Unable to delete the vehicle. Check your connection and try again.");
+      return;
+    }
 
-    if (error) {
-      setMessage(error.message);
+    if (!response.ok) {
+      let reason = "";
+      try {
+        const body = (await response.json()) as { error?: unknown };
+        reason = typeof body.error === "string" ? body.error : "";
+      } catch {
+        reason = "";
+      }
+      setMessage(
+        reason ||
+          (response.status === 403
+            ? "You do not have permission to delete this vehicle."
+            : response.status === 404
+              ? "That vehicle no longer exists."
+              : "Unable to delete the vehicle.")
+      );
+      if (response.status === 404) await loadVehicles();
       return;
     }
 
@@ -1062,7 +1121,7 @@ export default function VehiclesPage() {
                       }
                     >
                       <option value="">Select fleet policy</option>
-                      {fleetPolicies.map((policy) => (
+                      {policiesForTenant(policyTenantId).map((policy) => (
                         <option key={policy.id} value={policy.id}>
                           {policy.provider} • {policy.policy_number} • expires{" "}
                           {formatDateGB(policy.expiry_date)}
