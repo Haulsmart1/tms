@@ -12,6 +12,7 @@ import LicenceCard from "./LicenceCard";
 import { shouldShowSkeleton } from "../../../lib/loading/skeletonVisibility";
 import { computeChargeAmounts, formatPence } from "../../../lib/billing/money";
 import { BILLING_BASIS_SENTENCE, pricingHeadline } from "../../../lib/billing/pricingCopy";
+import { billingModelForRow } from "../../../lib/billing/rateCard";
 import type { LicenceVehicle, VehicleLicence } from "./types";
 
 /* Three, because these cards are full width in a single-column grid and are
@@ -243,9 +244,18 @@ export default function VehicleLicencesPage() {
            staff read no row at all; both land on null, which fails closed to
            the v1 copy below. A banner about pricing wording would say nothing
            useful on a page whose job is licences. */
+        /* Resolved only when the read succeeded. A successful read with no row
+           means this company has not added a card, and billingModelForRow
+           gives it the model it will be created on. That inference is only
+           sound for an admin, whose read reliably returns their own row;
+           staff also read no row, but pricingCopyMode below shows them
+           "unknown" before it ever consults this value. */
         setBillingModel(
-            ((billingRes.data as { billing_model?: string | null } | null)
-                ?.billing_model) ?? null
+            billingRes.error
+                ? null
+                : billingModelForRow(
+                      billingRes.data as { billing_model?: string | null } | null
+                  )
         );
 
         setVehicles(vehicleData ?? []);
