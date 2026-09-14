@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
 
@@ -70,7 +71,7 @@ function location(
     postcode,
   ]
     .filter(Boolean)
-    .join(", ") || "—";
+    .join(", ") || "-";
 }
 
 export default function QuoteRequestsInbox({
@@ -99,9 +100,16 @@ export default function QuoteRequestsInbox({
     setError,
   ] = useState("");
 
+  /* Latest request wins (INV-12). */
+  const loadRequestRef =
+    useRef(0);
+
   const load =
     useCallback(
       async () => {
+        const requestId =
+          ++loadRequestRef.current;
+
         setLoading(true);
         setError("");
 
@@ -129,12 +137,26 @@ export default function QuoteRequestsInbox({
             );
           }
 
+          if (
+            requestId !==
+            loadRequestRef.current
+          ) {
+            return;
+          }
+
           setRows(
             body.quoteRequests ??
               []
           );
         }
         catch (loadError) {
+          if (
+            requestId !==
+            loadRequestRef.current
+          ) {
+            return;
+          }
+
           setError(
             loadError instanceof Error
               ? loadError.message
@@ -142,7 +164,12 @@ export default function QuoteRequestsInbox({
           );
         }
         finally {
-          setLoading(false);
+          if (
+            requestId ===
+            loadRequestRef.current
+          ) {
+            setLoading(false);
+          }
         }
       },
       [
