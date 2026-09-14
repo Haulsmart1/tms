@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -20,7 +21,19 @@ type Props = {
   initialEmail: string;
   alreadyAccepted: boolean;
   alreadyDeclined: boolean;
+  /** Set when the quotation can no longer be decided (cancelled, expired...). */
+  closedMessage: string | null;
+  /** Hash of the prices and lines rendered on this page (INV-4). */
+  snapshotHash: string;
 };
+
+function quotationShareEndpoint(
+  token: string
+) {
+  return `/api/public/quotation-share/${encodeURIComponent(
+    token
+  )}`;
+}
 
 export default function AcceptanceClient({
   token,
@@ -30,6 +43,8 @@ export default function AcceptanceClient({
   initialEmail,
   alreadyAccepted,
   alreadyDeclined,
+  closedMessage,
+  snapshotHash,
 }: Props) {
   const [name, setName] =
     useState("");
@@ -69,6 +84,46 @@ export default function AcceptanceClient({
   ] =
     useState("");
 
+  /*
+    Record the view from the browser after hydration, at most once per tab
+    session, instead of on every server render. Email link scanners fetch
+    the HTML without running this, so they no longer count as a view (INV-18).
+  */
+  useEffect(() => {
+    const storageKey =
+      `tms:quotation-viewed:${token.slice(-32)}`;
+
+    try {
+      if (window.sessionStorage.getItem(storageKey)) {
+        return;
+      }
+
+      window.sessionStorage.setItem(
+        storageKey,
+        "1"
+      );
+    }
+    catch {
+      /* Storage blocked: still record once for this mount. */
+    }
+
+    void fetch(
+      quotationShareEndpoint(token),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body:
+          JSON.stringify({
+            action: "view",
+          }),
+        keepalive: true,
+      }
+    ).catch(() => undefined);
+  }, [token]);
+
   const requiredClauses =
     useMemo(
       () =>
@@ -97,7 +152,8 @@ export default function AcceptanceClient({
       adrAccepted) &&
     !busy &&
     !alreadyAccepted &&
-    !alreadyDeclined;
+    !alreadyDeclined &&
+    !closedMessage;
 
   function toggleClause(
     key: string
@@ -162,9 +218,7 @@ export default function AcceptanceClient({
     try {
       const response =
         await fetch(
-          `/api/public/quotation-share/${encodeURIComponent(
-            token
-          )}`,
+          quotationShareEndpoint(token),
           {
             method: "POST",
             headers: {
@@ -187,12 +241,17 @@ export default function AcceptanceClient({
                     acceptedKeys
                   ),
                 adrAccepted,
+                snapshotHash,
               }),
           }
         );
 
       const payload =
-        await response.json();
+        (await response
+          .json()
+          .catch(() => ({}))) as {
+          error?: string;
+        };
 
       if (!response.ok) {
         throw new Error(
@@ -243,6 +302,14 @@ export default function AcceptanceClient({
     return (
       <div className="rounded-xl border border-slate-300 bg-slate-50 p-5 text-sm">
         This quotation has already been declined.
+      </div>
+    );
+  }
+
+  if (closedMessage) {
+    return (
+      <div className="rounded-xl border border-amber-300 bg-amber-50 p-5 text-sm">
+        {closedMessage}
       </div>
     );
   }
