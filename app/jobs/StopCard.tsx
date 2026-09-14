@@ -13,6 +13,11 @@ import Field from "../../components/Field";
 import { createClient } from "../../lib/supabase/browser";
 import PodLink from "../components/PodLink";
 import { useTenant } from "../components/TenantProvider";
+import {
+  errorFromBody,
+  readJsonSafe,
+  uploadEvidenceViaSignedUrl,
+} from "../../lib/pod/uploadClient";
 
 const POD_BUCKET = "pod-files";
 const MAX_FILE_SIZE = 15 * 1024 * 1024;
@@ -213,52 +218,23 @@ export default function StopCard({
           );
         }
 
-        const safeName = file.name.replace(
-          /[^a-zA-Z0-9.\-_]/g,
-          "_"
-        );
-
-        const folder =
-          evidenceType === "photo"
-            ? "photos"
-            : "documents";
-
-        const storagePath =
-          `${activeTenantId}/${jobId}/${stop.id}/${folder}/` +
-          `${Date.now()}-${crypto.randomUUID()}-${safeName}`;
-
-        const { error: uploadError } = await supabase.storage
-          .from(POD_BUCKET)
-          .upload(storagePath, file, {
-            upsert: false,
-            contentType: file.type || undefined,
-          });
-
-        if (uploadError) {
-          throw uploadError;
-        }
-
-        const { error: insertError } = await supabase
-          .from("pod_evidence")
-          .insert({
-            tenant_id: activeTenantId,
-            job_id: jobId,
-            stop_id: stop.id,
-            evidence_type: evidenceType,
-            storage_path: storagePath,
-            original_filename: file.name,
-            mime_type: file.type || null,
-            file_size_bytes: file.size,
-            created_by: user.id,
-          });
-
-        if (insertError) {
-          await supabase.storage
-            .from(POD_BUCKET)
-            .remove([storagePath]);
-
-          throw insertError;
-        }
+        // The server picks the storage path and records the row after
+        // checking the stored file (review POD-10, POD-17).
+        await uploadEvidenceViaSignedUrl({
+          fetchImpl: fetch,
+          storage: supabase.storage.from(POD_BUCKET),
+          uploadUrlEndpoint: "/api/pod/evidence/upload-url",
+          recordEndpoint: "/api/pod/evidence",
+          file,
+          filename: file.name,
+          mimeType: file.type,
+          extraBody: {
+            tenantId: activeTenantId,
+            jobId,
+            stopId: stop.id,
+            evidenceType,
+          },
+        });
       }
 
       setEvidenceMessage(
@@ -298,24 +274,19 @@ export default function StopCard({
     clearMessages();
 
     try {
-      const { error: storageError } = await supabase.storage
-        .from(POD_BUCKET)
-        .remove([item.storage_path]);
+      // Server route: removes the row and the storage object, which the
+      // bucket refuses to delete for signed-in clients (review POD-17).
+      const response = await fetch(
+        `/api/pod/evidence/${encodeURIComponent(item.id)}?tenantId=${encodeURIComponent(activeTenantId)}`,
+        { method: "DELETE" }
+      );
 
-      if (storageError) {
-        throw storageError;
-      }
+      const body = await readJsonSafe(response);
 
-      const { error: deleteError } = await supabase
-        .from("pod_evidence")
-        .delete()
-        .eq("id", item.id)
-        .eq("tenant_id", activeTenantId)
-        .eq("job_id", jobId)
-        .eq("stop_id", stop.id);
-
-      if (deleteError) {
-        throw deleteError;
+      if (!response.ok) {
+        throw new Error(
+          errorFromBody(body, response.status, "Unable to delete POD evidence.")
+        );
       }
 
       setEvidenceMessage("POD evidence deleted.");

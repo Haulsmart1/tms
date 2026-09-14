@@ -17,6 +17,17 @@ import Skeleton from "../../components/Skeleton";
 import Stat from "../../components/Stat";
 import Textarea from "../../components/Textarea";
 import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
+import { chunk, fetchAllPages, type PageResponse } from "../../lib/jobs/fetchPages";
+import { saveStopPod } from "../../lib/pod/savePod";
+import {
+  errorFromBody,
+  readJsonSafe,
+  uploadEvidenceViaSignedUrl,
+} from "../../lib/pod/uploadClient";
+
+/* Hard ceiling for the POD job list. Past it the page says so instead of
+   silently losing rows at Supabase's 1000-row cap (review POD-13). */
+const POD_JOBS_MAX_ROWS = 5000;
 
 const POD_BUCKET = "pod-files";
 const MAX_FILE_SIZE = 15 * 1024 * 1024;
@@ -145,7 +156,8 @@ export default function PodPage() {
     clearMessages();
 
     try {
-      const [jobsResult, evidenceResult] = await Promise.all([
+      const jobsPage = await fetchAllPages<Job>(
+        (from, to) =>
         supabase
           .from("jobs")
           .select(`
@@ -177,38 +189,52 @@ export default function PodPage() {
               pod_document_url,
               pod_updated_at
             )
-          `)
+          `, { count: "exact" })
           .eq("tenant_id", activeTenantId)
-          .order("created_at", { ascending: false }),
+          .order("created_at", { ascending: false })
+          .range(from, to) as unknown as PromiseLike<PageResponse<Job>>,
+        { pageSize: 500, maxRows: POD_JOBS_MAX_ROWS }
+      );
 
-        supabase
-          .from("pod_evidence")
-          .select(`
-            id,
-            tenant_id,
-            job_id,
-            stop_id,
-            evidence_type,
-            storage_path,
-            original_filename,
-            mime_type,
-            file_size_bytes,
-            created_by,
-            created_at
-          `)
-          .eq("tenant_id", activeTenantId)
-          .order("created_at", { ascending: false }),
-      ]);
+      // Evidence only for the jobs on screen, paged, so a busy tenant's
+      // older stops never lose their evidence to the row cap.
+      const evidenceRows: PodEvidence[] = [];
 
-      if (jobsResult.error) {
-        throw jobsResult.error;
+      for (const jobIds of chunk(jobsPage.rows.map((job) => job.id), 150)) {
+        const evidencePage = await fetchAllPages<PodEvidence>(
+          (from, to) =>
+            supabase
+              .from("pod_evidence")
+              .select(`
+                id,
+                tenant_id,
+                job_id,
+                stop_id,
+                evidence_type,
+                storage_path,
+                original_filename,
+                mime_type,
+                file_size_bytes,
+                created_by,
+                created_at
+              `)
+              .eq("tenant_id", activeTenantId)
+              .in("job_id", jobIds)
+              .order("created_at", { ascending: false })
+              .range(from, to) as unknown as PromiseLike<PageResponse<PodEvidence>>,
+          { pageSize: 1000, maxRows: 1_000_000 }
+        );
+
+        evidenceRows.push(...evidencePage.rows);
       }
 
-      if (evidenceResult.error) {
-        throw evidenceResult.error;
+      if (jobsPage.truncated) {
+        setErrorMessage(
+          `Only the newest ${jobsPage.rows.length} of ${jobsPage.total ?? "more"} jobs are loaded. Older jobs are not shown.`
+        );
       }
 
-      const normalizedJobs = ((jobsResult.data ?? []) as unknown as Job[]).map(
+      const normalizedJobs = jobsPage.rows.map(
         (job) => ({
           ...job,
           job_stops: [...(job.job_stops ?? [])].sort(
@@ -218,7 +244,7 @@ export default function PodPage() {
       );
 
       setJobs(normalizedJobs);
-      setEvidence((evidenceResult.data ?? []) as PodEvidence[]);
+      setEvidence(evidenceRows);
 
       const nextForms: Record<string, PodForm> = {};
 
@@ -348,50 +374,23 @@ export default function PodPage() {
           );
         }
 
-        const safeName = file.name.replace(
-          /[^a-zA-Z0-9.\-_]/g,
-          "_"
-        );
-
-        const folder =
-          evidenceType === "photo" ? "photos" : "documents";
-
-        const storagePath =
-          `${activeTenantId}/${job.id}/${stop.id}/${folder}/` +
-          `${Date.now()}-${crypto.randomUUID()}-${safeName}`;
-
-        const { error: uploadError } = await supabase.storage
-          .from(POD_BUCKET)
-          .upload(storagePath, file, {
-            upsert: false,
-            contentType: file.type || undefined,
-          });
-
-        if (uploadError) {
-          throw uploadError;
-        }
-
-        const { error: evidenceError } = await supabase
-          .from("pod_evidence")
-          .insert({
-            tenant_id: activeTenantId,
-            job_id: job.id,
-            stop_id: stop.id,
-            evidence_type: evidenceType,
-            storage_path: storagePath,
-            original_filename: file.name,
-            mime_type: file.type || null,
-            file_size_bytes: file.size,
-            created_by: user.id,
-          });
-
-        if (evidenceError) {
-          await supabase.storage
-            .from(POD_BUCKET)
-            .remove([storagePath]);
-
-          throw evidenceError;
-        }
+        // The server picks the storage path and records the row after
+        // checking the stored file (review POD-2, POD-10, POD-17).
+        await uploadEvidenceViaSignedUrl({
+          fetchImpl: fetch,
+          storage: supabase.storage.from(POD_BUCKET),
+          uploadUrlEndpoint: "/api/pod/evidence/upload-url",
+          recordEndpoint: "/api/pod/evidence",
+          file,
+          filename: file.name,
+          mimeType: file.type,
+          extraBody: {
+            tenantId: activeTenantId,
+            jobId: job.id,
+            stopId: stop.id,
+            evidenceType,
+          },
+        });
       }
 
       const uploadedCount = files.length;
@@ -436,22 +435,19 @@ export default function PodPage() {
     clearMessages();
 
     try {
-      const { error: storageError } = await supabase.storage
-        .from(POD_BUCKET)
-        .remove([item.storage_path]);
+      // Server route: removes the row and the storage object, which the
+      // bucket refuses to delete for signed-in clients (review POD-17).
+      const response = await fetch(
+        `/api/pod/evidence/${encodeURIComponent(item.id)}?tenantId=${encodeURIComponent(activeTenantId)}`,
+        { method: "DELETE" }
+      );
 
-      if (storageError) {
-        throw storageError;
-      }
+      const body = await readJsonSafe(response);
 
-      const { error: rowError } = await supabase
-        .from("pod_evidence")
-        .delete()
-        .eq("id", item.id)
-        .eq("tenant_id", activeTenantId);
-
-      if (rowError) {
-        throw rowError;
+      if (!response.ok) {
+        throw new Error(
+          errorFromBody(body, response.status, "Unable to delete POD evidence.")
+        );
       }
 
       setMessage("POD evidence deleted.");
@@ -511,77 +507,16 @@ export default function PodPage() {
     setSavingStopId(stop.id);
 
     try {
-      const now = new Date().toISOString();
-
-      const updatePayload: Record<string, unknown> = {
-        recipient_name: form.recipient_name.trim() || null,
-        pod_notes: form.pod_notes.trim() || null,
-        pod_updated_at: now,
-      };
-
-      if (markComplete) {
-        updatePayload.status = "completed";
-
-        if (isCollection) {
-          updatePayload.pod_status = "collected";
-          updatePayload.collected_at = now;
-        }
-
-        if (isDelivery) {
-          updatePayload.pod_status = "delivered";
-          updatePayload.delivered_at = now;
-        }
-      }
-
-      const { error: stopError } = await supabase
-        .from("job_stops")
-        .update(updatePayload)
-        .eq("id", stop.id)
-        .eq("tenant_id", activeTenantId)
-        .eq("job_id", job.id);
-
-      if (stopError) {
-        throw stopError;
-      }
-
-      if (markComplete && isDelivery) {
-        const { data: deliveryStops, error: deliveryError } =
-          await supabase
-            .from("job_stops")
-            .select("id, pod_status")
-            .eq("tenant_id", activeTenantId)
-            .eq("job_id", job.id)
-            .eq("type", "delivery");
-
-        if (deliveryError) {
-          throw deliveryError;
-        }
-
-        const allDelivered =
-          (deliveryStops ?? []).length > 0 &&
-          (deliveryStops ?? []).every(
-            (deliveryStop) =>
-              deliveryStop.pod_status === "delivered"
-          );
-
-        if (allDelivered) {
-          const completedAt = new Date().toISOString();
-
-          const { error: jobError } = await supabase
-            .from("jobs")
-            .update({
-              status: "completed",
-              pod_status: "delivered",
-              completed_at: completedAt,
-            })
-            .eq("id", job.id)
-            .eq("tenant_id", activeTenantId);
-
-          if (jobError) {
-            throw jobError;
-          }
-        }
-      }
+      // One shared save for both consoles (review POD-12, POD-14).
+      await saveStopPod(supabase, {
+        tenantId: activeTenantId,
+        jobId: job.id,
+        stopId: stop.id,
+        stopType: stop.type,
+        recipientName: form.recipient_name,
+        podNotes: form.pod_notes,
+        markComplete,
+      });
 
       setMessage(
         markComplete
@@ -740,6 +675,56 @@ export default function PodPage() {
       );
     }
   }
+  /* Withdraw every live share link for a job (review POD-9). */
+  async function revokePodShares(
+    job: Job
+  ) {
+    clearMessages();
+
+    if (!activeTenantId) {
+      setErrorMessage("No active tenant is selected.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Withdraw every POD link already shared for this job? Anyone holding one will no longer be able to open it."
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/pod/share/revoke", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: job.id, tenantId: activeTenantId }),
+      });
+
+      const body = await readJsonSafe(response);
+
+      if (!response.ok) {
+        throw new Error(
+          errorFromBody(body, response.status, "Unable to withdraw POD links.")
+        );
+      }
+
+      const revoked = typeof body.revoked === "number" ? body.revoked : 0;
+
+      setMessage(
+        revoked === 0
+          ? "There were no live POD links for this job."
+          : `Withdrew ${revoked} POD ${revoked === 1 ? "link" : "links"}.`
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to withdraw POD links."
+      );
+    }
+  }
+
   async function emailPod(
     job: Job
   ) {
@@ -751,7 +736,7 @@ export default function PodPage() {
 
       const recipient =
         window.prompt(
-          "Email POD to:",
+          "Email POD to (an address saved on the customer, or your own):",
           share.contactEmail ?? ""
         );
 
@@ -1362,6 +1347,17 @@ export default function PodPage() {
                                   }
                                 >
                                   COPY LINK
+                                </Button>
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() =>
+                                    void revokePodShares(
+                                      job
+                                    )
+                                  }
+                                >
+                                  WITHDRAW LINKS
                                 </Button>
                                 <Button
                                   variant="secondary"

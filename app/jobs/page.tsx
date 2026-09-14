@@ -14,8 +14,24 @@ import DeleteJobDialog from "./DeleteJobDialog";
 import JobLabelPrinter from "./JobLabelPrinter";
 import MasterLoadBuilder from "./MasterLoadBuilder";
 import Button from "../../components/Button";
+import { fetchAllPages, type PageResponse } from "../../lib/jobs/fetchPages";
+import { isStopLocked, planStopChanges } from "../../lib/jobs/stopDiff";
+import { saveStopPod } from "../../lib/pod/savePod";
 
-const emptyStop = (type: "collection" | "delivery") => ({ type, address_line: "", city: "", postcode: "" });
+type FormStop = {
+  id?: string | null;
+  locked?: boolean;
+  type: "collection" | "delivery";
+  address_line: string;
+  city: string;
+  postcode: string;
+};
+
+const emptyStop = (type: "collection" | "delivery"): FormStop => ({ type, address_line: "", city: "", postcode: "" });
+
+/* Hard ceiling for the jobs list. Past it the page says so instead of
+   silently losing rows at Supabase's 1000-row cap (review POD-13). */
+const JOBS_MAX_ROWS = 5000;
 
 function formatMoney(value: any) {
   if (value === null || value === undefined || value === "") return "-";
@@ -56,6 +72,7 @@ export default function JobsPage() {
   const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [podForms, setPodForms] = useState<Record<string, any>>({});
+  const [jobsNotice, setJobsNotice] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; reference: string } | null>(null);
 
   const [acceptanceTarget, setAcceptanceTarget] = useState<{
@@ -95,7 +112,7 @@ export default function JobsPage() {
     customer_price: "", subcontractor_id: "", subcontractor_cost: "",
     journey_scope: "", origin_country_code: "", destination_country_code: "",
     compliance_regime_override: "", compliance_override_reason: "",
-    stops: [emptyStop("collection"), emptyStop("delivery")],
+    stops: [emptyStop("collection"), emptyStop("delivery")] as FormStop[],
   });
 
   async function loadData() {
@@ -112,7 +129,7 @@ export default function JobsPage() {
       setJobsLoading(false);
       setHasLoaded(true);
     };
-    const jobsQuery = supabase.from("jobs").select(`
+    const jobsQuery = () => supabase.from("jobs").select(`
         id, tenant_id, reference, status, scheduled_date, planning_date, customer_id, vehicle_id, driver_id,
         customer_price, subcontractor_id, subcontractor_cost,
         journey_scope, origin_country_code, destination_country_code,
@@ -120,17 +137,36 @@ export default function JobsPage() {
         accepted_at, accepted_by, collection_eta, delivery_eta, acceptance_note,
         customers ( name ), vehicles ( registration ), drivers ( name ),
         subcontractors ( name, vehicle_reg, driver_name ),
-        job_stops ( id, stop_order, type, address_line, city, postcode, status, pod_status, recipient_name, delivered_at, pod_notes, pod_photo_url ),
+        job_stops ( id, stop_order, type, address_line, city, postcode, status, pod_status, recipient_name, delivered_at, collected_at, pod_notes, pod_photo_url ),
         job_items ( id, sku, description, quantity, serial_numbers, external_reference, notes )
-      `);
+      `, { count: "exact" });
 
-    const { data: jobsData, error: jobsError } = await tenant.filterByTenant(jobsQuery).order("created_at", { ascending: false });
+    let jobsData: any[] = [];
+    try {
+      const jobsPage = await fetchAllPages<any>(
+        (from, to) =>
+          tenant
+            .filterByTenant(jobsQuery())
+            .order("created_at", { ascending: false })
+            .range(from, to) as unknown as PromiseLike<PageResponse<any>>,
+        { pageSize: 500, maxRows: JOBS_MAX_ROWS },
+      );
+      jobsData = jobsPage.rows;
+      setJobsNotice(
+        jobsPage.truncated
+          ? `Only the newest ${jobsPage.rows.length} of ${jobsPage.total ?? "more"} jobs are loaded. Older jobs are not shown.`
+          : "",
+      );
+    } catch (error) {
+      setMessage(`Jobs load error: ${error instanceof Error ? error.message : "unknown error"}`);
+      settle();
+      return;
+    }
     const { data: vehicleData, error: vehicleError } = await tenant.filterByTenant(supabase.from("vehicles").select("id, registration")).eq("active", true).order("registration", { ascending: true });
     const { data: driverData, error: driverError } = await tenant.filterByTenant(supabase.from("drivers").select("id, name")).eq("active", true).order("name", { ascending: true });
     const { data: customerData, error: customerError } = await tenant.filterByTenant(supabase.from("customers").select("id, name")).eq("active", true).order("name", { ascending: true });
     const { data: subcontractorData, error: subcontractorError } = await tenant.filterByTenant(supabase.from("subcontractors").select("id, name, vehicle_reg, driver_name")).eq("active", true).order("name", { ascending: true });
 
-    if (jobsError) { setMessage(`Jobs load error: ${jobsError.message}`); settle(); return; }
     if (vehicleError) { setMessage(`Vehicles load error: ${vehicleError.message}`); settle(); return; }
     if (driverError) { setMessage(`Drivers load error: ${driverError.message}`); settle(); return; }
     if (customerError) { setMessage(`Customers load error: ${customerError.message}`); settle(); return; }
@@ -193,7 +229,7 @@ export default function JobsPage() {
       customer_price: "", subcontractor_id: "", subcontractor_cost: "",
       journey_scope: "", origin_country_code: "", destination_country_code: "",
       compliance_regime_override: "", compliance_override_reason: "",
-      stops: [emptyStop("collection"), emptyStop("delivery")],
+      stops: [emptyStop("collection"), emptyStop("delivery")] as FormStop[],
     });
   }
 
@@ -230,7 +266,14 @@ export default function JobsPage() {
       compliance_regime_override: job.compliance_regime_override || "",
       compliance_override_reason: job.compliance_override_reason || "",
       stops: job.job_stops?.length
-        ? job.job_stops.map((s: any) => ({ type: s.type, address_line: s.address_line || "", city: s.city || "", postcode: s.postcode || "" }))
+        ? job.job_stops.map((s: any): FormStop => ({
+            id: s.id,
+            locked: isStopLocked(s),
+            type: s.type,
+            address_line: s.address_line || "",
+            city: s.city || "",
+            postcode: s.postcode || "",
+          }))
         : [emptyStop("collection"), emptyStop("delivery")],
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -336,28 +379,132 @@ export default function JobsPage() {
           : null,
     };
 
-    let jobId = editingJobId;
+    const plannedAt = form.scheduled_date ? `${form.scheduled_date}T08:00:00` : null;
 
     if (editingJobId) {
-      const { error: updateError } = await supabase.from("jobs").update(payload).eq("id", editingJobId);
-      if (updateError) { setLoading(false); setMessage(`Update job error: ${updateError.message}`); return; }
+      /* Edit stops in place instead of deleting and recreating them
+         (review POD-1): ids stay stable for a driver on site, POD fields are
+         never touched, and a stop with POD, evidence or scans is never
+         removed. The plan is built from a fresh read and refused as a whole
+         before any write. */
+      const editingJob = jobs.find((job) => job.id === editingJobId);
+      if (!editingJob?.tenant_id) { setLoading(false); setMessage("This job is no longer loaded. Refresh and try again."); return; }
+      const jobTenantId: string = editingJob.tenant_id;
 
-      const { error: deleteStopsError } = await supabase.from("job_stops").delete().eq("job_id", editingJobId);
-      if (deleteStopsError) { setLoading(false); setMessage(`Delete old stops error: ${deleteStopsError.message}`); return; }
-    } else {
-      const { data: insertedJob, error: jobError } = await supabase
+      const { data: currentStops, error: currentStopsError } = await supabase
+        .from("job_stops")
+        .select("id, stop_order, type, address_line, city, postcode, status, pod_status, delivered_at, collected_at")
+        .eq("job_id", editingJobId)
+        .eq("tenant_id", jobTenantId);
+      if (currentStopsError) { setLoading(false); setMessage(`Load stops error: ${currentStopsError.message}`); return; }
+
+      const [evidenceResult, scansResult] = await Promise.all([
+        supabase.from("pod_evidence").select("stop_id").eq("tenant_id", jobTenantId).eq("job_id", editingJobId),
+        supabase.from("job_item_scans").select("stop_id").eq("tenant_id", jobTenantId).eq("job_id", editingJobId),
+      ]);
+      if (evidenceResult.error || scansResult.error) {
+        setLoading(false);
+        setMessage(`Stop check error: ${(evidenceResult.error ?? scansResult.error)?.message}`);
+        return;
+      }
+
+      const countFor = (rows: Array<{ stop_id: string | null }> | null, stopId: string) =>
+        (rows ?? []).filter((row) => row.stop_id === stopId).length;
+
+      const plan = planStopChanges(
+        (currentStops ?? []).map((stop: any) => ({
+          ...stop,
+          evidenceCount: countFor(evidenceResult.data, stop.id),
+          scanCount: countFor(scansResult.data, stop.id),
+        })),
+        validStops.map((stop) => ({
+          id: stop.id ?? null,
+          type: stop.type,
+          address_line: stop.address_line,
+          city: stop.city,
+          postcode: stop.postcode,
+        })),
+      );
+      if (!plan.ok) { setLoading(false); setMessage(plan.message); return; }
+
+      if (plan.deletes.length > 0) {
+        const { data: deletedStops, error: deleteStopsError } = await supabase
+          .from("job_stops")
+          .delete()
+          .in("id", plan.deletes)
+          .eq("job_id", editingJobId)
+          .eq("tenant_id", jobTenantId)
+          .or("pod_status.is.null,pod_status.eq.pending")
+          .select("id");
+        if (deleteStopsError) {
+          setLoading(false);
+          setMessage(
+            deleteStopsError.code === "23503"
+              ? "A removed stop has barcode scans or other records attached, so it cannot be removed."
+              : `Remove stop error: ${deleteStopsError.message}`,
+          );
+          return;
+        }
+        if ((deletedStops ?? []).length !== plan.deletes.length) {
+          setLoading(false);
+          setMessage("A stop changed while you were editing. Refresh and try again.");
+          await loadData();
+          return;
+        }
+      }
+
+      for (const update of plan.updates) {
+        const { error: updateStopError } = await supabase
+          .from("job_stops")
+          .update(update.patch)
+          .eq("id", update.id)
+          .eq("job_id", editingJobId)
+          .eq("tenant_id", jobTenantId);
+        if (updateStopError) { setLoading(false); setMessage(`Update stop error: ${updateStopError.message}`); return; }
+      }
+
+      if (plan.inserts.length > 0) {
+        const { error: insertStopsError } = await supabase.from("job_stops").insert(
+          plan.inserts.map((stop) => ({
+            ...stop,
+            tenant_id: jobTenantId,
+            job_id: editingJobId,
+            planned_at: plannedAt,
+            status: "planned",
+            pod_status: "pending",
+          })),
+        );
+        if (insertStopsError) { setLoading(false); setMessage(`Add stop error: ${insertStopsError.message}`); return; }
+      }
+
+      const { error: updateError } = await supabase
         .from("jobs")
-        .insert([{ ...payload, tenant_id: tenant.writeTenantId, status: "planned" }])
-        .select("id")
-        .single();
-      if (jobError) { setLoading(false); setMessage(`Create job error: ${jobError.message}`); return; }
-      jobId = insertedJob.id;
+        .update(payload)
+        .eq("id", editingJobId)
+        .eq("tenant_id", jobTenantId);
+      setLoading(false);
+      // Surface the database's own message: an assignment trigger (for
+      // example an unlicensed vehicle) explains why a save was refused.
+      if (updateError) { setMessage(`Update job error: ${updateError.message}`); await loadData(); return; }
+
+      setMessage("Job updated.");
+      resetForm();
+      await loadData();
+      return;
     }
+
+    const { data: insertedJob, error: jobError } = await supabase
+      .from("jobs")
+      .insert([{ ...payload, tenant_id: tenant.writeTenantId, status: "planned" }])
+      .select("id")
+      .single();
+    if (jobError) { setLoading(false); setMessage(`Create job error: ${jobError.message}`); return; }
+    const jobId = insertedJob.id;
 
     const stopsToInsert = validStops.map((stop, index) => ({
       tenant_id: tenant.writeTenantId, job_id: jobId, stop_order: index + 1, type: stop.type,
       address_line: stop.address_line, city: stop.city || null, postcode: stop.postcode || null,
-      planned_at: form.scheduled_date ? `${form.scheduled_date}T08:00:00` : null,
+      planned_at: plannedAt,
       status: "planned", pod_status: "pending",
     }));
 
@@ -365,7 +512,7 @@ export default function JobsPage() {
     setLoading(false);
     if (stopsError) { setMessage(`Stops error: ${stopsError.message}`); return; }
 
-    setMessage(editingJobId ? "Job updated." : "Job created.");
+    setMessage("Job created.");
     resetForm();
     await loadData();
   }
@@ -718,40 +865,31 @@ export default function JobsPage() {
     }
   }
 
+  /* Same save as /pod (review POD-14): lib/pod/savePod.ts stamps
+     pod_updated_at, filters by tenant and job, and refuses to complete a
+     cancelled or unaccepted job. */
   async function savePod(jobId: string, stopId: string) {
+    const job = jobs.find((candidate) => candidate.id === jobId);
+    const stop = job?.job_stops?.find((candidate: any) => candidate.id === stopId);
+    if (!job?.tenant_id || !stop) { setMessage("This stop is no longer loaded. Refresh and try again."); return; }
+
     const podForm = podForms[stopId] || { recipient_name: "", pod_notes: "", pod_photo_url: "" };
-    const updatePayload: Record<string, any> = {
-      recipient_name: podForm.recipient_name.trim() || null,
-      pod_notes: podForm.pod_notes.trim() || null,
-      delivered_at: new Date().toISOString(),
-      pod_status: "delivered",
-      status: "completed",
-    };
-    if (podForm.pod_photo_url.trim()) updatePayload.pod_photo_url = podForm.pod_photo_url.trim();
 
-    const { error: stopError } = await supabase.from("job_stops").update(updatePayload).eq("id", stopId);
-    if (stopError) { setMessage(`POD save error: ${stopError.message}`); return; }
-
-    const { data: deliveryStops, error: deliveryStopsError } = await supabase
-      .from("job_stops").select("id, pod_status, type").eq("job_id", jobId).eq("type", "delivery");
-    if (deliveryStopsError) { setMessage(`Delivery stop check error: ${deliveryStopsError.message}`); await loadData(); return; }
-
-    const allDelivered = (deliveryStops || []).length > 0 && deliveryStops.every((s: any) => s.pod_status === "delivered");
-    if (allDelivered) {
-      const completedAt = new Date().toISOString();
-
-      const { error: jobUpdateError } = await supabase
-        .from("jobs")
-        .update({
-          status: "completed",
-          pod_status: "delivered",
-          completed_at: completedAt,
-        })
-        .eq("id", jobId);
-      if (jobUpdateError) { setMessage(`Job completion error: ${jobUpdateError.message}`); await loadData(); return; }
+    try {
+      await saveStopPod(supabase, {
+        tenantId: job.tenant_id,
+        jobId,
+        stopId,
+        stopType: stop.type,
+        recipientName: podForm.recipient_name,
+        podNotes: podForm.pod_notes,
+        markComplete: true,
+      });
+      setMessage("POD saved.");
+    } catch (error) {
+      setMessage(`POD save error: ${error instanceof Error ? error.message : "Unable to save POD."}`);
     }
 
-    setMessage("POD saved.");
     await loadData();
   }
 
@@ -919,6 +1057,12 @@ export default function JobsPage() {
                         ? ` · ${pendingCount} awaiting acceptance`
                         : ""}
                     </div>
+
+                    {jobsNotice ? (
+                      <div className="mt-0.5 text-xs font-medium text-danger-strong">
+                        {jobsNotice}
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="flex flex-wrap gap-2">

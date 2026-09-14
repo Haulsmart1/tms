@@ -318,6 +318,36 @@ export default function MasterLoadBuilder({
       return;
     }
 
+    // In the "All tenants" view there is no active tenant, so send the
+    // selected jobs' own tenant explicitly (review POD-19).
+    const selectedTenantIds = Array.from(
+      new Set(
+        selectedJobs
+          .map(
+            (job) =>
+              (job as ManifestUiJob & { tenant_id?: string | null })
+                .tenant_id ?? null,
+          )
+          .filter(
+            (value): value is string =>
+              Boolean(value),
+          ),
+      ),
+    );
+
+    const manifestTenantId =
+      tenantId ??
+      (selectedTenantIds.length === 1
+        ? selectedTenantIds[0]
+        : null);
+
+    if (!manifestTenantId) {
+      setMessage(
+        "Select jobs from a single tenant, or pick that tenant first.",
+      );
+      return;
+    }
+
     setCreating(true);
 
     try {
@@ -327,12 +357,10 @@ export default function MasterLoadBuilder({
             "application/json",
         });
 
-      if (tenantId) {
-        headers.set(
-          "x-tenant-id",
-          tenantId,
-        );
-      }
+      headers.set(
+        "x-tenant-id",
+        manifestTenantId,
+      );
 
       const response =
         await fetch(

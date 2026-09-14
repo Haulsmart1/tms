@@ -1,17 +1,41 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ApiError, requireTenant } from "../../../../lib/api/server";
+import { TenantAccessError, isUuid } from "../../../../lib/auth/serverTenantAccess";
 import {
   canDeleteJobStatus,
+  hasOperationalJobRecords,
   hasProtectedJobLinks,
 } from "../../../../lib/jobs/deletePolicy";
+import { authorizeOfficeTenant } from "../../../../lib/jobs/officeAccess";
+import { createAdminClient } from "../../../../lib/supabase/admin";
 
+/*
+  Delete a job that never started (review POD-23): office callers only, and
+  refused once POD evidence or barcode scans exist, because deleting would
+  orphan the uploaded files.
+*/
 export async function DELETE(
   request: NextRequest,
   context: { params: Promise<{ jobId: string }> }
 ) {
   try {
     const { jobId } = await context.params;
-    const { supabase, tenantId } = await requireTenant(request);
+
+    if (!isUuid(jobId)) {
+      throw new ApiError(404, "Job not found");
+    }
+
+    const { supabase, tenantId, user } = await requireTenant(request);
+    const admin = createAdminClient();
+
+    try {
+      await authorizeOfficeTenant(admin, user.id, tenantId);
+    } catch (error) {
+      if (error instanceof TenantAccessError && error.status === 403) {
+        throw new ApiError(403, "Only office staff can delete jobs.");
+      }
+      throw new ApiError(500, "Unable to verify tenant access.");
+    }
 
     const { data: job, error: jobError } = await supabase
       .from("jobs")
@@ -39,6 +63,8 @@ export async function DELETE(
       invoiceJobsResult,
       invoicesResult,
       supplierPurchaseOrdersResult,
+      podEvidenceResult,
+      itemScansResult,
     ] = await Promise.all([
       supabase
         .from("invoice_jobs")
@@ -55,55 +81,54 @@ export async function DELETE(
         .select("id")
         .eq("job_id", jobId)
         .limit(1),
+      // Service role: these must be counted even where RLS would hide rows.
+      admin
+        .from("pod_evidence")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .eq("job_id", jobId),
+      admin
+        .from("job_item_scans")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .eq("job_id", jobId),
     ]);
 
-    if (invoiceJobsResult.error) {
-      console.error(
-        "Job delete invoice_jobs safety check failed",
-        invoiceJobsResult.error
-      );
+    const failedCheck = [
+      invoiceJobsResult,
+      invoicesResult,
+      supplierPurchaseOrdersResult,
+      podEvidenceResult,
+      itemScansResult,
+    ].find((result) => result.error);
 
-      throw new ApiError(
-        500,
-        `Unable to verify invoice links: ${invoiceJobsResult.error.message}`
-      );
+    if (failedCheck?.error) {
+      console.error("Job delete safety check failed", failedCheck.error);
+      throw new ApiError(500, "Unable to verify whether this job can be deleted.");
     }
 
-    if (invoicesResult.error) {
-      console.error(
-        "Job delete invoices safety check failed",
-        invoicesResult.error
-      );
-
-      throw new ApiError(
-        500,
-        `Unable to verify direct invoice links: ${invoicesResult.error.message}`
-      );
-    }
-
-    if (supplierPurchaseOrdersResult.error) {
-      console.error(
-        "Job delete supplier purchase-order safety check failed",
-        supplierPurchaseOrdersResult.error
-      );
-
-      throw new ApiError(
-        500,
-        `Unable to verify supplier links: ${supplierPurchaseOrdersResult.error.message}`
-      );
-    }
-
-    const hasProtectedLinks = hasProtectedJobLinks({
-      invoiceJobs: invoiceJobsResult.data?.length ?? 0,
-      invoices: invoicesResult.data?.length ?? 0,
-      supplierPurchaseOrderJobs:
-        supplierPurchaseOrdersResult.data?.length ?? 0,
-    });
-
-    if (hasProtectedLinks) {
+    if (
+      hasProtectedJobLinks({
+        invoiceJobs: invoiceJobsResult.data?.length ?? 0,
+        invoices: invoicesResult.data?.length ?? 0,
+        supplierPurchaseOrderJobs: supplierPurchaseOrdersResult.data?.length ?? 0,
+      })
+    ) {
       throw new ApiError(
         409,
         "This job is linked to financial or supplier records and cannot be deleted."
+      );
+    }
+
+    if (
+      hasOperationalJobRecords({
+        podEvidence: podEvidenceResult.count ?? 0,
+        itemScans: itemScansResult.count ?? 0,
+      })
+    ) {
+      throw new ApiError(
+        409,
+        "This job already has POD evidence or barcode scans, so it cannot be deleted. Cancel it instead."
       );
     }
 
