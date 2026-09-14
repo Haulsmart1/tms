@@ -1,6 +1,8 @@
 ﻿import { notFound } from "next/navigation";
-import { verifyPodShareToken } from "../../../../lib/pod/shareToken";
+import { loadPodBranding } from "../../../../lib/pod/brandingServer";
 import { loadSharedPod } from "../../../../lib/pod/shareData";
+import { resolvePodShareToken } from "../../../../lib/pod/shareStore";
+import { createAdminClient } from "../../../../lib/supabase/admin";
 import ShareActions from "./ShareActions";
 import { Lock } from "lucide-react";
 
@@ -34,11 +36,11 @@ function formatDateTime(
 }
 
 function formatExpiry(
-  unixSeconds: number
+  isoTimestamp: string
 ) {
   const date =
     new Date(
-      unixSeconds * 1000
+      isoTimestamp
     );
 
   return date.toLocaleString(
@@ -120,23 +122,41 @@ export default async function PodSharePage({
   const { token } =
     await params;
 
-  const decodedToken =
-    decodeURIComponent(token);
+  let decodedToken: string;
 
-  const payload =
-    verifyPodShareToken(
-      decodedToken
-    );
-
-  if (!payload) {
+  try {
+    decodedToken =
+      decodeURIComponent(token);
+  } catch {
     notFound();
   }
 
-  const pod =
-    await loadSharedPod(
-      payload.tenantId,
-      payload.jobId
+  // Stored, revocable link (review POD-9): the share row, the job (still
+  // completed) and the tenant are all re-checked on every view.
+  const admin =
+    createAdminClient();
+
+  const share =
+    await resolvePodShareToken(
+      admin,
+      decodedToken
     );
+
+  if (!share) {
+    notFound();
+  }
+
+  const [pod, branding] =
+    await Promise.all([
+      loadSharedPod(
+        share.tenantId,
+        share.jobId
+      ),
+      loadPodBranding(
+        admin,
+        share.tenantId
+      ),
+    ]);
 
   if (!pod) {
     notFound();
@@ -183,7 +203,7 @@ export default async function PodSharePage({
         <header className="mb-7 flex flex-wrap items-start justify-between gap-5">
           <div>
             <div className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-blue-400 print:text-black">
-              ADR Carriers
+              {branding.carrierName}
             </div>
 
             <h1 className="text-3xl font-bold tracking-tight text-white print:text-black">
@@ -481,8 +501,8 @@ export default async function PodSharePage({
               <div className="mt-1 text-sm text-slate-300 print:text-black">
                 This link expires automatically on{" "}
                 {formatExpiry(
-                  payload.expiresAt
-                )}.
+                  share.expiresAt
+                )}, and can be withdrawn earlier by the carrier.
               </div>
             </div>
           </div>
