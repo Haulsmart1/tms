@@ -1,11 +1,26 @@
 import {
   PDFDocument,
-  StandardFonts,
   rgb,
   type PDFFont,
-  type PDFImage,
   type PDFPage,
 } from "pdf-lib";
+
+import { embedUnicodeFonts, pdfSafeText } from "../printing/pdfFonts";
+import { fitPdfText, loadPdfLogo, wrapPdfText } from "../printing/pdfText";
+
+/*
+  Invoice PDF.
+
+  Fonts: embedded DejaVu Sans (lib/printing/pdfFonts.ts), because the standard
+  Helvetica font throws on any character outside WinAnsi ("Ł", "ş", "→"),
+  which made invoices for Polish or Turkish customers impossible to email
+  (INV-1). Every string is drawn through pdfSafeText, and every width is
+  measured with the same font it is drawn in.
+
+  Layout (INV-20): long words are hard-broken, fixed-width boxes truncate,
+  continuation pages repeat a running header and the line-table header, and
+  every page carries "Page x of y".
+*/
 
 export type InvoicePdfLine = {
   description: string;
@@ -72,12 +87,17 @@ export type GenerateInvoicePdfInput = {
   jobs?: InvoicePdfJob[];
 };
 
+type Color = ReturnType<typeof rgb>;
+
 type Context = {
   pdf: PDFDocument;
   page: PDFPage;
   normal: PDFFont;
   bold: PDFFont;
   y: number;
+  runningTitle: string;
+  /** Redraws a table header after a page break inside the line table. */
+  onPageBreak: (() => void) | null;
 };
 
 const PAGE_WIDTH = 595.28;
@@ -85,15 +105,41 @@ const PAGE_HEIGHT = 841.89;
 const MARGIN = 42;
 const RIGHT = PAGE_WIDTH - MARGIN;
 const WIDTH = PAGE_WIDTH - MARGIN * 2;
+/* Lowest y body content may reach; the footer lives below it. */
+const BOTTOM = 54;
+/* First body y on a continuation page, below the running header. */
+const CONTINUATION_TOP = PAGE_HEIGHT - 62;
 
-function money(
-  value: number,
-  currency: string
-): string {
-  return new Intl.NumberFormat("en-GB", {
-    style: "currency",
-    currency: currency || "GBP",
-  }).format(value);
+const INK = rgb(0.08, 0.11, 0.17);
+const MUTED = rgb(0.34, 0.4, 0.48);
+const LINE = rgb(0.82, 0.84, 0.87);
+const LIGHT = rgb(0.95, 0.96, 0.97);
+
+const COLUMNS = {
+  description: MARGIN + 8,
+  descriptionWidth: 290,
+  qty: 350,
+  qtyWidth: 50,
+  rate: 405,
+  rateWidth: 54,
+  vat: 463,
+  vatWidth: 40,
+  net: RIGHT - 8,
+};
+
+export function formatPdfMoney(value: number, currency: string): string {
+  const amount = Number.isFinite(value) ? value : 0;
+  const code = String(currency || "GBP").trim().toUpperCase();
+
+  try {
+    return new Intl.NumberFormat("en-GB", {
+      style: "currency",
+      currency: code,
+    }).format(amount);
+  } catch {
+    /* A malformed currency code makes Intl throw; print the code instead. */
+    return `${code} ${amount.toFixed(2)}`;
+  }
 }
 
 function date(value: string | null): string {
@@ -119,323 +165,257 @@ function clean(value: string | null | undefined): string {
   return String(value ?? "").trim();
 }
 
-function splitText(
+/** The only place this file calls page.drawText. */
+function draw(
+  page: PDFPage,
   text: string,
-  font: PDFFont,
-  size: number,
-  maxWidth: number
-): string[] {
-  const output: string[] = [];
+  options: { x: number; y: number; size: number; font: PDFFont; color?: Color }
+) {
+  const safe = pdfSafeText(text, options.font);
 
-  for (
-    const paragraph of text.replace(/\r/g, "").split("\n")
-  ) {
-    if (!paragraph.trim()) {
-      output.push("");
-      continue;
-    }
-
-    let current = "";
-
-    for (const word of paragraph.split(/\s+/)) {
-      const candidate =
-        current ? `${current} ${word}` : word;
-
-      if (
-        font.widthOfTextAtSize(candidate, size) <=
-        maxWidth
-      ) {
-        current = candidate;
-      } else {
-        if (current) {
-          output.push(current);
-        }
-
-        current = word;
-      }
-    }
-
-    if (current) {
-      output.push(current);
-    }
+  if (!safe) {
+    return;
   }
 
-  return output;
+  page.drawText(safe, {
+    x: options.x,
+    y: options.y,
+    size: options.size,
+    font: options.font,
+    color: options.color ?? INK,
+  });
+}
+
+function rightText(
+  page: PDFPage,
+  font: PDFFont,
+  text: string,
+  y: number,
+  options: { size: number; right?: number; maxWidth?: number; color?: Color }
+) {
+  const fitted =
+    options.maxWidth !== undefined
+      ? fitPdfText(text, font, options.size, options.maxWidth)
+      : pdfSafeText(text, font);
+
+  const width = font.widthOfTextAtSize(fitted, options.size);
+
+  draw(page, fitted, {
+    x: (options.right ?? RIGHT) - width,
+    y,
+    size: options.size,
+    font,
+    color: options.color,
+  });
+}
+
+function drawRule(context: Context, y: number) {
+  context.page.drawLine({
+    start: { x: MARGIN, y },
+    end: { x: RIGHT, y },
+    thickness: 0.7,
+    color: LINE,
+  });
 }
 
 function addPage(context: Context) {
-  context.page =
-    context.pdf.addPage([
-      PAGE_WIDTH,
-      PAGE_HEIGHT,
-    ]);
+  context.page = context.pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
 
-  context.y = PAGE_HEIGHT - MARGIN;
+  draw(context.page, fitPdfText(context.runningTitle, context.bold, 8, WIDTH * 0.6), {
+    x: MARGIN,
+    y: PAGE_HEIGHT - 38,
+    size: 8,
+    font: context.bold,
+    color: MUTED,
+  });
+
+  context.page.drawLine({
+    start: { x: MARGIN, y: PAGE_HEIGHT - 47 },
+    end: { x: RIGHT, y: PAGE_HEIGHT - 47 },
+    thickness: 0.7,
+    color: LINE,
+  });
+
+  context.y = CONTINUATION_TOP;
+  context.onPageBreak?.();
 }
 
-function ensureSpace(
-  context: Context,
-  required: number
-) {
-  if (context.y - required < MARGIN) {
+function ensureSpace(context: Context, required: number) {
+  if (context.y - required < BOTTOM) {
     addPage(context);
   }
 }
 
+/** Flowing, wrapped text at context.y that breaks onto new pages as needed. */
 function drawText(
   context: Context,
   text: string,
   options?: {
     x?: number;
-    y?: number;
     size?: number;
     bold?: boolean;
     maxWidth?: number;
     gapAfter?: number;
+    color?: Color;
   }
-): number {
+) {
   const size = options?.size ?? 9;
-  const font =
-    options?.bold
-      ? context.bold
-      : context.normal;
-
+  const font = options?.bold ? context.bold : context.normal;
   const x = options?.x ?? MARGIN;
-  let y = options?.y ?? context.y;
-
-  const maxWidth =
-    options?.maxWidth ??
-    RIGHT - x;
-
-  const lines =
-    splitText(
-      text,
-      font,
-      size,
-      maxWidth
-    );
-
+  const maxWidth = options?.maxWidth ?? RIGHT - x;
   const lineHeight = size * 1.35;
 
-  for (const line of lines) {
+  for (const line of wrapPdfText(text, font, size, maxWidth)) {
     ensureSpace(context, lineHeight);
+    draw(context.page, line, { x, y: context.y, size, font, color: options?.color });
+    context.y -= lineHeight;
+  }
 
-    if (line) {
-      context.page.drawText(line, {
-        x,
-        y,
+  context.y -= options?.gapAfter ?? 2;
+}
+
+function drawTableHeader(context: Context) {
+  const top = context.y;
+
+  context.page.drawRectangle({
+    x: MARGIN,
+    y: top - 20,
+    width: WIDTH,
+    height: 22,
+    color: LIGHT,
+  });
+
+  const labelY = top - 13;
+  draw(context.page, "Description", { x: COLUMNS.description, y: labelY, size: 7.5, font: context.bold });
+  draw(context.page, "Qty", { x: COLUMNS.qty, y: labelY, size: 7.5, font: context.bold });
+  draw(context.page, "Rate", { x: COLUMNS.rate, y: labelY, size: 7.5, font: context.bold });
+  draw(context.page, "VAT", { x: COLUMNS.vat, y: labelY, size: 7.5, font: context.bold });
+  rightText(context.page, context.bold, "Net", labelY, { size: 7.5, right: COLUMNS.net });
+
+  context.y = top - 31;
+}
+
+function drawLine(context: Context, line: InvoicePdfLine, currency: string) {
+  const size = 8;
+  const lineHeight = 10;
+  const descriptionLines = wrapPdfText(line.description, context.normal, size, COLUMNS.descriptionWidth);
+
+  /* A description taller than a page is split across pages; the figures are
+     printed on the first chunk only. */
+  const maxLinesPerPage = Math.max(1, Math.floor((CONTINUATION_TOP - 31 - BOTTOM - 12) / lineHeight));
+  let remaining = descriptionLines;
+  let first = true;
+
+  while (first || remaining.length > 0) {
+    const chunk = remaining.slice(0, maxLinesPerPage);
+    remaining = remaining.slice(chunk.length);
+
+    const rowHeight = Math.max(28, chunk.length * lineHeight + 12);
+    ensureSpace(context, rowHeight + 8);
+
+    const top = context.y;
+    let descriptionY = top;
+
+    for (const descriptionLine of chunk) {
+      draw(context.page, descriptionLine, { x: COLUMNS.description, y: descriptionY, size, font: context.normal });
+      descriptionY -= lineHeight;
+    }
+
+    if (first) {
+      draw(context.page, fitPdfText(String(line.quantity), context.normal, size, COLUMNS.qtyWidth), {
+        x: COLUMNS.qty,
+        y: top,
         size,
-        font,
-        color: rgb(
-          0.08,
-          0.11,
-          0.17
-        ),
+        font: context.normal,
+      });
+
+      draw(context.page, fitPdfText(formatPdfMoney(line.unitPrice, currency), context.normal, size, COLUMNS.rateWidth), {
+        x: COLUMNS.rate,
+        y: top,
+        size,
+        font: context.normal,
+      });
+
+      draw(context.page, fitPdfText(`${line.vatRate}%`, context.normal, size, COLUMNS.vatWidth), {
+        x: COLUMNS.vat,
+        y: top,
+        size,
+        font: context.normal,
+      });
+
+      rightText(context.page, context.normal, formatPdfMoney(line.netAmount, currency), top, {
+        size,
+        right: COLUMNS.net,
+        maxWidth: COLUMNS.net - (COLUMNS.vat + COLUMNS.vatWidth) - 4,
       });
     }
 
-    y -= lineHeight;
-  }
-
-  if (options?.y === undefined) {
-    context.y =
-      y - (options?.gapAfter ?? 2);
-  }
-
-  return y;
-}
-
-function drawRule(
-  context: Context,
-  y: number
-) {
-  context.page.drawLine({
-    start: {
-      x: MARGIN,
-      y,
-    },
-    end: {
-      x: RIGHT,
-      y,
-    },
-    thickness: 0.7,
-    color: rgb(
-      0.82,
-      0.84,
-      0.87
-    ),
-  });
-}
-
-function rightText(
-  context: Context,
-  text: string,
-  y: number,
-  options?: {
-    size?: number;
-    bold?: boolean;
-    right?: number;
-  }
-) {
-  const size =
-    options?.size ?? 9;
-
-  const font =
-    options?.bold
-      ? context.bold
-      : context.normal;
-
-  const right =
-    options?.right ?? RIGHT;
-
-  const width =
-    font.widthOfTextAtSize(
-      text,
-      size
-    );
-
-  context.page.drawText(text, {
-    x: right - width,
-    y,
-    size,
-    font,
-    color: rgb(
-      0.08,
-      0.11,
-      0.17
-    ),
-  });
-}
-
-async function loadLogo(
-  pdf: PDFDocument,
-  url: string | null | undefined
-): Promise<PDFImage | null> {
-  if (!url) {
-    return null;
-  }
-
-  try {
-    const response =
-      await fetch(url, {
-        cache: "no-store",
-      });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const bytes =
-      new Uint8Array(
-        await response.arrayBuffer()
-      );
-
-    const contentType =
-      response.headers
-        .get("content-type")
-        ?.toLowerCase() ?? "";
-
-    if (
-      contentType.includes("png") ||
-      url.toLowerCase().includes(".png")
-    ) {
-      return await pdf.embedPng(bytes);
-    }
-
-    return await pdf.embedJpg(bytes);
-  } catch {
-    return null;
+    context.y = top - rowHeight;
+    drawRule(context, context.y + 8);
+    first = false;
   }
 }
 
-function drawTotals(
-  context: Context,
-  input: GenerateInvoicePdfInput
-) {
+function drawTotals(context: Context, input: GenerateInvoicePdfInput) {
   ensureSpace(context, 125);
 
   const labelX = 340;
-  const valueRight = RIGHT;
+  const valueWidth = RIGHT - labelX - 70;
 
-  const rows = [
-    ["Subtotal", money(input.subtotal, input.currency)],
-    ["VAT", money(input.vatTotal, input.currency)],
+  const rows: Array<[string, string]> = [
+    ["Subtotal", formatPdfMoney(input.subtotal, input.currency)],
+    ["VAT", formatPdfMoney(input.vatTotal, input.currency)],
   ];
 
   for (const [label, value] of rows) {
-    context.page.drawText(label, {
-      x: labelX,
-      y: context.y,
-      size: 9,
-      font: context.normal,
-    });
-
-    rightText(
-      context,
-      value,
-      context.y,
-      {
-        bold: true,
-        right: valueRight,
-      }
-    );
-
+    draw(context.page, label, { x: labelX, y: context.y, size: 9, font: context.normal });
+    rightText(context.page, context.bold, value, context.y, { size: 9, maxWidth: valueWidth });
     context.y -= 18;
   }
 
-  drawRule(
-    context,
-    context.y + 6
-  );
+  drawRule(context, context.y + 6);
 
-  context.page.drawText("Total", {
-    x: labelX,
-    y: context.y - 4,
+  draw(context.page, "Total", { x: labelX, y: context.y - 4, size: 12, font: context.normal });
+  rightText(context.page, context.bold, formatPdfMoney(input.total, input.currency), context.y - 4, {
     size: 12,
-    font: context.normal,
+    maxWidth: valueWidth,
   });
 
-  rightText(
-    context,
-    money(
-      input.total,
-      input.currency
-    ),
-    context.y - 4,
-    {
-      size: 12,
-      bold: true,
-      right: valueRight,
-    }
-  );
-
   context.y -= 28;
 
-  context.page.drawText(
-    "Balance due",
-    {
-      x: labelX,
-      y: context.y,
-      size: 10,
+  draw(context.page, "Balance due", { x: labelX, y: context.y, size: 10, font: context.normal });
+  rightText(context.page, context.bold, formatPdfMoney(input.balanceDue, input.currency), context.y, {
+    size: 11,
+    maxWidth: valueWidth,
+  });
+
+  context.y -= 28;
+}
+
+function drawFooters(context: Context, displayCompany: string, invoiceNumber: string) {
+  const pages = context.pdf.getPages();
+
+  pages.forEach((page, index) => {
+    page.drawLine({
+      start: { x: MARGIN, y: 36 },
+      end: { x: RIGHT, y: 36 },
+      thickness: 0.45,
+      color: LINE,
+    });
+
+    draw(page, fitPdfText(`${displayCompany}  |  Invoice ${invoiceNumber}`, context.normal, 6.8, WIDTH - 90), {
+      x: MARGIN,
+      y: 22,
+      size: 6.8,
       font: context.normal,
-    }
-  );
+      color: MUTED,
+    });
 
-  rightText(
-    context,
-    money(
-      input.balanceDue,
-      input.currency
-    ),
-    context.y,
-    {
-      size: 11,
-      bold: true,
-      right: valueRight,
-    }
-  );
-
-  context.y -= 28;
+    rightText(page, context.normal, `Page ${index + 1} of ${pages.length}`, 22, {
+      size: 6.8,
+      color: MUTED,
+    });
+  });
 }
 
 export async function generateInvoicePdf(
@@ -444,472 +424,209 @@ export async function generateInvoicePdf(
   bytes: Uint8Array;
   filename: string;
 }> {
-  const pdf =
-    await PDFDocument.create();
+  const pdf = await PDFDocument.create();
+  const { regular: normal, bold } = await embedUnicodeFonts(pdf);
 
-  const normal =
-    await pdf.embedFont(
-      StandardFonts.Helvetica
-    );
+  const profile = input.companyProfile ?? {};
+  const settings = input.documentSettings ?? {};
 
-  const bold =
-    await pdf.embedFont(
-      StandardFonts.HelveticaBold
-    );
+  const displayCompany =
+    clean(profile.company_name) ||
+    clean(profile.trading_name) ||
+    clean(input.companyName);
+
+  const invoiceNumber = clean(input.invoiceNumber);
 
   const context: Context = {
     pdf,
-    page:
-      pdf.addPage([
-        PAGE_WIDTH,
-        PAGE_HEIGHT,
-      ]),
+    page: pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]),
     normal,
     bold,
-    y:
-      PAGE_HEIGHT - MARGIN,
+    y: PAGE_HEIGHT - MARGIN,
+    runningTitle: `${displayCompany}  |  Invoice ${invoiceNumber}`,
+    onPageBreak: null,
   };
-
-  const profile =
-    input.companyProfile ?? {};
-
-  const settings =
-    input.documentSettings ?? {};
 
   const logo =
     settings.show_logo !== false
-      ? await loadLogo(
-          pdf,
-          settings.logo_signed_url
-        )
+      ? await loadPdfLogo(pdf, settings.logo_signed_url)
       : null;
 
   let headerTextX = MARGIN;
 
   if (logo) {
-    const scale =
-      Math.min(
-        70 / logo.height,
-        78 / logo.width
-      );
+    const scale = Math.min(70 / logo.height, 78 / logo.width);
+    const logoWidth = logo.width * scale;
+    const logoHeight = logo.height * scale;
 
-    const logoWidth =
-      logo.width * scale;
+    context.page.drawImage(logo, {
+      x: MARGIN,
+      y: PAGE_HEIGHT - MARGIN - logoHeight,
+      width: logoWidth,
+      height: logoHeight,
+    });
 
-    const logoHeight =
-      logo.height * scale;
-
-    context.page.drawImage(
-      logo,
-      {
-        x: MARGIN,
-        y:
-          PAGE_HEIGHT -
-          MARGIN -
-          logoHeight,
-        width:
-          logoWidth,
-        height:
-          logoHeight,
-      }
-    );
-
-    headerTextX =
-      MARGIN + logoWidth + 16;
+    headerTextX = MARGIN + logoWidth + 16;
   }
 
-  const displayCompany =
-    clean(
-      profile.company_name
-    ) ||
-    clean(
-      profile.trading_name
-    ) ||
-    input.companyName;
+  /* The right-hand 150pt of the header belongs to Company No / VAT No. */
+  const headerTextWidth = RIGHT - 150 - headerTextX;
 
-  context.page.drawText(
-    displayCompany,
-    {
-      x: headerTextX,
-      y:
-        PAGE_HEIGHT -
-        MARGIN -
-        13,
-      size: 11,
-      font: bold,
-    }
-  );
+  draw(context.page, fitPdfText(displayCompany, bold, 11, headerTextWidth), {
+    x: headerTextX,
+    y: PAGE_HEIGHT - MARGIN - 13,
+    size: 11,
+    font: bold,
+  });
 
-  const address =
-    [
-      profile.address_line_1,
-      profile.address_line_2,
-      profile.city,
-      profile.region,
-      profile.postcode,
-      profile.country_code,
-    ]
-      .map(clean)
-      .filter(Boolean)
-      .join(", ");
+  const address = [
+    profile.address_line_1,
+    profile.address_line_2,
+    profile.city,
+    profile.region,
+    profile.postcode,
+    profile.country_code,
+  ]
+    .map(clean)
+    .filter(Boolean)
+    .join(", ");
 
-  let headerY =
-    PAGE_HEIGHT -
-    MARGIN -
-    30;
+  let headerY = PAGE_HEIGHT - MARGIN - 30;
 
   if (address) {
-    const lines =
-      splitText(
-        address,
-        normal,
-        7.5,
-        285
-      );
-
-    for (const line of lines) {
-      context.page.drawText(
-        line,
-        {
-          x: headerTextX,
-          y: headerY,
-          size: 7.5,
-          font: normal,
-        }
-      );
-
+    /* At most three address lines so the header cannot reach the title. */
+    for (const line of wrapPdfText(address, normal, 7.5, headerTextWidth).slice(0, 3)) {
+      draw(context.page, line, { x: headerTextX, y: headerY, size: 7.5, font: normal });
       headerY -= 10;
     }
   }
 
-  if (
-    settings.show_contact_details !==
-    false
-  ) {
-    const contacts =
-      [
-        clean(
-          profile.business_phone
-        )
-          ? `Tel: ${clean(
-              profile.business_phone
-            )}`
-          : "",
-        clean(
-          profile.business_email
-        )
-          ? `Email: ${clean(
-              profile.business_email
-            )}`
-          : "",
-        clean(profile.website),
-      ]
-        .filter(Boolean)
-        .join("   ");
+  if (settings.show_contact_details !== false) {
+    const contacts = [
+      clean(profile.business_phone) ? `Tel: ${clean(profile.business_phone)}` : "",
+      clean(profile.business_email) ? `Email: ${clean(profile.business_email)}` : "",
+      clean(profile.website),
+    ]
+      .filter(Boolean)
+      .join("   ");
 
     if (contacts) {
-      context.page.drawText(
-        contacts,
-        {
-          x: headerTextX,
-          y: headerY - 2,
-          size: 7.2,
-          font: normal,
-        }
-      );
+      draw(context.page, fitPdfText(contacts, normal, 7.2, headerTextWidth), {
+        x: headerTextX,
+        y: headerY - 2,
+        size: 7.2,
+        font: normal,
+      });
     }
   }
 
-  if (
-    settings.show_company_registration !==
-      false &&
-    clean(
-      profile.registration_number
-    )
-  ) {
-    rightText(
-      context,
-      `Company No: ${clean(
-        profile.registration_number
-      )}`,
-      PAGE_HEIGHT - MARGIN - 14,
-      {
-        size: 7,
-      }
-    );
+  if (settings.show_company_registration !== false && clean(profile.registration_number)) {
+    rightText(context.page, normal, `Company No: ${clean(profile.registration_number)}`, PAGE_HEIGHT - MARGIN - 14, {
+      size: 7,
+      maxWidth: 140,
+    });
   }
 
-  if (
-    settings.show_vat_number !==
-      false &&
-    clean(profile.vat_number)
-  ) {
-    rightText(
-      context,
-      `VAT No: ${clean(
-        profile.vat_number
-      )}`,
-      PAGE_HEIGHT - MARGIN - 27,
-      {
-        size: 7,
-      }
-    );
+  if (settings.show_vat_number !== false && clean(profile.vat_number)) {
+    rightText(context.page, normal, `VAT No: ${clean(profile.vat_number)}`, PAGE_HEIGHT - MARGIN - 27, {
+      size: 7,
+      maxWidth: 140,
+    });
   }
 
-  context.y =
-    PAGE_HEIGHT - 148;
+  context.y = PAGE_HEIGHT - 148;
+  drawRule(context, context.y + 18);
 
-  drawRule(
-    context,
-    context.y + 18
-  );
+  drawText(context, "Invoice", { size: 22, bold: true, gapAfter: 3 });
+  drawText(context, invoiceNumber, { size: 14, gapAfter: 12 });
 
-  drawText(
-    context,
-    "Invoice",
-    {
-      size: 22,
-      bold: true,
-      gapAfter: 3,
-    }
-  );
-
-  drawText(
-    context,
-    input.invoiceNumber,
-    {
-      size: 14,
-      gapAfter: 12,
-    }
-  );
-
-  const detailTop =
-    context.y;
-
-  drawText(
-    context,
-    "CUSTOMER",
-    {
-      size: 7,
-      bold: true,
-      gapAfter: 4,
-    }
-  );
-
-  drawText(
-    context,
-    input.customerName,
-    {
-      size: 10,
-      bold: true,
-      gapAfter: 8,
-    }
-  );
-
-  drawText(
-    context,
-    "CUSTOMER REFERENCE",
-    {
-      size: 7,
-      bold: true,
-      gapAfter: 3,
-    }
-  );
-
-  drawText(
-    context,
-    clean(
-      input.customerReference
-    ) || "-",
-    {
-      size: 9,
-      gapAfter: 8,
-    }
-  );
-
-  drawText(
-    context,
-    "PO REFERENCE",
-    {
-      size: 7,
-      bold: true,
-      gapAfter: 3,
-    }
-  );
-
-  drawText(
-    context,
-    clean(
-      input.poReference
-    ) || "-",
-    {
-      size: 9,
-    }
-  );
-
-  const leftBottom =
-    context.y;
-
+  const detailTop = context.y;
   const rightX = 382;
+  const leftWidth = rightX - MARGIN - 16;
 
-  context.page.drawText(
-    "ISSUE DATE",
-    {
-      x: rightX,
-      y: detailTop,
-      size: 7,
-      font: bold,
-    }
-  );
+  drawText(context, "CUSTOMER", { size: 7, bold: true, gapAfter: 4, maxWidth: leftWidth });
+  drawText(context, input.customerName, { size: 10, bold: true, gapAfter: 8, maxWidth: leftWidth });
+  drawText(context, "CUSTOMER REFERENCE", { size: 7, bold: true, gapAfter: 3, maxWidth: leftWidth });
+  drawText(context, clean(input.customerReference) || "-", { size: 9, gapAfter: 8, maxWidth: leftWidth });
+  drawText(context, "PO REFERENCE", { size: 7, bold: true, gapAfter: 3, maxWidth: leftWidth });
+  drawText(context, clean(input.poReference) || "-", { size: 9, maxWidth: leftWidth });
 
+  /* The left column can wrap onto a second page for absurdly long input; the
+     right column is drawn on the first page, where its labels belong. */
+  const firstPage = pdf.getPage(0);
+  const leftBottom = context.page === firstPage ? context.y : BOTTOM;
+  const rightWidth = RIGHT - rightX;
+
+  draw(firstPage, "ISSUE DATE", { x: rightX, y: detailTop, size: 7, font: bold });
+  rightText(firstPage, normal, date(input.issueDate), detailTop - 14, { size: 9, maxWidth: rightWidth });
+
+  draw(firstPage, "DUE DATE", { x: rightX, y: detailTop - 42, size: 7, font: bold });
+  rightText(firstPage, normal, date(input.dueDate), detailTop - 56, { size: 9, maxWidth: rightWidth });
+
+  draw(firstPage, "STATUS", { x: rightX, y: detailTop - 84, size: 7, font: bold });
   rightText(
-    context,
-    date(input.issueDate),
-    detailTop - 14,
-    {
-      size: 9,
-    }
-  );
-
-  context.page.drawText(
-    "DUE DATE",
-    {
-      x: rightX,
-      y: detailTop - 42,
-      size: 7,
-      font: bold,
-    }
-  );
-
-  rightText(
-    context,
-    date(input.dueDate),
-    detailTop - 56,
-    {
-      size: 9,
-    }
-  );
-
-  context.page.drawText(
-    "STATUS",
-    {
-      x: rightX,
-      y: detailTop - 84,
-      size: 7,
-      font: bold,
-    }
-  );
-
-  rightText(
-    context,
+    firstPage,
+    normal,
     clean(input.status)
       ? clean(input.status)
           .replaceAll("_", " ")
-          .replace(
-            /^\w/,
-            (letter) =>
-              letter.toUpperCase()
-          )
+          .replace(/^\w/, (letter) => letter.toUpperCase())
       : "Invoice",
     detailTop - 98,
-    {
-      size: 9,
-    }
+    { size: 9, maxWidth: rightWidth }
   );
 
-  context.y =
-    Math.min(
-      leftBottom,
-      detailTop - 112
-    ) - 12;
+  if (context.page === firstPage) {
+    context.y = Math.min(leftBottom, detailTop - 112) - 12;
+  } else {
+    context.y -= 12;
+  }
 
-  drawRule(
-    context,
-    context.y + 8
-  );
+  drawRule(context, context.y + 8);
 
-  if (
-    input.jobs &&
-    input.jobs.length > 0
-  ) {
-    drawText(
-      context,
-      "JOBS / RMA REFERENCES",
-      {
-        size: 7,
-        bold: true,
-        gapAfter: 7,
-      }
-    );
+  if (input.jobs && input.jobs.length > 0) {
+    drawText(context, "JOBS / RMA REFERENCES", { size: 7, bold: true, gapAfter: 7 });
+
+    const boxWidth = 172;
+    const textWidth = boxWidth - 16;
 
     for (const job of input.jobs) {
-      ensureSpace(
-        context,
-        38
-      );
-
-      const reference =
-        clean(job.reference) ||
-        "Job";
+      ensureSpace(context, 38);
 
       context.page.drawRectangle({
         x: MARGIN,
         y: context.y - 28,
-        width: 172,
+        width: boxWidth,
         height: 34,
         borderWidth: 0.7,
-        borderColor:
-          rgb(
-            0.82,
-            0.84,
-            0.87
-          ),
+        borderColor: LINE,
       });
 
-      context.page.drawText(
-        reference,
-        {
-          x: MARGIN + 8,
-          y: context.y - 6,
-          size: 8,
-          font: bold,
-        }
-      );
+      draw(context.page, fitPdfText(clean(job.reference) || "Job", bold, 8, textWidth), {
+        x: MARGIN + 8,
+        y: context.y - 6,
+        size: 8,
+        font: bold,
+      });
 
-      const secondary =
-        clean(
-          job.externalReference
-        ) ||
-        clean(
-          job.customerReference
-        );
+      const secondary = clean(job.externalReference) || clean(job.customerReference);
 
       if (secondary) {
-        context.page.drawText(
-          secondary,
-          {
-            x: MARGIN + 8,
-            y: context.y - 17,
-            size: 6.8,
-            font: normal,
-          }
-        );
+        draw(context.page, fitPdfText(secondary, normal, 6.8, textWidth), {
+          x: MARGIN + 8,
+          y: context.y - 17,
+          size: 6.8,
+          font: normal,
+        });
       }
 
-      if (
-        clean(job.podStatus)
-      ) {
-        context.page.drawText(
-          `POD: ${clean(
-            job.podStatus
-          )}`,
-          {
-            x: MARGIN + 8,
-            y: context.y - 27,
-            size: 6.8,
-            font: normal,
-          }
-        );
+      if (clean(job.podStatus)) {
+        draw(context.page, fitPdfText(`POD: ${clean(job.podStatus)}`, normal, 6.8, textWidth), {
+          x: MARGIN + 8,
+          y: context.y - 27,
+          size: 6.8,
+          font: normal,
+        });
       }
 
       context.y -= 42;
@@ -918,266 +635,39 @@ export async function generateInvoicePdf(
     context.y -= 4;
   }
 
-  ensureSpace(
-    context,
-    100
-  );
+  ensureSpace(context, 100);
+  drawTableHeader(context);
 
-  const tableTop =
-    context.y;
+  context.onPageBreak = () => drawTableHeader(context);
 
-  context.page.drawRectangle({
-    x: MARGIN,
-    y: tableTop - 20,
-    width: WIDTH,
-    height: 22,
-    color:
-      rgb(
-        0.95,
-        0.96,
-        0.97
-      ),
-  });
-
-  const columns = {
-    description: MARGIN + 8,
-    qty: 350,
-    rate: 405,
-    vat: 463,
-    net: RIGHT - 8,
-  };
-
-  context.page.drawText(
-    "Description",
-    {
-      x: columns.description,
-      y: tableTop - 13,
-      size: 7.5,
-      font: bold,
-    }
-  );
-
-  context.page.drawText(
-    "Qty",
-    {
-      x: columns.qty,
-      y: tableTop - 13,
-      size: 7.5,
-      font: bold,
-    }
-  );
-
-  context.page.drawText(
-    "Rate",
-    {
-      x: columns.rate,
-      y: tableTop - 13,
-      size: 7.5,
-      font: bold,
-    }
-  );
-
-  context.page.drawText(
-    "VAT",
-    {
-      x: columns.vat,
-      y: tableTop - 13,
-      size: 7.5,
-      font: bold,
-    }
-  );
-
-  rightText(
-    context,
-    "Net",
-    tableTop - 13,
-    {
-      size: 7.5,
-      bold: true,
-      right: columns.net,
-    }
-  );
-
-  context.y =
-    tableTop - 31;
-
-  for (
-    const line of input.lines
-  ) {
-    const descriptionLines =
-      splitText(
-        line.description,
-        normal,
-        8,
-        295
-      );
-
-    const rowHeight =
-      Math.max(
-        28,
-        descriptionLines.length *
-          10 +
-          12
-      );
-
-    ensureSpace(
-      context,
-      rowHeight + 8
-    );
-
-    let descriptionY =
-      context.y;
-
-    for (
-      const descriptionLine of
-      descriptionLines
-    ) {
-      context.page.drawText(
-        descriptionLine,
-        {
-          x:
-            columns.description,
-          y:
-            descriptionY,
-          size: 8,
-          font: normal,
-        }
-      );
-
-      descriptionY -= 10;
-    }
-
-    context.page.drawText(
-      String(line.quantity),
-      {
-        x: columns.qty,
-        y: context.y,
-        size: 8,
-        font: normal,
-      }
-    );
-
-    context.page.drawText(
-      money(
-        line.unitPrice,
-        input.currency
-      ),
-      {
-        x: columns.rate,
-        y: context.y,
-        size: 8,
-        font: normal,
-      }
-    );
-
-    context.page.drawText(
-      `${line.vatRate}%`,
-      {
-        x: columns.vat,
-        y: context.y,
-        size: 8,
-        font: normal,
-      }
-    );
-
-    rightText(
-      context,
-      money(
-        line.netAmount,
-        input.currency
-      ),
-      context.y,
-      {
-        size: 8,
-        right: columns.net,
-      }
-    );
-
-    context.y -= rowHeight;
-
-    drawRule(
-      context,
-      context.y + 8
-    );
+  for (const line of input.lines) {
+    drawLine(context, line, input.currency);
   }
 
+  context.onPageBreak = null;
   context.y -= 10;
 
-  drawTotals(
-    context,
-    input
-  );
+  drawTotals(context, input);
 
-  if (
-    clean(input.notes)
-  ) {
-    drawText(
-      context,
-      "NOTES",
-      {
-        size: 7,
-        bold: true,
-        gapAfter: 4,
-      }
-    );
-
-    drawText(
-      context,
-      clean(input.notes),
-      {
-        size: 8,
-        gapAfter: 12,
-      }
-    );
+  if (clean(input.notes)) {
+    ensureSpace(context, 30);
+    drawText(context, "NOTES", { size: 7, bold: true, gapAfter: 4 });
+    drawText(context, clean(input.notes), { size: 8, gapAfter: 12 });
   }
 
-  if (
-    clean(
-      settings.bank_details
-    )
-  ) {
-    ensureSpace(
-      context,
-      80
-    );
-
-    drawRule(
-      context,
-      context.y + 8
-    );
-
-    drawText(
-      context,
-      "PAYMENT DETAILS",
-      {
-        size: 7,
-        bold: true,
-        gapAfter: 5,
-      }
-    );
-
-    drawText(
-      context,
-      clean(
-        settings.bank_details
-      ),
-      {
-        size: 8,
-        gapAfter: 6,
-      }
-    );
+  if (clean(settings.bank_details)) {
+    ensureSpace(context, 80);
+    drawRule(context, context.y + 8);
+    drawText(context, "PAYMENT DETAILS", { size: 7, bold: true, gapAfter: 5 });
+    drawText(context, clean(settings.bank_details), { size: 8, gapAfter: 6 });
   }
 
-  const safeNumber =
-    input.invoiceNumber.replace(
-      /[^A-Za-z0-9._-]+/g,
-      "-"
-    );
+  drawFooters(context, displayCompany, invoiceNumber);
+
+  const safeNumber = invoiceNumber.replace(/[^A-Za-z0-9._-]+/g, "-") || "invoice";
 
   return {
-    bytes:
-      await pdf.save(),
-    filename:
-      `${safeNumber}.pdf`,
+    bytes: await pdf.save(),
+    filename: `${safeNumber}.pdf`,
   };
 }

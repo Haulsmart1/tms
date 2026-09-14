@@ -2,7 +2,22 @@ import {
   loadQuotationShare,
 } from "../../../../lib/quotations/publicShare";
 
+import {
+  QuotationShareError,
+  SHARE_MESSAGES,
+  publicShareError,
+} from "../../../../lib/quotations/shareStatus";
+
 import AcceptanceClient from "./AcceptanceClient";
+
+/*
+  Customer-facing quotation page. Deliberately NOT on the console design
+  tokens: fixed light palette, see CLAUDE.md.
+
+  Rendering has no side effects (INV-18): the view is recorded by
+  AcceptanceClient after hydration, so email link scanners do not count.
+  Errors show fixed messages only; internal detail is logged server side.
+*/
 
 export const dynamic =
   "force-dynamic";
@@ -11,16 +26,24 @@ function money(
   value: unknown,
   currency: string
 ) {
-  return new Intl.NumberFormat(
-    "en-GB",
-    {
-      style: "currency",
-      currency:
-        currency || "GBP",
-    }
-  ).format(
-    Number(value ?? 0)
-  );
+  const amount =
+    Number(value ?? 0);
+
+  try {
+    return new Intl.NumberFormat(
+      "en-GB",
+      {
+        style: "currency",
+        currency:
+          currency || "GBP",
+      }
+    ).format(
+      Number.isFinite(amount) ? amount : 0
+    );
+  }
+  catch {
+    return `${currency} ${(Number.isFinite(amount) ? amount : 0).toFixed(2)}`;
+  }
 }
 
 function customerName(
@@ -73,18 +96,29 @@ export default async function QuotationSharePage({
   } = await params;
 
   try {
-    const rawToken =
-      decodeURIComponent(token);
+    let rawToken: string;
+
+    try {
+      rawToken =
+        decodeURIComponent(token);
+    }
+    catch {
+      throw new QuotationShareError(
+        "invalid",
+        404
+      );
+    }
 
     const {
       share,
       quotation,
       template,
       termsVersion,
+      decision,
+      snapshotHash,
     } =
       await loadQuotationShare(
-        rawToken,
-        true
+        rawToken
       );
 
     const lines =
@@ -146,7 +180,7 @@ export default async function QuotationSharePage({
                 <div>
                   Valid until:{" "}
                   {quotation.valid_until ||
-                    "—"}
+                    "-"}
                 </div>
               </div>
             </div>
@@ -321,14 +355,18 @@ export default async function QuotationSharePage({
                     ""
                   }
                   alreadyAccepted={
-                    Boolean(
-                      share.accepted_at
-                    )
+                    decision.state === "accepted"
                   }
                   alreadyDeclined={
-                    Boolean(
-                      share.declined_at
-                    )
+                    decision.state === "declined"
+                  }
+                  closedMessage={
+                    decision.state === "closed"
+                      ? SHARE_MESSAGES[decision.reason]
+                      : null
+                  }
+                  snapshotHash={
+                    snapshotHash
                   }
                 />
               </>
@@ -345,6 +383,18 @@ export default async function QuotationSharePage({
     );
   }
   catch (error) {
+    const {
+      message,
+      status,
+    } = publicShareError(error);
+
+    if (status >= 500) {
+      console.error(
+        "Quotation share page failed to load:",
+        error
+      );
+    }
+
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
         <div className="max-w-lg rounded-2xl bg-white p-8 text-center shadow-sm">
@@ -353,9 +403,7 @@ export default async function QuotationSharePage({
           </h1>
 
           <p className="mt-3 text-sm text-slate-600">
-            {error instanceof Error
-              ? error.message
-              : "Unable to load quotation."}
+            {message}
           </p>
         </div>
       </main>

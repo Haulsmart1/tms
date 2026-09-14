@@ -8,6 +8,21 @@ import {
 } from "../../../../../lib/accounts/server";
 
 import {
+  RATE_LIMITS,
+  checkRateLimit,
+  clientIp,
+} from "../../../../../lib/rateLimit";
+
+import {
+  INTAKE_PREFLIGHT_HEADERS,
+  intakeCorsHeaders,
+  isHoneypotFilled,
+  isIntakeOriginAllowed,
+  readPublicToken,
+  requestOriginFromHeaders,
+} from "../../../../../lib/quoteRequests/intakeSecurity";
+
+import {
   hasUsefulQuoteRequestData,
   hashQuoteRequestToken,
   normaliseQuoteRequest,
@@ -15,15 +30,38 @@ import {
   type PublicQuoteRequestPayload,
 } from "../../../../../lib/quoteRequests/publicIntake";
 
+/*
+  Public quote-request intake from a haulier's own website form.
+
+  - Only ACTIVE tokens are accepted (INV-21: tokens are still issued by hand;
+    see the report for the open decision on a management UI).
+  - Rate limited per client IP before any lookup, and per token after it
+    (INV-7), whether or not the request carries an Origin.
+  - When the token has allowed_origin, Origin (or Referer) must match; a
+    request with neither is refused rather than waved through (INV-7).
+  - CORS: OPTIONS preflight is answered and responses carry
+    Access-Control-Allow-Origin for the configured origin, so browser forms
+    can read the result and stop resubmitting (INV-22).
+  - A filled honeypot field (_honey or _gotcha) gets a success response and
+    is not stored.
+*/
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_BODY_BYTES =
   64 * 1024;
 
+type TokenRecord = {
+  id: string;
+  tenant_id: string;
+  allowed_origin: string | null;
+};
+
 function jsonError(
   message: string,
-  status: number
+  status: number,
+  headers: Record<string, string> = {}
 ) {
   return NextResponse.json(
     {
@@ -32,6 +70,7 @@ function jsonError(
     },
     {
       status,
+      headers,
     }
   );
 }
@@ -216,40 +255,102 @@ function sourceFromPayload(
   return "website";
 }
 
-function originAllowed(
-  configuredOrigin: string | null,
-  requestOrigin: string | null
-): boolean {
-  if (
-    !configuredOrigin
-  ) {
-    return true;
-  }
+async function findActiveToken(
+  admin: ReturnType<typeof createAdminClient>,
+  tokenHash: string
+): Promise<TokenRecord | null> {
+  const {
+    data,
+    error,
+  } = await admin
+    .from(
+      "quote_request_form_tokens"
+    )
+    .select(`
+      id,
+      tenant_id,
+      active,
+      allowed_origin
+    `)
+    .eq(
+      "token_hash",
+      tokenHash
+    )
+    .eq(
+      "active",
+      true
+    )
+    .maybeSingle();
 
-  if (
-    !requestOrigin
-  ) {
-    return true;
-  }
-
-  try {
-    const configured =
-      new URL(
-        configuredOrigin
-      ).origin;
-
-    const supplied =
-      new URL(
-        requestOrigin
-      ).origin;
-
-    return (
-      configured ===
-      supplied
+  if (error) {
+    throw new Error(
+      error.message
     );
   }
-  catch {
-    return false;
+
+  if (!data || data.active !== true) {
+    return null;
+  }
+
+  return {
+    id: data.id,
+    tenant_id: data.tenant_id,
+    allowed_origin: data.allowed_origin ?? null,
+  };
+}
+
+export async function OPTIONS(
+  request: NextRequest,
+  context: {
+    params: Promise<{
+      token: string;
+    }>;
+  }
+) {
+  try {
+    const { token } =
+      await context.params;
+
+    const publicToken =
+      readPublicToken(token);
+
+    if (!publicToken) {
+      return new NextResponse(null, {
+        status: 204,
+        headers: { Vary: "Origin" },
+      });
+    }
+
+    const tokenRecord =
+      await findActiveToken(
+        createAdminClient(),
+        hashQuoteRequestToken(publicToken)
+      );
+
+    const cors =
+      intakeCorsHeaders(
+        tokenRecord?.allowed_origin,
+        request.headers.get("origin")
+      );
+
+    return new NextResponse(null, {
+      status: 204,
+      headers:
+        cors["Access-Control-Allow-Origin"]
+          ? { ...cors, ...INTAKE_PREFLIGHT_HEADERS }
+          : cors,
+    });
+  }
+  catch (error) {
+    console.error(
+      "Public quote request preflight failed:",
+      error
+    );
+
+    return new NextResponse(null, {
+      status: 204,
+      headers: { Vary: "Origin" },
+    });
   }
 }
 
@@ -261,6 +362,10 @@ export async function POST(
     }>;
   }
 ) {
+  let cors: Record<string, string> = {
+    Vary: "Origin",
+  };
+
   try {
     const {
       token,
@@ -268,19 +373,31 @@ export async function POST(
       await context.params;
 
     const publicToken =
-      decodeURIComponent(
-        String(
-          token ?? ""
-        )
-      ).trim();
+      readPublicToken(token);
 
-    if (
-      publicToken.length <
-      32
-    ) {
+    if (!publicToken) {
       return jsonError(
         "Invalid quote request link.",
-        404
+        404,
+        cors
+      );
+    }
+
+    const admin =
+      createAdminClient();
+
+    const ipLimit =
+      await checkRateLimit(
+        admin,
+        RATE_LIMITS.quoteIntakePerIp,
+        clientIp(request.headers)
+      );
+
+    if (!ipLimit.allowed) {
+      return jsonError(
+        "Too many quote requests. Please try again later.",
+        429,
+        cors
       );
     }
 
@@ -289,59 +406,51 @@ export async function POST(
         publicToken
       );
 
-    const admin =
-      createAdminClient();
-
-    const {
-      data: tokenRecord,
-      error: tokenError,
-    } = await admin
-      .from(
-        "quote_request_form_tokens"
-      )
-      .select(`
-        id,
-        tenant_id,
-        active,
-        allowed_origin
-      `)
-      .eq(
-        "token_hash",
+    const tokenRecord =
+      await findActiveToken(
+        admin,
         tokenHash
-      )
-      .eq(
-        "active",
-        true
-      )
-      .maybeSingle();
-
-    if (tokenError) {
-      throw new Error(
-        tokenError.message
       );
-    }
 
     if (!tokenRecord) {
       return jsonError(
         "Invalid quote request link.",
-        404
+        404,
+        cors
       );
     }
 
-    const requestOrigin =
-      request.headers.get(
-        "origin"
+    cors =
+      intakeCorsHeaders(
+        tokenRecord.allowed_origin,
+        request.headers.get("origin")
       );
 
     if (
-      !originAllowed(
+      !isIntakeOriginAllowed(
         tokenRecord.allowed_origin,
-        requestOrigin
+        requestOriginFromHeaders(request.headers)
       )
     ) {
       return jsonError(
         "This form origin is not authorised.",
-        403
+        403,
+        cors
+      );
+    }
+
+    const tokenLimit =
+      await checkRateLimit(
+        admin,
+        RATE_LIMITS.quoteIntakePerToken,
+        tokenHash
+      );
+
+    if (!tokenLimit.allowed) {
+      return jsonError(
+        "Too many quote requests. Please try again later.",
+        429,
+        cors
       );
     }
 
@@ -366,7 +475,8 @@ export async function POST(
       ) {
         return jsonError(
           "Quote request is too large.",
-          413
+          413,
+          cors
         );
       }
 
@@ -376,13 +486,28 @@ export async function POST(
       ) {
         return jsonError(
           "Unsupported form content type.",
-          415
+          415,
+          cors
         );
       }
 
       return jsonError(
         "Invalid quote request payload.",
-        400
+        400,
+        cors
+      );
+    }
+
+    if (isHoneypotFilled(payload)) {
+      /* Look successful so the bot learns nothing; store nothing. */
+      return NextResponse.json(
+        {
+          ok: true,
+        },
+        {
+          status: 201,
+          headers: cors,
+        }
       );
     }
 
@@ -398,7 +523,8 @@ export async function POST(
     ) {
       return jsonError(
         "Quote request contains no usable details.",
-        400
+        400,
+        cors
       );
     }
 
@@ -489,6 +615,7 @@ export async function POST(
       },
       {
         status: 201,
+        headers: cors,
       }
     );
   }
@@ -500,7 +627,8 @@ export async function POST(
 
     return jsonError(
       "Unable to submit quote request.",
-      500
+      500,
+      cors
     );
   }
 }
