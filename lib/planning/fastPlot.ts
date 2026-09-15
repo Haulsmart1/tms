@@ -330,14 +330,16 @@ function finiteCost(value: unknown): number {
 const FAST_PLOT_BEAM_WIDTH = 96;
 
 /**
- * Complete TomTom matrices are retained for smaller routes because the V5
- * beam search benefits from knowing every directed edge. Above this threshold
- * Fast Plot switches to bounded, on-demand candidate loading.
+ * Complete TomTom matrices are retained only while they fit comfortably
+ * inside Planning's eight-call Smart Optimize Matrix ceiling.
  *
- * 60 physical visits require 36 10x10 matrix requests with the shared matrix
- * builder. That stays below the 40-request optimization budget.
+ * Twenty physical visits require at most four 10x10 matrix chunks. The
+ * anchored van-to-Drop-1 lookup normally consumes one additional call, leaving
+ * headroom inside the click-level budget. Larger routes use the bounded sparse
+ * path, which preserves precedence and finishes geographically when TomTom
+ * loading becomes unavailable or the shared budget is exhausted.
  */
-const FAST_PLOT_COMPLETE_MATRIX_MAX_VISITS = 60;
+const FAST_PLOT_COMPLETE_MATRIX_MAX_VISITS = 20;
 
 /**
  * Large planning lanes run interactively in the browser. Each sparse route

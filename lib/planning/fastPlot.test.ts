@@ -1185,6 +1185,82 @@ describe("Fast Plot V5", () => {
     ).toEqual(result.route);
   });
 
+  it("keeps an anchored 18-job lane inside an eight-call Matrix ceiling", async () => {
+    const jobs = Array.from({ length: 18 }, (_, index) =>
+      job(`budget-${index}`, [
+        stop(
+          `budget-c-${index}`,
+          1,
+          "collection",
+          55 + index / 100,
+          -4
+        ),
+        stop(
+          `budget-d-${index}`,
+          2,
+          "delivery",
+          53 + index / 100,
+          -2
+        ),
+      ])
+    );
+
+    let calls = 0;
+
+    const loader = vi.fn(async (
+      origins: LatLng[],
+      destinations: LatLng[]
+    ): Promise<number[][] | null> => {
+      if (calls >= 8) {
+        return null;
+      }
+
+      calls += 1;
+
+      return origins.map((origin) =>
+        destinations.map((destination) =>
+          secondsBetween(origin, destination)
+        )
+      );
+    });
+
+    const result = await optimizeFastPlotOrderFromStart(
+      jobs,
+      { lat: 56, lng: -3 },
+      loader
+    );
+
+    expect(result.ok).toBe(true);
+    expect(calls).toBeLessThanOrEqual(8);
+
+    if (result.ok) {
+      expect(result.orderedVisits).toHaveLength(36);
+      expect(result.route).toHaveLength(36);
+
+      for (let index = 0; index < result.route.length; index++) {
+        expect(result.route[index]).toEqual(
+          result.orderedVisits[index].point
+        );
+      }
+
+      const visitIndex = new Map(
+        result.orderedVisits.map((visit, index) => [
+          visit.key,
+          index,
+        ])
+      );
+
+      for (let index = 0; index < 18; index++) {
+        const collectionKey = `${55 + index / 100},-4`;
+        const deliveryKey = `${53 + index / 100},-2`;
+
+        expect(visitIndex.get(collectionKey)).toBeLessThan(
+          visitIndex.get(deliveryKey) as number
+        );
+      }
+    }
+  });
+
   it("does not claim closest-first for a route requiring a physical revisit", async () => {
     const jobs = [
       job("revisit", [
