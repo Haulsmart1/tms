@@ -35,16 +35,42 @@ function isIpv6Literal(host: string): boolean {
   return host.startsWith("[") && host.endsWith("]");
 }
 
+// Well-known IPv4-in-IPv6 embedding prefixes (RFC 6052 NAT64) whose last 32 bits
+// must be checked against the same blocklist as a literal IPv4 host, because a
+// NAT64/DNS64 gateway resolves them straight to that IPv4 address.
+const NAT64_PREFIXES = ["64:ff9b::", "64:ff9b:1:"];
+
+function extractNat64Ipv4(addr: string): string | null {
+  const prefix = NAT64_PREFIXES.find((p) => addr.startsWith(p));
+  if (!prefix) return null;
+
+  const dotted = addr.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (dotted) return dotted[1];
+
+  const groups = addr.split(":");
+  const hi = groups[groups.length - 2];
+  const lo = groups[groups.length - 1];
+  if (!hi || !lo || !/^[0-9a-f]{1,4}$/.test(hi) || !/^[0-9a-f]{1,4}$/.test(lo)) return null;
+  const hiNum = parseInt(hi, 16);
+  const loNum = parseInt(lo, 16);
+  return [(hiNum >> 8) & 0xff, hiNum & 0xff, (loNum >> 8) & 0xff, loNum & 0xff].join(".");
+}
+
 function isBlockedIpv6(host: string): boolean {
   const addr = host.slice(1, -1).toLowerCase();
-  return (
+  if (
     addr === "::" ||
     addr === "::1" ||
     addr.startsWith("::ffff:") ||
     /^f[cd]/.test(addr) ||
     /^fe[89ab]/.test(addr) ||
     addr.startsWith("ff")
-  );
+  ) {
+    return true;
+  }
+
+  const embedded = extractNat64Ipv4(addr);
+  return embedded !== null && isBlockedIpv4(embedded);
 }
 
 export function validateWebhookUrl(raw: unknown): WebhookUrlResult {
