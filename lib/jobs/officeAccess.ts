@@ -12,7 +12,7 @@ import {
 import type { AccessLevel } from "../auth/tenantAccess";
 import { isOfficeCaller } from "./officeRoles";
 
-async function hasActiveDriverLink(admin: SupabaseClient, userId: string): Promise<boolean> {
+export async function hasActiveDriverLink(admin: SupabaseClient, userId: string): Promise<boolean> {
   const [direct, portal] = await Promise.all([
     admin.from("driver_users").select("user_id", { count: "exact", head: true }).eq("user_id", userId).eq("active", true),
     admin

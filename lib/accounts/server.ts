@@ -1,8 +1,9 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
-import { isRoleAuthorized } from "./authz";
+import { accountsAccessAllowed } from "./authz";
 import { authorizeTenant, TenantAccessError } from "../auth/serverTenantAccess";
+import { hasActiveDriverLink } from "../jobs/officeAccess";
 import { toErrorResponse } from "./errors";
 export { ACCOUNTS_ADMIN_ROLES } from "./authz";
 export { AccountsHttpError } from "./errors";
@@ -80,7 +81,23 @@ export async function requireTenantAccess(
 
   const role = authorized.caller.roleName ?? "";
 
-  if (allowedRoles && !isRoleAuthorized(role, allowedRoles) && !allowedRoles.includes(authorized.tier)) {
+  // Drivers are not accounts users, whether or not the route has an
+  // allow-list (lib/accounts/authz.ts accountsAccessAllowed).
+  let driverLink = false;
+  if (authorized.tier === "staff") {
+    try {
+      driverLink = await hasActiveDriverLink(admin, user.id);
+    } catch {
+      throw new Error("TENANT_LOOKUP_FAILED");
+    }
+  }
+
+  if (
+    !accountsAccessAllowed(
+      { tier: authorized.tier, roleName: authorized.caller.roleName, hasActiveDriverLink: driverLink },
+      allowedRoles,
+    )
+  ) {
     throw new Error("FORBIDDEN");
   }
 
