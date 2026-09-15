@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import type { NextRequest } from "next/server";
 import { createAdminClient } from "../supabase/admin";
 import { authorizeTenant, loadCallerProfile, TenantAccessError } from "../auth/serverTenantAccess";
+import { requestTenantId } from "../auth/tenantAccess";
 
 export async function createApiSupabase() {
   const cookieStore = await cookies();
@@ -53,10 +54,13 @@ export async function requireTenant(request: NextRequest) {
     throw new ApiError(500, "Unable to verify tenant access");
   }
 
-  const tenantId = requestedTenantId ?? caller.homeTenantId;
-  if (!tenantId) {
-    throw new ApiError(403, "No tenant is linked to this user");
+  const resolved = requestTenantId(requestedTenantId, caller);
+  if (!resolved.ok) {
+    throw resolved.reason === "tenant-required"
+      ? new ApiError(400, "Choose a tenant first")
+      : new ApiError(403, "No tenant is linked to this user");
   }
+  const tenantId = resolved.tenantId;
 
   let authorized;
   try {

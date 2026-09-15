@@ -4,10 +4,36 @@ import {
   canManageTenant,
   decideTenantAccess,
   hasValidHome,
+  requestTenantId,
   roleTier,
   type CallerProfile,
   type TenantRef,
 } from "./tenantAccess";
+
+describe("requestTenantId", () => {
+  const home = (roleName: string | null) => ({ userId: "u1", roleName, companyId: "company-a", homeTenantId: "tenant-a1" });
+
+  it("uses the tenant the request names, for every role", () => {
+    expect(requestTenantId("tenant-a2", home("admin"))).toEqual({ ok: true, tenantId: "tenant-a2" });
+    expect(requestTenantId("tenant-a1", home("staff"))).toEqual({ ok: true, tenantId: "tenant-a1" });
+  });
+
+  it("falls back to the home tenant for staff, who are pinned to it", () => {
+    expect(requestTenantId(null, home("staff"))).toEqual({ ok: true, tenantId: "tenant-a1" });
+    expect(requestTenantId(null, home(null))).toEqual({ ok: true, tenantId: "tenant-a1" });
+  });
+
+  it("refuses an admin or super admin who named no tenant instead of assuming their home one", () => {
+    // Under "All tenants" the page sends no header; silently using the home
+    // tenant showed and created customers there while the selector said All.
+    expect(requestTenantId(null, home("admin"))).toEqual({ ok: false, reason: "tenant-required" });
+    expect(requestTenantId(null, home("super_admin"))).toEqual({ ok: false, reason: "tenant-required" });
+  });
+
+  it("reports a staff caller with no home tenant", () => {
+    expect(requestTenantId(null, { ...home("staff"), homeTenantId: null })).toEqual({ ok: false, reason: "no-home-tenant" });
+  });
+});
 
 const COMPANY_A = "company-a";
 const COMPANY_B = "company-b";

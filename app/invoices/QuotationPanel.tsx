@@ -908,6 +908,7 @@ export default function QuotationPanel({
             headers: {
               "Content-Type":
                 "application/json",
+              "x-tenant-id": tenantId,
             },
 
             body:

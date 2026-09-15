@@ -82,6 +82,24 @@ export function hasValidHome(caller: CallerProfile, homeTenant: TenantRef | null
   );
 }
 
+/**
+  Which tenant a request that may carry an x-tenant-id header is for. A named
+  tenant is used as given (the caller is then authorized against it). With no
+  header, staff get their home tenant, which is the only one they can reach. An
+  admin or super admin is REFUSED rather than assumed to mean their home tenant:
+  "All tenants" sends no header, and assuming one showed and created records in
+  the home tenant while the selector said All (2026-09-15 follow-up).
+*/
+export function requestTenantId(
+  requested: string | null,
+  caller: CallerProfile,
+): { ok: true; tenantId: string } | { ok: false; reason: "tenant-required" | "no-home-tenant" } {
+  if (requested) return { ok: true, tenantId: requested };
+  if (roleTier(caller.roleName) !== "staff") return { ok: false, reason: "tenant-required" };
+  if (!caller.homeTenantId) return { ok: false, reason: "no-home-tenant" };
+  return { ok: true, tenantId: caller.homeTenantId };
+}
+
 export type AccessLevel = "access" | "manage";
 
 export type AccessDecision =

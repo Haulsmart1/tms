@@ -74,7 +74,7 @@ export default function JobsPage() {
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [podForms, setPodForms] = useState<Record<string, any>>({});
   const [jobsNotice, setJobsNotice] = useState("");
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; reference: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; reference: string; tenant_id: string } | null>(null);
 
   const [acceptanceTarget, setAcceptanceTarget] = useState<{
     id: string;
@@ -668,13 +668,12 @@ export default function JobsPage() {
     await sendJobsToPlanning([job], targetDate);
   }
 
-  async function performDelete(jobId: string) {
+  async function performDelete(jobId: string, jobTenantId: string) {
     try {
+      // The job's own tenant, not the selector: under "All tenants" there is
+      // no active tenant, and the API no longer assumes an admin's home one.
       const headers = new Headers();
-
-      if (tenant.activeTenantId) {
-        headers.set("x-tenant-id", tenant.activeTenantId);
-      }
+      headers.set("x-tenant-id", jobTenantId);
 
       const response = await fetch(
         `/api/jobs/${encodeURIComponent(jobId)}`,
@@ -716,7 +715,7 @@ export default function JobsPage() {
       return;
     }
 
-    setDeleteTarget({ id: job.id, reference: job.reference });
+    setDeleteTarget({ id: job.id, reference: job.reference, tenant_id: job.tenant_id });
   }
 
   function openAcceptance(job: any) {
@@ -1897,7 +1896,7 @@ export default function JobsPage() {
           }
 
           const target = deleteTarget;
-          await performDelete(target.id);
+          await performDelete(target.id, target.tenant_id);
           setDeleteTarget(null);
         }}
       />
