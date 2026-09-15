@@ -24,7 +24,52 @@ are the licence gate (prodfix_30 refuses assigning an unlicensed vehicle), the d
 (prodfix_31), and the storage and policy tightening (prodfix_83, 85). With no live customers, the
 simplest safe path is one short window: apply everything below, then deploy the branch.
 
+## Baseline that must already be live (and must never be re-run)
+
+The prodfix files assume two earlier sets of migrations are applied. Neither is in this list, and
+neither is safe to replay.
+
+- `docs/sql/billing_01` .. `billing_07`. The `billing_07` header records `billing_01`..`05` as
+  applied (2026-09-10), and `billing_06`/`07` were applied with the period-billing work. Never
+  re-run `billing_03` STEP 1: outside its deploy window it creates coverage nobody paid for.
+- `supabase/migrations/*.sql` (15 files, 2026-08-13 .. 2026-09-11). Despite the folder name these
+  were pasted into the SQL editor by hand, so the Supabase CLI's migration history is empty. **Never
+  run `supabase db push` against this project**: it would treat all 15 as pending, replay files that
+  cannot run twice (`job_item_scans`, `load_manifests`, `planning_route_itineraries`) and recreate
+  functions that prodfix_85/86/87 harden.
+- `rls_01_tenants_company_id.sql` and `rls_01b_reseed.sql` now refuse to run. `rls_03` says DO NOT
+  RE-RUN.
+
+What depends on the baseline, and what goes wrong without it:
+
+| prodfix | Needs | Without it |
+|---|---|---|
+| 31 | `billing_03`, `billing_05`, `billing_06`, `billing_07` | Evidence check is built from whichever tables exist at apply time. Without `billing_07`'s lifecycle columns it compiles to `or true`, so **no vehicle can ever be deleted**. A billing table created later is ignored until 31 is re-run. |
+| 32 | `billing_06`, `billing_07` | Migration RPC fails. |
+| 33 | `billing_06` (`period_charges`, `billing_periods`), `billing_01` (`platform_charges`) | Aborts on an unguarded `::regclass` cast. |
+| 71 | `20260901041500_jobs_planning_date.sql` | Itinerary trigger references `jobs.planning_date`. |
+| 87 | `20260831235900_driver_activity_timezone_ferry.sql`, `20260911131500_tachograph_activity_ledger.sql` | Raises and changes nothing. |
+
 ## 0. Read-only checks first
+
+0. Run this. Every row must say `true`; if any says `false`, stop and apply or investigate that
+   baseline file before any prodfix.
+
+   ```sql
+   select 'billing_01 platform_charges' as needs, to_regclass('public.platform_charges') is not null as ok
+   union all select 'billing_03 vehicle_cycle_coverage', to_regclass('public.vehicle_cycle_coverage') is not null
+   union all select 'billing_03 vehicle_addon_charges', to_regclass('public.vehicle_addon_charges') is not null
+   union all select 'billing_04 record_cycle_charge', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'record_cycle_charge')
+   union all select 'billing_05 vehicle_addon_charges.square_card_id', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'vehicle_addon_charges' and column_name = 'square_card_id')
+   union all select 'billing_06 billing_periods', to_regclass('public.billing_periods') is not null
+   union all select 'billing_06 period_charges', to_regclass('public.period_charges') is not null
+   union all select 'billing_06 period_invoice_lines', to_regclass('public.period_invoice_lines') is not null
+   union all select 'billing_07 vehicle_licences.activated_at', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'vehicle_licences' and column_name = 'activated_at')
+   union all select 'billing_07 vehicle_licences.deactivated_at', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'vehicle_licences' and column_name = 'deactivated_at')
+   union all select 'supabase 20260901041500 jobs.planning_date', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'jobs' and column_name = 'planning_date')
+   union all select 'supabase 20260831235900 driver_activity_logs.activity_kind', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'driver_activity_logs' and column_name = 'activity_kind')
+   union all select 'supabase 20260911131500 upsert_manual_driver_activity', to_regprocedure('public.upsert_manual_driver_activity(uuid,uuid,uuid,text,text,timestamptz,timestamptz)') is not null;
+   ```
 
 1. `diag_2026_09_14_live_state.sql`: export the CSV. Several files below name a diag section to check.
 2. `prodfix_80_preflight_readonly.sql`: says what the security batch (step 7) will change. Keep the

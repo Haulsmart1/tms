@@ -207,6 +207,9 @@ docs/sql/                   numbered migrations, applied by hand in order in the
                              2026-09-14 review fixes; order in prodfix_00_APPLY_ORDER.md). `*_verify.sql`,
                              `diag_*` and `prodfix_80_preflight_readonly.sql` are read-only check scripts,
                              not migrations. Not every file has been applied: check the apply-order doc.
+supabase/migrations/        15 more hand-applied migrations (planning, manifests, Xero credentials, driver
+                             activity). CLI-style names, but applied via the SQL editor: NEVER run
+                             `supabase db push`, it would replay all of them. rls_01/rls_01b now raise if run.
 scripts/                    dev-login.mjs (local magic link), migrate-company-to-period-billing.mjs
 docs/superpowers/specs/     design specs (read before large features — several trade-offs, like the theme
                              inversion, are only explained here)

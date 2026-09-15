@@ -172,21 +172,12 @@ CRON_SECRET=                        # REQUIRED for billing: bearer token for /ap
 NEXT_PUBLIC_SITE_URL=               # absolute base URL for links in emails and share links (falls back to https://tmswizard.cloud)
 ```
 
-Database: the schema is managed in Supabase. RLS policies and helper functions are drafted as SQL under `docs/sql/` and applied in the Supabase SQL editor (not through an automated migration runner). This includes `docs/sql/billing_01_platform_billing.sql` (platform billing tables and policies), which is an unapplied draft until it is run there.
+Database: the schema is managed in Supabase. Migrations are SQL files applied by hand in the Supabase SQL editor; there is no automated migration runner. They live in two places:
 
-Deploying the mid-cycle billing work: the order is not optional, and it is spelled out in each migration's header. Read those before touching anything; the summary here is a checklist, not the reasoning.
+- `docs/sql/`: `rls_*`, `billing_01`..`billing_07` and the `prodfix_*` series.
+- `supabase/migrations/` (15 files, 2026-08-13 .. 2026-09-11): planning, load manifests, quotation acceptance, Xero credentials, driver activity. The folder uses Supabase CLI naming but the files were pasted into the SQL editor, so the CLI's history is empty. Never run `supabase db push` against this project: it would replay all 15.
 
-Before the deploy, in this order:
-
-1. `billing_03_mid_cycle_charges.sql` **STEP 1 only** (down to the STEP 2 banner). Do not paste the whole file: the steps are separated by comment banners, so one paste runs all three. STEP 1 creates `vehicle_cycle_coverage` and `vehicle_addon_charges` and backfills coverage for the cycle already paid for. Run its pre-flight checks first.
-2. `billing_04_atomic_charge_record.sql` in full. It creates `record_cycle_charge`, which the deployed `lib/billing/server.ts` calls by name. Ship the code first and every cron charge and first-time card setup takes the customer's money at Square and then fails on a missing function, recording neither the charge nor its coverage.
-3. `billing_05_addon_intent.sql` in full. It widens the `vehicle_addon_charges` status constraint to allow `pending`, which `lib/billing/addonServer.ts` writes before calling Square. Ship the code first and vehicle additions fail outright, but before any payment is attempted, so no money moves.
-
-Then deploy the code, and immediately re-run the STEP 1 backfill. STEP 1 runs while the old cron is still live and the old cron writes no coverage, so a charge date falling in that window leaves the new cycle uncovered and the next mid-cycle addition double-charges. The backfill is only safe to re-run inside that window: once a cron cycle has advanced `next_charge_on` it mints coverage nobody paid for.
-
-After the deploy has soaked, run `billing_03` STEP 2 and STEP 3 together. They revoke the browser's insert and update on `vehicle_licences` and add a trigger over `active` and `vehicle_id`. Run either one before the new code is live and licence creation breaks immediately, because the old licences page writes that table directly. After them, reverting the code breaks licence creation for the same reason.
-
-`billing_01_platform_billing.sql` and `billing_02_four_weekly.sql` precede all of this and are assumed already applied; `billing_02` has its own before-deploy / after-soak split in its header.
+`billing_01`..`billing_07` and `supabase/migrations/` are the applied baseline. Do not re-run them (in particular `billing_03` STEP 1, which mints coverage nobody paid for outside its original deploy window). `rls_01` and `rls_01b` now raise if run. Outstanding migrations, their order and a baseline check query are in `docs/sql/prodfix_00_APPLY_ORDER.md`; the reasoning behind each billing step is in its own file header.
 
 ## Project structure
 
