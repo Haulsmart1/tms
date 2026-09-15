@@ -6,6 +6,109 @@ CONFIRMED means proven from the repo; PLAUSIBLE means it depends on live databas
 
 Decisions taken with Ethan: profiles is the single role source of truth; unlicensed vehicles are gated from use; past-due suspension will be built; live DB state is checked by a read-only script Ethan runs.
 
+## Status at 2026-09-15 (branch ethan/production-review-fixes, head after 22f8497)
+
+Every finding below was re-checked against the code and SQL on the fix branch, then the ~20% of the codebase
+this review never covered (131 files in app/ and lib/, plus components/ and supabase/migrations/) was reviewed
+separately. Commit messages were not taken as proof; each failure scenario was traced through the new code.
+
+Status key: **FIXED** in code. **SQL** fixed, but inert until the named prodfix file is applied (none is yet;
+docs/sql/prodfix_00_APPLY_ORDER.md). **PARTIAL** some of the scenario remains. **OPEN** no fix. **DECISION** /
+**MANUAL** needs a product decision or a dashboard step. **LIVE** depends on live database state
+(diag_2026_09_14_live_state.sql not yet run). IDs not listed under a review are FIXED.
+
+Note: lib/rateLimit.ts allows every request while prodfix_01 is missing, so every rate-limit fix is inert today.
+
+### Review 01 and 02 (auth, SQL)
+- SQL: AUTH-2 (20), AUTH-4 (20), AUTH-7 (01, plus MANUAL: disable signups), AUTH-8 (01), AUTH-9 (20), AUTH-15 (10),
+  M6 (01), L4 (20), SQL-1 (82, 83), SQL-3 (84), SQL-4 (85), SQL-5 (31), SQL-6 (50), SQL-7 (87, 88), SQL-8 (83),
+  SQL-10 (81), SQL-12 (31), SQL-14/15 (86), SQL-16 (90), SQL-18 (87), SQL-19 (93).
+- PARTIAL: **SQL-2 (critical)** rls_11 makes child tables without tenant_id deny-all instead of parent-scoped, so
+  browser pages reading them may break. AUTH-5 no acceptance step before an account with no company is linked
+  (portal-only accounts owned by another company are no longer linked, a6e30ab). AUTH-6 login CSRF still works
+  with one extra click; email templates are MANUAL. AUTH-9 and AUTH-11 the subcontractor invite route is still
+  non-atomic and still reveals whether an account exists. SQL-17 idempotency guards and schema dump not done.
+- DECISION: AUTH-3 what happens to company-wide admins whose home tenant is moved.
+- LIVE: SQL-9 (optional prodfix_92), SQL-13 (plus MANUAL).
+
+### Review 03 and 04 (billing)
+- SQL: BILL1-1 (30), BILL1-3 (33), BILL2-12 (31), BILL2-17 (33), BILL2-18 (33, apply before 31), BILL2-21 (32).
+- OPEN: **BILL1-5** past_due companies keep full service on both models (past-due suspension, queued).
+- MANUAL: BILL1-4 CRON_SECRET in Vercel, plus an alert on the cron.
+- PARTIAL: BILL1-2 no audit of existing v2 companies with active licences and no period. BILL1-6 recovery charges
+  the stale cycle and a fresh one within a day, undisclosed. BILL1-10 concurrent add-ons can still share a
+  baseline. BILL1-11 v2 still stops at 1000 due periods or companies. BILL1-13 and BILL1-14 estimate and cancel
+  exist in the API but no page calls them. BILL2-10 cooling-off refund ignores usage. BILL2-13 vehicles added
+  between migration and seam are free. BILL2-15 nothing reconciles refund_pending.
+- LIVE: the unresolved activation report needs the billing_periods / period_charges query.
+
+### Review 05 (accounts, integrations, portals)
+- SQL: ACC-1 (40), ACC-8 (42), ACC-9 (41), ACC-17 (44), ACC-18 (01).
+- PARTIAL: ACC-6 credit notes and payments never reach Xero; xeroTaxTypes has no UI. ACC-8 credit note create is
+  still two writes, and concurrent drafts can credit the same line. ACC-13 an import killed between insert and
+  failure mark stays blocked as a duplicate. ACC-23 the admin-only webhook rule is API-only; LIVE whether the
+  customers table policy lets staff write webhook_url directly.
+
+### Review 06 and 07 (invoicing, quotations, POD, drivers, storage)
+- SQL: INV-3 (40), INV-4 (50), INV-7 (01), INV-8 (43), INV-9 (41), INV-10 (40), M2 (60), H2 and POD-4 (82, 83),
+  POD-9 (60), POD-15 (85), POD-25 (60).
+- PARTIAL: **POD-1** job edit is still a series of browser writes with no transaction. **POD-3** POD email is
+  narrowed, not closed: a self-signup tenant can still mail an address it stores on its own customer. INV-11 the
+  lookups invoice query and credit-note list still stop at 1000 rows. INV-23 drafts are not cleared on sign-out.
+  POD-22 a driver linked to two operators gets 409 on the dashboard.
+- DECISION: INV-21 no UI to issue, rotate or revoke quote-request form tokens.
+- MANUAL: INV-26 NEXT_PUBLIC_SITE_URL in Vercel.
+
+### Review 08 and 09 (planning, tracking, settings, fleet, dependencies)
+- SQL: PLAN-8 (70), PLAN-11 (70), PLAN-13 (73, 01), PLAN-15 (87), PLAN-23 (71), PLAN-25 (01), SET-2, SET-6, SET-7,
+  SET-8, SET-10, SET-24 (20), SET-4 (31).
+- PARTIAL: PLAN-3, PLAN-4, PLAN-6 rest, weekly rest and Working Time are disclosed or warned, not computed.
+  PLAN-5 routing is still car without traffic. PLAN-12 Smart Optimize is cancellable but still about 14s of CPU.
+  SET-10 sessions are not revoked on removal. SET-18 /settings/licences has no request sequencing. Known gap 1
+  tracking timeline, dashboard and expiry still use London time. Known gap 2 vehicle_locations is never written.
+- OPEN: PLAN-18 ferry and train interruptions (disclosed). SET-27 lodash and uuid via the TomTom SDK, no upstream fix.
+- DECISION: SET-20 page permissions, SET-26 privacy and terms pages (needed before signup).
+
+### Found after the review (2026-09-15)
+
+Fixed on the branch:
+
+| Finding | Commit | Note |
+|---|---|---|
+| Cancelling a company left licences active, so it could keep running its fleet for free | 22f8497 | prodfix_30 LIC02; inert until applied |
+| Accounts routes with no allow-list admitted drivers (payments, invoice and credit note approval, quote convert) | 89d80aa | |
+| Portal invite linked another company's portal-only driver or subcontractor | a6e30ab | |
+| POD share, POD email, Stripe Connect and magic-link built links from the request host | 9246028 | guarded by lib/accounts/publicLinks.test.ts |
+| Admin on All tenants saw and created customers in their home tenant | 57a46df | requireTenant now 400s an admin with no tenant |
+| Job acceptance sent accepted_by and accepted_at from the browser | 22f8497 | prodfix_94; inert until applied |
+| rls_01b_reseed.sql re-run would move every profile of a multi-tenant company to an arbitrary tenant | 5c4dbf6 | rls_01 and rls_01b now raise |
+| Apply-order doc omitted the billing_* and supabase/migrations/ baseline (prodfix_31 without billing_07 blocks every vehicle delete; supabase db push would replay 15 files) | 5c4dbf6 | step 0 check query added |
+
+Open:
+- Billing: v1 recovery replays the old card from the pending intent; card-save recovery on v2 leaves the days
+  between the failed period and today unbilled; the v2 quote ignores the already-billable free exit; the cron's
+  collect step uses a pre-loop prepaid snapshot (narrow double-minimum window); billing_06_verify breaks once
+  prodfix_33 is applied.
+- Access and data: invites still write tenant_id and role into editable user_metadata; auth_tenant_id() stays
+  installed and prodfix_86 grants it; prodfix_91 lets an admin write their own user_permissions; super-admin
+  invoices page writes invoice status from the browser, and LIVE whether staff can do the same; the job accept
+  and savePod status writes are still client writes (only the acceptance stamp is fixed); registration_requests_rls
+  can leave an old permissive read policy on leads (LIVE); drivers.points_total computed in the browser.
+- POD and drivers: expected serials are sent to the driver's phone and can be typed instead of scanned; POD email
+  creates a share link before sending and never revokes it on failure; office users can add evidence to a
+  completed, already-shared job; label printing crashes on non-Code 128 serials; phone GPS is indistinguishable
+  from telematics and can be stamped 2 minutes ahead; retried manifest scans report failure; driver location
+  route is not rate limited.
+- Email and integrations: every tenant sends from one MS Graph mailbox with no Reply-To and saveToSentItems on;
+  a send accepted by Graph but not logged is reported as failed and resent; email footers carry one company's
+  slogan; Cambridge RMA imports can stick in "received"; Stripe routes are unused, ungated by role on status, and
+  have no table in docs/sql; WEBP logos never render on PDFs; logo type is trusted from the browser; quotation
+  PATCH returns 500 when link revoke fails after the edit saved.
+- Operations: no GDPR erasure, data export or backup and restore runbook; 13 env vars undocumented in README;
+  no pinned Vercel region; maxDuration 300 needs Fluid compute or Pro; no engines field; Playwright project
+  package.json is gitignored; preview deploys send invite links to production; lead PII can reach logs from
+  request-access.
+
 
 ---
 
