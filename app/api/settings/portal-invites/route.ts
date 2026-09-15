@@ -69,6 +69,45 @@ async function accountCompany(admin: SupabaseClient, userId: string): Promise<st
   return tenantRow?.company_id ? String(tenantRow.company_id) : null;
 }
 
+/*
+  The company behind each ACTIVE portal link the account already holds, as the
+  third input to portalLinkDecision. A portal-only account has no profile, so
+  this is the only record of who it works for. A link on a tenant with no
+  company comes back as null, which the decision treats as foreign.
+*/
+async function portalLinkCompanies(admin: SupabaseClient, userId: string): Promise<(string | null)[]> {
+  const [driverLinks, subLinks] = await Promise.all([
+    admin.from("driver_users").select("tenant_id").eq("user_id", userId).eq("active", true),
+    admin.from("subcontractor_users").select("tenant_id").eq("user_id", userId).eq("active", true),
+  ]);
+  if (driverLinks.error || subLinks.error) {
+    throw new PortalInviteError(500, "Unable to send the invitation right now.");
+  }
+
+  const tenantIds = [
+    ...new Set(
+      [...(driverLinks.data ?? []), ...(subLinks.data ?? [])]
+        .map((row) => (row.tenant_id ? String(row.tenant_id) : ""))
+        .filter(Boolean),
+    ),
+  ];
+  if (tenantIds.length === 0) return [];
+
+  const { data: tenants, error } = await admin.from("tenants").select("id, company_id").in("id", tenantIds);
+  if (error) throw new PortalInviteError(500, "Unable to send the invitation right now.");
+
+  const companyByTenant = new Map((tenants ?? []).map((t) => [String(t.id), t.company_id ? String(t.company_id) : null]));
+  return tenantIds.map((id) => companyByTenant.get(id) ?? null);
+}
+
+async function linkDecisionFor(admin: SupabaseClient, userId: string, companyId: string | null) {
+  const [company, linkCompanies] = await Promise.all([
+    accountCompany(admin, userId),
+    portalLinkCompanies(admin, userId),
+  ]);
+  return portalLinkDecision(company, companyId, linkCompanies);
+}
+
 async function ensurePublicUser(admin: SupabaseClient, userId: string, email: string) {
   const { data, error } = await admin.from("users").select("id").eq("id", userId).maybeSingle();
   if (error) throw new Error("users lookup failed");
@@ -112,7 +151,7 @@ async function resolveInvitee(
   let userId = await findAuthUserId(admin, email);
 
   if (userId) {
-    const decision = portalLinkDecision(await accountCompany(admin, userId), companyId);
+    const decision = await linkDecisionFor(admin, userId, companyId);
     return { userId: decision === "link" ? userId : null, createdUserId: null, existing: true };
   }
 
@@ -128,7 +167,7 @@ async function resolveInvitee(
       console.error("[portal-invites] invite failed", error?.status, error?.code);
       throw new PortalInviteError(400, "Unable to send the invitation. Check the address and try again.");
     }
-    const decision = portalLinkDecision(await accountCompany(admin, userId), companyId);
+    const decision = await linkDecisionFor(admin, userId, companyId);
     return { userId: decision === "link" ? userId : null, createdUserId: null, existing: true };
   }
 
