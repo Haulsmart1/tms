@@ -123,6 +123,6 @@ export const config = {
      round trip per asset for no benefit. The final alternation skips anything
      with a file extension (favicon.ico, icon.svg, /public/* files). */
   matcher: [
-    "/((?!_next/static|_next/image|.*\.[^/]+$).*)",
+    "/((?!_next/static|_next/image|.*\\.[^/]+$).*)",
   ],
 };

@@ -87,6 +87,32 @@ describe("applyChargeOutcome", () => {
     ).toBe("2027-02-28");
   });
 
+  // BILL1-6: recovering a cycle that ended months ago must not schedule the
+  // next charge in the past, or the cron charges one missed cycle a day.
+  it("restarts the schedule today after collecting a stale cycle", () => {
+    expect(
+      applyChargeOutcome({
+        row: row({ status: "past_due", retry_count: 4 }),
+        cycleDate: "2026-04-01",
+        attempt: 5,
+        succeeded: true,
+        todayISO: "2026-08-10",
+      }).next_charge_on
+    ).toBe("2026-08-10");
+  });
+
+  it("keeps the ordinary schedule when the next charge is still ahead", () => {
+    expect(
+      applyChargeOutcome({
+        row: row(),
+        cycleDate: "2026-08-26",
+        attempt: 2,
+        succeeded: true,
+        todayISO: "2026-08-28",
+      }).next_charge_on
+    ).toBe("2026-09-23");
+  });
+
   it("schedules a retry on a non-final failure", () => {
     expect(
       applyChargeOutcome({

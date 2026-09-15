@@ -20,7 +20,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { errorResponse } from "../../../../lib/accounts/server";
-import { requireCompanyAdmin } from "../../../../lib/billing/server";
+import {
+  cancelV1Company,
+  requireCompanyAdmin,
+} from "../../../../lib/billing/server";
 import { cancelCompany } from "../../../../lib/billing/periodServer";
 import { createSquarePeriodPaymentProvider } from "../../../../lib/billing/periodPaymentServer";
 import { londonDateISO } from "../../../../lib/billing/schedule";
@@ -34,6 +37,7 @@ const BodySchema = z.object({
 
 const BLOCKED_MESSAGE: Record<string, string> = {
   already_canceled: "This subscription has already been cancelled.",
+  no_subscription: "There is no subscription on this account to cancel.",
   payment_settling:
     "A payment on your account is still settling, so it cannot be cancelled yet. Try again shortly, and contact support if this persists.",
 };
@@ -68,16 +72,26 @@ export async function POST(request: NextRequest) {
     );
 
     if (outcome.model === "v1_immediate") {
-      // v1 cancellation is not implemented here and must not be faked. Doing
-      // nothing while answering ok would leave a company believing they had
-      // cancelled while the 4-weekly cron kept charging them.
-      return NextResponse.json(
-        {
-          error:
-            "This account is not on period billing. Contact support to cancel.",
-        },
-        { status: 409 }
-      );
+      // v1 (charge in advance). Review BILL1-14: this used to refuse with
+      // "contact support" while the cron kept charging. Prepaid, so no invoice
+      // and no refund; the cycle in progress runs to its end.
+      const v1 = await cancelV1Company(admin, companyId);
+      if (v1.result === "blocked") {
+        return NextResponse.json(
+          {
+            error:
+              BLOCKED_MESSAGE[v1.reason] ??
+              "This subscription cannot be cancelled right now.",
+          },
+          { status: 409 }
+        );
+      }
+      return NextResponse.json({
+        ok: true,
+        model: "v1_immediate",
+        result: "cancelled",
+        note: "No further charges will be taken. The period you have already paid for runs to its end.",
+      });
     }
 
     if (outcome.result === "blocked") {

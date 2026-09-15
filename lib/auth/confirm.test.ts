@@ -81,7 +81,15 @@ describe("isMagicLinkEmailType", () => {
     ).toBe(true);
   });
 
+  it.each(["magiclink", "invite"])("accepts the %s link type", (type) => {
+    expect(isMagicLinkEmailType(type)).toBe(true);
+  });
+
   it("rejects other OTP types for this confirmation flow", () => {
+    expect(isMagicLinkEmailType("email_change")).toBe(false);
+    expect(isMagicLinkEmailType("signup")).toBe(false);
+    expect(isMagicLinkEmailType("")).toBe(false);
+
     expect(
       isMagicLinkEmailType("recovery"),
     ).toBe(false);

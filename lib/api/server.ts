@@ -1,6 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import type { NextRequest } from "next/server";
+import { createAdminClient } from "../supabase/admin";
+import { authorizeTenant, loadCallerProfile, TenantAccessError } from "../auth/serverTenantAccess";
+import { requestTenantId } from "../auth/tenantAccess";
 
 export async function createApiSupabase() {
   const cookieStore = await cookies();
@@ -39,57 +42,44 @@ export async function requireTenant(request: NextRequest) {
     throw new ApiError(401, "Not authenticated");
   }
 
-  const requestedTenantId = request.headers.get("x-tenant-id");
+  const requestedTenantId = request.headers.get("x-tenant-id")?.trim() || null;
 
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("tenant_id")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if (profileError) {
-    throw new ApiError(500, profileError.message);
+  // Authorize from profiles, the same rule RLS applies (can_access_tenant),
+  // not the legacy memberships table (review AUTH-4 / SET-3).
+  const admin = createAdminClient();
+  let caller;
+  try {
+    caller = await loadCallerProfile(admin, user.id);
+  } catch {
+    throw new ApiError(500, "Unable to verify tenant access");
   }
 
-  if (!requestedTenantId) {
-    if (!profile?.tenant_id) {
-      throw new ApiError(403, "No tenant is linked to this user");
+  const resolved = requestTenantId(requestedTenantId, caller);
+  if (!resolved.ok) {
+    throw resolved.reason === "tenant-required"
+      ? new ApiError(400, "Choose a tenant first")
+      : new ApiError(403, "No tenant is linked to this user");
+  }
+  const tenantId = resolved.tenantId;
+
+  let authorized;
+  try {
+    authorized = await authorizeTenant(admin, user.id, tenantId, "access");
+  } catch (error) {
+    if (error instanceof TenantAccessError && error.status === 403) {
+      throw new ApiError(403, "You do not have access to this tenant");
     }
-
-    return {
-      supabase,
-      user,
-      tenantId: profile.tenant_id as string,
-    };
-  }
-
-  if (profile?.tenant_id === requestedTenantId) {
-    return {
-      supabase,
-      user,
-      tenantId: requestedTenantId,
-    };
-  }
-
-  const { data: membership, error: membershipError } = await supabase
-    .from("memberships")
-    .select("id")
-    .eq("user_id", user.id)
-    .eq("tenant_id", requestedTenantId)
-    .maybeSingle();
-
-  if (membershipError) {
-    throw new ApiError(500, membershipError.message);
-  }
-
-  if (!membership) {
-    throw new ApiError(403, "You do not have access to this tenant");
+    throw new ApiError(500, "Unable to verify tenant access");
   }
 
   return {
     supabase,
     user,
-    tenantId: requestedTenantId,
+    tenantId,
+    /** profiles-based tier, the same one RLS uses: super_admin, admin or staff. */
+    tier: authorized.tier,
+    /** Exact roles.name for the caller, or null. */
+    roleName: authorized.caller.roleName,
   };
 }
 
@@ -100,4 +90,22 @@ export class ApiError extends Error {
   ) {
     super(message);
   }
+}
+
+/**
+  Wraps a PostgREST/Postgres error without echoing its text (review ACC-15).
+  The raw error is logged. Data problems the client can fix (class 22 data
+  exceptions and class 23 constraint violations, plus PostgREST's malformed
+  filter codes) answer 400 with a generic sentence; anything else is a 500.
+*/
+export function apiDbError(
+  error: { code?: string | null; message?: string | null },
+  message: string
+): ApiError {
+  console.error("[api] database error", error.code, error.message);
+  const code = String(error.code ?? "");
+  if (code.startsWith("22") || code.startsWith("23") || code === "PGRST100") {
+    return new ApiError(400, `${message} Some of the details are not valid.`);
+  }
+  return new ApiError(500, message);
 }

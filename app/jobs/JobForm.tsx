@@ -1,7 +1,17 @@
 import Field from "../../components/Field";
 import Button from "../../components/Button";
 
-type Stop = { type: "collection" | "delivery"; address_line: string; city: string; postcode: string };
+/* `id` is set for a stop that already exists, so saving updates it in place
+   (review POD-1). `locked` marks a stop with POD recorded: its address and
+   type are read-only and it cannot be removed from here. */
+type Stop = {
+  id?: string | null;
+  locked?: boolean;
+  type: "collection" | "delivery";
+  address_line: string;
+  city: string;
+  postcode: string;
+};
 
 type FormState = {
   reference: string;
@@ -41,12 +51,15 @@ type Props = {
 function StopRow({
   stop, index, onChange, onRemove,
 }: { stop: Stop; index: number; onChange: (field: keyof Stop, value: string) => void; onRemove: () => void }) {
+  const locked = Boolean(stop.locked);
+
   return (
     <div className="flex flex-wrap items-end gap-2">
       <Field
         id={`stop-${stop.type}-${index}-address`}
         label="Address"
         value={stop.address_line}
+        disabled={locked}
         onChange={(e) => onChange("address_line", e.target.value)}
         wrapperClassName="min-w-0 flex-1 basis-[220px]"
       />
@@ -54,6 +67,7 @@ function StopRow({
         id={`stop-${stop.type}-${index}-city`}
         label="City"
         value={stop.city}
+        disabled={locked}
         onChange={(e) => onChange("city", e.target.value)}
         wrapperClassName="w-40 min-w-0"
       />
@@ -61,12 +75,17 @@ function StopRow({
         id={`stop-${stop.type}-${index}-postcode`}
         label="Postcode"
         value={stop.postcode}
+        disabled={locked}
         onChange={(e) => onChange("postcode", e.target.value)}
         wrapperClassName="w-32 min-w-0"
       />
-      <Button type="button" variant="secondary" onClick={onRemove}>
-        Remove
-      </Button>
+      {locked ? (
+        <span className="pb-2.5 text-xs text-ink-3">POD recorded, not editable</span>
+      ) : (
+        <Button type="button" variant="secondary" onClick={onRemove}>
+          Remove
+        </Button>
+      )}
     </div>
   );
 }

@@ -11,8 +11,16 @@ export type AddonBillingRow = {
 };
 
 export type AddonAction =
-  | { kind: "free"; reason: "already_covered" | "no_subscription" | "cycle_due" }
-  | { kind: "blocked"; reason: "past_due" | "canceled" | "dunning" | "inactive_subscription" }
+  | { kind: "free"; reason: "already_covered" | "no_subscription" }
+  | {
+      kind: "blocked";
+      reason:
+        | "past_due"
+        | "canceled"
+        | "dunning"
+        | "inactive_subscription"
+        | "renewal_due";
+    }
   | { kind: "charge"; cycleDate: string; days: number };
 
 // The cycle a mid-cycle addition belongs to.
@@ -91,12 +99,23 @@ export function selectAddonAction(args: {
 
   const days = daysBetween(args.todayISO, args.billingRow.next_charge_on);
 
-  // The cycle charge is due or overdue and has not run yet. If it succeeds,
-  // the imminent cron run bills this vehicle at full price, so writing
-  // coverage here would hand over a free cycle instead. If it fails instead,
-  // that is caught above by the retry_at check on the next call, not here.
+  // The cycle charge is due or overdue and has not been recorded yet.
+  //
+  // This used to be FREE, on the reasoning that the imminent cron run would
+  // bill the vehicle at full price. Two holes, both now closed by refusing:
+  //
+  //   BILL1-9   an activation landing DURING the cron's Square call for this
+  //             company missed the snapshot the charge was priced from, and
+  //             after next_charge_on advanced it rode free for a whole cycle.
+  //   BILL1-4   with no upper bound on "due", a cron that is not running (a
+  //             missing CRON_SECRET), or a cycle charge wedged on an unknown
+  //             outcome, turned every addition free for as long as it lasted.
+  //
+  // The window is the hours between London midnight on renewal day and the
+  // cron run. Refusing costs a retry later that morning; being free cost a
+  // cycle per vehicle.
   if (days <= 0) {
-    return { kind: "free", reason: "cycle_due" };
+    return { kind: "blocked", reason: "renewal_due" };
   }
 
   return {

@@ -11,6 +11,11 @@
 --
 -- No RLS work: both tables already carry tenant policies (cmd ALL, tenant_id =
 -- get_my_company_id()) that cover new columns automatically.
+--
+-- NOTE 2026-09-14 (review SQL-9): rls_03 should have left `tenant_access using
+-- can_access_tenant(tenant_id)` on both tables, so the predicate described above is either a
+-- mistaken description or live drift. Check diag section 02_policy; if it is drift, apply
+-- docs/sql/prodfix_92_jobs_policy_drift.sql.
 
 alter table public.jobs
   add column if not exists route_order integer;

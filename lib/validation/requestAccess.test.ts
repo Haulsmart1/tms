@@ -43,6 +43,11 @@ describe("RequestAccessValidation", () => {
     expect(RequestAccessValidation.safeParse({ ...valid, vehicles: "2.5" }).success).toBe(false);
   });
 
+  it("caps vehicles at 100000, matching the route", () => {
+    expect(RequestAccessValidation.safeParse({ ...valid, vehicles: "100000" }).success).toBe(true);
+    expect(RequestAccessValidation.safeParse({ ...valid, vehicles: "100001" }).success).toBe(false);
+  });
+
   it("allows optional phone and notes to be empty", () => {
     const parsed = RequestAccessValidation.parse({ ...valid, phone: "", notes: "" });
     expect(parsed.phone).toBeUndefined();

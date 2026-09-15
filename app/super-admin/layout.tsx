@@ -23,7 +23,10 @@ export default async function SuperAdminLayout({ children }: { children: ReactNo
   if (denial?.status === 401) {
     // /login, not /. The landing page no longer carries a sign-in form, so
     // sending a logged-out user there strands them with no way back in.
-    redirect("/login");
+    // next= so signing in returns here rather than to /dashboard (AUTH-12).
+    // A server layout does not know which /super-admin page was asked for,
+    // so this returns to the overview.
+    redirect("/login?next=%2Fsuper-admin");
   }
 
   if (denial) redirect("/dashboard");

@@ -602,7 +602,7 @@ export default function TelematicsPage() {
               <div className="text-xs text-ink-3">
                 Auto-refresh 30 s
                 {lastLoadedAt
-                  ? ` ? updated ${lastLoadedAt.toLocaleTimeString(
+                  ? ` · updated ${lastLoadedAt.toLocaleTimeString(
                       "en-GB",
                       {
                         hour:
@@ -613,7 +613,7 @@ export default function TelematicsPage() {
                     )}`
                   : ""}
                 {refreshFailed
-                  ? " ? refresh failed, showing last known data"
+                  ? " · refresh failed, showing last known data"
                   : ""}
               </div>
             </div>

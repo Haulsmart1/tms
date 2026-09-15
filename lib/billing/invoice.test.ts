@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { fleetPeriodPence, PERIOD_MINIMUM_PENCE, PERIOD_VEHICLE_PENCE } from "./rateCard";
-import { assembleInvoice, estimateVehicleAddition } from "./invoice";
+import {
+  assembleInvoice,
+  effectiveMinimumPence,
+  estimateVehicleAddition,
+} from "./invoice";
 import type { InvoiceVehicle } from "./invoice";
 
 const PERIOD_START = "2026-03-21";
@@ -148,13 +152,131 @@ describe("assembleInvoice volume discount", () => {
     }
   });
 
-  // Proration and the discount have to compose. Twenty vehicles present for
-  // eleven days is 20 x GBP 25.34 = GBP 506.80, less 20 per cent.
-  it("discounts a prorated subtotal", () => {
-    const result = invoice(vehicles(20, "2026-04-07"));
+  // Proration and the discount have to compose. The spec's cancellation
+  // example: twenty vehicles in a period cut short to eleven days is
+  // 20 x GBP 25.34 = GBP 506.80, less 20 per cent, because twenty vehicles
+  // ran for the whole of that period.
+  it("discounts a prorated subtotal in a period cut short", () => {
+    const result = invoice(vehicles(20), { periodEndISO: "2026-04-01" });
 
     expect(result.subtotalPence).toBe(50680);
     expect(result.netPence).toBe(40544);
+  });
+
+  // BILL2-3. Twenty vehicles that joined for the last eleven days of a full
+  // period are about eight vehicles' worth of that period, so they band as
+  // eight, not twenty.
+  it("bands a late-joining fleet on its vehicle-days", () => {
+    const result = invoice(vehicles(20, "2026-04-07"));
+
+    expect(result.subtotalPence).toBe(50680);
+    expect(result.discountPercent).toBe(0);
+    expect(result.netPence).toBe(50680);
+  });
+});
+
+describe("assembleInvoice cannot be lowered by adding vehicles (BILL2-3)", () => {
+  const LAST_DAY = "2026-04-17";
+
+  // The review's reproduced cases. Each one used to invoice LESS with the
+  // throwaway vehicles than without them, by GBP 21 to GBP 56 net. What is
+  // left is per-line penny rounding inside the capped stretch of the curve
+  // (19 + 11 lands 3 pence under 19 alone), bounded by one penny per line.
+  it.each([
+    [9, 1],
+    [14, 1],
+    [14, 6],
+    [19, 1],
+    [19, 11],
+    [29, 1],
+    [5, 5],
+  ])("%i full vehicles plus %i on the last day costs more, not less", (full, extra) => {
+    const without = invoice(vehicles(full)).netPence;
+    const fleet = [
+      ...vehicles(full),
+      ...vehicles(extra, LAST_DAY).map((v) => ({
+        ...v,
+        vehicleId: `late-${v.vehicleId}`,
+      })),
+    ];
+    expect(invoice(fleet).netPence).toBeGreaterThanOrEqual(
+      without - fleet.length
+    );
+  });
+
+  // The property. Any existing fleet, any extra vehicle, any coverage start:
+  // the invoice does not fall. Rounding each line to the penny before the
+  // discount ratio applies can move the total by less than a penny per line
+  // inside the capped stretches of the curve, so that is the tolerance, and it
+  // is nowhere near a saving worth gaming.
+  it("never lowers the net by more than per-line rounding", () => {
+    const starts = ["2026-03-21", "2026-03-30", "2026-04-07", "2026-04-14", LAST_DAY];
+    for (let full = 0; full <= 32; full += 1) {
+      for (const lateStart of starts) {
+        for (let late = 0; late <= 3; late += 1) {
+          const base = [
+            ...vehicles(full),
+            ...vehicles(late, lateStart).map((v) => ({
+              ...v,
+              vehicleId: `late-${v.vehicleId}`,
+            })),
+          ];
+          const before = invoice(base);
+          for (const addStart of starts) {
+            const after = invoice([
+              ...base,
+              {
+                vehicleId: "added",
+                tenantId: "tenant-1",
+                vrnNormalised: "ZZ99ZZZ",
+                coverageStartISO: addStart,
+              },
+            ]);
+            expect(after.netPence).toBeGreaterThanOrEqual(
+              before.netPence - base.length
+            );
+          }
+        }
+      }
+    }
+  });
+});
+
+describe("effectiveMinimumPence (BILL2-9)", () => {
+  it("keeps the full floor on a scheduled period", () => {
+    expect(
+      effectiveMinimumPence({
+        minimumPence: 12900,
+        periodStartISO: PERIOD_START,
+        periodEndISO: PERIOD_END,
+        closedReason: "scheduled",
+      })
+    ).toBe(12900);
+  });
+
+  it("prorates the floor on a period cut short by cancellation", () => {
+    expect(
+      effectiveMinimumPence({
+        minimumPence: 12900,
+        periodStartISO: PERIOD_START,
+        periodEndISO: "2026-03-23",
+        closedReason: "cancellation",
+      })
+    ).toBe(921);
+  });
+
+  // The spec's two-vehicle day-11 cancellation: lines GBP 50.68, the prorated
+  // floor is GBP 50.68 too, and GBP 129 was prepaid, so nothing is owed.
+  it("leaves the spec's day-11 example owing nothing", () => {
+    const end = "2026-04-01";
+    const minimumPence = effectiveMinimumPence({
+      minimumPence: PERIOD_MINIMUM_PENCE,
+      periodStartISO: PERIOD_START,
+      periodEndISO: end,
+      closedReason: "cancellation",
+    });
+    const result = invoice(vehicles(2), { periodEndISO: end, minimumPence });
+    expect(result.netPence).toBeLessThanOrEqual(PERIOD_MINIMUM_PENCE);
   });
 });
 
@@ -206,8 +328,12 @@ describe("assembleInvoice lines", () => {
     expect(result.lines.map((line) => line.vehicleId)).toEqual(["b", "c", "a"]);
   });
 
+  // A two-day period with ten vehicles running all of it: ten vehicles' worth
+  // of fleet, so it reaches the 10% band, and still far under the floor.
   it("puts the discount and minimum lines after the vehicle lines", () => {
-    const kinds = invoice(vehicles(10, "2026-04-16")).lines.map((l) => l.kind);
+    const kinds = invoice(vehicles(10), { periodEndISO: "2026-03-23" }).lines.map(
+      (l) => l.kind
+    );
 
     expect(kinds.slice(0, 10)).toEqual(Array(10).fill("vehicle"));
     expect(kinds.slice(10)).toEqual(["volume_discount", "minimum_adjustment"]);

@@ -179,6 +179,47 @@ async function createImportRecord(
 
   if (error) {
     if (error.code === "23505") {
+      /*
+       * Review ACC-13: an earlier attempt that failed is claimed (only one
+       * retry can flip it from failed) and reprocessed. Only a received or
+       * processed import is a genuine duplicate.
+       */
+      const { data: existing, error: existingError } = await supabase
+        .from("cambridge_rma_imports")
+        .select("id, status")
+        .eq("tenant_id", ADR_CARRIERS_TENANT_ID)
+        .eq("rma_id", rma.id)
+        .maybeSingle();
+
+      if (existingError) {
+        throw new Error(`Unable to read existing RMA import: ${existingError.message}`);
+      }
+
+      if (existing && existing.status === "failed") {
+        const { data: claimed, error: claimError } = await supabase
+          .from("cambridge_rma_imports")
+          .update({
+            status: "received",
+            rma_number: rma.number,
+            raw_payload: rawPayload,
+            error_message: null,
+            processed_at: null,
+            job_id: null,
+          })
+          .eq("id", existing.id)
+          .eq("tenant_id", ADR_CARRIERS_TENANT_ID)
+          .eq("status", "failed")
+          .select("id");
+
+        if (claimError) {
+          throw new Error(`Unable to reclaim failed RMA import: ${claimError.message}`);
+        }
+
+        if (claimed && claimed.length > 0) {
+          return String(existing.id);
+        }
+      }
+
       throw new DuplicateRmaError(
         `Cambridge RMA ${rma.number} (${rma.id}) has already been received.`
       );
@@ -524,7 +565,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
-        error: message,
+        // Review ACC-15: the detail is logged and stored on the import row.
+        error: "The RMA could not be imported. Please retry later.",
       },
       {
         status: 500,

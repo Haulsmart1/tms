@@ -1,4 +1,5 @@
 import { createAdminClient } from "../supabase/admin";
+import { authorizeTenant, TenantAccessError } from "../auth/serverTenantAccess";
 
 const ADMIN_ROLES = new Set([
   "admin",
@@ -14,6 +15,11 @@ export function isTachographAdminRole(
   );
 }
 
+/*
+  Tachograph writes are admin-only. The check now comes from profiles, the same
+  rule as public.can_manage_tenant, instead of the legacy memberships table,
+  which company admins often have no row in (review PLAN-15).
+*/
 export async function requireTachographTenantAdmin(
   userId: string,
   tenantId: string
@@ -26,26 +32,14 @@ export async function requireTachographTenantAdmin(
 
   const admin = createAdminClient();
 
-  const {
-    data: membership,
-    error,
-  } = await admin
-    .from("memberships")
-    .select("id, role")
-    .eq("tenant_id", tenantId)
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (error) {
+  try {
+    await authorizeTenant(admin, userId, tenantId, "manage");
+  } catch (error) {
+    if (error instanceof TenantAccessError && error.status === 403) {
+      throw new Error("TACHOGRAPH_FORBIDDEN");
+    }
     throw new Error(
-      `Unable to verify tachograph tenant permissions: ${error.message}`
+      "Unable to verify tachograph tenant permissions."
     );
-  }
-
-  if (
-    !membership ||
-    !isTachographAdminRole(membership.role)
-  ) {
-    throw new Error("TACHOGRAPH_FORBIDDEN");
   }
 }

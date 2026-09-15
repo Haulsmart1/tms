@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ApiError, requireTenant } from "../../../lib/api/server";
+import { ApiError, apiDbError, requireTenant } from "../../../lib/api/server";
+import { buildCustomerSearchFilter } from "../../../lib/validation/customerSearch";
+import { validateWebhookUrl } from "../../../lib/validation/webhookUrl";
 
 const CUSTOMER_FIELDS = `
   id,
@@ -135,7 +137,7 @@ export async function GET(request: NextRequest) {
   try {
     const { supabase, tenantId } = await requireTenant(request);
 
-    const search = request.nextUrl.searchParams.get("search")?.trim();
+    const search = request.nextUrl.searchParams.get("search");
     const active = request.nextUrl.searchParams.get("active");
 
     let query = supabase
@@ -144,11 +146,11 @@ export async function GET(request: NextRequest) {
       .eq("tenant_id", tenantId)
       .order("name", { ascending: true });
 
-    if (search) {
-      const safeSearch = search.replaceAll(",", " ");
-      query = query.or(
-        `name.ilike.%${safeSearch}%,legal_name.ilike.%${safeSearch}%,trading_name.ilike.%${safeSearch}%,account_code.ilike.%${safeSearch}%,postcode.ilike.%${safeSearch}%`
-      );
+    // Review ACC-19: the search value is quoted and escaped, so it cannot add
+    // or change filter terms.
+    const searchFilter = buildCustomerSearchFilter(search);
+    if (searchFilter) {
+      query = query.or(searchFilter);
     }
 
     if (active === "true" || active === "false") {
@@ -158,7 +160,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await query;
 
     if (error) {
-      throw new ApiError(400, error.message);
+      throw apiDbError(error, "Unable to load customers.");
     }
 
     return NextResponse.json({ customers: data ?? [] });
@@ -169,14 +171,39 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const { supabase, tenantId, user } = await requireTenant(request);
-    const body = (await request.json()) as Record<string, unknown>;
+    const { supabase, tenantId, user, tier } = await requireTenant(request);
+
+    let body: Record<string, unknown>;
+    try {
+      const parsed = await request.json();
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+      body = parsed as Record<string, unknown>;
+    } catch {
+      throw new ApiError(400, "The request body must be a JSON object");
+    }
+
     const payload = cleanCustomerPayload(body);
 
     const name = String(payload.name ?? "").trim();
 
     if (!name) {
       throw new ApiError(400, "Customer name is required");
+    }
+
+    // Review ACC-23: integration settings are admin-only and the webhook URL
+    // must be a public https URL.
+    const webhook = validateWebhookUrl(payload.webhook_url);
+    if (!webhook.ok) {
+      throw new ApiError(400, webhook.message);
+    }
+    payload.webhook_url = webhook.value;
+
+    const wantsIntegration = payload.api_enabled === true || webhook.value !== null;
+    if (wantsIntegration && tier === "staff") {
+      throw new ApiError(403, "Only an admin can enable API access or set a webhook URL");
+    }
+    if (payload.api_enabled !== undefined) {
+      payload.api_enabled = payload.api_enabled === true;
     }
 
     payload.name = name;
@@ -190,7 +217,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) {
-      throw new ApiError(400, error.message);
+      throw apiDbError(error, "Unable to save the customer.");
     }
 
     return NextResponse.json({ customer: data }, { status: 201 });

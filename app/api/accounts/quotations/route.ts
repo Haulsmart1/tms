@@ -1,8 +1,15 @@
+import { listPageInfo, parseListPage } from "../../../../lib/accounts/listPaging";
 import { NextRequest, NextResponse } from "next/server";
 import {
   errorResponse,
   requireTenantAccess,
+  AccountsHttpError,
 } from "../../../../lib/accounts/server";
+import {
+  canEditQuotationContent,
+  checkQuotationTransition,
+} from "../../../../lib/accounts/quotationStatus";
+import { isIsoDate } from "../../../../lib/accounts/payments";
 
 export const dynamic = "force-dynamic";
 
@@ -62,20 +69,17 @@ function parseLines(value: unknown) {
     );
 
     if (!description) {
-      throw new Error(
-        `Quotation line ${index + 1} requires a description.`
+      throw new AccountsHttpError(400, `Quotation line ${index + 1} requires a description.`
       );
     }
 
     if (quantity <= 0) {
-      throw new Error(
-        `Quotation line ${index + 1} quantity must be greater than zero.`
+      throw new AccountsHttpError(400, `Quotation line ${index + 1} quantity must be greater than zero.`
       );
     }
 
     if (unitPrice < 0 || vatRate < 0) {
-      throw new Error(
-        `Quotation line ${index + 1} contains invalid values.`
+      throw new AccountsHttpError(400, `Quotation line ${index + 1} contains invalid values.`
       );
     }
 
@@ -104,8 +108,7 @@ function parseStops(value: unknown) {
       type !== "collection" &&
       type !== "delivery"
     ) {
-      throw new Error(
-        `Quotation stop ${index + 1} must be collection or delivery.`
+      throw new AccountsHttpError(400, `Quotation stop ${index + 1} must be collection or delivery.`
       );
     }
 
@@ -114,8 +117,7 @@ function parseStops(value: unknown) {
     ).trim();
 
     if (!addressLine) {
-      throw new Error(
-        `Quotation stop ${index + 1} requires an address.`
+      throw new AccountsHttpError(400, `Quotation stop ${index + 1} requires an address.`
       );
     }
 
@@ -162,7 +164,10 @@ export async function GET(
     const { admin } =
       await requireTenantAccess(tenantId);
 
-    const { data, error } = await admin
+    // INV-11: one explicit page with the exact total, never a silent cap.
+    const page = parseListPage(request.nextUrl.searchParams);
+
+    const { data, error, count } = await admin
       .from("quotations")
       .select(`
         *,
@@ -192,11 +197,15 @@ export async function GET(
           contact_phone,
           notes
         )
-      `)
+      `, { count: "exact" })
       .eq("tenant_id", tenantId)
       .order("created_at", {
         ascending: false,
-      });
+      })
+      .order("id", {
+        ascending: false,
+      })
+      .range(page.from, page.to);
 
     if (error) {
       throw new Error(error.message);
@@ -204,6 +213,7 @@ export async function GET(
 
     return NextResponse.json({
       quotations: data ?? [],
+      pagination: listPageInfo(page, count, (data ?? []).length),
     });
   } catch (error) {
     const result = errorResponse(error);
@@ -600,6 +610,29 @@ export async function PATCH(
       );
     }
 
+    // Review ACC-22 / INV-4: members cannot set "accepted" (only the customer
+    // acceptance flow does), and accepted, declined, expired and cancelled
+    // quotations cannot be reopened and repriced.
+    if (status) {
+      const transition =
+        checkQuotationTransition(
+          quotation.status,
+          status
+        );
+
+      if (!transition.ok) {
+        return NextResponse.json(
+          {
+            error: transition.message,
+            code: transition.code,
+          },
+          {
+            status: transition.status,
+          }
+        );
+      }
+    }
+
     const editableFields =
       [
         "customerId",
@@ -621,24 +654,63 @@ export async function PATCH(
           undefined
       );
 
+    if (hasContentChanges) {
+      const editable =
+        canEditQuotationContent(
+          quotation.status
+        );
+
+      if (!editable.ok) {
+        return NextResponse.json(
+          {
+            error: editable.message,
+            code: editable.code,
+          },
+          {
+            status: editable.status,
+          }
+        );
+      }
+    }
+
+    // Review ACC-20: validate scalar fields before any child rows are
+    // replaced, so a bad date can no longer leave new lines behind.
     if (
-      hasContentChanges &&
-      ![
-        "draft",
-        "sent",
-      ].includes(
-        quotation.status
-      )
+      body.quoteDate !== undefined &&
+      !isIsoDate(String(body.quoteDate ?? "").trim())
     ) {
       return NextResponse.json(
         {
           error:
-            "Only draft or sent quotations can be edited.",
+            "Quote date is required and must be a valid date.",
         },
         {
-          status: 409,
+          status: 400,
         }
       );
+    }
+
+    for (const [field, label] of [
+      ["validUntil", "Valid until"],
+      ["proposedServiceDate", "Proposed service date"],
+    ] as const) {
+      const value = body[field];
+
+      if (
+        value !== undefined &&
+        value !== null &&
+        value !== "" &&
+        !isIsoDate(String(value).trim())
+      ) {
+        return NextResponse.json(
+          {
+            error: `${label} must be a valid date.`,
+          },
+          {
+            status: 400,
+          }
+        );
+      }
     }
 
     let customerId:
@@ -1280,6 +1352,38 @@ export async function PATCH(
       await restoreChildren();
 
       throw mutationError;
+    }
+
+    // Review INV-4: a customer must never accept a price that has changed
+    // since the link was sent, or a quotation that has been withdrawn.
+    const revokeShareLinks =
+      (hasContentChanges &&
+        quotation.status === "sent") ||
+      (status !== null &&
+        [
+          "cancelled",
+          "declined",
+          "expired",
+          "converted",
+        ].includes(status));
+
+    if (revokeShareLinks) {
+      const {
+        error: revokeError,
+      } = await admin
+        .from("quotation_share_links")
+        .update({
+          revoked_at: new Date().toISOString(),
+        })
+        .eq("tenant_id", tenantId)
+        .eq("quotation_id", quotationId)
+        .is("revoked_at", null);
+
+      if (revokeError) {
+        throw new Error(
+          `quotation share link revoke failed: ${revokeError.code ?? ""}`
+        );
+      }
     }
 
     const {

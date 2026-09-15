@@ -79,11 +79,26 @@ export function applyChargeOutcome(args: {
   cycleDate: string;
   attempt: number;
   succeeded: boolean;
+  /**
+   * London today. When given, a successful charge for a cycle that is already
+   * over does not schedule the next one in the past. BILL1-6.
+   */
+  todayISO?: string;
 }): ChargeOutcomeUpdate {
   if (args.succeeded) {
+    // BILL1-6. A company recovering from months past_due (or a cron that was
+    // down) used to be charged one missed cycle per DAY until caught up, each
+    // at today's fleet size. The outstanding cycle is collected once; the next
+    // cycle then starts today, so exactly one further charge follows, dated
+    // today, and the cycles in between are not invented. Same shape as the v2
+    // rule that suspended time is not billed.
+    const next = computeNextChargeOn(args.cycleDate);
     return {
       status: "active",
-      next_charge_on: computeNextChargeOn(args.cycleDate),
+      next_charge_on:
+        args.todayISO !== undefined && next < args.todayISO
+          ? args.todayISO
+          : next,
       retry_at: null,
       retry_count: 0,
     };

@@ -166,7 +166,19 @@ export default function CustomersPage() {
     return result;
   }, [tenant.activeTenantId]);
 
+  /* An admin on "All tenants" has no active tenant. Customers belong to one
+     tenant, and /api/customers now refuses an admin request that names none
+     rather than quietly using their home tenant, so the page asks them to
+     choose instead of fetching. Staff are always pinned to a tenant. */
+  const needsTenant = tenant.status === "ready" && !tenant.activeTenantId;
+
   const loadCustomers = useCallback(async () => {
+    if (!tenant.activeTenantId) {
+      setCustomers([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setErrorMessage("");
 
@@ -319,6 +331,11 @@ export default function CustomersPage() {
   async function saveCustomer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (!tenant.activeTenantId) {
+      setErrorMessage("Choose a tenant before saving a customer");
+      return;
+    }
+
     if (!form.name.trim()) {
       setErrorMessage("Customer name is required");
       return;
@@ -418,6 +435,7 @@ export default function CustomersPage() {
 
             <Button
               type="button"
+              disabled={needsTenant}
               onClick={() => {
                 resetForm();
                 setShowForm(true);
@@ -431,7 +449,7 @@ export default function CustomersPage() {
 
           <MessageBanner tone="success">{message}</MessageBanner>
 
-          {showForm ? (
+          {showForm && !needsTenant ? (
             <form
               onSubmit={saveCustomer}
               className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm"
@@ -825,7 +843,11 @@ export default function CustomersPage() {
               />
             </div>
 
-            {showSkeleton ? (
+            {needsTenant ? (
+              <p className="py-10 text-center text-sm text-ink-3">
+                Choose a tenant in the selector to see and add its customers.
+              </p>
+            ) : showSkeleton ? (
               <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3" aria-busy>
                 <span className="sr-only" role="status">Loading customers</span>
                 {/* Six is a guess. However many customers arrive, this grid

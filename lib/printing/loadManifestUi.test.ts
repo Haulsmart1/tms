@@ -19,6 +19,7 @@ function job(
   return {
     id: "job-1",
     reference: "JOB-001",
+    status: "planned",
     vehicle_id: "vehicle-1",
     driver_id: "driver-1",
     job_items: [
@@ -73,6 +74,13 @@ describe("Master Load office helpers", () => {
       "BOX-001",
       "BOX-002",
     ]);
+  });
+
+  it("only offers jobs that are still open", () => {
+    expect(isMasterLoadEligible(job({ status: "in_progress" }))).toBe(true);
+    expect(isMasterLoadEligible(job({ status: "cancelled" }))).toBe(false);
+    expect(isMasterLoadEligible(job({ status: "completed" }))).toBe(false);
+    expect(isMasterLoadEligible(job({ status: null }))).toBe(false);
   });
 
   it("requires vehicle driver and serialized freight", () => {

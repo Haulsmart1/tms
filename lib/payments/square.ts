@@ -27,6 +27,15 @@ export function getSquare(): SquareClient {
         environment === "sandbox"
           ? SquareEnvironment.Sandbox
           : SquareEnvironment.Production,
+      // BILL1-7. With no timeout a hanging call held the billing cron until
+      // Vercel killed it at maxDuration, mid-payment, leaving that outcome
+      // unrecorded and the v2 close unrun. A timeout surfaces as
+      // SquareTimeoutError, which classifySquareThrow reports as indeterminate,
+      // so the pending intent row is kept and replayed rather than guessed.
+      // One retry (same idempotency key, so it cannot double-charge) bounds a
+      // single call at about 50 seconds.
+      timeoutInSeconds: 25,
+      maxRetries: 1,
     });
   }
 

@@ -1,6 +1,7 @@
-﻿import { createAdminClient } from "../supabase/admin";
+import { createAdminClient } from "../supabase/admin";
+import { POD_BUCKET } from "./podUrl";
+import { isPodEvidencePathFor } from "./evidencePath";
 
-const POD_BUCKET = "pod-files";
 const FILE_URL_LIFETIME_SECONDS = 15 * 60;
 
 export type SharedPodEvidence = {
@@ -9,6 +10,7 @@ export type SharedPodEvidence = {
   filename: string;
   mimeType: string | null;
   fileSize: number | null;
+  /** Server-side only (PDF image download). Never render it on the page. */
   storagePath: string;
   signedUrl: string | null;
 };
@@ -38,34 +40,39 @@ export type SharedPodData = {
   stops: SharedPodStop[];
 };
 
+/**
+  Load a job's POD for a share page or PDF, with the service role.
+
+  Callers must have resolved a valid share link (lib/pod/shareStore.ts) or an
+  authorized office caller first. Every evidence path is checked against the
+  row's own tenant, job and stop before it is signed (review POD-10): the
+  service role would otherwise sign any path a tenant managed to store.
+*/
 export async function loadSharedPod(
   tenantId: string,
-  jobId: string
+  jobId: string,
 ): Promise<SharedPodData | null> {
   const admin = createAdminClient();
 
-  const { data: job, error: jobError } =
-    await admin
-      .from("jobs")
-      .select(`
-        id,
-        tenant_id,
-        reference,
-        customer_reference,
-        status,
-        scheduled_date,
-        customers (
-          name
-        )
-      `)
-      .eq("id", jobId)
-      .eq("tenant_id", tenantId)
-      .maybeSingle();
+  const { data: job, error: jobError } = await admin
+    .from("jobs")
+    .select(`
+      id,
+      tenant_id,
+      reference,
+      customer_reference,
+      status,
+      scheduled_date,
+      customers (
+        name
+      )
+    `)
+    .eq("id", jobId)
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
 
   if (jobError) {
-    throw new Error(
-      `Unable to load POD job: ${jobError.message}`
-    );
+    throw new Error(`Unable to load POD job: ${jobError.message}`);
   }
 
   if (!job) {
@@ -95,9 +102,7 @@ export async function loadSharedPod(
       `)
       .eq("tenant_id", tenantId)
       .eq("job_id", jobId)
-      .order("stop_order", {
-        ascending: true,
-      }),
+      .order("stop_order", { ascending: true }),
 
     admin
       .from("pod_evidence")
@@ -114,145 +119,100 @@ export async function loadSharedPod(
       `)
       .eq("tenant_id", tenantId)
       .eq("job_id", jobId)
-      .order("created_at", {
-        ascending: true,
-      }),
+      .order("created_at", { ascending: true }),
   ]);
 
   if (stopsError) {
-    throw new Error(
-      `Unable to load POD stops: ${stopsError.message}`
-    );
+    throw new Error(`Unable to load POD stops: ${stopsError.message}`);
   }
 
   if (evidenceError) {
-    throw new Error(
-      `Unable to load POD evidence: ${evidenceError.message}`
-    );
+    throw new Error(`Unable to load POD evidence: ${evidenceError.message}`);
   }
 
-  const evidenceRows = evidence ?? [];
+  const evidenceRows = (evidence ?? []).filter((item) => {
+    const owned = isPodEvidencePathFor(item.storage_path, {
+      tenantId,
+      jobId,
+      stopId: String(item.stop_id ?? ""),
+    });
 
-  const paths = evidenceRows.map(
-    (item) => item.storage_path as string
-  );
+    if (!owned) {
+      console.warn("[pod-share] skipping evidence outside its own tenant path", item.id);
+    }
 
+    return owned;
+  });
+
+  const paths = evidenceRows.map((item) => item.storage_path as string);
   const signedUrls = new Map<string, string>();
 
   if (paths.length > 0) {
-    const {
-      data: signedData,
-      error: signedError,
-    } = await admin.storage
+    const { data: signedData, error: signedError } = await admin.storage
       .from(POD_BUCKET)
-      .createSignedUrls(
-        paths,
-        FILE_URL_LIFETIME_SECONDS
-      );
+      .createSignedUrls(paths, FILE_URL_LIFETIME_SECONDS);
 
     if (signedError) {
-      throw new Error(
-        `Unable to sign POD evidence: ${signedError.message}`
-      );
+      throw new Error(`Unable to sign POD evidence: ${signedError.message}`);
     }
 
     for (let index = 0; index < paths.length; index += 1) {
-      const signedUrl =
-        signedData?.[index]?.signedUrl ?? null;
+      const signedUrl = signedData?.[index]?.signedUrl ?? null;
 
       if (signedUrl) {
-        signedUrls.set(
-          paths[index],
-          signedUrl
-        );
+        signedUrls.set(paths[index], signedUrl);
       }
     }
   }
 
-  const evidenceByStop =
-    new Map<string, SharedPodEvidence[]>();
+  const evidenceByStop = new Map<string, SharedPodEvidence[]>();
 
   for (const item of evidenceRows) {
     const stopId = item.stop_id as string;
-
-    const current =
-      evidenceByStop.get(stopId) ?? [];
+    const current = evidenceByStop.get(stopId) ?? [];
 
     current.push({
       id: item.id as string,
-      evidenceType:
-        item.evidence_type as string,
-      filename:
-        (item.original_filename as string | null) ??
-        "POD evidence",
-      mimeType:
-        item.mime_type as string | null,
-      fileSize:
-        item.file_size_bytes as number | null,
-      storagePath:
-        item.storage_path as string,
-      signedUrl:
-        signedUrls.get(
-          item.storage_path as string
-        ) ?? null,
+      evidenceType: item.evidence_type as string,
+      filename: (item.original_filename as string | null) ?? "POD evidence",
+      mimeType: item.mime_type as string | null,
+      fileSize: item.file_size_bytes as number | null,
+      storagePath: item.storage_path as string,
+      signedUrl: signedUrls.get(item.storage_path as string) ?? null,
     });
 
-    evidenceByStop.set(
-      stopId,
-      current
-    );
+    evidenceByStop.set(stopId, current);
   }
 
-  const customerRelation =
-    job.customers as
-      | { name?: string | null }
-      | { name?: string | null }[]
-      | null;
+  const customerRelation = job.customers as
+    | { name?: string | null }
+    | { name?: string | null }[]
+    | null;
 
-  const customerName =
-    Array.isArray(customerRelation)
-      ? customerRelation[0]?.name
-      : customerRelation?.name;
+  const customerName = Array.isArray(customerRelation)
+    ? customerRelation[0]?.name
+    : customerRelation?.name;
 
   return {
     jobId: job.id as string,
-    reference:
-      (job.reference as string | null) ??
-      "No job reference",
-    customerReference:
-      job.customer_reference as string | null,
-    status:
-      job.status as string | null,
-    scheduledDate:
-      job.scheduled_date as string | null,
-    customerName:
-      customerName ??
-      "No customer",
+    reference: (job.reference as string | null) ?? "No job reference",
+    customerReference: job.customer_reference as string | null,
+    status: job.status as string | null,
+    scheduledDate: job.scheduled_date as string | null,
+    customerName: customerName ?? "No customer",
     stops: (stops ?? []).map((stop) => ({
       id: stop.id as string,
-      stopOrder:
-        stop.stop_order as number,
+      stopOrder: stop.stop_order as number,
       type: stop.type as string,
-      address:
-        stop.address_line as string,
-      city:
-        stop.city as string | null,
-      postcode:
-        stop.postcode as string | null,
-      status:
-        stop.status as string | null,
-      podStatus:
-        stop.pod_status as string | null,
-      recipientName:
-        stop.recipient_name as string | null,
-      deliveredAt:
-        stop.delivered_at as string | null,
-      podNotes:
-        stop.pod_notes as string | null,
-      evidence:
-        evidenceByStop.get(
-          stop.id as string
-        ) ?? [],
+      address: stop.address_line as string,
+      city: stop.city as string | null,
+      postcode: stop.postcode as string | null,
+      status: stop.status as string | null,
+      podStatus: stop.pod_status as string | null,
+      recipientName: stop.recipient_name as string | null,
+      deliveredAt: stop.delivered_at as string | null,
+      podNotes: stop.pod_notes as string | null,
+      evidence: evidenceByStop.get(stop.id as string) ?? [],
     })),
   };
 }

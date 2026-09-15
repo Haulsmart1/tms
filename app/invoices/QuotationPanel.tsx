@@ -1,7 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { appendPage, type ListPageInfo } from "../../lib/accounts/listPaging";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Button from "../../components/Button";
+import { addCalendarDays, operatorToday } from "../../lib/invoices/dates";
+import { calculateLineAmounts, calculateTotals } from "../../lib/invoices/money";
+import {
+  parseQuotationDraft,
+  quotationDraftKey,
+  serialiseQuotationDraft,
+  staleQuotationDraftKeys,
+} from "../../lib/quotations/draftStorage";
 import QuoteRequestsInbox, { type QuoteRequestPrefill } from "./QuoteRequestsInbox";
 
 type Customer = {
@@ -125,12 +134,12 @@ type StopDraft = {
   notes: string;
 };
 
-const today = () => new Date().toISOString().slice(0, 10);
+/* The operator's calendar day, not the UTC day (INV-15). */
+const today = () => operatorToday();
 
+/* Pure calendar arithmetic, so no timezone or DST change moves the result. */
 function addDays(date: string, days: number) {
-  const result = new Date(`${date}T12:00:00`);
-  result.setDate(result.getDate() + days);
-  return result.toISOString().slice(0, 10);
+  return addCalendarDays(date, days) ?? addCalendarDays(operatorToday(), days) ?? date;
 }
 
 function money(value: number, currency = "GBP") {
@@ -190,6 +199,9 @@ export default function QuotationPanel({
     });
 
   const [quotations, setQuotations] = useState<Quotation[]>([]);
+  /* INV-11: quotations arrive a page at a time. */
+  const [quotationsPage, setQuotationsPage] = useState<ListPageInfo | null>(null);
+  const [loadingMoreQuotations, setLoadingMoreQuotations] = useState(false);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState("");
@@ -198,6 +210,13 @@ export default function QuotationPanel({
   const [draftRestored, setDraftRestored] = useState(false);
   const [preview, setPreview] = useState<Quotation | null>(null);
   const [activeQuoteRequestId, setActiveQuoteRequestId] = useState("");
+  /* A quotation created from a request whose "converted" link step failed.
+     The quotation exists; only the link needs retrying (INV-14). */
+  const [pendingRequestLink, setPendingRequestLink] = useState<{
+    requestId: string;
+    quotationId: string;
+    quoteNumber: string;
+  } | null>(null);
 
   const [
     editingQuotation,
@@ -231,37 +250,36 @@ export default function QuotationPanel({
   ]);
 
   const quotationDraftStorageKey =
-    `tms:quotation-draft:${tenantId}`;
+    quotationDraftKey(tenantId);
 
   const selectedCustomer = availableCustomers.find(
     (customer) => customer.id === customerId
   );
 
   const totals = useMemo(() => {
-    return lines.reduce(
-      (result, line) => {
-        const quantity = Number(line.quantity || 0);
-        const unitPrice = Number(line.unitPrice || 0);
-        const vatRate = Number(line.vatRate || 0);
-
-        const subtotal = quantity * unitPrice;
-        const vat = subtotal * (vatRate / 100);
-
-        result.subtotal += subtotal;
-        result.vat += vat;
-        result.total += subtotal + vat;
-
-        return result;
-      },
-      {
-        subtotal: 0,
-        vat: 0,
-        total: 0,
-      }
+    /* Integer-pence maths from lib/invoices/money.ts, rounded per line, so
+       the form total matches the saved quotation and its PDF (INV-13). */
+    const result = calculateTotals(
+      lines.map((line) => ({
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        vatRate: line.vatRate,
+      }))
     );
+
+    return {
+      subtotal: result.subtotal,
+      vat: result.vat,
+      total: result.total,
+    };
   }, [lines]);
 
+  /* Latest request wins: a slow response for an earlier load must not
+     overwrite a newer one (INV-12). */
+  const loadRequestRef = useRef(0);
+
   const load = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
     setLoading(true);
     setMessage("");
 
@@ -283,21 +301,83 @@ export default function QuotationPanel({
         );
       }
 
+      if (requestId !== loadRequestRef.current) {
+        return;
+      }
+
       setQuotations(body.quotations ?? []);
+      setQuotationsPage(body.pagination ?? null);
     } catch (error) {
+      if (requestId !== loadRequestRef.current) {
+        return;
+      }
+
       setMessage(
         error instanceof Error
           ? error.message
           : "Unable to load quotations."
       );
     } finally {
-      setLoading(false);
+      if (requestId === loadRequestRef.current) {
+        setLoading(false);
+      }
     }
   }, [tenantId]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function loadMoreQuotations() {
+    const info = quotationsPage;
+
+    if (!info?.hasMore || loadingMoreQuotations) {
+      return;
+    }
+
+    const requestId = loadRequestRef.current;
+    setLoadingMoreQuotations(true);
+
+    try {
+      const response = await fetch(
+        `/api/accounts/quotations?tenantId=${encodeURIComponent(
+          tenantId
+        )}&page=${info.page + 1}&pageSize=${info.pageSize}`,
+        {
+          cache: "no-store",
+        }
+      );
+
+      const body = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          body.error || "Unable to load more quotations."
+        );
+      }
+
+      if (requestId !== loadRequestRef.current) {
+        return;
+      }
+
+      setQuotations((current) =>
+        appendPage(
+          current,
+          (body.quotations ?? []) as Quotation[],
+          (quotation) => quotation.id
+        )
+      );
+      setQuotationsPage(body.pagination ?? null);
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to load more quotations."
+      );
+    } finally {
+      setLoadingMoreQuotations(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -543,19 +623,27 @@ export default function QuotationPanel({
   }
   useEffect(() => {
     try {
-      const rawDraft =
+      /* Drafts can hold a prospect's contact details. Remove every expired
+         or pre-expiry draft, for any tenant, before restoring this one
+         (INV-23). */
+      for (const staleKey of staleQuotationDraftKeys(
+        window.localStorage
+      )) {
+        window.localStorage.removeItem(staleKey);
+      }
+
+      const storedDraft = parseQuotationDraft(
         window.localStorage.getItem(
           quotationDraftStorageKey
-        );
+        )
+      );
 
-      if (!rawDraft) {
+      if (!storedDraft) {
         setDraftRestored(true);
         return;
       }
 
-      const draft = JSON.parse(
-        rawDraft
-      ) as {
+      const draft = storedDraft as {
         activeQuoteRequestId?: string;
         customerId?: string;
         quoteDate?: string;
@@ -666,7 +754,7 @@ export default function QuotationPanel({
     try {
       window.localStorage.setItem(
         quotationDraftStorageKey,
-        JSON.stringify(draft)
+        serialiseQuotationDraft(draft)
       );
     } catch (error) {
       console.error(
@@ -820,6 +908,7 @@ export default function QuotationPanel({
             headers: {
               "Content-Type":
                 "application/json",
+              "x-tenant-id": tenantId,
             },
 
             body:
@@ -1397,6 +1486,73 @@ export default function QuotationPanel({
       setWorking(false);
     }
   }
+  async function linkQuoteRequest(
+    requestId: string,
+    quotationId: string
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    try {
+      const response = await fetch(
+        "/api/accounts/quote-requests",
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenantId,
+            requestId,
+            status: "converted",
+            quotationId,
+          }),
+        }
+      );
+
+      const body = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        return {
+          ok: false,
+          error: body.error || "the request could not be updated",
+        };
+      }
+
+      return { ok: true };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : "network error",
+      };
+    }
+  }
+
+  async function retryRequestLink() {
+    if (!pendingRequestLink) {
+      return;
+    }
+
+    setWorking(true);
+
+    const linked = await linkQuoteRequest(
+      pendingRequestLink.requestId,
+      pendingRequestLink.quotationId
+    );
+
+    setWorking(false);
+
+    if (linked.ok) {
+      setMessage(
+        `${pendingRequestLink.quoteNumber} is now linked to its quote request.`
+      );
+      setPendingRequestLink(null);
+    } else {
+      setMessage(
+        `Linking ${pendingRequestLink.quoteNumber} to its quote request still failed: ${linked.error}`
+      );
+    }
+  }
+
   async function createQuotation() {
     if (!customerId) {
       setMessage("Choose a customer.");
@@ -1478,48 +1634,37 @@ export default function QuotationPanel({
         );
       }
 
-      if (
-        activeQuoteRequestId &&
-        body.quotation?.id
-      ) {
-        const requestResponse =
-          await fetch(
-            "/api/accounts/quote-requests",
-            {
-              method: "PATCH",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                tenantId,
-                requestId:
-                  activeQuoteRequestId,
-                status:
-                  "converted",
-                quotationId:
-                  body.quotation.id,
-              }),
-            }
-          );
-
-        const requestBody =
-          await requestResponse.json();
-
-        if (!requestResponse.ok) {
-          throw new Error(
-            requestBody.error ||
-              "Quotation created but quote request could not be linked."
-          );
-        }
-      }
-
-      setMessage(
-        `${body.quotation?.quote_number || "Quotation"} created.`
-      );
+      /* The quotation now exists. Clear the form and its draft before the
+         link step, so a failed link can never lead to a second Create and a
+         second quotation number for the same request (INV-14). */
+      const createdNumber =
+        body.quotation?.quote_number || "Quotation";
+      const requestIdToLink = activeQuoteRequestId;
 
       clearSavedQuotationDraft();
       resetForm();
       setShowForm(false);
+
+      let linkWarning = "";
+
+      if (requestIdToLink && body.quotation?.id) {
+        const linked = await linkQuoteRequest(
+          requestIdToLink,
+          body.quotation.id
+        );
+
+        if (!linked.ok) {
+          setPendingRequestLink({
+            requestId: requestIdToLink,
+            quotationId: body.quotation.id,
+            quoteNumber: createdNumber,
+          });
+
+          linkWarning = ` The quote request could not be marked as converted (${linked.error}). Use Retry linking below; do not create the quotation again.`;
+        }
+      }
+
+      setMessage(`${createdNumber} created.${linkWarning}`);
       await load();
     } catch (error) {
       setMessage(
@@ -1619,6 +1764,7 @@ export default function QuotationPanel({
         deliveryLogId?: string;
         id?: string | null;
         error?: string;
+        warnings?: unknown;
       };
 
       if (!response.ok) {
@@ -1627,6 +1773,16 @@ export default function QuotationPanel({
           "Unable to email quotation."
         );
       }
+
+      /* The email went out; follow-up bookkeeping that failed comes back as
+         warnings (INV-17, INV-25) and must be visible, not swallowed. */
+      const warningText =
+        Array.isArray(body.warnings)
+          ? body.warnings
+              .filter((item): item is string => typeof item === "string" && item.trim() !== "")
+              .map((item) => ` Warning: ${item}`)
+              .join("")
+          : "";
 
       const acknowledgement =
         body.id
@@ -1640,7 +1796,7 @@ export default function QuotationPanel({
         } emailed to ${
           body.recipient ||
           "the customer"
-        }. PDF and secure acceptance link included.${acknowledgement}`
+        }. PDF and secure acceptance link included.${acknowledgement}${warningText}`
       );
 
       await load();
@@ -1869,6 +2025,18 @@ export default function QuotationPanel({
       {message ? (
         <div className="mt-3 rounded-md border border-line bg-surface-2 px-3 py-2 text-sm text-ink">
           {message}
+        </div>
+      ) : null}
+
+      {pendingRequestLink ? (
+        <div className="mt-2">
+          <Button
+            type="button"
+            disabled={working}
+            onClick={() => void retryRequestLink()}
+          >
+            Retry linking
+          </Button>
         </div>
       ) : null}
 
@@ -2169,9 +2337,11 @@ export default function QuotationPanel({
 
             <div className="grid gap-3">
               {lines.map((line, index) => {
-                const net =
-                  Number(line.quantity || 0) *
-                  Number(line.unitPrice || 0);
+                const net = calculateLineAmounts(
+                  line.quantity,
+                  line.unitPrice,
+                  line.vatRate
+                ).net;
 
                 return (
                   <div
@@ -3066,35 +3236,22 @@ export default function QuotationPanel({
                           {["draft", "sent"].includes(
                             quotation.status
                           ) ? (
-                            <>
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                disabled={working}
-                                onClick={() =>
-                                  void setStatus(
-                                    quotation,
-                                    "accepted"
-                                  )
-                                }
-                              >
-                                Accept
-                              </Button>
-
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                disabled={working}
-                                onClick={() =>
-                                  void setStatus(
-                                    quotation,
-                                    "declined"
-                                  )
-                                }
-                              >
-                                Decline
-                              </Button>
-                            </>
+                            /* No manual Accept (ACC-22 / INV-4): only the
+                               customer acceptance portal accepts a quotation,
+                               and the server refuses it with 409. */
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              disabled={working}
+                              onClick={() =>
+                                void setStatus(
+                                  quotation,
+                                  "declined"
+                                )
+                              }
+                            >
+                              Decline
+                            </Button>
                           ) : null}
 
                           {quotation.status === "accepted" &&
@@ -3138,6 +3295,25 @@ export default function QuotationPanel({
           </div>
         )}
       </div>
+
+      {quotationsPage?.hasMore ? (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-ink-3">
+          <span className="font-mono tabular-nums">
+            {quotationsPage.total !== null
+              ? `Showing ${quotations.length} of ${quotationsPage.total} quotations`
+              : `Showing ${quotations.length} quotations`}
+          </span>
+
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={loadingMoreQuotations}
+            onClick={() => void loadMoreQuotations()}
+          >
+            {loadingMoreQuotations ? "Loading..." : "Load more"}
+          </Button>
+        </div>
+      ) : null}
       <style jsx>{`
         .control {
           height: 2.5rem;

@@ -7,6 +7,7 @@ import {
 } from "../../../../lib/tomtom/api";
 import {
   authClient,
+  isDurablyRateLimited,
   isRateLimited,
   parsePoints,
   requireOperator,
@@ -43,7 +44,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "You do not have console access." }, { status: 403 });
     }
 
-    if (isRateLimited(operator.userId, "matrix")) {
+    if (
+      isRateLimited(operator.userId, "matrix") ||
+      (await isDurablyRateLimited(operator.userId))
+    ) {
       return NextResponse.json(
         { error: "Too many requests. Please try again shortly." },
         { status: 429 }

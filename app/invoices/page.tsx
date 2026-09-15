@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { useTenant } from "../components/TenantProvider";
@@ -18,6 +19,17 @@ import MessageBanner from "../../components/MessageBanner";
 import Stat from "../../components/Stat";
 import Tabs from "../../components/Tabs";
 import QuotationPanel from "./QuotationPanel";
+import { isOverdue, operatorToday } from "../../lib/invoices/dates";
+import { mayBeTruncated } from "../../lib/invoices/listLimits";
+import { appendPage, type ListPageInfo } from "../../lib/accounts/listPaging";
+import type { InvoiceTotals } from "../../lib/invoices/totals";
+import { invoiceResendWarning } from "../../lib/invoices/resend";
+import {
+  calculateLineAmounts,
+  roundMoney,
+  splitPaymentAllocation,
+  toPence,
+} from "../../lib/invoices/money";
 
 type Tab =
   | "ready"
@@ -65,6 +77,7 @@ type Invoice = {
   notes?: string | null;
   accounting_invoice_id?: string | null;
   accounting_sync_status?: string | null;
+  sent_at?: string | null;
 };
 
 type InvoiceLine = {
@@ -253,6 +266,13 @@ export default function CustomerAccountsPage() {
   const [tab, setTab] = useState<Tab>("ready");
   const [readyJobs, setReadyJobs] = useState<ReadyJob[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  /* INV-11: lists arrive one page at a time; the KPIs come from server
+     totals computed across every invoice, not from the loaded page. */
+  const [readyPage, setReadyPage] = useState<ListPageInfo | null>(null);
+  const [invoicesPage, setInvoicesPage] = useState<ListPageInfo | null>(null);
+  const [rowsPage, setRowsPage] = useState<ListPageInfo | null>(null);
+  const [invoiceTotals, setInvoiceTotals] = useState<InvoiceTotals | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [subcontractors, setSubcontractors] = useState<Subcontractor[]>([]);
   const [rows, setRows] = useState<GenericRow[]>([]);
@@ -292,8 +312,8 @@ export default function CustomerAccountsPage() {
   const [paymentMethod, setPaymentMethod] = useState("bank_transfer");
   const [creditInvoiceId, setCreditInvoiceId] = useState("");
   const [creditReason, setCreditReason] = useState("");
-  const [creditIssueDate, setCreditIssueDate] = useState(
-    new Date().toISOString().slice(0, 10)
+  const [creditIssueDate, setCreditIssueDate] = useState(() =>
+    operatorToday()
   );
   const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
   const [creditLines, setCreditLines] = useState<CreditLineDraft[]>([]);
@@ -335,6 +355,35 @@ export default function CustomerAccountsPage() {
   const [xeroWorking, setXeroWorking] = useState(false);
 
   const tenantId = tenant.activeTenantId;
+
+  /* Incremented by every loadTab; a response is applied only if it belongs
+     to the newest request (INV-12). */
+  const loadRequestRef = useRef(0);
+
+  /* Tenant switch (INV-3, INV-24): drop everything loaded or selected for
+     the previous tenant, so its invoices cannot feed the KPIs, the payment
+     allocation list, a credit note or an invoice created under the new one.
+     Declared before the load effect so it runs first. */
+  useEffect(() => {
+    setReadyJobs([]);
+    setInvoices([]);
+    setCustomers([]);
+    setSubcontractors([]);
+    setRows([]);
+    setCreditNotes([]);
+    setCreditLines([]);
+    setSelectedJobs([]);
+    setPaymentCustomerId("");
+    setPaymentInvoiceId("");
+    setCreditInvoiceId("");
+    setEditingInvoice(null);
+    setEditingCreditNote(null);
+    setPreviewInvoice(null);
+    setStatementCustomerId("");
+    setChaseCustomerId("");
+    setCustomerPoCustomerId("");
+    setSupplierPoSubcontractorId("");
+  }, [tenantId]);
 
   const loadXeroStatus = useCallback(async () => {
     if (!tenantId) {
@@ -382,7 +431,7 @@ export default function CustomerAccountsPage() {
     }
   }, [tenantId]);
 
-  const loadLookups = useCallback(async () => {
+  const loadLookups = useCallback(async (isCurrent: () => boolean = () => true) => {
     if (!tenantId) return;
 
     const response = await fetch(
@@ -396,23 +445,31 @@ export default function CustomerAccountsPage() {
       throw new Error(body.error || "Unable to load account lookups.");
     }
 
+    if (!isCurrent()) return;
+
     setCustomers(body.customers ?? []);
     setSubcontractors(body.subcontractors ?? []);
 
-    setInvoices((current) => {
-      if (current.length > 0) return current;
-
-      return (body.invoices ?? []).map((invoice: Invoice) => ({
+    /* Always replace. Keeping a non-empty list let the previous tenant's
+       invoices survive a tenant switch (INV-3). The Invoices and Credits
+       tabs overwrite this with the full rows straight after. */
+    setInvoices(
+      (body.invoices ?? []).map((invoice: Invoice) => ({
         ...invoice,
         customer_name:
           body.customers?.find(
             (customer: Customer) => customer.id === invoice.customer_id
           )?.name ?? null,
-      }));
-    });
+      }))
+    );
   }, [tenantId]);
 
   const loadTab = useCallback(async () => {
+    /* Latest request wins (INV-12): a slower response for a previous tenant
+       or tab must not overwrite a newer one. */
+    const requestId = ++loadRequestRef.current;
+    const isCurrent = () => requestId === loadRequestRef.current;
+
     if (!tenantId) {
       setDataTenantId(tenantId);
       setLoading(false);
@@ -424,7 +481,9 @@ export default function CustomerAccountsPage() {
     setMessage("");
 
     try {
-      await loadLookups();
+      await loadLookups(isCurrent);
+
+      if (!isCurrent()) return;
 
       if (tab === "ready") {
         const response = await fetch(
@@ -440,8 +499,12 @@ export default function CustomerAccountsPage() {
           throw new Error(body.error || "Unable to load completed jobs.");
         }
 
+        if (!isCurrent()) return;
+
         setReadyJobs(body.jobs ?? []);
+        setReadyPage(body.pagination ?? null);
         setRows([]);
+        setDataTenantId(tenantId);
         return;
       }
 
@@ -457,13 +520,19 @@ export default function CustomerAccountsPage() {
           throw new Error(body.error || "Unable to load invoices.");
         }
 
+        if (!isCurrent()) return;
+
         setInvoices(body.invoices ?? []);
+        setInvoicesPage(body.pagination ?? null);
+        if (body.totals) setInvoiceTotals(body.totals);
         setRows([]);
+        setDataTenantId(tenantId);
         return;
       }
 
       if (tab === "quotations") {
         setRows([]);
+        setDataTenantId(tenantId);
         return;
       }
       const endpoint =
@@ -499,6 +568,8 @@ export default function CustomerAccountsPage() {
         throw new Error(body.error || "Unable to load accounts data.");
       }
 
+      if (!isCurrent()) return;
+
       if (tab === "accounting") {
         setIntegrations(body.integrations ?? []);
         setRows([]);
@@ -509,7 +580,7 @@ export default function CustomerAccountsPage() {
         const invoiceResponse = await fetch(
           `/api/accounts/invoices?tenantId=${encodeURIComponent(
             tenantId
-          )}`,
+          )}&pageSize=500`,
           {
             cache: "no-store",
           }
@@ -524,8 +595,13 @@ export default function CustomerAccountsPage() {
           );
         }
 
+        if (!isCurrent()) return;
+
         setInvoices(invoiceBody.invoices ?? []);
+        setInvoicesPage(invoiceBody.pagination ?? null);
+        if (invoiceBody.totals) setInvoiceTotals(invoiceBody.totals);
       } else {
+        setRowsPage(body.pagination ?? null);
         setRows(
           body.payments ??
             body.statements ??
@@ -534,14 +610,23 @@ export default function CustomerAccountsPage() {
             []
         );
       }
+
+      /* Set on success too, not only on error: otherwise dataTenantId stayed
+         undefined and the skeleton rule could never recognise on-screen
+         content as belonging to the selected tenant (INV-12). */
+      setDataTenantId(tenantId);
     } catch (error) {
+      if (!isCurrent()) return;
+
       setMessage(
         error instanceof Error ? error.message : "Unable to load accounts."
       );
       setDataTenantId(tenantId);
     } finally {
-      setLoading(false);
-      setHasLoaded(true);
+      if (isCurrent()) {
+        setLoading(false);
+        setHasLoaded(true);
+      }
     }
   }, [loadLookups, tab, tenantId]);
 
@@ -578,6 +663,16 @@ export default function CustomerAccountsPage() {
     [readyJobs, selectedJobs]
   );
 
+  /* Prune selections that are no longer on screen, e.g. a job a colleague
+     has just invoiced (INV-24). */
+  useEffect(() => {
+    setSelectedJobs((current) => {
+      const visible = new Set(readyJobs.map((job) => job.job_id));
+      const kept = current.filter((jobId) => visible.has(jobId));
+      return kept.length === current.length ? current : kept;
+    });
+  }, [readyJobs]);
+
   const selectedCustomerIds = Array.from(
     new Set(selectedReady.map((job) => job.customer_id))
   );
@@ -593,16 +688,112 @@ export default function CustomerAccountsPage() {
       !["void", "credited"].includes(String(invoice.status ?? "").toLowerCase())
   );
 
-  const overdueInvoices = openInvoices.filter(
-    (invoice) =>
-      invoice.due_date &&
-      invoice.due_date < new Date().toISOString().slice(0, 10)
+  /* Overdue from the operator's calendar day, not the UTC day (INV-15). */
+  const operatorDayToday = operatorToday();
+
+  const overdueInvoices = openInvoices.filter((invoice) =>
+    isOverdue(invoice.due_date, operatorDayToday)
   );
 
-  const outstandingTotal = openInvoices.reduce(
-    (sum, invoice) => sum + Number(invoice.balance_due ?? 0),
-    0
-  );
+  /* Server totals cover every invoice (INV-11). The loaded page is only a
+     fallback before the Invoices tab has been opened. */
+  const outstandingTotal =
+    invoiceTotals?.outstandingTotal ??
+    openInvoices.reduce(
+      (sum, invoice) => sum + toPence(invoice.balance_due),
+      0
+    ) / 100;
+
+  const overdueInvoiceCount =
+    invoiceTotals?.overdueCount ?? overdueInvoices.length;
+
+  const readyJobCount = readyPage?.total ?? readyJobs.length;
+
+  /* Invoices, ready jobs and payments now page completely. Credit notes are
+     not paged yet, and the credit-note invoice picker loads the largest page
+     only, so those can still be incomplete. */
+  const listsMayBeTruncated =
+    tab === "credits" &&
+    (mayBeTruncated(creditNotes.length) || invoicesPage?.hasMore === true);
+
+  async function loadMore(kind: "ready" | "invoices" | "payments") {
+    const info =
+      kind === "ready" ? readyPage : kind === "invoices" ? invoicesPage : rowsPage;
+
+    if (!tenantId || !info?.hasMore || loadingMore) return;
+
+    const requestId = loadRequestRef.current;
+    const endpoint = kind === "ready" ? "ready-to-invoice" : kind;
+
+    setLoadingMore(true);
+
+    try {
+      const response = await fetch(
+        `/api/accounts/${endpoint}?tenantId=${encodeURIComponent(
+          tenantId
+        )}&page=${info.page + 1}&pageSize=${info.pageSize}`,
+        { cache: "no-store" }
+      );
+
+      const body = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(body.error || "Unable to load more records.");
+      }
+
+      // A tenant or tab change started a fresh load; drop this page.
+      if (requestId !== loadRequestRef.current) return;
+
+      if (kind === "ready") {
+        setReadyJobs((current) =>
+          appendPage(current, (body.jobs ?? []) as ReadyJob[], (job) => job.job_id)
+        );
+        setReadyPage(body.pagination ?? null);
+      } else if (kind === "invoices") {
+        setInvoices((current) =>
+          appendPage(current, (body.invoices ?? []) as Invoice[], (invoice) => invoice.id)
+        );
+        setInvoicesPage(body.pagination ?? null);
+      } else {
+        setRows((current) =>
+          appendPage(current, (body.payments ?? []) as GenericRow[], (row) => String(row.id))
+        );
+        setRowsPage(body.pagination ?? null);
+      }
+    } catch (error) {
+      if (requestId !== loadRequestRef.current) return;
+      setMessage(
+        error instanceof Error ? error.message : "Unable to load more records."
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  const paymentAllocationInvoice = paymentInvoiceId
+    ? openInvoices.find((invoice) => invoice.id === paymentInvoiceId) ?? null
+    : null;
+
+  const paymentAllocationHint = (() => {
+    if (!paymentAllocationInvoice || !paymentAmount.trim()) {
+      return "";
+    }
+
+    const currency = paymentAllocationInvoice.currency || "GBP";
+    const split = splitPaymentAllocation(
+      paymentAmount,
+      paymentAllocationInvoice.balance_due
+    );
+
+    return split.unallocatedPence > 0
+      ? `${money(split.allocate, currency)} will be allocated to ${
+          paymentAllocationInvoice.invoice_number || "the invoice"
+        } (its outstanding balance); ${money(
+          split.unallocated,
+          currency
+        )} stays unallocated on the account.`
+      : `Allocating ${money(split.allocate, currency)} in ${currency}.`;
+  })();
 
   async function postJson(
     path: string,
@@ -665,7 +856,8 @@ export default function CustomerAccountsPage() {
       {
         tenantId: tenant.writeTenantId,
         customerId: selectedCustomerIds[0],
-        jobIds: selectedJobs,
+        /* Only the jobs actually visible and selected (INV-24). */
+        jobIds: selectedReady.map((job) => job.job_id),
         poReference: invoicePoReference.trim() || null,
         notes: invoiceNotes.trim() || null,
       },
@@ -826,11 +1018,33 @@ export default function CustomerAccountsPage() {
       return;
     }
 
+    /* INV-2: only a customer that requires POD attachments forces them.
+       For everyone else the invoice goes on its own, with ready PODs added
+       when the server honours attachAvailablePod; an incomplete POD must
+       not block the invoice. The server re-reads the customer's flags. */
+    const invoiceCustomer = customers.find(
+      (item) => item.id === invoice.customer_id
+    );
+
+    const podAttachmentRequired =
+      invoiceCustomer?.invoice_pod_attachment_required === true;
+
+    /* INV-25: an already-sent invoice needs a deliberate second send. */
+    const resendWarning = invoiceResendWarning({
+      invoiceNumber: invoice.invoice_number,
+      status,
+      sentAt: invoice.sent_at,
+    });
+
     if (
       !window.confirm(
-        `Email ${
+        `${resendWarning ? `${resendWarning}\n\n` : ""}Email ${
           invoice.invoice_number || "this invoice"
-        } with PDF and available POD attachments?`
+        } with the invoice PDF${
+          podAttachmentRequired
+            ? " and the POD PDFs this customer requires"
+            : " (POD PDFs are attached only when they are ready)"
+        }?`
       )
     ) {
       return;
@@ -849,12 +1063,13 @@ export default function CustomerAccountsPage() {
           },
           body: JSON.stringify({
             tenantId: tenant.writeTenantId,
-            includePod: true,
+            includePod: podAttachmentRequired,
+            attachAvailablePod: true,
           }),
         }
       );
 
-      const body = (await response.json()) as {
+      const body = (await response.json().catch(() => ({}))) as {
         ok?: boolean;
         invoiceId?: string;
         invoiceNumber?: string;
@@ -869,8 +1084,27 @@ export default function CustomerAccountsPage() {
           reference: string;
           podStatus: string;
         }>;
+        skippedPodJobs?: Array<{
+          id: string;
+          reference: string;
+          podStatus: string;
+        }>;
+        warnings?: unknown;
         error?: string;
       };
+
+      /* 503 means a database update the route depends on is not applied yet.
+         Nothing was sent, and retrying will not help until it is. */
+      if (response.status === 503) {
+        throw new Error(
+          `${
+            invoice.invoice_number || "The invoice"
+          } was not sent. ${
+            body.error ||
+            "Emailing invoices is unavailable until a pending database update is applied. Please contact support."
+          }`
+        );
+      }
 
       if (!response.ok) {
         if (
@@ -908,6 +1142,23 @@ export default function CustomerAccountsPage() {
           ? ` Provider acknowledgement: ${body.providerMessageId}.`
           : "";
 
+      const skippedPodText =
+        Array.isArray(body.skippedPodJobs) && body.skippedPodJobs.length > 0
+          ? ` POD not attached (not ready): ${body.skippedPodJobs
+              .map((job) => `${job.reference} (${job.podStatus})`)
+              .join(", ")}.`
+          : "";
+
+      const warningText = Array.isArray(body.warnings)
+        ? body.warnings
+            .filter(
+              (item): item is string =>
+                typeof item === "string" && item.trim() !== ""
+            )
+            .map((item) => ` Warning: ${item}`)
+            .join("")
+        : "";
+
       setMessage(
         `${
           body.invoiceNumber ||
@@ -923,7 +1174,7 @@ export default function CustomerAccountsPage() {
                 podCount === 1 ? "" : "s"
               }`
             : ""
-        }.${acknowledgement}`
+        }.${acknowledgement}${skippedPodText}${warningText}`
       );
 
       setPreviewInvoice(null);
@@ -1150,90 +1401,110 @@ export default function CustomerAccountsPage() {
     }
   }
   async function createPayment() {
-    if (!tenant.writeTenantId || !paymentCustomerId || !paymentAmount) {
-      setMessage("Customer and payment amount are required.");
+    const amountText = paymentAmount.trim();
+    const amountPence = toPence(amountText);
+
+    if (
+      !tenant.writeTenantId ||
+      !paymentCustomerId ||
+      !amountText ||
+      !Number.isFinite(Number(amountText)) ||
+      amountPence <= 0
+    ) {
+      setMessage("Customer and a payment amount greater than zero are required.");
       return;
     }
+
+    /* INV-10: allocate only to one of this tenant's open invoices for this
+       customer, never more than its outstanding balance, and record the
+       payment in the invoice's own currency. */
+    const allocationInvoice = paymentInvoiceId
+      ? openInvoices.find((invoice) => invoice.id === paymentInvoiceId) ?? null
+      : null;
+
+    if (
+      paymentInvoiceId &&
+      (!allocationInvoice ||
+        allocationInvoice.customer_id !== paymentCustomerId)
+    ) {
+      setMessage(
+        "Choose an open invoice for this customer, or record the payment as unallocated."
+      );
+      return;
+    }
+
+    const paymentCustomer = customers.find(
+      (customer) => customer.id === paymentCustomerId
+    );
+
+    const currency = String(
+      allocationInvoice?.currency ||
+        paymentCustomer?.currency_code ||
+        "GBP"
+    ).toUpperCase();
+
+    const split = splitPaymentAllocation(
+      amountText,
+      allocationInvoice?.balance_due ?? 0
+    );
 
     const success = await postJson(
       "/api/accounts/payments",
       {
         tenantId: tenant.writeTenantId,
         customerId: paymentCustomerId,
-        invoiceId: paymentInvoiceId || null,
-        amount: Number(paymentAmount),
-        allocateAmount: paymentInvoiceId ? Number(paymentAmount) : 0,
+        invoiceId: allocationInvoice?.id ?? null,
+        amount: amountPence / 100,
+        currency,
+        allocateAmount: allocationInvoice ? split.allocate : 0,
         paymentMethod,
         paymentReference: paymentReference.trim() || null,
       },
-      "Payment recorded."
+      allocationInvoice && split.unallocatedPence > 0
+        ? `Payment recorded. ${money(split.allocate, currency)} allocated to ${
+            allocationInvoice.invoice_number || "the invoice"
+          }; ${money(split.unallocated, currency)} left unallocated.`
+        : "Payment recorded."
     );
 
     if (success) {
       setPaymentAmount("");
       setPaymentReference("");
+      setPaymentInvoiceId("");
     }
   }
 
+  /* Same integer-pence rounding as quotations and the PDFs (INV-13). */
   function roundCreditMoney(value: number) {
-    return Math.round(
-      (value + Number.EPSILON) * 100
-    ) / 100;
+    return roundMoney(value);
   }
 
   function creditDraftTotals() {
-    return creditLines.reduce(
-      (totals, line) => {
-        const quantity =
-          Number(line.quantity || 0);
+    let netPence = 0;
+    let vatPence = 0;
 
-        if (
-          !Number.isFinite(quantity) ||
-          quantity <= 0
-        ) {
-          return totals;
-        }
+    for (const line of creditLines) {
+      const quantity = Number(line.quantity || 0);
 
-        const net =
-          roundCreditMoney(
-            quantity *
-              line.unitPrice
-          );
-
-        const vat =
-          roundCreditMoney(
-            net *
-              (line.vatRate / 100)
-          );
-
-        const gross =
-          roundCreditMoney(
-            net + vat
-          );
-
-        return {
-          net:
-            roundCreditMoney(
-              totals.net + net
-            ),
-
-          vat:
-            roundCreditMoney(
-              totals.vat + vat
-            ),
-
-          gross:
-            roundCreditMoney(
-              totals.gross + gross
-            ),
-        };
-      },
-      {
-        net: 0,
-        vat: 0,
-        gross: 0,
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        continue;
       }
-    );
+
+      const amounts = calculateLineAmounts(
+        line.quantity,
+        line.unitPrice,
+        line.vatRate
+      );
+
+      netPence += amounts.netPence;
+      vatPence += amounts.vatPence;
+    }
+
+    return {
+      net: netPence / 100,
+      vat: vatPence / 100,
+      gross: (netPence + vatPence) / 100,
+    };
   }
 
   function creditedQuantityForLine(
@@ -1467,11 +1738,7 @@ export default function CustomerAccountsPage() {
       ""
     );
 
-    setCreditIssueDate(
-      new Date()
-        .toISOString()
-        .slice(0, 10)
-    );
+    setCreditIssueDate(operatorToday());
 
     setCreditLines([]);
   }
@@ -1667,10 +1934,7 @@ export default function CustomerAccountsPage() {
     );
 
     setCreditIssueDate(
-      note.issue_date ||
-        new Date()
-          .toISOString()
-          .slice(0, 10)
+      note.issue_date || operatorToday()
     );
 
     await loadCreditInvoiceLines(
@@ -2258,11 +2522,11 @@ export default function CustomerAccountsPage() {
               />
               <Stat
                 label="Overdue invoices"
-                value={String(overdueInvoices.length)}
+                value={String(overdueInvoiceCount)}
               />
               <Stat
                 label="Ready to invoice"
-                value={String(readyJobs.length)}
+                value={String(readyJobCount)}
               />
             </div>
           </header>
@@ -2277,6 +2541,13 @@ export default function CustomerAccountsPage() {
           </div>
 
           <MessageBanner tone="neutral">{message}</MessageBanner>
+
+          {listsMayBeTruncated ? (
+            <MessageBanner tone="neutral">
+              Older credit notes or invoices may be missing from this tab. The
+              Outstanding and Overdue figures above still cover every invoice.
+            </MessageBanner>
+          ) : null}
 
           {showSkeleton ? (
             <div aria-busy className="grid gap-3">
@@ -2354,6 +2625,26 @@ export default function CustomerAccountsPage() {
                 />
               ) : null}
 
+              {tab === "ready" ? (
+                <LoadMoreRow
+                  info={readyPage}
+                  shown={readyJobs.length}
+                  noun="jobs"
+                  loading={loadingMore}
+                  onLoadMore={() => void loadMore("ready")}
+                />
+              ) : null}
+
+              {tab === "invoices" ? (
+                <LoadMoreRow
+                  info={invoicesPage}
+                  shown={invoices.length}
+                  noun="invoices"
+                  loading={loadingMore}
+                  onLoadMore={() => void loadMore("invoices")}
+                />
+              ) : null}
+
               {tab === "payments" ? (
                 <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
                   <h2 className="m-0 mb-3 text-md font-semibold text-ink">Record Customer Payment</h2>
@@ -2412,6 +2703,12 @@ export default function CustomerAccountsPage() {
                       />
                     </Field>
 
+                    {paymentAllocationHint ? (
+                      <p className="m-0 self-center text-xs text-ink-3 sm:col-span-2 lg:col-span-3">
+                        {paymentAllocationHint}
+                      </p>
+                    ) : null}
+
                     <Select id="invoice-method" label="Method"
                         value={paymentMethod}
                         onChange={(event) =>
@@ -2446,6 +2743,13 @@ export default function CustomerAccountsPage() {
                   </div>
 
                   <RecordCards rows={rows} />
+                  <LoadMoreRow
+                    info={rowsPage}
+                    shown={rows.length}
+                    noun="payments"
+                    loading={loadingMore}
+                    onLoadMore={() => void loadMore("payments")}
+                  />
                 </section>
               ) : null}
 
@@ -3286,6 +3590,7 @@ export default function CustomerAccountsPage() {
 
               {tab === "quotations" && tenantId ? (
                 <QuotationPanel
+                  key={tenantId}
                   tenantId={tenantId}
                   customers={customers}
                 />
@@ -4641,6 +4946,45 @@ function InvoicesPanel({
     </section>
   );
 }
+function LoadMoreRow({
+  info,
+  shown,
+  noun,
+  loading,
+  onLoadMore,
+}: {
+  info: ListPageInfo | null;
+  shown: number;
+  noun: string;
+  loading: boolean;
+  onLoadMore: () => void;
+}) {
+  if (!info || (!info.hasMore && (info.total === null || info.total <= shown))) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-ink-3">
+      <span className="font-mono tabular-nums">
+        {info.total !== null
+          ? `Showing ${shown} of ${info.total} ${noun}`
+          : `Showing ${shown} ${noun}`}
+      </span>
+
+      {info.hasMore ? (
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={loading}
+          onClick={onLoadMore}
+        >
+          {loading ? "Loading..." : "Load more"}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 function RecordCards({
   rows,
   documentType,
@@ -4776,7 +5120,7 @@ function money(
 }
 
 function formatDate(value: string | null | undefined) {
-  if (!value) return "â€”";
+  if (!value) return "-";
 
   const date = new Date(
     value.includes("T") ? value : `${value}T00:00:00`

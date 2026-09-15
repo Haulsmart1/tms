@@ -2,7 +2,7 @@
 
 A multi-tenant Transport Management System (TMS) for UK and EU road-haulage operators. TMS Wizzard runs the day-to-day of a haulage business in one place: booking jobs, capturing proof of delivery, invoicing, managing the fleet and drivers, and staying on top of compliance (tachograph / working-time, vehicle licences, maintenance and VOR). It is a SaaS product billed every 4 weeks, deployed at tmswizzard.cloud. Two pricing models are live at once during a migration: v1 charges in advance on graduated per-week bands (GBP 10 down to GBP 5), v2 bills in arrears at GBP 64.50 per vehicle per 4-week period with a GBP 129.00 minimum and whole-fleet volume discounts. Each company is on exactly one, set by `company_billing.billing_model`. New companies are created on v2 (`NEW_COMPANY_BILLING_MODEL` in `lib/billing/rateCard.ts`) and take no money until their first vehicle is activated for billing; existing companies move one at a time with `scripts/migrate-company-to-period-billing.mjs`.
 
-> Status: active development. The core operational pages are functional against a live Supabase backend; some analytics and admin-management pages are still launchers or read-only views (see the Page Inventory status tags). A multi-tenant Row Level Security overhaul and a storage-bucket lockdown were recently completed and are in rollout.
+> Status: active development. The core operational pages are functional against a live Supabase backend; some analytics and admin-management pages are still launchers or read-only views (see the Page Inventory status tags). A multi-tenant Row Level Security overhaul and a storage-bucket lockdown were recently completed and are in rollout. A full production-readiness review (2026-09-14, `docs/superpowers/reviews/2026-09-14-production-readiness-review.md`) was fixed on `ethan/production-review-fixes`; its SQL must be applied in the order given in `docs/sql/prodfix_00_APPLY_ORDER.md` before that code is deployed.
 
 ---
 
@@ -19,7 +19,7 @@ A multi-tenant Transport Management System (TMS) for UK and EU road-haulage oper
 
 - **Framework:** Next.js 16 (App Router), React 19, TypeScript.
 - **Backend:** Supabase (Postgres, Auth via magic link, Storage), accessed through `@supabase/ssr`.
-- **Auth:** passwordless magic-link (token_hash + verifyOtp), with a security-hardened callback route.
+- **Auth:** passwordless magic-link, sent by a rate-limited server route that never creates accounts, confirmed on `/auth/confirm` (token_hash + verifyOtp). Accounts come from invites; there is no self-service signup yet.
 - **Validation:** Zod.
 - **Tests:** Vitest.
 - **Styling:** a hybrid of inline styles (legacy pages) and Tailwind + IBM Plex on opt-in "ds" pages (see Design System). Fonts: IBM Plex Sans / Mono and Inter.
@@ -37,9 +37,10 @@ TMS Wizzard is multi-tenant by design, and the tenancy model is the backbone of 
   - staff (default / no elevated role): their own tenant only.
 - **Row Level Security (RLS) is the isolation boundary,** not the client. Every data decision is enforced in Postgres by SECURITY DEFINER helper functions (`can_access_tenant`, `can_manage_tenant`) that fail closed: a missing or malformed tenant / company / role denies access rather than leaking it. A tampered client cannot cross tenants because `WITH CHECK` rejects foreign-tenant writes and `USING` hides unreadable rows. Guard triggers block a user from escalating their own role, tenant, or company.
 - **Client tenant resolution:** the app resolves the acting tenant once through a `TenantProvider` that calls a trusted `get_tenant_context()` RPC, exposes a `useTenant()` hook (role, accessible tenants, active tenant, `filterByTenant`, `writeTenantId`), and renders a fail-closed gate for signed-out or unlinked accounts. Admins get a tenant selector (company-wide by default, filterable to one tenant); staff are locked to their own tenant.
-- **Storage:** proof-of-delivery files live in a private `pod-files` bucket with tenant-scoped `storage.objects` policies keyed on the tenant path segment; the app serves them via short-lived signed URLs rather than public URLs.
+- **Storage:** proof-of-delivery files live in a private `pod-files` bucket with tenant-scoped `storage.objects` policies keyed on the tenant path segment; the app serves them via short-lived signed URLs rather than public URLs. Uploads go straight to storage through server-issued signed upload URLs, and customer POD share links are random tokens stored hashed in `pod_share_links`, so they can be withdrawn.
+- **Server routes on the service role** bypass RLS, so they authorize the caller themselves with `authorizeTenant()` (`lib/auth/serverTenantAccess.ts`), which applies the same rule as `can_access_tenant` / `can_manage_tenant` from `profiles`. The legacy `memberships` table is never read for authorization.
 
-The RLS design and migrations live under `docs/sql/` (`rls_01`..`rls_10`) and are documented in `docs/superpowers/specs/`.
+The RLS design and migrations live under `docs/sql/` (`rls_01`..`rls_12`, then the `prodfix_*` series in the order given by `docs/sql/prodfix_00_APPLY_ORDER.md`) and are documented in `docs/superpowers/specs/`.
 
 ## Design system
 
@@ -58,7 +59,7 @@ The app is used in dim control rooms, so **dark is the default theme** and light
 - `.dark` duplicates `:root` exactly. That is not redundant: it lets a subtree pin itself dark against an ancestor `.light`, which is how the legacy pages stay dark while a user is in light mode. The landing page uses the mirror of this, pinning itself `light`.
 - **Do not use Tailwind `dark:` variants.** Under an inverted default they mean the opposite of what you would expect. Theme differences belong in the token values.
 - The preference is stored per **device** in `localStorage["tms-theme"]`, not per user: a shared control-room machine should stay dark whoever signs in. A synchronous script at the top of `<body>` applies it before first paint, which is why `<html>` carries `suppressHydrationWarning`.
-- **There is no Content-Security-Policy in this app today.** If one is added, it must allow that inline script by hash or nonce, or the light theme will silently stop working and everything will render dark.
+- **The only Content-Security-Policy today is `frame-ancestors 'none'`** (with the other security headers in `next.config.ts`). If a `script-src` is added, it must allow that inline script by hash or nonce, or the light theme will silently stop working and everything will render dark.
 - **Which pages follow the theme** is controlled by one allowlist, `lib/nav/themeableRoutes.ts`. It drives both the toggle's visibility and the legacy dark pin. To move a legacy page onto the theme: convert its inline colour literals to tokens, give it a `ds ... bg-canvas` root, then add its path to that list.
 - Every token pair in both themes is contrast-checked by `lib/theme/contrast.test.ts`, which parses `app/tokens.css` itself and runs on every `npm test`. Four documented pre-existing gaps are listed there as floors that must not regress.
 
@@ -70,26 +71,28 @@ Status tags: [OK] functional against live data, [PARTIAL] real data but view-onl
 
 ### Public and auth
 - **`/` Landing** [OK]: marketing homepage (hero, features, the full weekly tier table driven off PRICE_TIERS, request-access form), server-rendered with JSON-LD. ds / Plex.
-- **`/login`** [OK]: passwordless magic-link sign in; surfaces "link expired" errors. ds / Plex.
-- **`/api/auth/callback`** [OK]: completes magic-link sign in (verifyOtp / code exchange), sets session cookies, redirects to a validated `next` path (open-redirect hardened).
-- **`/api/request-access`** [OK]: lead intake for the landing form; honeypot + per-IP rate limit + Zod validation, stores the lead, then notifies via Microsoft Teams and Resend.
+- **`/login`** [OK]: passwordless magic-link sign in through `POST /api/auth/magic-link` (rate limited per email and IP, never creates an account, same answer whether or not the email exists); honours the `next` deep link; surfaces "link expired" errors. ds / Plex.
+- **`/auth/confirm`** [OK]: where email links land; verifies the `token_hash` only after the user presses Continue, so email scanners cannot use up a link.
+- **`/api/auth/callback`** [OK]: exchanges a PKCE `code` and sets session cookies; a `token_hash` sent here is forwarded to `/auth/confirm`. Redirects only to a validated `next` path (open-redirect hardened).
+- **`/api/request-access`** [OK]: lead intake for the landing form; honeypot, durable per-IP and per-email rate limits, a 24-hour duplicate check and Zod validation, then stores the lead and notifies via Microsoft Teams and Resend.
 
 ### Operations
 - **`/dashboard`** [OK]: tenant-scoped KPI tiles (jobs today, unassigned, on the road, PODs awaiting, overdue invoices), a today's-jobs table, a needs-attention list and a 7-day revenue chart. Read-only; no write path.
-- **`/jobs`** [OK]: create / edit / delete jobs with collection and delivery stops; inline POD capture and "mark delivered"; margin display. The heaviest operational page.
+- **`/jobs`** [OK]: create / edit / delete jobs with collection and delivery stops; inline POD capture and "mark delivered"; margin display. The heaviest operational page. Editing a job updates its stops in place and refuses to change or remove a stop that already has a POD; deleting a job is office-staff only and refused once evidence or scans exist. Assigning a vehicle with no active licence is refused.
+- **`/planning`** [OK]: day planning lanes, Smart Optimize and driver-hours preview. Hours checks cover EU driving limits and the 45-minute break only (no rest, Working Time, ferry or HGV routing, and the page says so). Read-only while "All tenants" is selected; saves are atomic and refuse to overwrite a plan someone else changed.
 - **`/pod`** [OK]: dedicated proof-of-delivery workflow; upload photos and delivery documents to private storage, record recipient / notes, mark stops delivered. Served via signed URLs.
-- **`/tracking`** [PARTIAL]: read-only view of vehicles and their latest GPS locations.
+- **`/tracking`** [PARTIAL]: read-only view of vehicles and their latest GPS locations (newest fix per vehicle); jobs are placed on their `planning_date`, falling back to `scheduled_date`.
 - **`/telematics`** [PARTIAL]: read-only list of the latest vehicle GPS positions (lat / long / speed / time).
 - **`/tachograph`** [PARTIAL]: read-only driver-hours / working-time view (driver cards + recent activity logs). No compliance logic yet.
 
 ### Commercial
 - **`/customers`** [OK]: customer directory with create / edit / activate.
 - **`/subcontractors`** [OK]: subcontractor directory with create / edit / activate.
-- **`/invoices`** [OK]: raise and track tenant invoices, update status.
+- **`/invoices`** [OK]: raise and track tenant invoices, quotations, payments and credit notes. Lists page with "Load more" (the list APIs take `page` / `pageSize`), and the outstanding / overdue KPIs are computed server-side across every invoice. Only the customer acceptance portal can accept a quotation; share links expire at the end of `valid_until`, London time.
 - **`/stats`** [OK]: company KPI dashboard (revenue, margins, job / POD / fleet counts, driver leaderboard, top customers) with a period selector and client-side aggregation.
 
 ### Fleet and compliance
-- **`/vehicles`** [OK]: vehicle roster; admin create / edit / delete, staff may toggle active / VOR status.
+- **`/vehicles`** [OK]: vehicle roster; admin create / edit / delete. Deletes go through `DELETE /api/vehicles/[id]`, which refuses a vehicle with billing history. VOR changes are admin-only (staff are refused before anything is written).
 - **`/drivers`** [OK]: driver roster; admin-managed create / edit / delete.
 - **`/assets`** [OK]: trailers / pallets / equipment; create and list (no edit / delete yet).
 - **`/maintenance`** [OK]: maintenance records; logging a VOR record marks the vehicle off-road, completion restores it.
@@ -98,8 +101,8 @@ Status tags: [OK] functional against live data, [PARTIAL] real data but view-onl
 ### Settings
 - **`/settings`** [LAUNCHER]: settings hub cards.
 - **`/settings/company`** [OK]: the most complete form in the app; multi-section company profile with country-driven fields (GB VAT / EORI / O-licence vs US EIN / USDOT / MC / IFTA), currency / timezone defaults, validation.
-- **`/settings/users`** [OK]: invite users by magic link (admin action).
-- **`/settings/permissions`** [PARTIAL]: per-user, per-page access checkboxes writing to `user_permissions`. Grant path works; revoke path and controlled state are incomplete, and the page now says so on screen rather than implying the boxes reflect stored state.
+- **`/settings/users`** [OK]: invite users by magic link, change roles and remove users from the company (admin action). Invites and role changes write `profiles` (company, tenant, role) atomically through the `prodfix_20` RPCs; you cannot remove yourself or the last admin, and only a super_admin can change a super_admin.
+- **`/settings/permissions`** [STUB]: shows a notice only. The checkboxes never restricted anything, so they were removed until it is decided what a page permission should restrict and where it is enforced.
 - **`/settings/invoices`** [PARTIAL]: this tenant's 4-weekly charge (active licensed vehicles priced on the graduated weekly bands). Shows the v1 model only; a v2 company's charges live in `billing_periods` / `period_invoice_lines` and are not surfaced here yet.
 - **`/settings/billing`** [OK]: subscription payment method (Square card on file, 3DS verified) and charge history; company admins only (super_admin sees a notice linking to `/super-admin/billing`; staff see a notice).
 
@@ -108,7 +111,7 @@ Status tags: [OK] functional against live data, [PARTIAL] real data but view-onl
 - **`/super-admin/companies`** [OK]: searchable list of customer companies with tenant, billable-vehicle and user counts, billing model and subscription status; each row opens a detail page.
 - **`/super-admin/companies/[id]`** [OK]: edit a company's profile, rename its tenants, and move a tenant to another company behind a typed confirmation that shows what moves and what it will cost. Writes go through `/api/super-admin/*` on the service role, because `companies` and `tenants` have no RLS write policy by design (`docs/sql/rls_04_identity_tables.sql`).
 - **`/super-admin/users`** [OK]: searchable list of every platform user with email, resolved company and tenant names, and role. Read-only. Surfaces orphaned auth accounts (an `auth.users` row with no `profiles` row, which a half-completed invite leaves behind) as "incomplete" rather than hiding them.
-- **`/super-admin/billing`** [OK]: per-company billing (billable vehicles priced on the graduated weekly bands) with invoice generation, plus each company's subscription status (card on file, next charge, past-due with failed attempts).
+- **`/super-admin/billing`** [OK]: read-only per-company billing (billable vehicles and pricing) plus each company's subscription status (card on file, next charge, past-due with failed attempts). The old "Create Invoice" button is gone: it wrote v1-priced rows into the customer `invoices` ledger for every company.
 - **`/super-admin/invoices`** [OK]: all invoices; mark paid / pending.
 - **`/super-admin/requests`** [OK]: triage landing-page leads; cross-checks the true row count via the service role to detect an RLS misconfiguration. ds / Plex.
 
@@ -116,7 +119,7 @@ Status tags: [OK] functional against live data, [PARTIAL] real data but view-onl
 
 - **Microsoft Teams** (`TEAMS_WEBHOOK_URL`): Adaptive Card alert to the team when a lead is submitted.
 - **Resend** (`RESEND_API_KEY`, `MAIL_FROM`, `LEAD_INBOX`): transactional email for lead notifications.
-- **Square** (`SQUARE_ACCESS_TOKEN`, `SQUARE_ENVIRONMENT`, `SQUARE_LOCATION_ID`, `NEXT_PUBLIC_SQUARE_APP_ID`, `NEXT_PUBLIC_SQUARE_LOCATION_ID`): platform subscription billing, card on file plus the daily `/api/billing/run` charge cron (see `/settings/billing` and `/super-admin/billing`). This is separate from Stripe Connect (tenant-to-customer invoice payments), which is unrelated to platform billing. The earlier catalogue / plan-creation scaffolding under `app/subscription page/` is superseded by this and not wired into a live route.
+- **Square** (`SQUARE_ACCESS_TOKEN`, `SQUARE_ENVIRONMENT`, `SQUARE_LOCATION_ID`, `NEXT_PUBLIC_SQUARE_APP_ID`, `NEXT_PUBLIC_SQUARE_LOCATION_ID`): platform subscription billing, card on file plus the daily `/api/billing/run` charge cron (see `/settings/billing` and `/super-admin/billing`). This is separate from Stripe Connect (tenant-to-customer invoice payments), which is unrelated to platform billing. The cron claims each charge in the database and reuses idempotency keys on retry, so overlapping runs cannot charge twice; saving a new card retries failed charges and clears past_due. v1 companies can cancel self-service.
   - **Mid-cycle vehicle additions.** Billing is a paid-coverage set, not a headcount taken at charge time. Adding or activating a vehicle licence part way through a cycle charges the card immediately, pro-rata for the days left in the cycle, at the marginal band rate (the difference between the whole fleet's weekly price before and after the vehicle, since the bands are graduated). Each cycle's payment writes a `vehicle_cycle_coverage` row per vehicle it paid for, and `/api/licences/activate` charges only for a vehicle that cycle did not cover. Deactivating licences before the charge date and reactivating them after therefore no longer avoids the bill: the reactivation is an uncovered vehicle and is charged pro-rata. A company that is past due, in dunning, or canceled cannot add vehicles at all. Add-on attempts are recorded in `vehicle_addon_charges`, written as `pending` before the Square call so a retry replays a byte-identical request rather than being refused for reusing the idempotency key; a `pending` row is a payment whose outcome is unknown, never one that did not happen, and must not be deleted.
   - **Card form postal code (sandbox gotcha).** The Web Payments SDK picks the postal-code
     field's format from the *card's* issuing country, not the Square account's country. It sends the
@@ -163,24 +166,18 @@ SQUARE_ENVIRONMENT=                 # sandbox or production
 SQUARE_LOCATION_ID=                 # server-only; payments location
 NEXT_PUBLIC_SQUARE_APP_ID=          # browser; Web Payments SDK
 NEXT_PUBLIC_SQUARE_LOCATION_ID=     # browser; Web Payments SDK
-CRON_SECRET=                        # bearer token protecting /api/billing/run; Vercel Cron sends it automatically
+CRON_SECRET=                        # REQUIRED for billing: bearer token for /api/billing/run (500 and no billing if unset)
+
+# App
+NEXT_PUBLIC_SITE_URL=               # absolute base URL for links in emails and share links (falls back to https://tmswizard.cloud)
 ```
 
-Database: the schema is managed in Supabase. RLS policies and helper functions are drafted as SQL under `docs/sql/` and applied in the Supabase SQL editor (not through an automated migration runner). This includes `docs/sql/billing_01_platform_billing.sql` (platform billing tables and policies), which is an unapplied draft until it is run there.
+Database: the schema is managed in Supabase. Migrations are SQL files applied by hand in the Supabase SQL editor; there is no automated migration runner. They live in two places:
 
-Deploying the mid-cycle billing work: the order is not optional, and it is spelled out in each migration's header. Read those before touching anything; the summary here is a checklist, not the reasoning.
+- `docs/sql/`: `rls_*`, `billing_01`..`billing_07` and the `prodfix_*` series.
+- `supabase/migrations/` (15 files, 2026-08-13 .. 2026-09-11): planning, load manifests, quotation acceptance, Xero credentials, driver activity. The folder uses Supabase CLI naming but the files were pasted into the SQL editor, so the CLI's history is empty. Never run `supabase db push` against this project: it would replay all 15.
 
-Before the deploy, in this order:
-
-1. `billing_03_mid_cycle_charges.sql` **STEP 1 only** (down to the STEP 2 banner). Do not paste the whole file: the steps are separated by comment banners, so one paste runs all three. STEP 1 creates `vehicle_cycle_coverage` and `vehicle_addon_charges` and backfills coverage for the cycle already paid for. Run its pre-flight checks first.
-2. `billing_04_atomic_charge_record.sql` in full. It creates `record_cycle_charge`, which the deployed `lib/billing/server.ts` calls by name. Ship the code first and every cron charge and first-time card setup takes the customer's money at Square and then fails on a missing function, recording neither the charge nor its coverage.
-3. `billing_05_addon_intent.sql` in full. It widens the `vehicle_addon_charges` status constraint to allow `pending`, which `lib/billing/addonServer.ts` writes before calling Square. Ship the code first and vehicle additions fail outright, but before any payment is attempted, so no money moves.
-
-Then deploy the code, and immediately re-run the STEP 1 backfill. STEP 1 runs while the old cron is still live and the old cron writes no coverage, so a charge date falling in that window leaves the new cycle uncovered and the next mid-cycle addition double-charges. The backfill is only safe to re-run inside that window: once a cron cycle has advanced `next_charge_on` it mints coverage nobody paid for.
-
-After the deploy has soaked, run `billing_03` STEP 2 and STEP 3 together. They revoke the browser's insert and update on `vehicle_licences` and add a trigger over `active` and `vehicle_id`. Run either one before the new code is live and licence creation breaks immediately, because the old licences page writes that table directly. After them, reverting the code breaks licence creation for the same reason.
-
-`billing_01_platform_billing.sql` and `billing_02_four_weekly.sql` precede all of this and are assumed already applied; `billing_02` has its own before-deploy / after-soak split in its header.
+`billing_01`..`billing_07` and `supabase/migrations/` are the applied baseline. Do not re-run them (in particular `billing_03` STEP 1, which mints coverage nobody paid for outside its original deploy window). `rls_01` and `rls_01b` now raise if run. Outstanding migrations, their order and a baseline check query are in `docs/sql/prodfix_00_APPLY_ORDER.md`; the reasoning behind each billing step is in its own file header.
 
 ## Project structure
 
@@ -189,8 +186,10 @@ app/                      Next.js App Router pages and API routes
   components/             shared UI (AppHeader, TenantProvider, TenantGate, TenantSelector, PodLink)
   <feature>/page.tsx      one page per feature (jobs, pod, invoices, ...)
   api/                    route handlers (auth callback, request-access, billing/run, billing/card, licences/activate)
-  subscription page/      earlier Square catalogue / plan-creation scaffolding, superseded by lib/payments/square.ts
 lib/
+  auth/                   public route allowlist, route classification test, profiles-based tenant authorization
+  rateLimit.ts            durable rate limits backed by the prodfix_01 table
+  printing/               PDF helpers, including pdfFonts.ts (embedded Unicode fonts for every generated PDF)
   supabase/               browser, server, and admin (service-role) clients
   tenant/                 pure tenant-resolution logic (context, filter) + tests
   pod/                    POD URL classifier / signer + tests
@@ -198,10 +197,9 @@ lib/
   validation/             Zod schemas
   roles.ts                role-name helper
 docs/
-  sql/                    RLS + storage policy migrations (rls_01..rls_10), plus the billing series applied in
-                          order: billing_01_platform_billing, billing_02_four_weekly,
-                          billing_03_mid_cycle_charges, billing_04_atomic_charge_record,
-                          billing_05_addon_intent
+  sql/                    RLS + storage policy migrations (rls_01..rls_12), the billing series applied in
+                          order (billing_01..billing_07), and the prodfix_* review fixes, whose order and
+                          dashboard steps are in prodfix_00_APPLY_ORDER.md
   superpowers/specs/      design specs
   superpowers/plans/      implementation plans
   handoffs/               session handoffs
@@ -210,13 +208,14 @@ docs/
 ## Roadmap (intended features)
 
 - **Finish the security-week rollout:** apply the tenant-context de-hardcode and the pod-files private-bucket lockdown to production. The `proxy.ts` auth gate is done (Next 16 renamed `middleware.ts` to `proxy.ts`): Supabase session refresh, plus a deny-by-default redirect/401 for unauthenticated requests; its public-route allowlist lives in `lib/auth/publicRoutes.ts` and is unit tested.
-- **Lock down the `job-files` bucket:** a second storage bucket with permissive policies, pending a decision on its ownership and use.
+- **Lock down the `job-files` bucket:** written as `prodfix_82` (private bucket) and `prodfix_83` (restrictive tenant policies, superseding `rls_12`), not yet applied. No app code uses the bucket, so deleting it is the simpler option.
 - **Live tracking:** TomTom integration to make `/tracking` and `/telematics` real-time instead of read-only snapshots.
 - **Payments:** platform subscription billing (Square card on file, daily charge cron, dunning) is live at `/settings/billing`; self-serve signup (a company creating its own account and starting a subscription without an operator provisioning it first) is still future work.
 - **Analytics dashboards:** make `/dashboard` data-driven; add cross-tenant "which tenant is performing best" views on top of the admin tenant selector; charts and SQL-view aggregation at scale.
-- **Admin management:** super-admin user management (the users page is read-only); a `super_admin_audit` table to replace the current log-only trail of company and tenant edits; a transactional RPC so the two-write company and tenant routes cannot leave partial state; and finish the per-page permissions model (revoke path, controlled state).
+- **Admin management:** super-admin user management (the users page is read-only) and a "view as tenant" mode; decide and build the per-page permissions model. Done on the review branch: the `super_admin_audit` table and an atomic tenant-move RPC (`prodfix_10`).
 - **Design-system rollout:** move the remaining ~14 legacy inline-styled pages onto the design system so they follow the theme. The dark-default "operator theme" itself shipped on 2026-08-13 (see Design system above); what is left is converting those pages' hardcoded colour literals to tokens and adding each path to `lib/nav/themeableRoutes.ts`.
-- **User invite flow:** complete first-user-becomes-admin provisioning and settings guards.
+- **User invite flow:** invites now provision `profiles` atomically; first-user-becomes-admin for self-service signup is still to be built.
+- **Queued features (designs pending):** past-due read-only suspension, billing health alerts, per-tenant timezone, and data export on cancellation.
 
 ## Notes on maturity
 

@@ -517,8 +517,25 @@ export default function V2Billing() {
                 response.retried && response.succeeded === false
                   ? {
                       tone: "warning",
-                      text: `New card saved, but the outstanding charge was declined (${String(response.failureCode ?? "declined")}). It will be retried automatically.`,
+                      text: "New card saved, but an outstanding payment was declined. Check the card details or contact your bank, then try again.",
                     }
+                  : response.openFailureCode
+                    ? {
+                        tone: "warning",
+                        text: "Card saved, but the first payment for your active vehicles could not be taken. Check the card and try again, or contact support.",
+                      }
+                  : response.retried
+                    ? {
+                        tone: "success",
+                        text: response.periodOpened
+                          ? "Card saved, your outstanding balance was paid and a new billing period has started."
+                          : "Card saved and your outstanding balance was paid.",
+                      }
+                  : response.periodOpened
+                    ? {
+                        tone: "success",
+                        text: "Card saved. Your active vehicles are now being billed and the minimum for this period was taken.",
+                      }
                   : response.model === "v2_period"
                     ? {
                         tone: "success",

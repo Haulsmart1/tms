@@ -36,6 +36,9 @@ export default async function AuthConfirmPage({
     scalar(params.next) ??
     "/dashboard";
 
+  /* The link's own OTP type (email, magiclink or invite) is carried through
+     rather than forced to "email", so an invite link verifies as an invite.
+     The callback re-validates it against the same allowlist. */
   const valid =
     isValidMagicLinkTokenHash(tokenHash) &&
     isMagicLinkEmailType(type);
@@ -60,6 +63,14 @@ export default async function AuthConfirmPage({
               Press continue to securely sign in to TMS Wizzard.
             </p>
 
+            {/* A sign-in link signs you in as whoever it was sent to. Someone
+                could send you a link to THEIR account hoping you enter
+                customer or card details into it (login CSRF, AUTH-6). */}
+            <p className="mt-2 text-sm text-ink-2">
+              Only continue if you asked for this link yourself. If someone
+              else sent it to you, close this page.
+            </p>
+
             <form
               method="post"
               action="/api/auth/callback"
@@ -74,7 +85,7 @@ export default async function AuthConfirmPage({
               <input
                 type="hidden"
                 name="type"
-                value="email"
+                value={type ?? "email"}
               />
 
               <input

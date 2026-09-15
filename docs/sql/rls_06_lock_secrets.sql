@@ -17,9 +17,18 @@ revoke select, insert, update, delete on public.integration_connections from ano
 -- security_barrier view, never a policy on this table.
 
 -- A4 (hygiene): memberships is a legacy user<->tenant table (FK user_id -> public.users),
--- unused by the app, and it kept a stale "TO public" ALL policy comparing tenant_id to a
--- company id. Drop it and lock the table (deny-all), matching users/user_permissions. It is
--- slated for removal with public.users.
+-- and it kept a stale "TO public" ALL policy comparing tenant_id to a company id. Drop it and
+-- lock the table (deny-all). It is slated for removal with public.users.
+--
+-- CORRECTION 2026-09-14 (review finding SQL-7): "unused by the app" was wrong when written.
+-- Service-role routes (settings/users, portal-invites, subcontractor invites, pod/share,
+-- subcontractors) still read and WRITE memberships, and two tachograph RPCs authorized from it.
+-- The product decision since then: profiles (role_id, company_id, tenant_id) is the single source
+-- of truth for roles and tenancy, exactly as can_access_tenant / can_manage_tenant /
+-- get_tenant_context read it. As of commit deec4cd the app no longer reads memberships for
+-- authorization, and prodfix_87 moves the tachograph RPCs to can_manage_tenant. Do NOT drop the
+-- table until every remaining write in app/api has been removed. user_permissions is no longer
+-- deny-all either: see prodfix_91.
 do $$ declare pol record; begin
   for pol in select policyname from pg_policies
     where schemaname='public' and tablename='memberships'

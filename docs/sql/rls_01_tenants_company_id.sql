@@ -1,5 +1,13 @@
 -- RLS Tenancy Hardening (Phase 1) -- 01: add tenants.company_id
--- Run in the Supabase SQL editor, in numeric order. Safe to re-run.
+--
+-- APPLIED ONCE with the 2026-07-28 tenancy hardening. DO NOT RE-RUN. The block below refuses to run.
+-- The original header said "Safe to re-run". A re-run recreates the shared placeholder tenant
+-- (with a null company_id) if it has since been deleted. Kept for history only.
+do $$
+begin
+  raise exception 'rls_01_tenants_company_id.sql was applied on 2026-07-28 and must not be re-run. Nothing changed.';
+end $$;
+
 -- Plan: docs/superpowers/plans/2026-07-28-rls-tenancy-hardening.md
 -- APPLY ORDER: 01 -> (reseed tenants + assign admin roles, plan Task 7 steps 1-2)
 --              -> 02 -> 03 -> 04 -> 04b -> 05 -> 09.

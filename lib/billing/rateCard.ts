@@ -180,6 +180,83 @@ function pricedBands(
   );
 }
 
+export type VehicleDaysBand = {
+  band: DiscountBand;
+  /**
+   * The discounted price of the fleet as a fraction of its undiscounted price
+   * is numerator / denominator. Integers, so the invoice never takes a float.
+   */
+  numerator: number;
+  denominator: number;
+};
+
+/**
+ * The discount band for a period, chosen from VEHICLE-DAYS rather than from
+ * the number of invoice lines. Review finding BILL2-3.
+ *
+ * THE RULE. A fleet's size for banding is its full-period equivalent: the
+ * total billable vehicle-days divided by the length of the period. That
+ * equivalent is priced on the same capped curve as fleetPeriodPence, just
+ * evaluated continuously:
+ *
+ *     price(x) = min over bands B of ( max(x, T_B) x rate x (1 - d_B) )
+ *
+ * with the 0% band taken as x itself (no cap raising a fraction of a vehicle
+ * up to one whole vehicle). The ratio price(x) / (x x rate) is what the
+ * invoice applies to its prorated subtotal.
+ *
+ * WHY. Banding on line count let a customer add throwaway vehicles on the last
+ * day of a period: each cost 1/28 of the rate but counted as a whole vehicle
+ * for the band, and the band's discount then applied to the whole subtotal. Nine
+ * full vehicles plus one added on the last day invoiced GBP 55.98 LESS than the
+ * nine alone. On vehicle-days that vehicle adds 1/28 of a vehicle to the fleet
+ * size, so the band cannot move, and every term above is non-decreasing in the
+ * vehicle-days, so adding coverage can never lower the price (up to per-line
+ * penny rounding, which invoice.test.ts bounds).
+ *
+ * The denominator is the period's ACTUAL length, so a period cut short by
+ * cancellation still bands on the fleet that was running: twenty vehicles for
+ * the eleven days of a cancelled period are twenty vehicles, which is the
+ * spec's worked example. A fleet present all period lands exactly on the rate
+ * card, because x is then the vehicle count.
+ */
+export function fleetBandForVehicleDays(
+  vehicleDays: number,
+  periodDays: number
+): VehicleDaysBand {
+  if (!Number.isInteger(vehicleDays) || vehicleDays < 0) {
+    throw new Error(
+      `vehicleDays must be a non-negative integer, got ${vehicleDays}`
+    );
+  }
+  if (!Number.isInteger(periodDays) || periodDays <= 0) {
+    throw new Error(`periodDays must be a positive integer, got ${periodDays}`);
+  }
+
+  const denominator = vehicleDays * 100;
+  if (vehicleDays === 0) {
+    return { band: DISCOUNT_BANDS[0], numerator: 0, denominator: 0 };
+  }
+
+  let bestIndex = 0;
+  let best = Number.POSITIVE_INFINITY;
+  DISCOUNT_BANDS.forEach((band, index) => {
+    const size =
+      band.discountPercent === 0
+        ? vehicleDays
+        : Math.max(vehicleDays, band.threshold * periodDays);
+    const term = size * (100 - band.discountPercent);
+    // Strictly less, so ties go to the earlier (smaller) band, matching
+    // fleetDiscountBand.
+    if (term < best) {
+      best = term;
+      bestIndex = index;
+    }
+  });
+
+  return { band: DISCOUNT_BANDS[bestIndex], numerator: best, denominator };
+}
+
 /**
  * The billing model a BRAND NEW company is created on.
  *

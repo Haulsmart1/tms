@@ -98,6 +98,8 @@ export async function optimizeDriverAwareJobOrder(input: {
         return { ok: false, reason: "no_routable_jobs" };
       case "start_cost_unavailable":
       case "route_cost_unavailable":
+      // No signal is passed here, so cancellation cannot happen; treat it as unavailable.
+      case "cancelled":
         return { ok: false, reason: "route_cost_unavailable" };
     }
   }

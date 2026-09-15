@@ -101,14 +101,13 @@ describe("selectAddonAction", () => {
     ).toEqual({ kind: "blocked", reason: "dunning" });
   });
 
-  // A healthy company whose cycle charge is due today or overdue: coverage is
-  // no longer honoured, but the outcome is unchanged (still free, still no
-  // coverage written, still billed in full by the imminent cron run). Only
-  // the reason string differs.
-  it("falls through to cycle_due rather than already_covered on the charge date", () => {
+  // A healthy company whose cycle charge is due today or overdue: coverage no
+  // longer vouches for an elapsed cycle, and the addition waits for the
+  // renewal to be recorded.
+  it("does not honour coverage on the charge date", () => {
     expect(select({ todayISO: "2026-09-21", alreadyCovered: true })).toEqual({
-      kind: "free",
-      reason: "cycle_due",
+      kind: "blocked",
+      reason: "renewal_due",
     });
   });
 
@@ -171,21 +170,24 @@ describe("selectAddonAction", () => {
     ).toEqual({ kind: "blocked", reason: "inactive_subscription" });
   });
 
-  // Between a cycle falling due and the cron running, next_charge_on is in
-  // the past. The imminent cron run counts live vehicles, so it will pick
-  // this one up at full price; recording coverage here would make it free for
-  // a whole cycle.
-  it("is free on the charge date, leaving the vehicle to the cron", () => {
+  // BILL1-9: between a cycle falling due and its charge being recorded, an
+  // addition could miss the cron's snapshot and ride free for a cycle.
+  it("refuses on the charge date until the renewal is recorded", () => {
     expect(select({ todayISO: "2026-09-21" })).toEqual({
-      kind: "free",
-      reason: "cycle_due",
+      kind: "blocked",
+      reason: "renewal_due",
     });
   });
 
-  it("is free while a due charge has not yet run", () => {
+  // BILL1-4: a cron that is not running must not turn additions free.
+  it("refuses while a due charge has not yet run, however overdue", () => {
     expect(select({ todayISO: "2026-09-23" })).toEqual({
-      kind: "free",
-      reason: "cycle_due",
+      kind: "blocked",
+      reason: "renewal_due",
+    });
+    expect(select({ todayISO: "2026-12-01" })).toEqual({
+      kind: "blocked",
+      reason: "renewal_due",
     });
   });
 

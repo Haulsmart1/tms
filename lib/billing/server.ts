@@ -7,13 +7,17 @@ import { createAdminClient, createUserClient } from "../accounts/server";
 import { ACCOUNTS_ADMIN_ROLES, isRoleAuthorized } from "../accounts/authz";
 import { extractRoleName } from "../roles";
 import { getSquare, getSquareLocationId } from "../payments/square";
+import { reconcilePaymentByReference } from "../payments/squareLookup";
 import {
   chargeIdempotencyKey,
   classifyPaymentResult,
   computeChargeAmounts,
+  VAT_RATE,
 } from "./money";
+import { paymentReferenceId } from "./reconcile";
 import { classifySquareThrow } from "./squareThrow";
 import { billableVehicleIds } from "./vehicleCount";
+import { selectV1CancellationAction } from "./cancellation";
 
 // PostgREST caps unscoped selects at 1000 rows by default. Hitting this cap
 // means the vehicle/licence count below is silently truncated, which
@@ -134,18 +138,68 @@ export type CycleResult = {
   receiptUrl: string | null;
 };
 
+// What one cycle charge sends to Square, and the vehicles it pays for. Taken
+// from a pending intent row when one exists, never recomputed on a replay.
+type CycleBody = {
+  attempt: number;
+  vehicleIds: string[];
+  vehicleCount: number;
+  netPence: number;
+  vatPence: number;
+  grossPence: number;
+  squareCardId: string;
+  squareCustomerId: string;
+  createdAt: string | null;
+};
+
+const INTENT_SELECT =
+  "attempt, status, vehicle_count, net_pence, vat_pence, gross_pence, square_card_id, square_customer_id, vehicle_ids, created_at";
+
+type IntentRow = {
+  attempt: number;
+  status: string;
+  vehicle_count: number;
+  net_pence: number;
+  vat_pence: number;
+  gross_pence: number;
+  square_card_id: string | null;
+  square_customer_id: string | null;
+  vehicle_ids: string[] | null;
+  created_at: string | null;
+};
+
+// 42703 means prodfix_33 is not applied: platform_charges has no intent
+// columns, and the charge falls back to recording its outcome after Square
+// answers, which is exactly how it worked before.
+function intentUnsupported(error: { code?: string } | null): boolean {
+  return error?.code === "42703";
+}
+
 // Runs one charge attempt end to end: count vehicles, take payment (skipped
-// for zero vehicles), append the platform_charges audit row. Does NOT touch
-// company_billing; callers persist applyChargeOutcome themselves, because the
-// first-ever charge creates the row while cron charges update it.
+// for zero vehicles), record the platform_charges audit row and the coverage
+// it bought. Does NOT touch company_billing; callers persist
+// applyChargeOutcome themselves, because the first-ever charge creates the row
+// while cron charges update it.
+//
+// INTENT FIRST (review BILL1-3). This used to record nothing until Square
+// answered. On an indeterminate answer the next run sent the same key with a
+// body recomputed from the live fleet, and if the fleet had changed Square
+// answered IDEMPOTENCY_KEY_REUSED, every day, forever. It now writes a
+// `pending` row holding the amounts, the card and the vehicle ids BEFORE the
+// call, and a retry resends exactly that. Same pattern as billing_05 for
+// add-ons and period_charges for v2. Needs docs/sql/prodfix_33; without it the
+// old record-after behaviour runs unchanged.
+//
+// A DUNNING RETRY CHARGES WHAT THE CYCLE RECORDED (review BILL1-6). Attempts
+// after the first reuse the failed attempt's amounts and vehicle ids, so a
+// company recovering after months past_due pays the cycle it owed, not that
+// cycle re-priced at today's fleet.
 //
 // If Square returns a non-terminal status (PENDING/APPROVED), this throws
-// PAYMENT_INDETERMINATE before writing the audit row: recording it as either
-// succeeded or failed would be wrong (succeeded is a lie; failed schedules a
-// retry under a NEW idempotency key, and if the pending payment later
-// completes the customer is charged twice). The next run replays the SAME
-// (company, cycle, attempt) idempotency key and observes the payment's
-// eventual terminal state.
+// PAYMENT_INDETERMINATE before settling anything: recording it as either
+// succeeded or failed would be wrong (failed schedules a retry under a NEW
+// idempotency key, and if the pending payment later completes the customer is
+// charged twice). The next run replays the SAME key and body.
 export async function runChargeCycle(
   admin: SupabaseClient,
   args: {
@@ -191,41 +245,159 @@ export async function runChargeCycle(
     };
   }
 
-  const vehicleIds = await fetchBillableVehicles(admin, args.companyId);
-  const vehicleCount = vehicleIds.size;
-  const amounts = computeChargeAmounts(vehicleCount);
+  // An unsettled intent for this cycle.
+  const pendingRes = await admin
+    .from("platform_charges")
+    .select(INTENT_SELECT)
+    .eq("company_id", args.companyId)
+    .eq("cycle_date", args.cycleDate)
+    .eq("status", "pending")
+    .order("attempt", { ascending: false })
+    .limit(1);
+  if (pendingRes.error && !intentUnsupported(pendingRes.error)) {
+    throw new Error(`Unable to check for a pending charge: ${pendingRes.error.message}`);
+  }
+  const intentsSupported = !pendingRes.error;
+  const pending = (pendingRes.data?.[0] as IntentRow | undefined) ?? null;
+
+  if (pending && Number(pending.attempt) !== args.attempt) {
+    // A different attempt of this cycle has an unknown outcome. Charging
+    // another attempt now is a second key against a card that may already
+    // have paid, so refuse until it is reconciled.
+    throw new Error(
+      `PAYMENT_INDETERMINATE: attempt ${pending.attempt} for company ${args.companyId} cycle ${args.cycleDate} is still pending; it must be reconciled before attempt ${args.attempt} is charged`
+    );
+  }
+
+  let body: CycleBody | null = pending ? bodyFromIntent(pending, args) : null;
+  let intentRecorded = Boolean(pending);
+
+  if (!body) {
+    let recorded: IntentRow | null = null;
+    if (intentsSupported && args.attempt > 1) {
+      const failedRes = await admin
+        .from("platform_charges")
+        .select(INTENT_SELECT)
+        .eq("company_id", args.companyId)
+        .eq("cycle_date", args.cycleDate)
+        .eq("status", "failed")
+        .not("vehicle_ids", "is", null)
+        .order("attempt", { ascending: false })
+        .limit(1);
+      if (failedRes.error) {
+        throw new Error(`Unable to read the recorded cycle: ${failedRes.error.message}`);
+      }
+      recorded = (failedRes.data?.[0] as IntentRow | undefined) ?? null;
+    }
+
+    if (recorded) {
+      body = {
+        ...bodyFromIntent(recorded, args),
+        attempt: args.attempt,
+        squareCardId: args.squareCardId,
+        squareCustomerId: args.squareCustomerId,
+        createdAt: null,
+      };
+    } else {
+      const vehicleIds = [...(await fetchBillableVehicles(admin, args.companyId))];
+      const amounts = computeChargeAmounts(vehicleIds.length);
+      body = {
+        attempt: args.attempt,
+        vehicleIds,
+        vehicleCount: vehicleIds.length,
+        netPence: amounts.netPence,
+        vatPence: amounts.vatPence,
+        grossPence: amounts.grossPence,
+        squareCardId: args.squareCardId,
+        squareCustomerId: args.squareCustomerId,
+        createdAt: null,
+      };
+    }
+  }
 
   let succeeded = true;
   let failureCode: string | null = null;
   let squarePaymentId: string | null = null;
   let receiptUrl: string | null = null;
 
-  if (amounts.grossPence > 0) {
-    let payment: { id?: string; receiptUrl?: string; status?: string } | undefined;
-    let callThrew = false;
-
-    // Resolved BEFORE the try. Both throw when an env var is missing, which is
-    // a configuration outage with no request sent, and inside the try that
-    // would be classified as a payment of unknown outcome and reported as
-    // "the money may have moved" for a call that never left the process.
+  if (body.grossPence > 0) {
+    // Resolved BEFORE the intent is written and before the try. Both throw
+    // when an env var is missing, which is a configuration outage with no
+    // request sent; a pending row written first would read as "the money may
+    // have moved" for a call that never left the process.
     const square = getSquare();
     const locationId = getSquareLocationId();
 
+    if (!intentRecorded && intentsSupported) {
+      const inserted = await admin.from("platform_charges").insert({
+        company_id: args.companyId,
+        cycle_date: args.cycleDate,
+        attempt: body.attempt,
+        vehicle_count: body.vehicleCount,
+        net_pence: body.netPence,
+        vat_pence: body.vatPence,
+        gross_pence: body.grossPence,
+        vat_rate: VAT_RATE,
+        currency: "GBP",
+        status: "pending",
+        square_card_id: body.squareCardId,
+        square_customer_id: body.squareCustomerId,
+        vehicle_ids: body.vehicleIds,
+      });
+
+      if (!inserted.error) {
+        intentRecorded = true;
+      } else if (inserted.error.code === "23505") {
+        // Something already holds this attempt number. A pending row is
+        // another caller's intent: replay it. A settled one is an attempt whose
+        // company_billing outcome was never applied: replay the same key and
+        // body without an intent, which is how this worked before and lets
+        // Square hand back the original answer.
+        const raced = await admin
+          .from("platform_charges")
+          .select(INTENT_SELECT)
+          .eq("company_id", args.companyId)
+          .eq("cycle_date", args.cycleDate)
+          .eq("attempt", body.attempt)
+          .maybeSingle();
+        if (raced.error) throw new Error(raced.error.message);
+        if ((raced.data as IntentRow | null)?.status === "pending") {
+          body = bodyFromIntent(raced.data as IntentRow, args);
+          intentRecorded = true;
+        }
+      } else if (
+        inserted.error.code === "23514" ||
+        intentUnsupported(inserted.error)
+      ) {
+        console.warn(
+          "[billing] platform_charges cannot hold a pending intent yet; apply docs/sql/prodfix_33_billing_integrity.sql. Recording after Square answers instead."
+        );
+      } else {
+        throw new Error(`Unable to record charge intent: ${inserted.error.message}`);
+      }
+    }
+
+    const idempotencyKey = chargeIdempotencyKey(
+      args.companyId,
+      args.cycleDate,
+      body.attempt
+    );
+    const referenceId = paymentReferenceId(idempotencyKey);
+    let payment: { id?: string; receiptUrl?: string; status?: string } | undefined;
+    let callThrew = false;
+
     try {
       const response = await square.payments.create({
-        idempotencyKey: chargeIdempotencyKey(
-          args.companyId,
-          args.cycleDate,
-          args.attempt
-        ),
-        sourceId: args.squareCardId,
-        customerId: args.squareCustomerId,
+        idempotencyKey,
+        sourceId: body.squareCardId,
+        customerId: body.squareCustomerId,
         locationId,
         amountMoney: {
-          amount: BigInt(amounts.grossPence),
+          amount: BigInt(body.grossPence),
           currency: "GBP",
         },
-        note: `TMS Wizzard subscription ${args.cycleDate}: ${vehicleCount} vehicles`,
+        referenceId,
+        note: `TMS Wizzard subscription ${args.cycleDate}: ${body.vehicleCount} vehicles`,
       });
       payment = response.payment;
     } catch (error) {
@@ -233,37 +405,42 @@ export async function runChargeCycle(
         error instanceof SquareError &&
         error.errors[0]?.code === "IDEMPOTENCY_KEY_REUSED"
       ) {
-        // A payment already exists under this (company, cycle, attempt) key
-        // with a body that no longer matches (e.g. a replacement card), so
-        // Square refused to replay it. The prior payment's outcome is unknown
-        // to this caller: recording a failure here would misclassify a
-        // possible success, and recording a success would be a guess.
-        throw new Error(
-          `PAYMENT_INDETERMINATE: idempotency key already used for company ${args.companyId} cycle ${args.cycleDate} attempt ${args.attempt}; a payment exists with unknown outcome, re-run later`
-        );
-      }
+        // A payment already exists under this key with a body that no longer
+        // matches. Ask Square what it was rather than guess.
+        const found = await reconcilePaymentByReference(square, {
+          locationId,
+          referenceId,
+          amountPence: body.grossPence,
+          sinceISO: body.createdAt,
+        });
+        if (found.kind === "succeeded") {
+          payment = { id: found.paymentId, receiptUrl: found.receiptUrl ?? undefined, status: "COMPLETED" };
+        } else if (found.kind === "failed") {
+          payment = { status: found.failureCode };
+        } else {
+          throw new Error(
+            `PAYMENT_INDETERMINATE: idempotency key already used for company ${args.companyId} cycle ${args.cycleDate} attempt ${body.attempt} and Square could not confirm the outcome (${found.reason}); MANUAL REVIEW: reconcile reference ${referenceId} before retrying`
+          );
+        }
+      } else {
+        // Only a throw that PROVES Square refused the payment may be recorded
+        // as a decline. See classifySquareThrow.
+        const thrown = classifySquareThrow(error);
+        if (thrown.kind === "indeterminate") {
+          throw new Error(
+            `PAYMENT_INDETERMINATE: no usable answer from Square for company ${args.companyId} cycle ${args.cycleDate} attempt ${body.attempt}: ${thrown.reason}; the next run replays the same idempotency key`
+          );
+        }
 
-      // Only a throw that PROVES Square refused the payment may be recorded as
-      // a decline. See classifySquareThrow: a dropped connection arrives here
-      // as a SquareError too, and recording that as failed would retire this
-      // attempt and let the next run open a new idempotency key against a card
-      // that may already have been charged.
-      const thrown = classifySquareThrow(error);
-      if (thrown.kind === "indeterminate") {
-        throw new Error(
-          `PAYMENT_INDETERMINATE: no usable answer from Square for company ${args.companyId} cycle ${args.cycleDate} attempt ${args.attempt}: ${thrown.reason}; nothing recorded, the next run replays the same idempotency key`
-        );
+        callThrew = true;
+        succeeded = false;
+        failureCode = thrown.failureCode;
       }
-
-      callThrew = true;
-      succeeded = false;
-      failureCode = thrown.failureCode;
     }
 
     // Classification happens outside the try/catch: the try/catch only
     // captures network/SDK-level failures. A successful call that returned a
-    // non-terminal payment status must throw here, BEFORE the audit insert
-    // below, so nothing is recorded for this attempt.
+    // non-terminal payment status must throw here, before anything is settled.
     if (!callThrew) {
       squarePaymentId = payment?.id ?? null;
       receiptUrl = payment?.receiptUrl ?? null;
@@ -275,7 +452,7 @@ export async function runChargeCycle(
             (squarePaymentId ?? "unknown") +
             " has status " +
             classification.status +
-            "; no outcome recorded, next run re-checks with the same idempotency key"
+            "; nothing settled, next run re-checks with the same idempotency key"
         );
       }
 
@@ -285,80 +462,29 @@ export async function runChargeCycle(
     }
   }
 
-  // Record the audit row and the coverage it bought in ONE call
-  // (docs/sql/billing_04_atomic_charge_record.sql). Both inserts run inside
-  // the single transaction PostgREST wraps around the rpc, so they land
-  // together or not at all.
+  // Record (or, with an intent, SETTLE) the audit row and the coverage it
+  // bought in ONE call (billing_04, amended by prodfix_33). Both writes run in
+  // the single transaction PostgREST wraps around the rpc. Coverage is the
+  // snapshot of vehicles this charge was priced for, not today's fleet.
   //
-  // Why not two statements here: coverage completeness is money. The
-  // licence-activation route reads vehicle_cycle_coverage to decide whether a
-  // mid-cycle vehicle needs a pro-rata charge, so a lost coverage row bills
-  // the customer again for a vehicle this cycle already paid for. Sequencing
-  // the two writes in this file is wrong in either order. Audit first with
-  // coverage errors swallowed can lose coverage permanently, and the
-  // prior-success early return above then stops any later run from repairing
-  // it. Coverage first with a throw on failure leaves the card route's
-  // first-time-setup path charged with no platform_charges row and no
-  // company_billing row, which is the one state its orphan recovery cannot
-  // detect.
-  //
-  // Folding coverage into the audit row's own statement adds no failure mode
-  // that was not already there: in the code this replaces the COVERAGE write
-  // threw on error too, so a coverage failure already aborted this function.
-  // (The audit insert threw on everything except 23505, and that single
-  // tolerance now lives in the database as `on conflict do nothing`, so there
-  // is no duplicate error left for this code to classify.)
-  //
-  // p_vehicle_ids is empty for a failed charge, and the function independently
-  // refuses to write coverage unless p_status is 'succeeded', so "a failed
-  // charge covers nothing" is decided in one place rather than duplicated
-  // here. A zero-vehicle cycle passes an empty array and writes no coverage.
-  //
-  // What a throw here costs depends on the branch that produced it. With
-  // grossPence === 0 no Square call happened, so only a zero-amount audit row
-  // is lost. On a decline no money moved, so only the failure audit row is
-  // lost. Only on success is the money taken with nothing recorded.
-  //
-  // Recovery from that last case differs by caller, and only one of them
-  // self-heals:
-  //
-  //   Cron (/api/billing/run): the per-company catch absorbs the throw and
-  //   applyChargeOutcome never runs, so status, retry_count and
-  //   next_charge_on are untouched; the next run recomputes an identical
-  //   (cycleDate, attempt) and sends Square the same idempotency key, which
-  //   replays the original payment instead of taking a second one. That
-  //   replay holds only while the request body is unchanged. The body carries
-  //   amountMoney and a note containing the vehicle count, so a change in
-  //   FLEET SIZE makes Square answer IDEMPOTENCY_KEY_REUSED instead (handled
-  //   above as PAYMENT_INDETERMINATE). Swapping one vehicle for another
-  //   leaves both the amount and the note identical, so the payment does
-  //   replay, and coverage is then written for the CURRENT set rather than
-  //   the set the payment actually covered.
-  //
-  //   Card route first-time setup (/api/billing/card): does NOT self-heal.
-  //   firstTimeAttempt is derived from platform_charges rows for
-  //   cycle_date = today and orphan recovery looks for a succeeded
-  //   platform_charges row; a throw here suppressed both, so neither can see
-  //   the payment. A same-day retry does not double-charge (same cycleDate,
-  //   same attempt, so the key is refused as IDEMPOTENCY_KEY_REUSED against
-  //   the newly stored card and the customer gets a 409), but the next day
-  //   cycleDate is a different date, so the key differs and the customer is
-  //   charged a second full cycle with still no record of the first.
+  // A throw here after a successful payment leaves the pending intent in place
+  // (or, without prodfix_33, no row), and the next run replays the same key
+  // and body, which Square answers with the original payment.
   const { error: recordError } = await admin.rpc("record_cycle_charge", {
     p_company_id: args.companyId,
     p_cycle_date: args.cycleDate,
-    p_attempt: args.attempt,
-    p_vehicle_count: vehicleCount,
-    p_net_pence: amounts.netPence,
-    p_vat_pence: amounts.vatPence,
-    p_gross_pence: amounts.grossPence,
-    p_vat_rate: amounts.vatRate,
+    p_attempt: body.attempt,
+    p_vehicle_count: body.vehicleCount,
+    p_net_pence: body.netPence,
+    p_vat_pence: body.vatPence,
+    p_gross_pence: body.grossPence,
+    p_vat_rate: VAT_RATE,
     p_currency: "GBP",
     p_square_payment_id: squarePaymentId,
     p_receipt_url: receiptUrl,
     p_status: succeeded ? "succeeded" : "failed",
     p_failure_code: failureCode,
-    p_vehicle_ids: succeeded ? [...vehicleIds] : [],
+    p_vehicle_ids: succeeded ? body.vehicleIds : [],
   });
 
   if (recordError) {
@@ -370,14 +496,102 @@ export async function runChargeCycle(
   return {
     companyId: args.companyId,
     cycleDate: args.cycleDate,
-    attempt: args.attempt,
-    vehicleCount,
-    netPence: amounts.netPence,
-    vatPence: amounts.vatPence,
-    grossPence: amounts.grossPence,
+    attempt: body.attempt,
+    vehicleCount: body.vehicleCount,
+    netPence: body.netPence,
+    vatPence: body.vatPence,
+    grossPence: body.grossPence,
     succeeded,
     failureCode,
     squarePaymentId,
     receiptUrl,
   };
+}
+
+function bodyFromIntent(
+  row: IntentRow,
+  args: { squareCardId: string; squareCustomerId: string }
+): CycleBody {
+  const vehicleIds = row.vehicle_ids ?? [];
+  return {
+    attempt: Number(row.attempt),
+    vehicleIds,
+    vehicleCount: Number(row.vehicle_count),
+    netPence: Number(row.net_pence),
+    vatPence: Number(row.vat_pence),
+    grossPence: Number(row.gross_pence),
+    squareCardId: row.square_card_id ?? args.squareCardId,
+    squareCustomerId: row.square_customer_id ?? args.squareCustomerId,
+    createdAt: row.created_at,
+  };
+}
+
+export type V1CancellationOutcome =
+  | { result: "cancelled" }
+  | {
+      result: "blocked";
+      reason: "already_canceled" | "payment_settling" | "no_subscription";
+    };
+
+/**
+ * Cancel a company still on v1. Review BILL1-14.
+ *
+ * Prepaid, so no invoice and no refund: the cycle in progress runs to its end.
+ * Setting `canceled` is what stops the money. The cron selects only
+ * non-canceled rows and selectDueAction answers none for canceled, the card
+ * route's recovery answers none, and the activate route blocks additions.
+ */
+export async function cancelV1Company(
+  admin: SupabaseClient,
+  companyId: string
+): Promise<V1CancellationOutcome> {
+  const billingRes = await admin
+    .from("company_billing")
+    .select("status")
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (billingRes.error) throw new Error(billingRes.error.message);
+  if (!billingRes.data) return { result: "blocked", reason: "no_subscription" };
+
+  const [cyclePending, addonPending] = await Promise.all([
+    admin
+      .from("platform_charges")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId)
+      .eq("status", "pending"),
+    admin
+      .from("vehicle_addon_charges")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId)
+      .eq("status", "pending"),
+  ]);
+  if (cyclePending.error) throw new Error(cyclePending.error.message);
+  // 42P01: billing_03 is not applied, so there are no add-on charges at all.
+  if (addonPending.error && addonPending.error.code !== "42P01") {
+    throw new Error(addonPending.error.message);
+  }
+
+  const action = selectV1CancellationAction({
+    status: billingRes.data.status as string,
+    hasUnsettledCharge:
+      (cyclePending.count ?? 0) > 0 || (addonPending.count ?? 0) > 0,
+  });
+  if (action.kind === "blocked") {
+    return { result: "blocked", reason: action.reason };
+  }
+
+  // Conditional on not already canceled, so a concurrent cancel is harmless.
+  // retry_at is cleared so nothing reads the row as mid-dunning.
+  const { error } = await admin
+    .from("company_billing")
+    .update({
+      status: "canceled",
+      retry_at: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("company_id", companyId)
+    .neq("status", "canceled");
+  if (error) throw new Error(error.message);
+
+  return { result: "cancelled" };
 }

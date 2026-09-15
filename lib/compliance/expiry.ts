@@ -8,6 +8,13 @@
    driver's tacho/CPC readiness to be dispatched. This is document expiry dates
    on subcontractors and vehicles. */
 
+import {
+  calendarDaysBetween,
+  OPERATOR_TIME_ZONE,
+  operatorDayInTimeZone,
+  todayIsoDateInZone,
+} from "../time";
+
 export type ComplianceLevel = "ok" | "amber" | "red";
 
 export type ComplianceResult = {
@@ -16,7 +23,35 @@ export type ComplianceResult = {
   days: number | null;
 };
 
-export function getCompliance(expiry: string | null): ComplianceResult {
+const BARE_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const TIMESTAMP = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/;
+
+/* The calendar day an expiry value names, in the operator zone, or null when
+   it names none. A bare date is taken as written. A timestamp is an instant,
+   so its day is the operator-zone day that instant falls on. Anything else is
+   unreadable and must never be reported as valid (review PLAN-19). */
+function expiryDay(expiry: string, timeZone: string): string | null {
+  const value = expiry.trim();
+
+  if (BARE_DATE.test(value)) {
+    return calendarDaysBetween(value, value) === null ? null : value;
+  }
+
+  if (TIMESTAMP.test(value)) {
+    const instant = new Date(value);
+    return Number.isFinite(instant.getTime())
+      ? operatorDayInTimeZone(instant, timeZone)
+      : null;
+  }
+
+  return null;
+}
+
+export function getCompliance(
+  expiry: string | null,
+  now: Date = new Date(),
+  timeZone: string = OPERATOR_TIME_ZONE,
+): ComplianceResult {
   if (!expiry) {
     return {
       level: "amber",
@@ -25,21 +60,21 @@ export function getCompliance(expiry: string | null): ComplianceResult {
     };
   }
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  /* Calendar-day labels compared as labels, not a millisecond delta. The old
+     delta was a whole number of days plus or minus an hour whenever the two
+     dates straddled a clock change, and Math.ceil turned that hour into an
+     extra day, so the 7-day warning fired a day late in autumn (SET-23). */
+  const today = todayIsoDateInZone(timeZone, now);
+  const day = expiryDay(expiry, timeZone);
+  const days = day === null ? null : calendarDaysBetween(today, day);
 
-  /* KNOWN BUG, deliberately not fixed here: this millisecond delta is a whole
-     number of days plus or minus an hour whenever the two dates straddle a BST
-     transition, and Math.ceil turns that hour into a whole extra day. Warnings
-     fire a day late across the autumn change. Reproduction, blast radius and
-     the reasoning for leaving it are in
-     docs/superpowers/specs/2026-09-03-loading-skeletons-batch-2-design.md.
-
-     The shape of a fix: lib/planning/compliance.ts takes the operator day as a
-     `today: string` and compares calendar days as strings, which sidesteps the
-     arithmetic entirely. */
-  const expiryDate = new Date(`${expiry}T00:00:00`);
-  const days = Math.ceil((expiryDate.getTime() - today.getTime()) / 86_400_000);
+  if (days === null) {
+    return {
+      level: "amber",
+      label: "DATE INVALID",
+      days: null,
+    };
+  }
 
   if (days < 0) {
     return {

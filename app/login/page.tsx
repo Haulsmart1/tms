@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import Link from "next/link";
-import { createClient } from "../../lib/supabase/browser";
 import Field from "../../components/Field";
 import Button from "../../components/Button";
 
@@ -14,12 +13,22 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  /* The deep link the proxy (or TenantGate) sent us here with. The server
+     re-validates it against its own origin, so this is never trusted as-is. */
+  const [next, setNext] = useState<string | null>(null);
 
   useEffect(() => {
-    // The auth callback redirects failures here with ?error=..., so an expired
-    // or already-used link lands on a page that can send a fresh one.
     const params = new URLSearchParams(window.location.search);
-    if (params.get("error")) {
+    setNext(params.get("next"));
+
+    const error = params.get("error");
+    if (error === "portal") {
+      setMessage(
+        "You are signed in, but we could not work out which portal to open. Try again in a moment, or go to your dashboard.",
+      );
+    } else if (error) {
+      // The auth callback redirects failures here with ?error=..., so an expired
+      // or already-used link lands on a page that can send a fresh one.
       setMessage(
         "That sign-in link didn't work or has expired. Enter your email and we'll send a fresh one.",
       );
@@ -39,20 +48,26 @@ export default function LoginPage() {
 
     setLoading(true);
     try {
-      const supabase = createClient();
-      const redirectTo = `${window.location.origin}/auth/confirm?next=/dashboard`;
-      const { error } = await supabase.auth.signInWithOtp({
-        email: trimmed,
-        options: { emailRedirectTo: redirectTo },
+      /* Server route, not supabase.auth.signInWithOtp from the browser: the
+         route never creates an account, rate limits, and answers the same
+         whether or not the address exists (AUTH-7). */
+      const response = await fetch("/api/auth/magic-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: trimmed, next }),
       });
-      if (error) {
-        setMessage(error.message);
+      const payload = (await response.json().catch(() => ({}))) as {
+        message?: string;
+        error?: string;
+      };
+      if (!response.ok) {
+        setMessage(payload.error ?? "Unable to start login. Please try again.");
         return;
       }
-      setMessage("Login link sent. Check your email.");
+      setMessage(payload.message ?? "Check your email for a sign-in link.");
       setEmail("");
-    } catch (error: unknown) {
-      setMessage(error instanceof Error ? error.message : "Unable to start login.");
+    } catch {
+      setMessage("Unable to start login. Check your connection and try again.");
     } finally {
       setLoading(false);
     }
@@ -92,6 +107,13 @@ export default function LoginPage() {
             {message}
           </p>
         ) : null}
+
+        <p className="mt-4 text-xs text-ink-3">
+          No account yet?{" "}
+          <Link href="/#request-access" className="underline hover:text-ink">
+            Request access
+          </Link>
+        </p>
       </div>
     </div>
   );

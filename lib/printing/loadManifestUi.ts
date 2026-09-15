@@ -1,3 +1,5 @@
+import { isWorkableJobStatus } from "../jobs/jobStatus";
+
 export type ManifestUiJobItem = {
   id: string;
   serial_numbers: string[] | null;
@@ -6,6 +8,7 @@ export type ManifestUiJobItem = {
 export type ManifestUiJob = {
   id: string;
   reference: string;
+  status: string | null;
   vehicle_id: string | null;
   driver_id: string | null;
   job_items: ManifestUiJobItem[] | null;
@@ -50,11 +53,15 @@ export function serializedManifestItemsForJob(
   return result;
 }
 
+// Only open jobs can go on a manifest. The server refuses closed jobs too
+// (review POD-19); checking here keeps them out of the builder's list instead
+// of letting the office pick them and then fail on save.
 export function isMasterLoadEligible(
   job: ManifestUiJob,
 ): boolean {
   return Boolean(
-    job.vehicle_id
+    isWorkableJobStatus(job.status)
+    && job.vehicle_id
     && job.driver_id
     && serializedManifestItemsForJob(job).length > 0,
   );

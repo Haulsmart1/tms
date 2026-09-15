@@ -12,6 +12,8 @@ import StripeConnectionPanel from "../../../components/settings/StripeConnection
 import { useTenant } from "../../components/TenantProvider";
 import TenantGate from "../../components/TenantGate";
 import Skeleton from "../../../components/Skeleton";
+import { companyIdFromTenantRow, companyLookupTenantId } from "../../../lib/tenant/companyScope";
+import { isValidIanaTimeZone } from "../../../lib/time";
 
 type CompanyProfile = {
   tenant_id: string;
@@ -199,13 +201,23 @@ function mapRowToProfile(row: CompanyProfileRow): CompanyProfile {
 }
 
 export default function CompanySettingsPage() {
-  const {
-    status: tenantStatus,
+  const tenant = useTenant();
+  const tenantStatus = tenant.status;
+  const activeTenantId = tenant.activeTenantId;
+  const writeTenantId = tenant.writeTenantId;
+
+  /* SET-1: company_profiles is keyed by COMPANY id, so the tenant only tells
+     us where to look the company up (tenants.company_id). */
+  const lookupTenantId = companyLookupTenantId({
+    role: tenant.role,
     activeTenantId,
     writeTenantId,
-  } = useTenant();
+    tenants: tenant.tenants,
+  });
 
-  const selectedTenantId =
+  /* Stripe Connect is per tenant: it needs a real tenant id, never the
+     company id. */
+  const stripeTenantId =
     writeTenantId ??
     activeTenantId;
   const supabase = useMemo(() => createClient(), []);
@@ -293,29 +305,51 @@ export default function CompanySettingsPage() {
           return;
         }
 
-        if (!selectedTenantId) {
+        if (!lookupTenantId) {
           if (mounted) {
             setCompanyId(null);
             setProfile(null);
             setLoading(false);
             setError(
-              "No active company selected."
+              "Pick a tenant to edit its company profile."
             );
           }
 
           return;
         }
 
+        const { data: tenantRow, error: tenantError } = await supabase
+          .from("tenants")
+          .select("company_id")
+          .eq("id", lookupTenantId)
+          .maybeSingle();
+
         if (!mounted) {
           return;
         }
 
+        const resolvedCompanyId = tenantError
+          ? null
+          : companyIdFromTenantRow(tenantRow);
+
+        if (!resolvedCompanyId) {
+          setCompanyId(null);
+          setProfile(null);
+          setLoading(false);
+          setError(
+            tenantError
+              ? "Unable to resolve the company for this tenant."
+              : "This tenant is not linked to a company."
+          );
+          return;
+        }
+
         setCompanyId(
-          selectedTenantId
+          resolvedCompanyId
         );
 
         await loadProfile(
-          selectedTenantId,
+          resolvedCompanyId,
           isMounted
         );
       }
@@ -340,7 +374,7 @@ export default function CompanySettingsPage() {
       mounted = false;
     };
   }, [
-    selectedTenantId,
+    lookupTenantId,
     tenantStatus,
     supabase,
   ]);
@@ -419,6 +453,14 @@ export default function CompanySettingsPage() {
 
     if (!profile.legal_entity_type.trim()) {
       setError("Legal entity type is required.");
+      return;
+    }
+
+    // Planning, Tracking and Tachograph fall back to Europe/London on an
+    // invalid zone; refusing it here stops a typo from being saved at all.
+    const timeZone = profile.timezone.trim();
+    if (timeZone && !isValidIanaTimeZone(timeZone)) {
+      setError(`"${timeZone}" is not a recognised timezone. Use a name like Europe/London.`);
       return;
     }
 
@@ -893,9 +935,11 @@ export default function CompanySettingsPage() {
             </div>
           </form>
 
-          <StripeConnectionPanel
-            tenantId={companyId}
-          />
+          {stripeTenantId ? (
+            <StripeConnectionPanel
+              tenantId={stripeTenantId}
+            />
+          ) : null}
         </>
         )}
       </main>

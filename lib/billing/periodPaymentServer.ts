@@ -19,7 +19,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { SquareError } from "square";
 
 import { getSquare, getSquareLocationId } from "../payments/square";
+import { reconcilePaymentByReference } from "../payments/squareLookup";
 import { classifyPaymentResult } from "./money";
+import { paymentReferenceId } from "./reconcile";
 import { classifySquareThrow } from "./squareThrow";
 import {
   periodChargeIdempotencyKey,
@@ -41,7 +43,11 @@ type PendingRow = {
   currency: string;
   square_card_id: string | null;
   square_customer_id: string | null;
+  created_at: string | null;
 };
+
+const PENDING_SELECT =
+  "id, attempt, net_pence, vat_pence, gross_pence, currency, square_card_id, square_customer_id, created_at";
 
 /**
  * Square-backed period payments.
@@ -89,21 +95,57 @@ async function chargePeriod(
     return { status: "skipped" };
   }
 
-  const { data: billing, error: billingError } = await admin
-    .from("company_billing")
-    .select("square_customer_id, square_card_id")
-    .eq("company_id", charge.companyId)
+  // ALREADY PAID. Review BILL2-2. A second collector acting on a stale
+  // snapshot of a closed or failed period used to derive attempt max+1, which
+  // is a NEW idempotency key, and Square took a second payment. A period is
+  // never charged twice for one kind: return the payment that already landed.
+  const paid = await admin
+    .from("period_charges")
+    .select("square_payment_id, receipt_url")
+    .eq("billing_period_id", charge.periodId)
+    .eq("kind", charge.kind)
+    .eq("status", "succeeded")
+    .gt("gross_pence", 0)
+    .order("attempt", { ascending: false })
+    .limit(1)
     .maybeSingle();
-
-  if (billingError) throw new Error(billingError.message);
-  if (!billing?.square_card_id || !billing?.square_customer_id) {
-    return { status: "failed", failureCode: "NO_PAYMENT_METHOD" };
+  if (paid.error) throw new Error(paid.error.message);
+  if (paid.data) {
+    return {
+      status: "succeeded",
+      providerPaymentId: (paid.data.square_payment_id as string | null) ?? "",
+      receiptUrl: (paid.data.receipt_url as string | null) ?? null,
+    };
   }
 
-  const pending = await claimAttempt(admin, charge, {
-    cardId: billing.square_card_id as string,
-    customerId: billing.square_customer_id as string,
-  });
+  // Resolved BEFORE any row is written. Both throw when an env var is missing,
+  // which is a configuration outage with no request sent. Resolving them after
+  // the pending insert (as this used to) left a pending row for a request that
+  // never left the process, which then blocked the customer as "still
+  // settling" forever. Review BILL2-4.
+  const square = getSquare();
+  const locationId = getSquareLocationId();
+
+  // A pending row is replayed with the card IT recorded, so it needs no card on
+  // file today. Only a brand new attempt does.
+  let pending = await readPending(admin, charge);
+  if (!pending) {
+    const { data: billing, error: billingError } = await admin
+      .from("company_billing")
+      .select("square_customer_id, square_card_id")
+      .eq("company_id", charge.companyId)
+      .maybeSingle();
+
+    if (billingError) throw new Error(billingError.message);
+    if (!billing?.square_card_id || !billing?.square_customer_id) {
+      return { status: "failed", failureCode: "NO_PAYMENT_METHOD" };
+    }
+
+    pending = await claimAttempt(admin, charge, {
+      cardId: billing.square_card_id as string,
+      customerId: billing.square_customer_id as string,
+    });
+  }
 
   // Everything sent to Square comes from the PENDING ROW, never from `charge`.
   // That is the whole point of recording intent first: on a retry these are
@@ -114,32 +156,29 @@ async function chargePeriod(
     charge.kind,
     pending.attempt
   );
+  const referenceId = paymentReferenceId(idempotencyKey);
   const note = periodChargeNote(
     charge.kind,
     charge.periodStartISO,
     charge.periodEndISO
   );
 
-  // Resolved BEFORE the try. Both throw when an env var is missing, which is a
-  // configuration outage with no request sent; inside the try that would be
-  // classified as a payment of unknown outcome and reported as "the money may
-  // have moved" for a call that never left the process. Same reasoning as
-  // runChargeCycle.
-  const square = getSquare();
-  const locationId = getSquareLocationId();
-
   let payment: { id?: string; receiptUrl?: string; status?: string } | undefined;
 
   try {
     const response = await square.payments.create({
       idempotencyKey,
-      sourceId: pending.square_card_id ?? billing.square_card_id,
-      customerId: pending.square_customer_id ?? billing.square_customer_id,
+      sourceId: pending.square_card_id ?? "",
+      customerId: pending.square_customer_id ?? undefined,
       locationId,
       amountMoney: {
         amount: BigInt(pending.gross_pence),
         currency: pending.currency as "GBP",
       },
+      // Derived from the key, so a replay sends the same value. It is what
+      // lets reconcilePaymentByReference find this payment at Square when a
+      // replay is refused.
+      referenceId,
       note,
     });
     payment = response.payment;
@@ -149,12 +188,37 @@ async function chargePeriod(
       error.errors[0]?.code === "IDEMPOTENCY_KEY_REUSED"
     ) {
       // A payment exists under this key with a body that no longer matches.
-      // Its outcome is unknown here: recording a failure would misclassify a
-      // possible success, recording a success would be a guess. The pending
-      // row is deliberately LEFT IN PLACE so the attempt cannot advance and
-      // mint a fresh key against a card that may already have been charged.
+      // Look it up rather than guess. Only positive evidence is recorded; if
+      // Square cannot tell us, the pending row is LEFT IN PLACE so the attempt
+      // cannot advance and mint a fresh key against a card that may already
+      // have been charged.
+      const found = await reconcilePaymentByReference(square, {
+        locationId,
+        referenceId,
+        amountPence: pending.gross_pence,
+        sinceISO: pending.created_at,
+      });
+      if (found.kind === "succeeded") {
+        await settle(admin, pending.id, {
+          status: "succeeded",
+          square_payment_id: found.paymentId,
+          receipt_url: found.receiptUrl,
+        });
+        return {
+          status: "succeeded",
+          providerPaymentId: found.paymentId,
+          receiptUrl: found.receiptUrl,
+        };
+      }
+      if (found.kind === "failed") {
+        await settle(admin, pending.id, {
+          status: "failed",
+          failure_code: found.failureCode,
+        });
+        return { status: "failed", failureCode: found.failureCode };
+      }
       throw new Error(
-        `PAYMENT_INDETERMINATE: idempotency key already used for period ${charge.periodId} ${charge.kind} attempt ${pending.attempt}; a payment exists with unknown outcome, reconcile against Square before retrying`
+        `PAYMENT_INDETERMINATE: idempotency key already used for period ${charge.periodId} ${charge.kind} attempt ${pending.attempt} and Square could not confirm the outcome (${found.reason}); MANUAL REVIEW: reconcile reference ${referenceId} in Square before retrying`
       );
     }
 
@@ -208,8 +272,25 @@ async function chargePeriod(
   };
 }
 
+async function readPending(
+  admin: SupabaseClient,
+  charge: PeriodCharge
+): Promise<PendingRow | null> {
+  const { data, error } = await admin
+    .from("period_charges")
+    .select(PENDING_SELECT)
+    .eq("billing_period_id", charge.periodId)
+    .eq("kind", charge.kind)
+    .eq("status", "pending")
+    .order("attempt", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as PendingRow | null) ?? null;
+}
+
 /**
- * Find the pending attempt to replay, or record a new one.
+ * Record a new attempt, or join the one a concurrent caller just recorded.
  *
  * A pending row means a previous call reached Square and its outcome was never
  * recorded. NEVER delete one to tidy up: that frees the attempt number, and the
@@ -221,21 +302,6 @@ async function claimAttempt(
   charge: PeriodCharge,
   card: { cardId: string; customerId: string }
 ): Promise<PendingRow> {
-  const { data: existing, error: existingError } = await admin
-    .from("period_charges")
-    .select(
-      "id, attempt, net_pence, vat_pence, gross_pence, currency, square_card_id, square_customer_id"
-    )
-    .eq("billing_period_id", charge.periodId)
-    .eq("kind", charge.kind)
-    .eq("status", "pending")
-    .order("attempt", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (existingError) throw new Error(existingError.message);
-  if (existing) return existing as PendingRow;
-
   const attempt = await nextAttemptNumber(admin, charge);
 
   const { data: inserted, error: insertError } = await admin
@@ -256,9 +322,7 @@ async function claimAttempt(
       square_customer_id: card.customerId,
       status: "pending",
     })
-    .select(
-      "id, attempt, net_pence, vat_pence, gross_pence, currency, square_card_id, square_customer_id"
-    )
+    .select(PENDING_SELECT)
     .single();
 
   if (insertError) {
@@ -269,15 +333,21 @@ async function claimAttempt(
     if (insertError.code === "23505") {
       const raced = await admin
         .from("period_charges")
-        .select(
-          "id, attempt, net_pence, vat_pence, gross_pence, currency, square_card_id, square_customer_id"
-        )
+        .select(PENDING_SELECT + ", status")
         .eq("billing_period_id", charge.periodId)
         .eq("kind", charge.kind)
         .eq("attempt", attempt)
         .single();
       if (raced.error) throw new Error(raced.error.message);
-      return raced.data as PendingRow;
+      // The winner has already settled. Replaying a settled row would send
+      // its key again and report whatever Square answers as a new outcome, so
+      // stand down and let the caller's next run read the settled state.
+      if ((raced.data as { status?: string }).status !== "pending") {
+        throw new Error(
+          `ATTEMPT_CLAIM_FAILED: a concurrent caller already settled period ${charge.periodId} ${charge.kind} attempt ${attempt}; no payment was attempted`
+        );
+      }
+      return raced.data as unknown as PendingRow;
     }
     throw new Error(insertError.message);
   }
@@ -312,10 +382,15 @@ async function settle(
   chargeRowId: string,
   fields: Record<string, unknown>
 ): Promise<void> {
-  const { error } = await admin
+  // status = 'pending' in the filter, for the reason addonServer.ts sets out:
+  // the first terminal answer sticks, and a late failure can never overwrite
+  // a recorded success and wipe the payment id.
+  const { data, error } = await admin
     .from("period_charges")
     .update(fields)
-    .eq("id", chargeRowId);
+    .eq("id", chargeRowId)
+    .eq("status", "pending")
+    .select("id");
 
   // Throwing here leaves a pending row, which is the safe direction: the
   // outcome is genuinely unknown to the database, and the next run replays the
@@ -325,13 +400,19 @@ async function settle(
       `Square answered for period charge ${chargeRowId} but the outcome could not be recorded: ${error.message}`
     );
   }
+  if ((data?.length ?? 0) === 0) {
+    console.error(
+      `[billing] period charge ${chargeRowId} was no longer pending when settling ${JSON.stringify(fields)}; a concurrent settler got there first. Reconcile against Square if the outcomes differ.`
+    );
+  }
 }
 
 
 export type RefundResult =
-  | { status: "refunded"; refundedPence: number }
+  /** `settled` is false while Square reports the refund as still in progress. */
+  | { status: "refunded"; refundedPence: number; settled: boolean }
   /** Nothing was collected, so there is nothing to give back. */
-  | { status: "nothing_to_refund" };
+  | { status: "nothing_to_refund"; reason: "no_succeeded_charge" | "no_payment_id" };
 
 /**
  * Give back a period's up-front minimum, in full.
@@ -345,7 +426,8 @@ export type RefundResult =
  * same rule the charge path follows: only positive evidence that Square
  * refused a request may be recorded as a refusal. A refund whose outcome is
  * unknown must not be retried blindly, because a second refund is a second
- * transfer of real money.
+ * transfer of real money. (The refund key is fixed per period, so a retry of
+ * the same refund replays rather than repeats.)
  */
 export async function refundPeriodMinimum(
   admin: SupabaseClient,
@@ -363,22 +445,29 @@ export async function refundPeriodMinimum(
   if (charge.error) throw new Error(charge.error.message);
 
   const grossPence = Number(charge.data?.gross_pence ?? 0);
-  if (!charge.data?.square_payment_id || grossPence <= 0) {
-    return { status: "nothing_to_refund" };
+  if (!charge.data || grossPence <= 0) {
+    return { status: "nothing_to_refund", reason: "no_succeeded_charge" };
+  }
+  if (!charge.data.square_payment_id) {
+    // BILL2-16. Money was taken and there is no payment id to refund it
+    // against. The caller must not report a refund that did not happen.
+    return { status: "nothing_to_refund", reason: "no_payment_id" };
   }
 
   const square = getSquare();
 
+  let refundStatus: string | null = null;
   try {
-    await square.refunds.refundPayment({
+    const response = await square.refunds.refundPayment({
       idempotencyKey: periodRefundIdempotencyKey(periodId),
       paymentId: charge.data.square_payment_id as string,
       amountMoney: {
         amount: BigInt(grossPence),
-        currency: (charge.data.currency as string) === "GBP" ? "GBP" : "GBP",
+        currency: "GBP",
       },
       reason: "TMS Wizzard cooling-off cancellation",
     });
+    refundStatus = response.refund?.status ?? null;
   } catch (error) {
     const thrown = classifySquareThrow(error);
     throw new Error(
@@ -388,15 +477,37 @@ export async function refundPeriodMinimum(
     );
   }
 
-  const recorded = await admin
+  // BILL2-15. The refund's own status decides what is recorded. REJECTED and
+  // FAILED mean no money went back, so nothing is recorded and the company is
+  // not cancelled. PENDING (or no status) means Square accepted it and has not
+  // finished, which is recorded as such rather than as done.
+  if (refundStatus === "REJECTED" || refundStatus === "FAILED") {
+    throw new Error(
+      `REFUND_FAILED: Square answered ${refundStatus} for the minimum refund on period ${periodId}; nothing was recorded`
+    );
+  }
+  const settled = refundStatus === "COMPLETED";
+
+  let recorded = await admin
     .from("period_charges")
-    .update({ status: "refunded" })
+    .update({ status: settled ? "refunded" : "refund_pending" })
     .eq("id", charge.data.id);
+
+  // prodfix_33 not applied: the status check does not know refund_pending.
+  // Record the refund as refunded with a marker saying Square had not
+  // completed it, rather than failing after the money was sent back.
+  if (recorded.error?.code === "23514" && !settled) {
+    recorded = await admin
+      .from("period_charges")
+      .update({ status: "refunded", failure_code: "REFUND_PENDING_AT_SQUARE" })
+      .eq("id", charge.data.id);
+  }
+
   if (recorded.error) {
     throw new Error(
       `The minimum for period ${periodId} was refunded at Square but the outcome could not be recorded: ${recorded.error.message}`
     );
   }
 
-  return { status: "refunded", refundedPence: grossPence };
+  return { status: "refunded", refundedPence: grossPence, settled };
 }

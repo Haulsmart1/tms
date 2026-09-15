@@ -13,6 +13,8 @@ import {
   getStripe,
 } from "../../../../../../lib/payments/stripe";
 
+import { publicAppOrigin } from "../../../../../../lib/accounts/appUrl";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -217,9 +219,7 @@ export async function POST(
     }
 
     const origin =
-      new URL(
-        request.url
-      ).origin;
+      publicAppOrigin(request.url);
 
     const returnUrl =
       `${origin}/settings/company?stripe=return`;

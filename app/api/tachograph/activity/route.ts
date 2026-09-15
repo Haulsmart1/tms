@@ -6,6 +6,7 @@ import {
 import {
   requireTachographTenantAdmin,
 } from "../../../../lib/tachograph/serverAuth";
+import { publicActivityRpcError } from "../../../../lib/tachograph/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -110,9 +111,18 @@ export async function POST(request: Request) {
     );
 
     if (error) {
+      const publicError = publicActivityRpcError(
+        error.message,
+        "Unable to save driver activity."
+      );
+
+      if (!publicError.known) {
+        console.error("tachograph/activity upsert failed:", error.code, error.message);
+      }
+
       return NextResponse.json(
-        { error: error.message },
-        { status: 400 }
+        { error: publicError.message },
+        { status: publicError.known ? 400 : 500 }
       );
     }
 
@@ -121,13 +131,10 @@ export async function POST(request: Request) {
       id: data,
     });
   } catch (error) {
+    // Constant message: internal and service-role errors stay in the log.
+    console.error("tachograph/activity POST failed:", error);
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unable to save driver activity.",
-      },
+      { error: "Unable to save driver activity." },
       { status: 500 }
     );
   }
@@ -198,21 +205,27 @@ export async function DELETE(request: Request) {
     );
 
     if (error) {
+      const publicError = publicActivityRpcError(
+        error.message,
+        "Unable to delete driver activity."
+      );
+
+      if (!publicError.known) {
+        console.error("tachograph/activity delete failed:", error.code, error.message);
+      }
+
       return NextResponse.json(
-        { error: error.message },
-        { status: 400 }
+        { error: publicError.message },
+        { status: publicError.known ? 400 : 500 }
       );
     }
 
     return NextResponse.json({ ok: true });
   } catch (error) {
+    // Constant message: internal and service-role errors stay in the log.
+    console.error("tachograph/activity DELETE failed:", error);
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unable to delete driver activity.",
-      },
+      { error: "Unable to delete driver activity." },
       { status: 500 }
     );
   }

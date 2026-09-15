@@ -1,4 +1,22 @@
--- RLS Tenancy Hardening (Phase 1) -- 03: re-key every tenant_id table. Safe to re-run.
+-- RLS Tenancy Hardening (Phase 1) -- 03: re-key every tenant_id table.
+--
+-- APPLIED ONCE on 2026-07-28. DO NOT RE-RUN. (The original header said "Safe to re-run"; that
+-- stopped being true as soon as later migrations added tables. Review finding SQL-11, 2026-09-14.)
+--
+-- WHY: the loop below is not a frozen list. It visits EVERY public table that has a tenant_id
+-- column TODAY and is not in `excluded`, drops EVERY policy on it, and installs a generic one.
+-- Tables created after 2026-07-28 carry deliberately different policies that a re-run would
+-- silently replace with `tenant_access FOR ALL using can_access_tenant(tenant_id)`, including:
+--   period_invoice_lines, billing tables       admin-only reads      -> staff would read them
+--   accounting_oauth_credentials               deliberately no policy -> an ALL policy, protected
+--                                                                        only by a grant revoke
+--   planning_route_*, driver_transport_*,      select-only for clients -> write policies appear,
+--   tachograph_sync_runs, load_*, job_items,                               one GRANT away from use
+--   job_item_scans, driver_users, vehicle_licences
+--   and anything prodfix_85 / prodfix_91 installed.
+-- To re-key a single table, copy the one relevant `create policy` for that table by hand.
+--
+-- Original description:
 -- For each table with a tenant_id column (minus the excluded set): drop EVERY existing
 -- policy (not just by name), then create one policy. writes_closed = read-only (system
 -- owns the writes); admin_write = staff-read / admin-write; everything else = read+write.

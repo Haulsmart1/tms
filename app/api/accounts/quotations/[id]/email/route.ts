@@ -12,7 +12,21 @@ import {
   ACCOUNTS_ADMIN_ROLES,
   errorResponse,
   requireTenantAccess,
+  AccountsHttpError,
 } from "../../../../../../lib/accounts/server";
+
+import {
+  loadDocumentBranding,
+} from "../../../../../../lib/accounts/documentBranding";
+
+import {
+  authorizeDocumentRecipient,
+  enforceDocumentEmailLimits,
+} from "../../../../../../lib/accounts/documentEmail";
+
+import {
+  publicAppOrigin,
+} from "../../../../../../lib/accounts/appUrl";
 
 import {
   createQuotationShareToken,
@@ -31,11 +45,12 @@ import {
   buildDocumentEmailHtml,
 } from "../../../../../../lib/documents/emailTemplate";
 
+import {
+  quotationShareExpiry,
+} from "../../../../../../lib/quotations/shareExpiry";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const EMAIL_PATTERN =
-  /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function safeHeader(
   value: string
@@ -45,68 +60,6 @@ function safeHeader(
     .slice(0, 180);
 }
 
-async function loadDocumentBranding(
-  request: NextRequest,
-  tenantId: string
-) {
-  try {
-    const url =
-      new URL(
-        "/api/settings/documents",
-        request.url
-      );
-
-    url.searchParams.set(
-      "tenantId",
-      tenantId
-    );
-
-    const headers =
-      new Headers();
-
-    const cookie =
-      request.headers.get(
-        "cookie"
-      );
-
-    const authorization =
-      request.headers.get(
-        "authorization"
-      );
-
-    if (cookie) {
-      headers.set(
-        "cookie",
-        cookie
-      );
-    }
-
-    if (authorization) {
-      headers.set(
-        "authorization",
-        authorization
-      );
-    }
-
-    const response =
-      await fetch(
-        url,
-        {
-          method: "GET",
-          headers,
-          cache: "no-store",
-        }
-      );
-
-    if (!response.ok) {
-      return null;
-    }
-
-    return await response.json();
-  } catch {
-    return null;
-  }
-}
 
 function renderTemplate(
   value: string,
@@ -124,60 +77,26 @@ function renderTemplate(
     );
 }
 
+// Ends with valid_until in Europe/London, not UTC, and never outlives the
+// template's default validity (lib/quotations/shareExpiry.ts).
 function calculateExpiry(
   validUntil: string | null,
   defaultValidDays: number
 ): number {
-  const nowSeconds =
-    Math.floor(Date.now() / 1000);
+  const lifetimeSeconds = Math.max(1, defaultValidDays) * 24 * 60 * 60;
+  const result = quotationShareExpiry({
+    validUntil,
+    fallbackLifetimeSeconds: lifetimeSeconds,
+    maxLifetimeSeconds: lifetimeSeconds,
+  });
 
-  const fallbackExpiry =
-    nowSeconds +
-    Math.max(
-      1,
-      defaultValidDays
-    ) *
-      24 *
-      60 *
-      60;
-
-  if (!validUntil) {
-    return fallbackExpiry;
+  if (!result.ok) {
+    throw result.reason === "quotation_expired"
+      ? new AccountsHttpError(409, "Quotation validity has expired. Extend the valid-until date first.", "quotation_expired")
+      : new AccountsHttpError(409, "Quotation has an invalid valid-until date.", "invalid_valid_until");
   }
 
-  const validityMilliseconds =
-    new Date(
-      `${validUntil}T23:59:59.999Z`
-    ).getTime();
-
-  if (
-    !Number.isFinite(
-      validityMilliseconds
-    )
-  ) {
-    throw new Error(
-      "Quotation has an invalid valid-until date."
-    );
-  }
-
-  const validityExpiry =
-    Math.floor(
-      validityMilliseconds / 1000
-    );
-
-  if (
-    validityExpiry <=
-    nowSeconds
-  ) {
-    throw new Error(
-      "Quotation validity has expired."
-    );
-  }
-
-  return Math.min(
-    validityExpiry,
-    fallbackExpiry
-  );
+  return result.expiresAt;
 }
 
 export async function POST(
@@ -190,6 +109,12 @@ export async function POST(
 ) {
   let newShareLinkId:
     string | null = null;
+
+  // Review INV-17: the request body is consumed once, so the failure cleanup
+  // uses these instead of re-reading it.
+  let cleanupAdmin:
+    Awaited<ReturnType<typeof requireTenantAccess>>["admin"] | null = null;
+  let cleanupTenantId = "";
 
   try {
     const body =
@@ -236,11 +161,15 @@ export async function POST(
 
     const {
       admin,
+      user,
     } =
       await requireTenantAccess(
         tenantId,
         ACCOUNTS_ADMIN_ROLES
       );
+
+    cleanupAdmin = admin;
+    cleanupTenantId = tenantId;
 
     const {
       data: quotation,
@@ -355,31 +284,29 @@ export async function POST(
       );
     }
 
+    // Review ACC-5: only addresses stored for this customer (or the caller's
+    // own address).
     const recipient =
-      requestedRecipient ||
-      String(
-        customer.operations_email ??
-          customer.email ??
-          customer.accounts_email ??
-          ""
-      ).trim();
+      await authorizeDocumentRecipient({
+        admin,
+        tenantId,
+        customerId: String(quotation.customer_id),
+        requested: requestedRecipient,
+        defaults: [
+          customer.operations_email,
+          customer.email,
+          customer.accounts_email,
+        ],
+        customerEmails: [
+          customer.operations_email,
+          customer.email,
+          customer.accounts_email,
+        ],
+        callerEmail: user.email,
+      });
 
-    if (
-      !recipient ||
-      !EMAIL_PATTERN.test(
-        recipient
-      )
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "A valid quotation email recipient is required.",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
+    // Review ACC-18: per-user and per-tenant send limits.
+    await enforceDocumentEmailLimits(admin, user.id, tenantId);
 
     const {
       data: tenant,
@@ -537,10 +464,9 @@ export async function POST(
       );
     }
 
+    // Review INV-26: the configured site URL, never the request Host.
     const origin =
-      new URL(
-        request.url
-      ).origin;
+      publicAppOrigin(request.url);
 
     const shareUrl =
       `${origin}/quotation/share/${encodeURIComponent(
@@ -645,10 +571,7 @@ const quoteNumber =
     }
 
     const branding =
-      await loadDocumentBranding(
-        request,
-        tenantId
-      );
+      await loadDocumentBranding(admin, tenantId);
 
     const {
       bytes: quotationPdfBytes,
@@ -805,6 +728,14 @@ const quoteNumber =
         },
       });
 
+    // The email has been delivered with this link in it: it must never be
+    // revoked by the failure cleanup, and later bookkeeping failures are
+    // warnings rather than errors (review INV-17, INV-25).
+    newShareLinkId =
+      null;
+
+    const warnings: string[] = [];
+
 
     const sentAt =
       new Date()
@@ -833,9 +764,8 @@ const quoteNumber =
       );
 
     if (shareUpdateError) {
-      throw new Error(
-        shareUpdateError.message
-      );
+      console.error("[quotation email] sent but share link update failed", shareUpdateError.code);
+      warnings.push("The quotation was emailed, but the share link record could not be updated.");
     }
 
     const nextStatus =
@@ -867,12 +797,9 @@ const quoteNumber =
         tenantId
       );
 
-    if (
-      quotationUpdateError
-    ) {
-      throw new Error(
-        quotationUpdateError.message
-      );
+    if (quotationUpdateError) {
+      console.error("[quotation email] sent but status update failed", quotationUpdateError.code);
+      warnings.push("The quotation was emailed, but it could not be marked as sent. Do not resend; refresh the list.");
     }
 
     /*
@@ -907,16 +834,14 @@ const quoteNumber =
       );
 
     if (revokeOldError) {
-      throw new Error(
-        revokeOldError.message
-      );
+      console.error("[quotation email] older share links could not be revoked", revokeOldError.code);
+      warnings.push("Older links to this quotation could not be revoked. Revoke them by sharing again.");
     }
-
-    newShareLinkId =
-      null;
 
     return NextResponse.json({
       ok: true,
+
+      warnings,
 
       id:
         delivery.providerMessageId,
@@ -950,47 +875,19 @@ const quoteNumber =
       newShareLinkId
     ) {
       try {
-        const body =
-          await request
-            .clone()
-            .json();
-
-        const tenantId =
-          String(
-            body.tenantId ??
-              ""
-          ).trim();
-
-        if (tenantId) {
-          const {
-            admin,
-          } =
-            await requireTenantAccess(
-              tenantId,
-              ACCOUNTS_ADMIN_ROLES
-            );
-
-          await admin
-            .from(
-              "quotation_share_links"
-            )
+        if (cleanupAdmin && cleanupTenantId) {
+          await cleanupAdmin
+            .from("quotation_share_links")
             .update({
-              revoked_at:
-                new Date()
-                  .toISOString(),
+              revoked_at: new Date().toISOString(),
             })
-            .eq(
-              "id",
-              newShareLinkId
-            )
-            .eq(
-              "tenant_id",
-              tenantId
-            );
+            .eq("id", newShareLinkId)
+            .eq("tenant_id", cleanupTenantId);
         }
       }
-      catch {
-        // Preserve original error.
+      catch (cleanupError) {
+        // Preserve the original error.
+        console.error("[quotation email] share link cleanup failed", cleanupError);
       }
     }
 

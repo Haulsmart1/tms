@@ -1,55 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@supabase/ssr";
-import { createClient } from "@supabase/supabase-js";
-import { cookies } from "next/headers";
+import { createUserClient, createAdminClient } from "../../../lib/accounts/server";
+import { authorizeTenant, TenantAccessError } from "../../../lib/auth/serverTenantAccess";
+import { subcontractorColumnsFor } from "../../../lib/accounts/portalScope";
+import { GENERIC_ERROR_MESSAGE } from "../../../lib/accounts/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-async function createAuthenticatedClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anon) {
-    throw new Error("Supabase public environment variables are missing.");
-  }
-
-  const cookieStore = await cookies();
-
-  return createServerClient(url, anon, {
-    cookies: {
-      getAll() {
-        return cookieStore.getAll();
-      },
-      setAll(cookiesToSet) {
-        try {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options)
-          );
-        } catch {}
-      },
-    },
-  });
-}
-
-function createAdminClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url || !serviceRole) {
-    throw new Error("Supabase server environment variables are missing.");
-  }
-
-  return createClient(url, serviceRole, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
-}
-
+/*
+  Review ACC-10 (audit M3) and ACC-2: authorization comes from profiles, the
+  same rule RLS uses, and the columns returned depend on the caller's role.
+  Drivers are refused; staff get operational columns; admins also get
+  commercial terms.
+*/
 export async function GET(request: NextRequest) {
   try {
-    const userClient = await createAuthenticatedClient();
+    const userClient = await createUserClient();
 
     const {
       data: { user },
@@ -57,49 +23,41 @@ export async function GET(request: NextRequest) {
     } = await userClient.auth.getUser();
 
     if (authError || !user) {
-      return NextResponse.json(
-        { error: "You must be signed in." },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "You must be signed in." }, { status: 401 });
     }
 
     const tenantId = request.nextUrl.searchParams.get("tenantId")?.trim();
 
     if (!tenantId) {
-      return NextResponse.json(
-        { error: "A tenant must be selected." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "A tenant must be selected." }, { status: 400 });
     }
 
     const admin = createAdminClient();
 
-    const { data: membership, error: membershipError } = await admin
-      .from("memberships")
-      .select("id, role")
-      .eq("tenant_id", tenantId)
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    if (membershipError) {
-      throw new Error(membershipError.message);
+    let authorized;
+    try {
+      authorized = await authorizeTenant(admin, user.id, tenantId, "access");
+    } catch (error) {
+      if (error instanceof TenantAccessError && error.status === 403) {
+        return NextResponse.json({ error: "You do not belong to the selected tenant." }, { status: 403 });
+      }
+      throw error;
     }
 
-    if (!membership) {
-      return NextResponse.json(
-        { error: "You do not belong to the selected tenant." },
-        { status: 403 }
-      );
+    const columns = subcontractorColumnsFor(authorized.tier, authorized.caller.roleName);
+
+    if (!columns) {
+      return NextResponse.json({ error: "Your role cannot view subcontractors." }, { status: 403 });
     }
 
     const { data, error } = await admin
       .from("subcontractors")
-      .select("*")
+      .select(columns)
       .eq("tenant_id", tenantId)
       .order("name");
 
     if (error) {
-      throw new Error(error.message);
+      throw new Error(`subcontractors select failed: ${error.code ?? ""}`);
     }
 
     return NextResponse.json({
@@ -108,14 +66,6 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Subcontractors API failed:", error);
 
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unable to load subcontractors.",
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: GENERIC_ERROR_MESSAGE, code: "internal_error" }, { status: 500 });
   }
 }

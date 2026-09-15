@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { errorResponse } from "../../../../lib/accounts/server";
 import { getSquare } from "../../../../lib/payments/square";
 import {
+  fetchBillableVehicles,
   requireCompanyAdmin,
   runChargeCycle,
 } from "../../../../lib/billing/server";
@@ -13,6 +15,12 @@ import {
   computeNextChargeOn,
   londonDateISO,
 } from "../../../../lib/billing/schedule";
+import {
+  collectOutstandingPeriods,
+  openPeriodAndChargeMinimum,
+  resolveActivation,
+} from "../../../../lib/billing/periodServer";
+import { createSquarePeriodPaymentProvider } from "../../../../lib/billing/periodPaymentServer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,21 +30,113 @@ const BodySchema = z.object({
   verificationToken: z.string().min(1),
 });
 
-// Best effort: after a card replacement, disable the old card at Square so
-// the customer does not accumulate live cards. Nothing charges the old card
-// once company_billing points at the new one, so a failure here is harmless.
-async function disableReplacedCard(
+const SETTLING_MESSAGE =
+  "A previous payment attempt is still settling with Square. Please wait a few minutes and try again; if this persists, charges resume automatically tomorrow.";
+
+// Best effort: disable a card at Square that company_billing no longer points
+// at, so the customer does not accumulate live cards. Nothing charges it.
+async function disableCard(
   square: ReturnType<typeof getSquare>,
-  oldCardId: string | null | undefined,
-  newCardId: string
+  cardId: string | null | undefined,
+  keepCardId: string | null | undefined
 ) {
-  if (oldCardId && oldCardId !== newCardId) {
+  if (cardId && cardId !== keepCardId) {
     try {
-      await square.cards.disable({ cardId: oldCardId });
+      await square.cards.disable({ cardId });
     } catch {
       // Best effort only; see comment above.
     }
   }
+}
+
+/**
+ * Write company_billing, tolerating a database without the card_fingerprint
+ * column (prodfix_33 not applied): retried without it on 42703.
+ */
+async function writeBilling(
+  mode: "insert" | "update",
+  admin: SupabaseClient,
+  companyId: string,
+  fields: Record<string, unknown>
+) {
+  const run = (payload: Record<string, unknown>) =>
+    mode === "insert"
+      ? admin.from("company_billing").insert({ company_id: companyId, ...payload })
+      : admin.from("company_billing").update(payload).eq("company_id", companyId);
+
+  let result = await run(fields);
+  if (result.error?.code === "42703" && "card_fingerprint" in fields) {
+    const withoutFingerprint = { ...fields };
+    delete withoutFingerprint.card_fingerprint;
+    result = await run(withoutFingerprint);
+  }
+  return result;
+}
+
+/**
+ * v2 after a card is saved: take anything outstanding, then make sure a fleet
+ * that is billable has a period to be billed in.
+ *
+ * BILL2-5: a past_due v2 company could never recover; replacing the card did
+ * nothing. Outstanding closed and failed periods are now collected at once
+ * with the new card, and the company returns to active when all of them pay.
+ *
+ * BILL1-2: a fleet already active when the first card is saved (licences made
+ * active before the card, or by SQL) had no period and was never billed. It
+ * now gets one, with the minimum, per the spec's "on payment, the floor is
+ * taken again and a new period opens".
+ */
+async function settleV2AfterCardSave(admin: SupabaseClient, companyId: string) {
+  const provider = createSquarePeriodPaymentProvider(admin);
+  const now = new Date();
+  const todayISO = londonDateISO(now);
+
+  const outstanding = await collectOutstandingPeriods(admin, provider, companyId, {
+    nowISO: now.toISOString(),
+    todayISO,
+  });
+
+  const billable = await fetchBillableVehicles(admin, companyId);
+  let periodOpened = false;
+  let openFailureCode: string | null = null;
+  let chargedPence = 0;
+
+  if (billable.size > 0) {
+    const activation = await resolveActivation(admin, companyId, todayISO);
+    if (activation.action.kind === "open_period_and_charge" && activation.settings) {
+      try {
+        const opened = await openPeriodAndChargeMinimum(admin, provider, {
+          companyId,
+          periodStartISO: activation.action.periodStartISO,
+          settings: activation.settings,
+          minimumPence: activation.action.amountPence,
+        });
+        if (opened.ok) {
+          periodOpened = true;
+          chargedPence = opened.grossPence;
+        } else {
+          openFailureCode = opened.failureCode;
+        }
+      } catch (error) {
+        openFailureCode = "ERROR";
+        console.error(
+          "Card saved but the billing period could not be opened",
+          companyId,
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+    }
+  }
+
+  return {
+    retried: outstanding.attempted > 0,
+    succeeded:
+      outstanding.attempted === 0 ? undefined : outstanding.collected === outstanding.attempted,
+    periodsCollected: outstanding.collected,
+    periodOpened,
+    openFailureCode,
+    chargedPence,
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -116,16 +216,32 @@ export async function POST(request: NextRequest) {
       card_last4: card.last4 ?? null,
       card_exp_month: card.expMonth != null ? Number(card.expMonth) : null,
       card_exp_year: card.expYear != null ? Number(card.expYear) : null,
+      // BILL2-10: lets the cooling-off refund be once per card, not only once
+      // per company.
+      card_fingerprint: card.fingerprint ?? null,
     };
 
     const today = londonDateISO(new Date());
 
+    // BILL1-12. Two first-time saves in flight at once (a double submit, two
+    // tabs) both pass `!existing`. The second insert hits the primary key; its
+    // card is disabled and the request answers with the row that won instead
+    // of a raw Postgres error.
+    async function concurrentFirstSave() {
+      await disableCard(square, card!.id, null);
+      return NextResponse.json(
+        {
+          error:
+            "Your card is already being saved in another window. Reload the billing page to see it.",
+        },
+        { status: 409 }
+      );
+    }
+
     if (!existing) {
       // Orphan recovery: a prior first-time setup may have charged Square
-      // successfully and then crashed before the company_billing insert
-      // below ran. Detect that state before charging again, which would
-      // double-bill. Only look back 31 days: a stale succeeded charge from
-      // further back is not this crash window and should not be trusted.
+      // successfully and then crashed before the company_billing insert below
+      // ran. Detect that state before charging again.
       const { data: orphanRows, error: orphanError } = await admin
         .from("platform_charges")
         .select("cycle_date, vehicle_count, gross_pence, receipt_url")
@@ -145,14 +261,14 @@ export async function POST(request: NextRequest) {
       if (recentOrphan) {
         const cycleDate = recentOrphan.cycle_date as string;
         const nextChargeOn = computeNextChargeOn(cycleDate);
-        const { error: insertError } = await admin.from("company_billing").insert({
-          company_id: companyId,
+        const { error: insertError } = await writeBilling("insert", admin, companyId, {
           ...cardFields,
           status: "active",
           next_charge_on: nextChargeOn,
           retry_at: null,
           retry_count: 0,
         });
+        if (insertError?.code === "23505") return concurrentFirstSave();
         if (insertError) {
           throw new Error(insertError.message);
         }
@@ -168,55 +284,38 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      /* v2 bills in ARREARS, so saving a card takes no money. The period opens
-         and the minimum is charged when the first vehicle is activated, in
-         openPeriodAndChargeMinimum, not here.
-
-         Placed after orphan recovery, not before it: a succeeded v1 charge that
-         crashed before its insert is still real money, and must be recorded
-         even if the default has since moved to v2.
-
-         Returning early rather than falling through matters: runChargeCycle
-         below writes platform_charges and prices with lib/billing/money.ts,
-         which is v1's rate card. */
+      /* v2 bills in ARREARS, so saving a card takes no money UNLESS the fleet
+         is already billable (BILL1-2), in which case the first period opens
+         now with its minimum. Placed after orphan recovery: a succeeded v1
+         charge that crashed before its insert is still real money. */
       if (NEW_COMPANY_BILLING_MODEL === "v2_period") {
-        const { error: insertError } = await admin.from("company_billing").insert({
-          company_id: companyId,
+        const { error: insertError } = await writeBilling("insert", admin, companyId, {
           ...cardFields,
           status: "active",
           billing_model: "v2_period",
-          /* Not null because the column is date NOT NULL (billing_01), and the
-             signup date rather than a sentinel because it is true: it is where
-             this company's billing began. It is inert. The v1 cron skips v2
-             rows explicitly (app/api/billing/run/route.ts) and
-             selectRecoveryAction answers "none" for them, which is the same
-             arrangement scripts/migrate-company-to-period-billing.mjs leaves a
-             migrated company in. */
+          // date NOT NULL (billing_01); inert for v2, the v1 cron skips v2 rows.
           next_charge_on: today,
           retry_at: null,
           retry_count: 0,
         });
+        if (insertError?.code === "23505") return concurrentFirstSave();
         if (insertError) {
           throw new Error(insertError.message);
         }
 
+        const settled = await settleV2AfterCardSave(admin, companyId);
         return NextResponse.json({
           ok: true,
           firstCharge: false,
           model: "v2_period",
+          ...settled,
         });
       }
 
-      // First-time setup: immediate first charge; write company_billing only
+      // First-time v1 setup: immediate first charge; write company_billing only
       // on success so a declined card leaves no half-configured subscription.
-      //
-      // Attempt number is derived from the audit trail, not hardcoded to 1: a
-      // declined first attempt today already used idempotency key
-      // (company, today, 1), and the admin can retry same-day with a
-      // different card. Reusing attempt 1 for that retry would send a NEW
-      // request body under the SAME key, which Square rejects as
-      // IDEMPOTENCY_KEY_REUSED. Any recorded attempt (succeeded or failed)
-      // counts, since either way that key is already spent.
+      // The attempt number is derived from the audit trail (any status), since
+      // a declined same-day attempt has already spent its key.
       const { data: attemptRows, error: attemptError } = await admin
         .from("platform_charges")
         .select("attempt")
@@ -243,18 +342,14 @@ export async function POST(request: NextRequest) {
           chargeError instanceof Error &&
           chargeError.message.startsWith("PAYMENT_INDETERMINATE")
         ) {
-          return NextResponse.json(
-            {
-              error:
-                "A previous payment attempt is still settling with Square. Please wait a few minutes and try again; if this persists, charges resume automatically tomorrow.",
-            },
-            { status: 409 }
-          );
+          console.error("First charge indeterminate", chargeError.message);
+          return NextResponse.json({ error: SETTLING_MESSAGE }, { status: 409 });
         }
         throw chargeError;
       }
 
       if (!result.succeeded) {
+        await disableCard(square, card.id, null);
         return NextResponse.json(
           {
             error: "Your card was declined. No subscription was set up.",
@@ -265,14 +360,14 @@ export async function POST(request: NextRequest) {
       }
 
       const nextChargeOn = computeNextChargeOn(today);
-      const { error: insertError } = await admin.from("company_billing").insert({
-        company_id: companyId,
+      const { error: insertError } = await writeBilling("insert", admin, companyId, {
         ...cardFields,
         status: "active",
         next_charge_on: nextChargeOn,
         retry_at: null,
         retry_count: 0,
       });
+      if (insertError?.code === "23505") return concurrentFirstSave();
       if (insertError) {
         throw new Error(insertError.message);
       }
@@ -287,8 +382,35 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Replacement card: store the new card, then, if a cycle is outstanding
-    // (mid-dunning or past_due), retry it immediately.
+    // ---------------------------------------------------------------------
+    // Replacement card.
+    // ---------------------------------------------------------------------
+
+    if (existing.billing_model === "v2_period") {
+      const { error: updateError } = await writeBilling("update", admin, companyId, {
+        ...cardFields,
+        updated_at: new Date().toISOString(),
+      });
+      if (updateError) {
+        throw new Error(updateError.message);
+      }
+      await disableCard(
+        square,
+        existing.square_card_id as string | null | undefined,
+        card.id
+      );
+
+      // A cancelled company is not billed or reactivated by saving a card.
+      if (existing.status === "canceled") {
+        return NextResponse.json({ ok: true, firstCharge: false, retried: false });
+      }
+
+      const settled = await settleV2AfterCardSave(admin, companyId);
+      return NextResponse.json({ ok: true, firstCharge: false, ...settled });
+    }
+
+    // v1: store the new card, then, if a cycle is outstanding (mid-dunning or
+    // past_due), retry it immediately.
     const action = selectRecoveryAction({
       status: existing.status,
       next_charge_on: existing.next_charge_on as string,
@@ -298,14 +420,14 @@ export async function POST(request: NextRequest) {
     });
 
     if (action.kind === "none") {
-      const { error: updateError } = await admin
-        .from("company_billing")
-        .update({ ...cardFields, updated_at: new Date().toISOString() })
-        .eq("company_id", companyId);
+      const { error: updateError } = await writeBilling("update", admin, companyId, {
+        ...cardFields,
+        updated_at: new Date().toISOString(),
+      });
       if (updateError) {
         throw new Error(updateError.message);
       }
-      await disableReplacedCard(
+      await disableCard(
         square,
         existing.square_card_id as string | null | undefined,
         card.id
@@ -324,21 +446,23 @@ export async function POST(request: NextRequest) {
         squareCardId: card.id,
       });
     } catch (chargeError) {
+      // The new card is kept either way.
+      await writeBilling("update", admin, companyId, {
+        ...cardFields,
+        updated_at: new Date().toISOString(),
+      });
       if (
         chargeError instanceof Error &&
         chargeError.message.startsWith("PAYMENT_INDETERMINATE")
       ) {
-        return NextResponse.json(
-          {
-            error:
-              "A previous payment attempt is still settling with Square. Please wait a few minutes and try again; if this persists, charges resume automatically tomorrow.",
-          },
-          { status: 409 }
-        );
+        console.error("Recovery charge indeterminate", chargeError.message);
+        return NextResponse.json({ error: SETTLING_MESSAGE }, { status: 409 });
       }
       throw chargeError;
     }
 
+    // BILL1-6: a stale cycle is collected once and the schedule restarts
+    // today, instead of back-billing one missed cycle per day.
     const outcome = applyChargeOutcome({
       row: {
         next_charge_on: existing.next_charge_on as string,
@@ -346,41 +470,51 @@ export async function POST(request: NextRequest) {
       cycleDate,
       attempt,
       succeeded: result.succeeded,
+      todayISO: today,
     });
 
-    // Compare-and-swap: only apply the outcome if the dunning state has not
-    // moved since we read `existing` (guards against a race with the cron,
-    // which may have run the same cycle concurrently). The card fields are
-    // always written on the fallback below regardless of the race, because
-    // the new card replaces the old dead one either way.
-    const { data: casRows, error: updateError } = await admin
-      .from("company_billing")
-      .update({
-        ...cardFields,
-        ...outcome,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("company_id", companyId)
-      .eq("status", existing.status)
-      .eq("retry_count", existing.retry_count)
-      .select("company_id");
-    if (updateError) {
-      throw new Error(updateError.message);
+    // Compare-and-swap: apply the outcome only if the dunning state has not
+    // moved since `existing` was read (a concurrent cron run on the same
+    // cycle). The card is written by the fallback either way.
+    const casUpdate = (fields: Record<string, unknown>) =>
+      admin
+        .from("company_billing")
+        .update(fields)
+        .eq("company_id", companyId)
+        .eq("status", existing.status)
+        .eq("retry_count", existing.retry_count)
+        .select("company_id");
+
+    const casFields: Record<string, unknown> = {
+      ...cardFields,
+      ...outcome,
+      updated_at: new Date().toISOString(),
+    };
+    let cas = await casUpdate(casFields);
+    if (cas.error?.code === "42703") {
+      delete casFields.card_fingerprint;
+      cas = await casUpdate(casFields);
     }
+    if (cas.error) {
+      throw new Error(cas.error.message);
+    }
+    const casRows = cas.data;
 
     if (!casRows || casRows.length === 0) {
-      const { error: fallbackError } = await admin
-        .from("company_billing")
-        .update({ ...cardFields, updated_at: new Date().toISOString() })
-        .eq("company_id", companyId);
-      if (fallbackError) {
-        throw new Error(fallbackError.message);
-      }
-      await disableReplacedCard(
-        square,
-        existing.square_card_id as string | null | undefined,
-        card.id
-      );
+      const fallback = await writeBilling("update", admin, companyId, {
+        ...cardFields,
+        updated_at: new Date().toISOString(),
+      });
+      if (fallback.error) throw new Error(fallback.error.message);
+    }
+
+    await disableCard(
+      square,
+      existing.square_card_id as string | null | undefined,
+      card.id
+    );
+
+    if (!casRows || casRows.length === 0) {
       return NextResponse.json(
         {
           ok: false,
@@ -391,12 +525,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await disableReplacedCard(
-      square,
-      existing.square_card_id as string | null | undefined,
-      card.id
-    );
-
     return NextResponse.json({
       ok: true,
       firstCharge: false,
@@ -405,9 +533,24 @@ export async function POST(request: NextRequest) {
       failureCode: result.failureCode,
       receiptUrl: result.receiptUrl,
       status: outcome.status,
+      nextChargeOn: outcome.next_charge_on,
     });
   } catch (error) {
     const result = errorResponse(error);
+    // BILL1-12: never pass PostgREST or Square messages to the browser.
+    if (result.status === 500) {
+      console.error(
+        "Card save failed",
+        error instanceof Error ? (error.stack ?? error.message) : String(error)
+      );
+      return NextResponse.json(
+        {
+          error:
+            "Something went wrong saving your card. Reload the billing page to check before trying again.",
+        },
+        { status: 500 }
+      );
+    }
     return NextResponse.json(result.body, { status: result.status });
   }
 }

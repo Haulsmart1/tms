@@ -1,7 +1,20 @@
 -- RLS Tenancy Hardening (Phase 1) -- 01b: reseed TEST DATA (per-company tenants + admin roles).
+--
+-- APPLIED ONCE with the 2026-07-28 tenancy hardening. DO NOT RE-RUN. The block below refuses to run.
+-- The original header called this idempotent. It stopped being so once a company could own
+-- more than one tenant: step 3 joins profiles to tenants on company_id, so every profile in a
+-- multi-tenant company is moved to an arbitrary one of its tenants (staff land in the wrong
+-- depot and read and write its data), and step 4 promotes a user to admin. The SQL editor runs
+-- as postgres, which the profiles guard exempts, so nothing else stops it. Kept for history only.
+do $$
+begin
+  raise exception 'rls_01b_reseed.sql was applied on 2026-07-28 and must not be re-run: it would move every user of a multi-tenant company to an arbitrary tenant. Nothing changed.';
+end $$;
+
+-- Original notes:
 -- Run AFTER rls_01 and BEFORE rls_02..05: an admin must exist before the admin-write
 -- policies land, or company-settings saving and fleet edits lock to super_admin.
--- Idempotent. THIS EDITS DATA and is for the current throwaway test set only.
+-- THIS EDITS DATA and is for the throwaway test set of 2026-07-28 only.
 --
 -- Current state: 7 companies (one profile each) all sharing tenant 2f7cc0dc with null roles,
 -- plus 1 super_admin. This gives each company its own tenant and makes its sole user the admin.

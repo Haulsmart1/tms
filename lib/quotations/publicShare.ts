@@ -3,6 +3,20 @@ import {
 } from "../accounts/server";
 
 import {
+  operatorToday,
+} from "../invoices/dates";
+
+import {
+  buildAcceptanceSnapshot,
+  hashAcceptanceSnapshot,
+} from "./acceptanceSnapshot";
+
+import {
+  QuotationShareError,
+  quotationShareState,
+} from "./shareStatus";
+
+import {
   hashQuotationShareToken,
   verifyQuotationShareToken,
 } from "./shareToken";
@@ -14,16 +28,44 @@ export type QuotationTermsClause = {
   required: boolean;
 };
 
+/*
+  Loads a shared quotation for the public page and the accept/decline route.
+
+  Errors (INV-18): a QuotationShareError carries a message the anonymous
+  visitor may see (invalid, revoked or expired link). Anything else is an
+  internal failure and is thrown as a plain Error, which callers turn into a
+  generic message through publicShareError, logging the detail server side.
+
+  No side effects: loading no longer records a view. A link scanner that
+  pre-fetches the email (Safe Links, Mimecast) would otherwise set
+  first_viewed_at, and a failing view RPC made the whole quotation
+  unavailable. The page's client records the view after hydration through
+  markQuotationShareViewed.
+
+  decision (INV-6) says whether the quotation can still be accepted, from the
+  quotation's own status and valid_until, not only the link row.
+*/
 export async function loadQuotationShare(
-  rawToken: string,
-  markViewed = false
+  rawToken: string
 ) {
-  const payload =
-    verifyQuotationShareToken(rawToken);
+  let payload: ReturnType<typeof verifyQuotationShareToken>;
+
+  try {
+    payload =
+      verifyQuotationShareToken(rawToken);
+  }
+  catch (error) {
+    throw new Error(
+      `Quotation share token verification failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
 
   if (!payload) {
-    throw new Error(
-      "This quotation link is invalid or has expired."
+    throw new QuotationShareError(
+      "invalid",
+      404
     );
   }
 
@@ -72,23 +114,29 @@ export async function loadQuotationShare(
   }
 
   if (!share) {
-    throw new Error(
-      "This quotation link is invalid."
+    throw new QuotationShareError(
+      "invalid",
+      404
     );
   }
 
   if (share.revoked_at) {
-    throw new Error(
-      "This quotation link has been revoked."
+    throw new QuotationShareError(
+      "revoked",
+      410
     );
   }
 
+  const expiresAt =
+    new Date(share.expires_at).getTime();
+
   if (
-    new Date(share.expires_at).getTime() <=
-    Date.now()
+    !Number.isFinite(expiresAt) ||
+    expiresAt <= Date.now()
   ) {
-    throw new Error(
-      "This quotation link has expired."
+    throw new QuotationShareError(
+      "linkExpired",
+      410
     );
   }
 
@@ -163,8 +211,9 @@ export async function loadQuotationShare(
   }
 
   if (!quotation) {
-    throw new Error(
-      "Quotation not found."
+    throw new QuotationShareError(
+      "invalid",
+      404
     );
   }
 
@@ -245,23 +294,24 @@ export async function loadQuotationShare(
     }
   }
 
-  if (markViewed) {
-    const {
-      error: viewedError,
-    } = await admin.rpc(
-      "mark_quotation_share_viewed",
-      {
-        p_share_link_id:
-          share.id,
-      }
-    );
+  const decision =
+    quotationShareState({
+      quotationStatus:
+        quotation.status,
+      validUntil:
+        quotation.valid_until,
+      convertedJobId:
+        quotation.converted_job_id,
+      shareAcceptedAt:
+        share.accepted_at,
+      shareDeclinedAt:
+        share.declined_at,
+      today:
+        operatorToday(),
+    });
 
-    if (viewedError) {
-      throw new Error(
-        viewedError.message
-      );
-    }
-  }
+  const snapshot =
+    buildAcceptanceSnapshot(quotation);
 
   return {
     payload,
@@ -269,5 +319,44 @@ export async function loadQuotationShare(
     quotation,
     template,
     termsVersion,
+    tokenHash,
+    decision,
+    snapshot,
+    snapshotHash:
+      hashAcceptanceSnapshot(snapshot),
   };
+}
+
+/**
+  Records that the customer opened the quotation. Best effort: a failure is
+  logged and never blocks the page or a decision.
+*/
+export async function markQuotationShareViewed(
+  shareLinkId: string
+): Promise<void> {
+  try {
+    const {
+      error,
+    } = await createAdminClient().rpc(
+      "mark_quotation_share_viewed",
+      {
+        p_share_link_id:
+          shareLinkId,
+      }
+    );
+
+    if (error) {
+      console.error(
+        "[quotation-share] could not record view",
+        error.code,
+        error.message
+      );
+    }
+  }
+  catch (error) {
+    console.error(
+      "[quotation-share] could not record view",
+      error
+    );
+  }
 }

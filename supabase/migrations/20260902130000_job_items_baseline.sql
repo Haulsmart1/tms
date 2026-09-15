@@ -1,3 +1,10 @@
+-- NOTE 2026-09-14 (review SQL-4 / POD-15 / SQL-16): the four job_items_*_tenant policies below
+-- use auth_tenant_id(), which is defined nowhere in the repo and may read user-editable JWT
+-- user_metadata. docs/sql/prodfix_85_replace_auth_tenant_id_policies.sql replaces them with
+-- can_access_tenant(tenant_id) policies under the same names (so the `if not exists` guards
+-- below make a re-run a no-op), and docs/sql/prodfix_90_child_tenant_binding.sql binds
+-- job_items.tenant_id to its job's tenant.
+--
 -- Baseline the existing production job_items schema so clean migration
 -- histories can reproduce the table before barcode scan migrations run.
 --

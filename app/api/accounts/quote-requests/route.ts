@@ -1,3 +1,4 @@
+import { listPageInfo, parseListPage } from "../../../../lib/accounts/listPaging";
 import {
   NextRequest,
   NextResponse,
@@ -46,9 +47,16 @@ export async function GET(
         tenantId
       );
 
+    // INV-11: one explicit page with the exact total, never a silent cap.
+    const page =
+      parseListPage(
+        request.nextUrl.searchParams
+      );
+
     const {
       data,
       error,
+      count,
     } = await admin
       .from("quote_requests")
       .select(`
@@ -79,7 +87,7 @@ export async function GET(
         reviewed_at,
         converted_at,
         rejected_at
-      `)
+      `, { count: "exact" })
       .eq(
         "tenant_id",
         tenantId
@@ -96,6 +104,16 @@ export async function GET(
         {
           ascending: false,
         }
+      )
+      .order(
+        "id",
+        {
+          ascending: false,
+        }
+      )
+      .range(
+        page.from,
+        page.to
       );
 
     if (error) {
@@ -107,6 +125,12 @@ export async function GET(
     return NextResponse.json({
       quoteRequests:
         data ?? [],
+      pagination:
+        listPageInfo(
+          page,
+          count,
+          (data ?? []).length
+        ),
     });
   }
   catch (error) {

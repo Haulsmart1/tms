@@ -1,3 +1,9 @@
+-- NOTE 2026-09-14 (review SQL-7 / SQL-14 / SQL-15 / SQL-18): the bodies of
+-- upsert_manual_driver_activity and delete_manual_driver_activity below are SUPERSEDED by
+-- docs/sql/prodfix_87_tachograph_manual_activity.sql, which authorizes with
+-- can_manage_tenant (profiles) instead of memberships, takes an advisory lock so the overlap check
+-- is race-free, sets search_path = public, pg_temp and revokes EXECUTE from anon. Re-running this
+-- file after prodfix_87 would reinstate the memberships check and the race: re-run prodfix_87 too.
 alter table public.driver_activity_logs
     add column if not exists source_kind text not null default 'legacy',
     add column if not exists source_provider text,

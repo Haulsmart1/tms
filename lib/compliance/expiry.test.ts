@@ -118,35 +118,49 @@ describe("getCompliance", () => {
     expect(result.label).toBe("VALID • 31d");
   });
 
-  /* The two cases below pin a FAIL-OPEN, not a desired behaviour. An expiry
-     string Date cannot parse yields NaN, and every band comparison against NaN
-     is false, so the input falls through `days < 0`, `days <= 7` and
-     `days <= 30` alike and lands on the final return: a green VALID badge on
-     data nobody could read.
+  /* These used to pin a FAIL-OPEN: an unparseable value produced NaN days and
+     a green "VALID • NaNd" badge (review PLAN-19). Unreadable input is now
+     amber "DATE INVALID" with days null, never valid. */
+  it("reports an unparseable date as invalid, never as valid", () => {
+    for (const bad of ["not-a-date", "2026-02-30", "2026-09-03garbage"]) {
+      const result = getCompliance(bad);
 
-     Note days: NaN satisfies the declared `number | null`, so the type gives no
-     protection and nothing downstream catches it either.
-
-     It is unreachable today only because all five expiry columns are Postgres
-     `date`, which Supabase serves as a bare YYYY-MM-DD. Migrating any one of
-     them to `timestamptz` would start sending the second form below, and every
-     card on the page would turn green. That is exactly why these exist. */
-  it("fails open to a green VALID badge on an unparseable date", () => {
-    const result = getCompliance("not-a-date");
-
-    expect(result.level).toBe("ok");
-    expect(result.days).toBeNaN();
-    expect(result.label).toBe("VALID • NaNd");
+      expect(result.level).toBe("amber");
+      expect(result.days).toBeNull();
+      expect(result.label).toBe("DATE INVALID");
+    }
   });
 
-  it("fails open the same way on a timestamp-shaped value", () => {
-    /* What a timestamptz column would serve. The function appends T00:00:00 to
-       whatever it is given, so this becomes a double-timestamp string. */
-    const result = getCompliance("2026-09-03T00:00:00+00:00");
+  it("reads a timestamp as the operator-zone day it falls on", () => {
+    /* What a timestamptz column would serve. 23:30 UTC on 2 Sept is already
+       00:30 on 3 Sept in London (BST), which is today. */
+    expect(getCompliance("2026-09-02T23:30:00+00:00").days).toBe(0);
+    expect(getCompliance("2026-09-03T00:00:00+00:00").days).toBe(0);
+    expect(getCompliance("2026-10-04T12:00:00Z").label).toBe("VALID • 31d");
+  });
 
-    expect(result.level).toBe("ok");
-    expect(result.days).toBeNaN();
-    expect(result.label).toBe("VALID • NaNd");
+  it("counts whole days across the autumn clock change (SET-23)", () => {
+    /* 20 Oct is BST, 27 Oct is GMT. The old millisecond delta was 7 days and
+       1 hour, which Math.ceil rounded to 8 and so kept the badge amber. */
+    vi.setSystemTime(new Date("2026-10-20T09:00:00"));
+
+    const result = getCompliance("2026-10-27");
+    expect(result.days).toBe(7);
+    expect(result.level).toBe("red");
+  });
+
+  it("counts whole days across the spring clock change", () => {
+    vi.setSystemTime(new Date("2026-03-25T09:00:00"));
+
+    expect(getCompliance("2026-04-01").days).toBe(7);
+  });
+
+  it("uses the supplied timezone for today", () => {
+    /* 22:00 UTC on 3 Sept is 4 Sept in Tokyo but still 3 Sept in London. */
+    const now = new Date("2026-09-03T22:00:00Z");
+
+    expect(getCompliance("2026-09-04", now, "Europe/London").days).toBe(1);
+    expect(getCompliance("2026-09-04", now, "Asia/Tokyo").days).toBe(0);
   });
 
   it("is unaffected by the time of day the check runs", () => {
