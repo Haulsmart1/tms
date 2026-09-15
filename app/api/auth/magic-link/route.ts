@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { publicAppOrigin } from "../../../../lib/accounts/appUrl";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { RATE_LIMITS, checkRateLimit, clientIp } from "../../../../lib/rateLimit";
 import {
@@ -33,7 +34,9 @@ export const dynamic = "force-dynamic";
    the implicit flow), so the link works in whichever browser opens it. */
 
 export async function POST(request: NextRequest) {
-  const origin = new URL(request.url).origin;
+  // The sign-in link goes into an email, so its origin is the configured site
+  // URL, never the request Host (lib/accounts/publicLinks.test.ts).
+  const origin = publicAppOrigin(request.url);
 
   let body: Record<string, unknown>;
   try {

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { publicAppOrigin } from "../../../../lib/accounts/appUrl";
 import { createApiSupabase } from "../../../../lib/api/server";
 import { isUuid } from "../../../../lib/auth/serverTenantAccess";
 import { authorizeOfficeTenant, officeAccessErrorResponse } from "../../../../lib/jobs/officeAccess";
@@ -92,7 +93,7 @@ export async function POST(request: NextRequest) {
       createdBy: user.id,
     });
 
-    const origin = new URL(request.url).origin;
+    const origin = publicAppOrigin(request.url);
     const encodedToken = encodeURIComponent(token);
 
     return NextResponse.json({
