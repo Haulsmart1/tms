@@ -82,6 +82,12 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
     currently active (or `null` when viewing "All").
 - Any new data-fetching/writing page must go through `useTenant()` / `filterByTenant` / `writeTenantId` — do not
   query Supabase tables directly by an assumed tenant.
+- `requireTenant` (`lib/api/server.ts`) reads the `x-tenant-id` header. Staff with no header get their home
+  tenant; an admin or super admin with no header gets 400 (`requestTenantId` in `lib/auth/tenantAccess.ts`),
+  because "All tenants" sends none. Send the record's own tenant, not the selector, when acting on a row.
+- Accounts routes (`requireTenantAccess`) refuse drivers even without an allow-list, by the same office rule as
+  POD sharing (`lib/jobs/officeRoles.ts`). Links that leave the app use `publicAppOrigin()`, never the request
+  host; `lib/accounts/publicLinks.test.ts` fails on any route that builds one from the request.
 - `vehicle_licences.active` and `vehicle_licences.vehicle_id` are **server-only**. `billing_03` revokes the
   client's insert and update grants and installs a trigger, because an active licence is a billable vehicle
   and repointing `vehicle_id` would make a different vehicle billable for free. Activation goes through
@@ -94,8 +100,10 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
   has no coverage row for it. Keep those two ideas distinct, and do not add a second billable-count rule.
 - **Unlicensed vehicles cannot be put to work.** `prodfix_30` adds a trigger that refuses to newly assign a
   vehicle with no active licence (errcode `LIC01`) on jobs, vehicle assignments, load manifests and planning
-  itineraries; existing assignments are grandfathered. `lib/billing/unlicensedVehicle.ts` turns that error
-  into a user message. Without this gate, billing was optional.
+  itineraries; existing assignments are grandfathered. The same trigger refuses any new assignment for a
+  company whose `company_billing.status` is `canceled` (errcode `LIC02`), because cancelling leaves licences
+  active. `lib/billing/unlicensedVehicle.ts` turns both errors into a user message. Without this gate,
+  billing was optional.
 - **Deleting a vehicle goes through `DELETE /api/vehicles/[id]`**, never a browser delete. It answers 409 when
   billing history exists, and `prodfix_31` makes billing evidence tables RESTRICT rather than cascade.
 - **Two billing models run side by side**, routed on `company_billing.billing_model`. Everything above

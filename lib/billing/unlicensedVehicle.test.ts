@@ -42,6 +42,26 @@ describe("isUnlicensedVehicleError", () => {
   });
 });
 
+const CANCELLED_MESSAGE =
+  "Vehicle AB12CDE cannot be assigned to new work because this company's subscription is cancelled.";
+
+describe("cancelled-company refusal (LIC02)", () => {
+  it("is recognised by code, hint or sentence", () => {
+    expect(isUnlicensedVehicleError({ code: "LIC02", message: CANCELLED_MESSAGE })).toBe(true);
+    expect(isUnlicensedVehicleError({ code: "P0001", message: "x", hint: "company_billing_cancelled" })).toBe(true);
+    expect(isUnlicensedVehicleError(new Error(`save failed: ${CANCELLED_MESSAGE}`))).toBe(true);
+  });
+
+  it("returns the database sentence, not the licence copy", () => {
+    expect(unlicensedVehicleMessage({ code: "LIC02", message: CANCELLED_MESSAGE })).toBe(CANCELLED_MESSAGE);
+    expect(unlicensedVehicleMessage(new Error(`save failed: ${CANCELLED_MESSAGE}`))).toBe(CANCELLED_MESSAGE);
+  });
+
+  it("falls back to cancellation copy when the code survived but the message did not", () => {
+    expect(unlicensedVehicleMessage({ code: "LIC02", message: "" })).toMatch(/subscription is cancelled/);
+  });
+});
+
 describe("unlicensedVehicleMessage", () => {
   it("returns the database sentence for a recognised error", () => {
     expect(unlicensedVehicleMessage({ code: "LIC01", message: DB_MESSAGE })).toBe(DB_MESSAGE);

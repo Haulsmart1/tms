@@ -19,7 +19,8 @@
 -- lib/billing/vehicleCount.ts ("billable if ANY licence is active"). Rows are
 -- never counted: one vehicle legitimately carries an O-licence, a waste carrier
 -- licence and an ADR certificate at once. Only `active` is read, so this file
--- does not depend on billing_03 or billing_07 being applied.
+-- does not depend on billing_03 or billing_07 being applied (it does need
+-- billing_01's company_billing, for the cancelled-company check below).
 --
 -- GATED (table.column, and the write path that reaches it):
 --   jobs.vehicle_id                        app/jobs/page.tsx insert/update,
@@ -54,11 +55,27 @@
 -- on the service role, and a server route must not be a way around this. Fix a
 -- stuck case by activating a licence, not by bypassing the trigger.
 --
+-- CANCELLED COMPANIES (added 2026-09-15). Cancelling sets
+-- company_billing.status = 'canceled' and stops the charges but leaves every
+-- licence active, so the licence check alone let a cancelled company keep
+-- running its fleet for GBP 0. The same trigger now refuses any new assignment
+-- for a vehicle whose company is cancelled, licensed or not (LIC02). A company
+-- with no company_billing row has never subscribed and is governed by LIC01
+-- alone. Past-due suspension will extend this check when it is designed.
+-- This reads public.company_billing (billing_01), so the file refuses to apply
+-- without it.
+--
 -- ERROR CONTRACT (mirrored by lib/billing/unlicensedVehicle.ts; change both):
 --   errcode  LIC01 (custom SQLSTATE; PostgREST returns it as `code`, HTTP 400)
 --   message  Vehicle <registration or id> has no active licence. Activate it
 --            on the Licences page before assigning it.
 --   hint     vehicle_unlicensed
+--   detail   vehicle_id=<uuid> table=<table>
+--
+--   errcode  LIC02
+--   message  Vehicle <registration or id> cannot be assigned to new work
+--            because this company's subscription is cancelled.
+--   hint     company_billing_cancelled
 --   detail   vehicle_id=<uuid> table=<table>
 --
 -- WHY SECURITY DEFINER IS SAFE HERE, when billing_03 and billing_07 argue
@@ -104,6 +121,13 @@
 
 begin;
 
+do $$
+begin
+  if to_regclass('public.company_billing') is null then
+    raise exception 'prodfix_30: public.company_billing is missing (billing_01). The gate would fail every assignment at run time. Nothing changed.';
+  end if;
+end $$;
+
 create or replace function public.guard_vehicle_assignment_licensed()
 returns trigger
 language plpgsql
@@ -139,6 +163,30 @@ begin
 
   v_vehicle := v_new::uuid;
 
+  select nullif(btrim(v.registration), '') into v_registration
+  from public.vehicles v where v.id = v_vehicle;
+
+  -- A CANCELLED company cannot put vehicles to new work, licensed or not.
+  -- Cancelling sets company_billing.status = 'canceled' and stops the charges,
+  -- but leaves every licence active, so without this a cancelled company kept
+  -- running its whole fleet for GBP 0 (2026-09-15 follow-up). The vehicle
+  -- reaches its company through its tenant; some legacy rows carry a company
+  -- id in vehicles.tenant_id directly, so both are checked. A company with no
+  -- company_billing row has never subscribed and is governed by LIC01 alone.
+  if exists (
+    select 1
+    from public.vehicles v
+    left join public.tenants t on t.id = v.tenant_id
+    join public.company_billing cb on cb.company_id = coalesce(t.company_id, v.tenant_id)
+    where v.id = v_vehicle and cb.status = 'canceled'
+  ) then
+    raise exception 'Vehicle % cannot be assigned to new work because this company''s subscription is cancelled.',
+        coalesce(v_registration, v_vehicle::text)
+      using errcode = 'LIC02',
+            hint = 'company_billing_cancelled',
+            detail = format('vehicle_id=%s table=%s', v_vehicle, tg_table_name);
+  end if;
+
   -- ANY active licence makes the vehicle usable (lib/billing/vehicleCount.ts).
   if exists (
     select 1 from public.vehicle_licences vl
@@ -146,9 +194,6 @@ begin
   ) then
     return new;
   end if;
-
-  select nullif(btrim(v.registration), '') into v_registration
-  from public.vehicles v where v.id = v_vehicle;
 
   raise exception 'Vehicle % has no active licence. Activate it on the Licences page before assigning it.',
       coalesce(v_registration, v_vehicle::text)

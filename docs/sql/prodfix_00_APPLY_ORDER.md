@@ -56,7 +56,8 @@ What depends on the baseline, and what goes wrong without it:
    baseline file before any prodfix.
 
    ```sql
-   select 'billing_01 platform_charges' as needs, to_regclass('public.platform_charges') is not null as ok
+   select 'billing_01 company_billing' as needs, to_regclass('public.company_billing') is not null as ok
+   union all select 'billing_01 platform_charges', to_regclass('public.platform_charges') is not null
    union all select 'billing_03 vehicle_cycle_coverage', to_regclass('public.vehicle_cycle_coverage') is not null
    union all select 'billing_03 vehicle_addon_charges', to_regclass('public.vehicle_addon_charges') is not null
    union all select 'billing_04 record_cycle_charge', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'record_cycle_charge')
@@ -96,7 +97,7 @@ What depends on the baseline, and what goes wrong without it:
 |---|---|---|
 | 4 | `prodfix_33_billing_integrity.sql` | Must go BEFORE 31. Collection claims, refund_pending, one-success backstop. |
 | 5 | `prodfix_31_billing_evidence_retention.sql` | RESTRICT foreign keys and an atomic vehicle delete. After this, a company with billing rows cannot be deleted. Check diag `08_fk` for the constraint names it expects. |
-| 6 | `prodfix_30_vehicle_licence_gate.sql` | Licence gate trigger (errcode LIC01). First run the count query in its header to see how many live assignments are already unlicensed (they are grandfathered). |
+| 6 | `prodfix_30_vehicle_licence_gate.sql` | Licence gate trigger (errcode LIC01), and from 2026-09-15 a cancelled-company gate (LIC02): a company whose `company_billing.status` is `canceled` cannot newly assign any vehicle. First run the count query in its header to see how many live assignments are already unlicensed (they are grandfathered). |
 | 7 | `prodfix_32_migrate_company_to_period_billing.sql` | Needed before any `scripts/migrate-company-to-period-billing.mjs --apply`. |
 
 ## 4. Customer accounts (in order)
@@ -130,6 +131,7 @@ What depends on the baseline, and what goes wrong without it:
 | 17 | `prodfix_71_itinerary_integrity.sql` | |
 | 18 | `prodfix_72_latest_positions.sql` | Creates two indexes; run it when nobody is using Tracking. |
 | 19 | `prodfix_73_geocode_failures.sql` | |
+| 19a | `prodfix_94_job_acceptance_stamp.sql` | Stamps `jobs.accepted_by` / `accepted_at` with the real caller, so a browser write cannot record someone else as the person who accepted a job. Changes nothing for server code. |
 
 ## 8. Database security batch
 
