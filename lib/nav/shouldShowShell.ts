@@ -10,7 +10,12 @@ import { isSkeletonReadyRoute } from "./skeletonReadyRoutes";
 // not a denylist of bad ones, so any future status value not yet accounted
 // for defaults to hidden too.
 export function shouldShowShell(pathname: string, status: TenantStatus): boolean {
-  if (pathname === "/" || pathname === "/login" || pathname.startsWith("/super-admin")) {
+  if (
+    pathname === "/" ||
+    pathname === "/login" ||
+    pathname === "/signup" ||
+    pathname.startsWith("/super-admin")
+  ) {
     return false;
   }
   if (status === "ready") return true;

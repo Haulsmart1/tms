@@ -5,6 +5,7 @@ describe("isThemeableRoute", () => {
   it("returns true for the pages that paint their own bg-canvas on a .ds wrapper", () => {
     expect(isThemeableRoute("/")).toBe(true);
     expect(isThemeableRoute("/login")).toBe(true);
+    expect(isThemeableRoute("/signup")).toBe(true);
     expect(isThemeableRoute("/dashboard")).toBe(true);
     expect(isThemeableRoute("/jobs")).toBe(true);
     expect(isThemeableRoute("/pod")).toBe(true);
@@ -88,6 +89,7 @@ describe("isThemeableRoute", () => {
       [
         "/",
         "/login",
+        "/signup",
         "/auth/confirm",
         "/super-admin",
         "/super-admin/requests",

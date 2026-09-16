@@ -58,6 +58,7 @@
 export const THEMEABLE_ROUTES: readonly string[] = [
   "/",                        // app/page.tsx                      (self-pins .light)
   "/login",                   // app/login/page.tsx                (no shell, no toggle)
+  "/signup",                  // app/signup/page.tsx               (no shell, no toggle)
   "/super-admin",             // app/super-admin/page.tsx           (no shell, no toggle)
   "/super-admin/requests",    // app/super-admin/requests/page.tsx (no shell, no toggle)
   "/super-admin/billing",     // app/super-admin/billing/page.tsx  (no shell, no toggle)

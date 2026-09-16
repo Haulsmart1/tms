@@ -26,6 +26,8 @@ const PUBLIC_ROUTES = [
   "/api/auth/callback",
   "/api/auth/magic-link",
   "/api/request-access",
+  "/signup",
+  "/api/signup",
   "/api/billing/run",
   "/api/integrations/cambridge-audio/rma",
   "/pod/share/[token]",

@@ -28,6 +28,12 @@ const PUBLIC_EXACT = new Set([
   /* Lead intake from the landing page form. Rate limited durably inside the
      route; it cannot require a session because the sender has no account. */
   "/api/request-access",
+  /* Self-serve signup: the page and the route that creates the account. The
+     visitor has no session yet by definition. The route honeypots, rate limits
+     per IP and per email, and answers identically whether or not the address
+     exists (lib/auth/signup.ts). */
+  "/signup",
+  "/api/signup",
   /* Bearer-secret auth (CAMBRIDGE_RMA_SECRET), checked inside the route
      handler with a constant-time compare. A machine caller has no cookie. */
   "/api/integrations/cambridge-audio/rma",

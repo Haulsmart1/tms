@@ -13,6 +13,14 @@ describe("shouldShowShell", () => {
     expect(shouldShowShell("/login", "signed-out")).toBe(false);
   });
 
+  /* A signed-in admin who opens /signup (a bookmark, a shared link) must see
+     the page, not the console chrome around it. */
+  it("hides on /signup regardless of status", () => {
+    expect(shouldShowShell("/signup", "ready")).toBe(false);
+    expect(shouldShowShell("/signup", "signed-out")).toBe(false);
+    expect(shouldShowShell("/signup", "loading")).toBe(false);
+  });
+
   it("hides on every /super-admin/* route regardless of status", () => {
     expect(shouldShowShell("/super-admin", "ready")).toBe(false);
     expect(shouldShowShell("/super-admin/billing", "ready")).toBe(false);
