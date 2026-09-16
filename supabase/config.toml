@@ -223,7 +223,11 @@ web3 = 30
 
 [auth.email]
 # Allow/disallow new user signups via email to your project.
-enable_signup = false
+# TRUE: in the CLI this switch is the email PROVIDER (GoTrue EXTERNAL_EMAIL_ENABLED). Setting
+# it false answers "Email logins are disabled" to every magic link, which breaks /login for
+# everyone. New-user signups are refused by the top-level [auth] enable_signup = false above,
+# which is the hosted dashboard's "Allow new users to sign up".
+enable_signup = true
 # If enabled, a user will be required to confirm any email change on both the old, and new email
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true

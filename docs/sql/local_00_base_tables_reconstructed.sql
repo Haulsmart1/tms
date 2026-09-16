@@ -370,6 +370,7 @@ create table if not exists public.subcontractor_users (         -- prodfix_20 re
   id          uuid primary key default gen_random_uuid(),
   tenant_id   uuid not null references public.tenants(id),
   user_id     uuid not null,
+  role        text,                                             -- app/api/auth/callback/route.ts lookupPortal selects "id, role"; every login reads it
   active      boolean not null default true,
   created_at  timestamptz not null default now()
 );
