@@ -13,6 +13,8 @@ import { operatorDay } from "../../lib/time";
 import { isAwaitingPod } from "../../lib/pod/overdue";
 import Skeleton from "../../components/Skeleton";
 import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
+import GettingStartedPanel from "../../components/dashboard/GettingStartedPanel";
+import type { GettingStartedCounts } from "../../lib/dashboard/gettingStarted";
 
 type Kpis = {
   jobsToday: number;
@@ -44,6 +46,11 @@ export default function DashboardPage() {
   const [todayJobs, setTodayJobs] = useState<TodayJobRow[]>([]);
   const [attention, setAttention] = useState<AttentionItem[]>([]);
   const [revenue, setRevenue] = useState<RevenueDay[]>([]);
+  /* Self-serve signup's first-run panel (decision 2 in the signup spec).
+     Loaded separately from the KPIs so a count failure cannot take the
+     dashboard down; a failed count reads as zero and the panel errs toward
+     showing. Admin only: staff cannot add a card, a vehicle or a driver. */
+  const [gettingStarted, setGettingStarted] = useState<GettingStartedCounts | null>(null);
   // The tenant the KPIs/rows on screen were loaded FOR. Set only when the
   // load below reaches "ready", never on "error". See
   // lib/loading/skeletonVisibility.ts.
@@ -196,7 +203,29 @@ export default function DashboardPage() {
       setState("ready");
     }
 
+    async function loadGettingStarted() {
+      if (tenant.status !== "ready" || tenant.role !== "admin") {
+        setGettingStarted(null);
+        return;
+      }
+      /* Head-only counts. company_billing is company-scoped and its RLS
+         policy shows an admin exactly their own company's row, so no tenant
+         filter applies there. */
+      const [vehicles, drivers, card] = await Promise.all([
+        tenant.filterByTenant(supabase.from("vehicles").select("id", { count: "exact", head: true })),
+        tenant.filterByTenant(supabase.from("drivers").select("id", { count: "exact", head: true })),
+        supabase.from("company_billing").select("company_id", { count: "exact", head: true }),
+      ]);
+      if (cancelled) return;
+      setGettingStarted({
+        vehicleCount: vehicles.error ? 0 : vehicles.count ?? 0,
+        driverCount: drivers.error ? 0 : drivers.count ?? 0,
+        cardCount: card.error ? 0 : card.count ?? 0,
+      });
+    }
+
     load();
+    void loadGettingStarted();
     return () => { cancelled = true; };
   }, [tenant.activeTenantId, tenant.status]);
 
@@ -233,6 +262,8 @@ export default function DashboardPage() {
       <div className="ds min-h-screen bg-canvas font-sans text-ink">
         <main className="mx-auto max-w-6xl px-6 py-8">
           <h1 className="text-2xl font-semibold tracking-tight text-ink">Dashboard</h1>
+
+          {gettingStarted ? <GettingStartedPanel {...gettingStarted} className="mt-6" /> : null}
 
           {state === "error" ? (
             <div className="mt-6 rounded-lg border border-danger-border bg-danger-tint p-4 text-sm text-danger-strong">

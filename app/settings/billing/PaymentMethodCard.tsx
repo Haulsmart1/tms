@@ -43,10 +43,11 @@ type Props = {
   onReplace: () => void;
   onCancel: () => void;
   onComplete: (response: Record<string, unknown>) => void;
-  /* Shown beside the card form when there is no card yet. Defaults to the v1
-     wording, which promises a charge today. A v2 body must pass its own: v2
-     takes nothing until a vehicle is activated. */
-  setupNotice?: string;
+  /* Shown beside the card form when there is no card yet. REQUIRED, with no
+     default: the old default was the v1 wording ("Your first charge is taken
+     today"), which is false for a v2 company, and a new signup is v2. Each
+     body passes the sentence for its own model. */
+  setupNotice: string;
 };
 
 /* The icon square from the Settings launcher cards (app/settings/page.tsx),
@@ -75,7 +76,7 @@ export default function PaymentMethodCard({
   onReplace,
   onCancel,
   onComplete,
-  setupNotice = "Add a card to start your subscription. Your first charge is taken today.",
+  setupNotice,
 }: Props) {
   let body: ReactNode;
 

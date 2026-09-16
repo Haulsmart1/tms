@@ -422,6 +422,9 @@ export default function V1Billing() {
             billing={billing}
             loadError={Boolean(loadError?.billing)}
             showForm={showCardForm}
+            /* v1 charges in advance, so the first charge really is today.
+               Passed explicitly: PaymentMethodCard no longer defaults to it. */
+            setupNotice="Add a card to start your subscription. Your first charge is taken today."
             onReplace={() => {
               setNotice(null);
               setShowCardForm(true);
