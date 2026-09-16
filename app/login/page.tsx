@@ -110,8 +110,8 @@ export default function LoginPage() {
 
         <p className="mt-4 text-xs text-ink-3">
           No account yet?{" "}
-          <Link href="/#request-access" className="underline hover:text-ink">
-            Request access
+          <Link href="/signup" className="underline hover:text-ink">
+            Create one
           </Link>
         </p>
       </div>

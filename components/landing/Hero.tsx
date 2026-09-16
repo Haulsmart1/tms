@@ -80,9 +80,9 @@ export default function Hero() {
             platform built for UK and European haulage.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
-            <a href="#request-access" className={buttonClasses("primary", "lg")}>
+            <Link href="/signup" className={buttonClasses("primary", "lg")}>
               Get started
-            </a>
+            </Link>
             <Link href="/login" className={buttonClasses("secondary", "lg")}>
               Sign in
             </Link>

@@ -174,7 +174,13 @@ IP, never creates a user (`shouldCreateUser: false`) and answers the same whethe
 Email links land on `/auth/confirm` (`verifyOtp` with `token_hash`, open-redirect hardened `next` param). The
 GET `app/api/auth/callback` only exchanges a PKCE `code`; a `token_hash` sent there is forwarded to
 `/auth/confirm` rather than verified, so a link opened by an email scanner is not consumed. Self-service
-signup does not exist yet: accounts come from invites, and Supabase's "Allow new users to sign up" must be off.
+signup is `/signup` -> `POST /api/signup`: honeypot, per-IP and per-email rate limits, then the
+service-role admin API creates the auth user silently, the `signup_01` RPC
+`create_company_with_admin` writes company, tenant, company profile and founding admin profile in
+one transaction, and only then the invite email goes out (pure logic in `lib/auth/signup.ts`). It
+answers one constant body whether or not the address exists. Supabase's "Allow new users to sign
+up" stays off: the service role creates users regardless, and `supabase.auth.signUp` must never
+appear in browser code.
 
 `proxy.ts` is the edge gate: it refreshes the Supabase session cookie and turns away anonymous requests
 (redirect to `/login?next=...` for pages, `401 {"error":"unauthorized"}` for anything `isApiPath`, so a

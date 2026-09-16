@@ -1,3 +1,4 @@
+import Link from "next/link";
 import Container from "../Container";
 
 export default function Footer() {
@@ -12,6 +13,9 @@ export default function Footer() {
             href="#" placeholders that went nowhere. Restore them once real
             privacy notice and terms pages are published. */}
         <nav className="flex gap-4" aria-label="Footer">
+          <Link href="/signup" className="hover:text-ink-2">
+            Get started
+          </Link>
           <a href="#request-access" className="hover:text-ink-2">
             Contact
           </a>
