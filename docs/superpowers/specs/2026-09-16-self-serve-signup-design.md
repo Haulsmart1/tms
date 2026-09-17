@@ -351,7 +351,9 @@ concurrent duplicate signup; existing customer's email; per-email limit; per-IP 
 malformed and oversized bodies, unknown keys, empty strings, unicode and homoglyph names,
 plus-addressing and uppercase emails; RPC failure after user creation; forged `next`; replayed
 invite token; direct REST calls to the RPC as `anon` and `authenticated`; signed-in admin on
-`/signup`; `GET` and empty `POST` to `/api/signup`; `/privacy` and `/terms` 404.
+`/signup`; `GET` and empty `POST` to `/api/signup`; `/privacy` and `/terms` not built (the edge
+gate in `proxy.ts` sends an anonymous visitor to `/login?next=...`, not a 404, because neither
+path is public; recorded red and accepted as the SET-26 launch blocker).
 
 ## Manual steps before launch
 

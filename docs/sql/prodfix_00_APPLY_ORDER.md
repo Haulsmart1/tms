@@ -163,6 +163,15 @@ Then run `rls_09_verify.sql` (with real ids substituted locally, never committed
 |---|---|---|
 | 34 | `signup_01_create_company_with_admin.sql` | The RPC behind `POST /api/signup`: company, tenant, company profile and founding admin in one transaction, service_role only. Needs prodfix_01 (rate limits), prodfix_20 (`prodfix_role_id`, roles seeded) and prodfix_88 (the tenant/company binding it satisfies). Also adds the unique index on `roles.name`; if the live table holds duplicate role names the file fails and changes nothing, so fix those first. Spec: `docs/superpowers/specs/2026-09-16-self-serve-signup-design.md`. |
 
+Ordering constraints from the signup review (`docs/superpowers/reviews/2026-09-16-self-serve-signup-review.md`,
+B1 and S1): every landing call to action links `/signup` in the same branch, so the branch must not
+deploy before entries 1 to 34 are applied, or every "Get started" submit answers 500. And apply
+`prodfix_20` (#3) and `signup_01` (#34) in the same sitting: between them `/api/signup` answers
+200 to an existing address and 500 to a new one, which is an account-existence oracle, and each
+500 creates and then deletes an auth user. Run the VERIFY 3 block of `signup_01` (rolled back) on
+the hosted project before marking #34 applied: the RPC's column list for `companies` and `tenants`
+was proven only against the local reconstruction.
+
 `docs/sql/local_00_base_tables_reconstructed.sql` is NOT in this list. It rebuilds the
 dashboard-created identity tables for a local `supabase start` stack only, and must never be
 applied to a hosted project.
