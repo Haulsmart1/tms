@@ -299,7 +299,7 @@ v1 wording by omission.
 | `components/landing/PricingCard.tsx:68` | `#request-access` "Request access" | `/signup` "Get started" |
 | `components/landing/Footer.tsx:15` | `#request-access` "Contact" | `/signup` "Get started", plus keep "Contact" to `#request-access` |
 | `app/login/page.tsx` "No account yet?" | `/#request-access` "Request access" | `/signup` "Create one" |
-| `app/components/TenantGate.tsx` RecoveryActions | `/#request-access` "Request access" | `/signup` "Create a company" |
+| `app/components/TenantGate.tsx` RecoveryActions | `/#request-access` "Request access" | `/signup` "Create a company" beside `/#request-access` "Request access", which stays because a signed-in address cannot use `/signup` (review S3) |
 | `components/landing/RequestAccessForm.tsx:74-83` | "Self-serve signup is coming soon." | "Prefer to talk it through first? Tell us about your operation and we will get in touch. Or create your account now." with a link to `/signup` |
 
 LandingNav's three `#request-access` references are the nav anchor (line 13) and the two

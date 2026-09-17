@@ -155,6 +155,9 @@ try {
   /* 5. Billing: v2 body, card form, no v1 wording. */
   await page.goto(`${BASE}/settings/billing`, { waitUntil: "load" });
   await page.waitForSelector("text=Payment method", { timeout: 20000 });
+  /* The skeleton also says "Payment method"; the card notice arrives with the
+     billing preview, so wait for it (both v1 and v2 notices begin "Add a card"). */
+  await page.waitForSelector("text=Add a card", { timeout: 20000 });
   const billingText = (await page.locator("body").innerText()).toLowerCase();
   check(!billingText.includes(V1_SENTENCE), "billing page never shows the v1 charge sentence");
   check(billingText.includes(V2_FRAGMENT.toLowerCase()), "billing page shows the v2 card setup sentence");
