@@ -34,13 +34,18 @@
 --                     full_name) and a legacy memberships row all written.
 --   'already_member'  the profile already belongs to a company (company_id
 --                     set, or tenant_id set on a tenant that has a company):
---                     nothing written. Calling twice for one user creates one
---                     company.
+--                     no company, tenant, company profile, binding or
+--                     membership written. A bare public.users row and a bare
+--                     profiles row may be inserted first so there is a row to
+--                     lock. Calling twice for one user creates one company.
 --
 -- ERRORS (raised as stable tokens; the route never forwards database text)
 --   invalid_arguments   null user id, or an empty company name
 --   user_not_found      no auth.users row for p_user_id
 --   role_missing / role_ambiguous   from prodfix_role_id
+--   not_eligible        the profile is a super_admin (platform staff are never
+--                       a company's founding admin; prodfix_20's
+--                       provision_tenant_user refuses the same case)
 --
 -- Also adds a unique index on roles.name. prodfix_role_id exists to raise
 -- role_ambiguous only because nothing prevented duplicates; this makes the
@@ -93,7 +98,7 @@ begin
   -- provisioning trigger). Either way, lock one row and decide from it.
   insert into public.profiles (id) values (p_user_id) on conflict (id) do nothing;
 
-  select p.id, p.company_id, p.tenant_id, p.full_name
+  select p.id, p.company_id, p.tenant_id, p.role_id, p.full_name
     into v_profile
     from public.profiles p
    where p.id = p_user_id
@@ -103,6 +108,14 @@ begin
      or exists (select 1 from public.tenants t
                  where t.id = v_profile.tenant_id and t.company_id is not null) then
     return 'already_member';
+  end if;
+
+  -- Never re-role platform staff. Unreachable through /api/signup, which only
+  -- calls this for a user it created moments earlier, but this is a
+  -- service_role primitive any future caller can reach.
+  if exists (select 1 from public.roles r
+              where r.id = v_profile.role_id and r.name = 'super_admin') then
+    raise exception 'not_eligible';
   end if;
 
   insert into public.companies (name)
