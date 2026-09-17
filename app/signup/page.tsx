@@ -12,6 +12,7 @@ import {
   describeSignupFieldErrors,
   type SignupFieldErrors,
 } from "../../lib/validation/signup";
+import { SIGNUP_FAILED_MESSAGE, SIGNUP_SENT_MESSAGE } from "../../lib/auth/signup";
 
 /* Self-serve signup (docs/superpowers/specs/2026-09-16-self-serve-signup-design.md).
    Same skeleton as app/login/page.tsx: `ds font-sans` opts this subtree into
@@ -80,13 +81,13 @@ export default function SignupPage() {
           setFieldErrors(next);
           if (Object.keys(next).length === 0) setError("Please check the highlighted fields.");
         } else {
-          setError(payload.error ?? "We could not create your account. Please try again.");
+          setError(payload.error ?? SIGNUP_FAILED_MESSAGE);
         }
         setStatus("idle");
         return;
       }
 
-      setSentMessage(payload.message ?? "Check your inbox to finish setting up your account.");
+      setSentMessage(payload.message ?? SIGNUP_SENT_MESSAGE);
       setStatus("sent");
     } catch {
       setError("We could not reach the server. Check your connection and try again.");
