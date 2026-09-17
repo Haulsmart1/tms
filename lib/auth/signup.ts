@@ -30,11 +30,10 @@ export function signupSentResponse(): SignupResponse {
 /* The one failure body: admin client missing, lookup failed, or the RPC
    failed after the auth user was created (and compensation ran). Constant
    whether or not the compensating delete succeeded. */
+export const SIGNUP_FAILED_MESSAGE = "We could not create your account. Please try again in a moment.";
+
 export function signupFailedResponse(): SignupResponse {
-  return {
-    status: 500,
-    body: { ok: false, error: "We could not create your account. Please try again in a moment." },
-  };
+  return { status: 500, body: { ok: false, error: SIGNUP_FAILED_MESSAGE } };
 }
 
 export function invalidBodyResponse(): SignupResponse {
@@ -115,6 +114,29 @@ async function handleExistingUser(deps: SignupDeps, userId: string, email: strin
   return signupSentResponse();
 }
 
+/* Compensation after a failed RPC. One retry covers a transient GoTrue error.
+   If both attempts fail, an unconfirmed auth user with no profile is left
+   behind, and every later submit from that address takes the existing-
+   unconfirmed branch (invite re-sent, RPC never called), so the customer would
+   confirm into the no-tenant screen. That is an operator ticket: log it under
+   its own message with the user id so it can be found and deleted. */
+async function compensateCreatedUser(deps: SignupDeps, userId: string): Promise<void> {
+  try {
+    await deps.deleteUser(userId);
+    return;
+  } catch (err) {
+    deps.log.warn("signup: cleanup of new auth user failed, retrying once", { userId, ...describe(err) });
+  }
+  try {
+    await deps.deleteUser(userId);
+  } catch (err) {
+    deps.log.error("signup: orphaned auth user left behind after failed provisioning", {
+      userId,
+      ...describe(err),
+    });
+  }
+}
+
 export async function runSignup(deps: SignupDeps, request: SignupRequest): Promise<SignupResponse> {
   // 1. Honeypot, on the raw body, before any parsing work.
   if (isSignupHoneypotTriggered(request.body)) {
@@ -187,11 +209,7 @@ export async function runSignup(deps: SignupDeps, request: SignupRequest): Promi
 
   if (provisionError !== null || !outcome || !ACCEPTED_OUTCOMES.has(outcome)) {
     deps.log.error("signup: provisioning failed", { ...describe(provisionError), outcome });
-    try {
-      await deps.deleteUser(userId);
-    } catch (err) {
-      deps.log.error("signup: cleanup of new auth user failed", { userId, ...describe(err) });
-    }
+    await compensateCreatedUser(deps, userId);
     return signupFailedResponse();
   }
 

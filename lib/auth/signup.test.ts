@@ -21,6 +21,7 @@ type FakeOptions = {
   companyOutcome?: string;
   companyError?: Error;
   deleteError?: Error;
+  deleteErrorOnce?: Error;
   inviteError?: Error;
   magicLinkError?: Error;
   lookupError?: Error;
@@ -60,6 +61,11 @@ function fakeDeps(options: FakeOptions = {}) {
     deleteUser: async (id) => {
       record("deleteUser", id);
       if (options.deleteError) throw options.deleteError;
+      if (options.deleteErrorOnce) {
+        const once = options.deleteErrorOnce;
+        options.deleteErrorOnce = undefined;
+        throw once;
+      }
     },
     createCompany: async (args) => {
       record("createCompany", args);
@@ -243,12 +249,21 @@ describe("runSignup: failures and compensation", () => {
     expect(f.names()).not.toContain("sendInvite");
   });
 
-  it("a failed compensating delete is logged and the response is still the same failure response", async () => {
+  it("a compensating delete that fails twice is logged as an orphan with the user id, and the response is still the same failure response", async () => {
     const f = fakeDeps({ createdId: "u-new", companyError: new Error("boom"), deleteError: new Error("gone") });
     const response = await runSignup(f.deps, request());
     expect(serialize(response)).toBe(serialize(signupFailedResponse()));
-    expect(f.logs.some((l) => l.level === "error" && l.message.includes("cleanup"))).toBe(true);
-    expect((f.logs.find((l) => l.message.includes("cleanup"))?.meta as { userId: string }).userId).toBe("u-new");
+    expect(f.names().filter((n) => n === "deleteUser")).toHaveLength(2);
+    const orphan = f.logs.find((l) => l.level === "error" && l.message.includes("orphan"));
+    expect((orphan?.meta as { userId: string }).userId).toBe("u-new");
+  });
+
+  it("a compensating delete that fails once succeeds on the retry and logs no orphan", async () => {
+    const f = fakeDeps({ createdId: "u-new", companyError: new Error("boom"), deleteErrorOnce: new Error("blip") });
+    const response = await runSignup(f.deps, request());
+    expect(serialize(response)).toBe(serialize(signupFailedResponse()));
+    expect(f.names().filter((n) => n === "deleteUser")).toHaveLength(2);
+    expect(f.logs.some((l) => l.message.includes("orphan"))).toBe(false);
   });
 
   it("a lookup failure answers the failure response before any side effect", async () => {
