@@ -106,3 +106,14 @@ Also checked: `/signup` root is `ds ... bg-canvas ... font-sans text-ink` (`app/
 - `app/dashboard/page.tsx`, `components/dashboard/GettingStartedPanel.tsx`, `lib/dashboard/gettingStarted.ts` and its test: the first-run panel from handoff 3.4 ("a small getting started panel on /dashboard" is one of two options offered). `app/dashboard/page.tsx` is not in the Map table; the change is confined to one state, one loader and one JSX line.
 - `lib/rateLimit.test.ts` (new): a test for an in-scope module that had none; adds only assertions.
 - Everything else in the diff is named in sections 3.1 to 3.5, the Map table, or the documents list.
+
+## Ultra review (cloud, 2026-09-17)
+
+Run on `feat/self-serve-signup` against main after the phase 5 fixes. Four findings, each verified against the code by the implementer; Ethan chose to leave the branch as is.
+
+| # | File:line | Finding | Assessment | Resolution |
+|---|---|---|---|---|
+| U1 | `app/signup/page.tsx:183,187` | `/terms` and `/privacy` links land on pages that do not exist. | The stated mechanism is wrong (the edge gate answers 307 to `/login?next=...`, not 404); the substance is the SET-26 launch blocker already recorded in S2 and the closing handoff. Decision 4: link only, pages not built on this branch. | Deferred to launch: build the two pages before the first real signup. |
+| U2 | `lib/auth/signup.ts:184-198` | If `createUser` errors after GoTrue committed the user, the catch finds the id this request created and takes the existing-user branch, which never provisions a company; the customer confirms into the no-tenant screen. | Confirmed and narrow: needs a post-commit error from GoTrue. The RPC is idempotent and concurrency-safe (adversarial row 1), so calling it for the found id before sending the email would close the gap with the same response body. Touches decision 8 in that one path. | Deferred by Ethan, 2026-09-17. Recovery today is an operator provisioning the orphan. |
+| U3 | `app/api/signup/route.ts:42,49` | `signupFailedResponse()` is called twice per error return. | Confirmed, harmless: two extra allocations on two error paths. | Deferred by Ethan, 2026-09-17. |
+| U4 | `app/dashboard/page.tsx:206-225` | Three head-only counts run on every dashboard load for every admin, even after onboarding is complete. | Confirmed and cheap: parallel head requests on indexed columns, admins only. A cached completion flag would go wrong when a vehicle is deleted and would be per-device. | Deferred by Ethan, 2026-09-17; not recommended. |
