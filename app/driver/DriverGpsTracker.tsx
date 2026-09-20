@@ -10,6 +10,27 @@ import {
 import { metresPerSecondToKph } from "../../lib/driver/location";
 
 const MIN_SEND_INTERVAL_MS = 15_000;
+const GPS_TRACKING_OPT_IN_KEY = "tms.driver.gps-tracking.v1";
+
+function hasTrackingOptIn(): boolean {
+  try {
+    return window.localStorage.getItem(GPS_TRACKING_OPT_IN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function setTrackingOptIn(enabled: boolean): void {
+  try {
+    if (enabled) {
+      window.localStorage.setItem(GPS_TRACKING_OPT_IN_KEY, "1");
+    } else {
+      window.localStorage.removeItem(GPS_TRACKING_OPT_IN_KEY);
+    }
+  } catch {
+    // Tracking still works when browser storage is unavailable.
+  }
+}
 
 type TrackingState =
   | "idle"
@@ -85,6 +106,7 @@ export default function DriverGpsTracker() {
   }, [clearRetry]);
 
   const stopTracking = useCallback(() => {
+    setTrackingOptIn(false);
     endWatch();
     setState("idle");
     setMessage("");
@@ -136,6 +158,7 @@ export default function DriverGpsTracker() {
         }
 
         if (action === "stop") {
+          setTrackingOptIn(false);
           endWatch();
           setState("error");
           setMessage(errorText || "GPS tracking stopped.");
@@ -205,7 +228,7 @@ export default function DriverGpsTracker() {
     [flush],
   );
 
-  const startTracking = useCallback(() => {
+  const startTracking = useCallback((rememberOptIn = true) => {
     if (!navigator.geolocation) {
       setState("error");
       setMessage("GPS location is not supported by this browser.");
@@ -216,6 +239,10 @@ export default function DriverGpsTracker() {
       return;
     }
 
+    if (rememberOptIn) {
+      setTrackingOptIn(true);
+    }
+
     setState("requesting");
     setMessage("Requesting GPS permission...");
 
@@ -223,6 +250,7 @@ export default function DriverGpsTracker() {
       handlePosition,
       (error) => {
         if (error.code === error.PERMISSION_DENIED) {
+          setTrackingOptIn(false);
           endWatch();
           setState("error");
           setMessage(
@@ -245,6 +273,12 @@ export default function DriverGpsTracker() {
       },
     );
   }, [endWatch, handlePosition]);
+
+  useEffect(() => {
+    if (hasTrackingOptIn()) {
+      startTracking(false);
+    }
+  }, [startTracking]);
 
   const active =
     state === "active" || state === "requesting" || state === "reconnecting";
@@ -293,7 +327,7 @@ export default function DriverGpsTracker() {
 
       <button
         type="button"
-        onClick={active ? stopTracking : startTracking}
+        onClick={active ? stopTracking : () => startTracking()}
         style={{
           minHeight: 42,
           padding: "8px 14px",
