@@ -33,10 +33,9 @@
    whether or not it has been tokenised, because prefix matching cannot tell
    a real page from a hypothetical one.
 
-   EIGHT ENTRIES BELOW DO NOT SHOW A TOGGLE, and that is correct. AppShell is
+   MANY ENTRIES BELOW DO NOT SHOW A TOGGLE, and that is correct. AppShell is
    what renders the toggle, and shouldShowShell() hides AppShell entirely on
-   "/", "/login" and every "/super-admin/*" path, which is now six routes rather
-   than one. They all still need listing, because this list ALSO decides whether
+   "/", "/login", "/signup", the policy pages and every "/super-admin/*" path. They all still need listing, because this list ALSO decides whether
    ThemeScope pins a route dark, and pinning the landing page or /login dark
    would be wrong. The two portal dashboards (/driver, /subcontractor) DO offer
    the control, so converting them is the one part of this change a user can
@@ -59,6 +58,20 @@ export const THEMEABLE_ROUTES: readonly string[] = [
   "/",                        // app/page.tsx                      (self-pins .light)
   "/login",                   // app/login/page.tsx                (no shell, no toggle)
   "/signup",                  // app/signup/page.tsx               (no shell, no toggle)
+  /* The policy pages. Like "/", each self-pins `.light` on its own root, so
+     these entries are belt-and-braces: they stop ThemeScope wrapping a light
+     public document in a dark subtree. Paths come from lib/legal/routes.ts. */
+  "/legal",                   // app/legal/page.tsx  (self-pins .light, no shell)
+  "/terms",                   // app/terms/page.tsx  (self-pins .light, no shell)
+  "/privacy",                 // app/privacy/page.tsx  (self-pins .light, no shell)
+  "/cookies",                 // app/cookies/page.tsx  (self-pins .light, no shell)
+  "/cancellation-policy",     // app/cancellation-policy/page.tsx  (self-pins .light, no shell)
+  "/dpa",                     // app/dpa/page.tsx  (self-pins .light, no shell)
+  "/accessibility",           // app/accessibility/page.tsx  (self-pins .light, no shell)
+  "/support-policy",          // app/support-policy/page.tsx  (self-pins .light, no shell)
+  "/acceptable-use",          // app/acceptable-use/page.tsx  (self-pins .light, no shell)
+  "/sub-processors",          // app/sub-processors/page.tsx  (self-pins .light, no shell)
+  "/security",                // app/security/page.tsx  (self-pins .light, no shell)
   "/super-admin",             // app/super-admin/page.tsx           (no shell, no toggle)
   "/super-admin/requests",    // app/super-admin/requests/page.tsx (no shell, no toggle)
   "/super-admin/billing",     // app/super-admin/billing/page.tsx  (no shell, no toggle)

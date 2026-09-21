@@ -1,0 +1,389 @@
+{
+  "source": "02-Privacy-Notice.pdf",
+  "title": "Privacy Notice",
+  "company": [
+    "Silver Lady Holdings Ltd, trading as TMSWizzard",
+    "Church View, Newton Arlosh",
+    "Wigton, Cumbria, CA7 5ET",
+    "Registered in England & Wales: [COMPANY NUMBER]",
+    "VAT number: [VAT NUMBER]",
+    "Email: it@silverlady.group"
+  ],
+  "intro": [
+    {
+      "kind": "p",
+      "runs": [
+        {
+          "text": "This notice explains how Silver Lady Holdings Ltd, trading as TMSWizzard (\"we\", \"us\"), uses personal data when it acts as a controller. It is written to meet the UK General Data Protection Regulation (UK GDPR) and the Data Protection Act 2018, as amended by the Data (Use and Access) Act 2025."
+        }
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "heading": "1. Who we are",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "Silver Lady Holdings Ltd, Church View, Newton Arlosh, Wigton, Cumbria, CA7 5ET. Company number [COMPANY NUMBER]. ICO registration reference [ICO REFERENCE]. We have not appointed a Data Protection Officer. Data protection is overseen by our directors. Contact: it@silverlady.group."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "2. When this notice applies, and when it does not",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "It applies",
+              "bold": true
+            },
+            {
+              "text": " to data we decide how to use: user accounts and sign-in records, billing records, website enquiries, signup details, support correspondence and security logs."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "It does not apply",
+              "bold": true
+            },
+            {
+              "text": " to the operational data our customers load into TMSWizzard, such as driver records, vehicle positions, delivery addresses and proof of delivery. For that data the haulage operator using TMSWizzard is the controller and we act only as its processor under our Data Processing Agreement. If you are a driver, a delivery recipient, a subcontractor or a customer of one of our customers, please contact that operator first. If you contact us, we will pass your request to them."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "3. The data we collect and why",
+      "blocks": [
+        {
+          "kind": "table",
+          "head": [
+            "Data",
+            "What it includes",
+            "Purpose",
+            "Lawful basis"
+          ],
+          "rows": [
+            [
+              "User accounts",
+              "Email address, full name, phone number, role, company and depot",
+              "Creating and running your account, sending sign-in links",
+              "Contract"
+            ],
+            [
+              "Sign-in and session records",
+              "Sign-in times, IP address and browser user agent",
+              "Authentication, security and fraud prevention",
+              "Legitimate interests (keeping the service secure)"
+            ],
+            [
+              "Billing records",
+              "Company name, Square customer reference, card token, card brand, last four digits, expiry date, every charge with amount, VAT and receipt link",
+              "Taking payment, accounting and tax",
+              "Contract and legal obligation"
+            ],
+            [
+              "Signup details",
+              "Company name, contact name, work email",
+              "Forming the contract and creating the account",
+              "Contract"
+            ],
+            [
+              "Website enquiries",
+              "Company, contact name, email, phone, vehicle count, free-text notes",
+              "Responding to your enquiry",
+              "Legitimate interests (responding to a business enquiry you made)"
+            ],
+            [
+              "Support correspondence",
+              "Emails you send us and our replies",
+              "Providing support",
+              "Contract and legitimate interests"
+            ],
+            [
+              "Security logs",
+              "Rate-limit keys made from an IP address or a lower-cased email address",
+              "Preventing abuse of sign-in, signup and enquiry forms",
+              "Legitimate interests"
+            ],
+            [
+              "Administrative audit log",
+              "Which of our staff changed which field, without the values",
+              "Accountability for privileged access",
+              "Legitimate interests"
+            ],
+            [
+              "Server logs",
+              "IP address, page or API path requested, and limited technical identifiers",
+              "Operating, securing and debugging the service",
+              "Legitimate interests"
+            ]
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "We never receive your full card number, security code or card PIN. These are entered into Square's own secure form."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "We do not use your data for advertising, we do not sell it, and we do not carry out automated decision-making or profiling that has legal or similarly significant effects. TMSWizzard does not use artificial intelligence or machine learning services."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "4. Where we get data from",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "Directly from you, from the administrator at your company who invites you as a user, and automatically from your device when you use the service."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "5. Who we share it with",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "We use the following providers. Full details are in our Sub-processor List."
+            }
+          ]
+        },
+        {
+          "kind": "table",
+          "head": [
+            "Provider",
+            "Role"
+          ],
+          "rows": [
+            [
+              "Supabase",
+              "Database, authentication and file storage. Sign-in and invitation emails are currently sent through Supabase's email service."
+            ],
+            [
+              "Vercel",
+              "Application hosting and server logs"
+            ],
+            [
+              "Square",
+              "Card payments, 3-D Secure and hosted receipts"
+            ],
+            [
+              "Microsoft (Microsoft 365 and Teams)",
+              "Sending documents by email and internal alerts for new enquiries"
+            ],
+            [
+              "Resend",
+              "Internal email alerts for new enquiries"
+            ],
+            [
+              "TomTom",
+              "Map tiles, geocoding and routing. When a map is displayed your browser fetches tiles directly from TomTom, which discloses your IP address to TomTom."
+            ]
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "We may also share data with our professional advisers, with HMRC and other authorities where the law requires, and with a successor if the business is transferred."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "6. Where your data is held and international transfers",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "Our database and file storage (Supabase) and our application hosting (Vercel) are located in the United Kingdom (London). Some providers are headquartered outside the UK and may access or process limited data elsewhere, for example for support, email delivery or payment processing. Where that happens we rely on UK adequacy regulations (including those covering the EEA and the UK Extension to the EU-US Data Privacy Framework for certified US organisations), or on the ICO's International Data Transfer Agreement or the UK Addendum to the EU Standard Contractual Clauses. You can ask us for details of the safeguard used for a particular provider."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "7. How long we keep it",
+      "blocks": [
+        {
+          "kind": "table",
+          "head": [
+            "Data",
+            "Retention"
+          ],
+          "rows": [
+            [
+              "User account and profile",
+              "For the life of the account. When a user is removed from a company, their name and phone number are erased within 30 days of our being told, unless needed for a reason below."
+            ],
+            [
+              "Sign-in and session records",
+              "12 months"
+            ],
+            [
+              "Billing, charge and VAT records",
+              "6 years from the end of the financial year they relate to"
+            ],
+            [
+              "Website enquiries that do not become customers",
+              "12 months from last contact"
+            ],
+            [
+              "Support correspondence",
+              "3 years from the end of the matter"
+            ],
+            [
+              "Rate-limit security logs",
+              "1 day"
+            ],
+            [
+              "Administrative audit log",
+              "6 years"
+            ],
+            [
+              "Server logs",
+              "Our hosting provider's standard log retention, no more than 90 days"
+            ]
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "Our full Data Retention Schedule is available on request."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "8. Your device",
+      "blocks": [
+        {
+          "kind": "ul",
+          "items": [
+            [
+              {
+                "text": "Cookies and local storage.",
+                "bold": true
+              },
+              {
+                "text": " We use only strictly necessary cookies and storage. See our Cookie Notice."
+              }
+            ],
+            [
+              {
+                "text": "Location.",
+                "bold": true
+              },
+              {
+                "text": " The driver app asks your browser for permission to read your location. It sends a position no more often than every 15 seconds and only while tracking is switched on. The operator you work for decides whether tracking is used and is the controller of that data."
+              }
+            ],
+            [
+              {
+                "text": "Camera.",
+                "bold": true
+              },
+              {
+                "text": " The driver app asks for camera access to scan barcodes and photograph proof of delivery. Images are captured only when you take them."
+              }
+            ],
+            [
+              {
+                "text": "Shared computers.",
+                "bold": true
+              },
+              {
+                "text": " Unsaved quotation and planning drafts are held in your browser's local storage for up to 7 days so work is not lost. On a shared computer, sign out and clear drafts when you finish."
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "9. Your rights",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "You have the right to be informed, to access your data, to have it corrected, to have it erased, to restrict or object to processing, and to data portability. Where we rely on legitimate interests you may object at any time. These rights are subject to conditions and exemptions in law. When you ask for access we will carry out a reasonable and proportionate search."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "To exercise a right, email it@silverlady.group. We will respond within one month. This can be extended by two months for complex requests, and we will tell you if so. There is normally no fee. We may need to verify your identity."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "Some records cannot be erased on request because we must keep them by law or need them for legal claims, for example billing and VAT records, audit logs and evidence of contract acceptance. Where we cannot erase we will restrict use to those purposes."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "10. Complaints",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "If you are unhappy with how we have handled your data, please email it@silverlady.group. We will acknowledge your complaint within 30 days and respond without undue delay. You also have the right to complain to the Information Commissioner's Office at ico.org.uk or on 0303 123 1113."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "11. Changes",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "We will post any changes to this notice on our website and update the version and date. We will tell account administrators by email about material changes."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "versionLine": "Version 1.0. Effective September 2026.",
+  "slug": "privacy"
+}

@@ -1,0 +1,231 @@
+{
+  "source": "04-Cancellation-and-Refund-Policy.pdf",
+  "title": "Cancellation and Refund Policy",
+  "company": [
+    "Silver Lady Holdings Ltd, trading as TMSWizzard",
+    "Church View, Newton Arlosh",
+    "Wigton, Cumbria, CA7 5ET",
+    "Registered in England & Wales: [COMPANY NUMBER]",
+    "VAT number: [VAT NUMBER]",
+    "Email: it@silverlady.group"
+  ],
+  "intro": [
+    {
+      "kind": "p",
+      "runs": [
+        {
+          "text": "This policy explains in plain language how to cancel TMSWizzard, what you will be charged and when a refund is due. It forms part of our Terms and Conditions."
+        }
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "heading": "1. Who this applies to",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "TMSWizzard is sold to businesses only. The statutory 14-day cancellation right for consumers does not apply. The rights below are contractual rights we choose to give every customer."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "2. How to cancel",
+      "blocks": [
+        {
+          "kind": "ul",
+          "items": [
+            [
+              {
+                "text": "An administrator of your company emails it@silverlady.group from their registered email address and states that they wish to cancel."
+              }
+            ],
+            [
+              {
+                "text": "We confirm by reply. Cancellation takes effect when we confirm, and for cooling-off purposes we use the time your email reached us."
+              }
+            ],
+            [
+              {
+                "text": "We aim to action cancellation requests within 1 business day."
+              }
+            ]
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "An in-product cancel button is planned. Until it is available, email is the way to cancel."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "3. 48-hour cooling-off refund",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "If you cancel within 48 hours of your first payment, we refund that payment in full."
+            }
+          ]
+        },
+        {
+          "kind": "table",
+          "head": [
+            "Point",
+            "Detail"
+          ],
+          "rows": [
+            [
+              "Start of the 48 hours",
+              "When your first payment is taken. That is the £129.00 minimum plus VAT, charged when you activate your first vehicle. It does not start at signup or when you save a card."
+            ],
+            [
+              "Amount refunded",
+              "The full minimum charge including VAT (£154.80 at the current VAT rate)."
+            ],
+            [
+              "Method",
+              "To the original card, through Square. The time to reach your account depends on your card issuer, usually within 10 working days."
+            ],
+            [
+              "Limits",
+              "Once per company and once per payment card, and only in a company's first billing period."
+            ],
+            [
+              "If the refund fails",
+              "Your account is not cancelled until the refund succeeds, so you are never left cancelled and unrefunded. We will contact you to resolve it."
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "4. Cancelling after the cooling-off window (standard plan)",
+      "blocks": [
+        {
+          "kind": "ul",
+          "items": [
+            [
+              {
+                "text": "Your current 28-day period is shortened to end on the day after cancellation."
+              }
+            ],
+            [
+              {
+                "text": "We work out the charge for the vehicle days you used up to that point and deduct what you have already paid in the period."
+              }
+            ],
+            [
+              {
+                "text": "If a balance remains, we charge it to your card. If you have already paid more than the days used, there is no further charge and no refund. This is most likely for small fleets, where the £129.00 minimum covers the whole period."
+              }
+            ],
+            [
+              {
+                "text": "Nothing rolls over into a new period."
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "5. Cancelling on the legacy plan",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "If you joined before 28-day period billing was introduced and pay in advance, cancellation stops future billing. Your prepaid 28-day cycle runs to its end and no refund is due. The cooling-off refund does not apply to the legacy plan."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "6. What happens after you cancel",
+      "blocks": [
+        {
+          "kind": "ul",
+          "items": [
+            [
+              {
+                "text": "Your users can still sign in and read your data for 90 days."
+              }
+            ],
+            [
+              {
+                "text": "Work already assigned can be completed. New vehicle assignments and new vehicle licences are refused."
+              }
+            ],
+            [
+              {
+                "text": "For up to 15 months after cancellation we will provide an export of your data on request, so you can meet your statutory record-keeping duties."
+              }
+            ],
+            [
+              {
+                "text": "After that, your operational data is deleted or anonymised. Billing, VAT, audit and contract records are kept as the law requires. See our Data Retention Schedule."
+              }
+            ],
+            [
+              {
+                "text": "Saving a new card does not reactivate a cancelled account. Email us if you want to come back."
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "7. Other refunds",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "Apart from the cooling-off refund, payments are non-refundable unless we have charged you in error or the law requires a refund. If you think a charge is wrong, email it@silverlady.group within 30 days with the charge date and amount, and we will investigate."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "8. Failed payments",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "A failed payment does not cancel your account. We retry on days 1, 3, 5 and 7. If all retries fail your account becomes past due until a valid card is saved, at which point the outstanding sums are collected."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "9. Contact",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "Email: it@silverlady.group"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "versionLine": "Version 1.0. Effective September 2026.",
+  "slug": "cancellation-policy"
+}

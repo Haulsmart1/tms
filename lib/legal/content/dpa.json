@@ -1,0 +1,627 @@
+{
+  "source": "05-Data-Processing-Agreement.pdf",
+  "title": "Data Processing Agreement",
+  "company": [
+    "Silver Lady Holdings Ltd, trading as TMSWizzard",
+    "Church View, Newton Arlosh",
+    "Wigton, Cumbria, CA7 5ET",
+    "Registered in England & Wales: [COMPANY NUMBER]",
+    "VAT number: [VAT NUMBER]",
+    "Email: it@silverlady.group"
+  ],
+  "intro": [
+    {
+      "kind": "p",
+      "runs": [
+        {
+          "text": "This Data Processing Agreement (\"DPA\") forms part of the Terms and Conditions between Silver Lady Holdings Ltd, trading as TMSWizzard (\"Processor\", \"we\") and the Customer (\"Controller\", \"you\"). It applies automatically when you accept the Terms and sets out the terms required by Article 28(3) of the UK GDPR."
+        }
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "heading": "1. Definitions",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "\"Data Protection Law\" means the UK GDPR, the Data Protection Act 2018, the Privacy and Electronic Communications Regulations 2003 and the Data (Use and Access) Act 2025, each as amended, and, where it applies to you, the EU GDPR. \"Customer Personal Data\" means personal data within the data you or your users load into or generate in TMSWizzard. Other terms have the meanings given in Data Protection Law."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "2. Roles",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "2.1 You are the controller of Customer Personal Data and we are your processor."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "2.2 Where you process personal data on behalf of another organisation (for example, where a manufacturer or shipper sends you collection or delivery details of its own customers, including through an inbound integration or webhook), you act as that organisation's processor and we act as your sub-processor. You confirm that you are authorised by that organisation to appoint us on the terms of this DPA."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "2.3 We are an independent controller of account, billing, enquiry and security data as described in our Privacy Notice. This DPA does not apply to that data."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "3. Details of the processing",
+      "blocks": [
+        {
+          "kind": "table",
+          "head": [
+            "Item",
+            "Detail"
+          ],
+          "rows": [
+            [
+              "Subject matter and purpose",
+              "Providing the TMSWizzard transport management service to you under the Terms"
+            ],
+            [
+              "Duration",
+              "The term of the agreement, plus the post-cancellation periods in clause 11"
+            ],
+            [
+              "Nature of processing",
+              "Hosting, storage, retrieval, display, transmission by email at your users' instruction, geocoding and routing, synchronisation with services you connect, backup and deletion"
+            ],
+            [
+              "Data subjects",
+              "Your drivers and other staff; your customers and their contacts; consignees and delivery recipients, who may be members of the public; subcontractors, their staff and emergency contacts; people who open share links or accept quotations"
+            ],
+            [
+              "Categories of data",
+              "See Annex 1"
+            ],
+            [
+              "Special category and criminal offence data",
+              "Driver health data (medical dates and restrictions); motoring offence data (penalty points, endorsements, disqualifications, licence check results). See clause 5."
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "4. Our obligations",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "We will:"
+            }
+          ]
+        },
+        {
+          "kind": "ul",
+          "items": [
+            [
+              {
+                "text": "process Customer Personal Data only on your documented instructions, which are the Terms, this DPA and your users' use of the service, unless the law requires otherwise, in which case we will tell you first where the law allows;"
+              }
+            ],
+            [
+              {
+                "text": "tell you if we believe an instruction infringes Data Protection Law;"
+              }
+            ],
+            [
+              {
+                "text": "ensure everyone we authorise to process Customer Personal Data is bound by a duty of confidentiality;"
+              }
+            ],
+            [
+              {
+                "text": "implement the technical and organisational measures in Annex 2;"
+              }
+            ],
+            [
+              {
+                "text": "engage sub-processors only under clause 7;"
+              }
+            ],
+            [
+              {
+                "text": "assist you under clauses 8 and 9;"
+              }
+            ],
+            [
+              {
+                "text": "delete or return Customer Personal Data under clause 11; and"
+              }
+            ],
+            [
+              {
+                "text": "make available the information needed to show compliance under clause 10."
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "5. Your obligations",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "5.1 You are responsible for the lawfulness of the Customer Personal Data you load and the instructions you give, including having a lawful basis and giving privacy information to your drivers, staff, customers and delivery recipients."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "5.2 "
+            },
+            {
+              "text": "Special category and criminal offence data.",
+              "bold": true
+            },
+            {
+              "text": " TMSWizzard lets you record driver medical information, driving licence endorsements, penalty points and disqualifications. You are responsible for identifying an Article 9 condition and an Article 10 basis, for meeting a condition in Schedule 1 to the Data Protection Act 2018, and for keeping an appropriate policy document where required. Record only what you need. Avoid entering health or offence details in free-text note fields."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "5.3 "
+            },
+            {
+              "text": "Right-to-work records.",
+              "bold": true
+            },
+            {
+              "text": " You decide whether to record right-to-work check dates and references, and you are responsible for their accuracy and retention."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "5.4 "
+            },
+            {
+              "text": "Driver location and working time monitoring.",
+              "bold": true
+            },
+            {
+              "text": " You decide whether to switch on GPS tracking and drivers' hours recording. To help with your data protection impact assessment: the driver app sends a position no more than once every 15 seconds while tracking is on, linked to a named driver through the vehicle assignment. Positions, scan-time coordinates, planned routes and drivers' hours activities are stored for the periods in clause 11. You are responsible for your own assessment, for informing drivers, and for following the ICO's guidance on monitoring workers."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "5.5 "
+            },
+            {
+              "text": "Emergency contacts.",
+              "bold": true
+            },
+            {
+              "text": " Emergency contacts have no relationship with us. You are responsible for telling them that you hold their details."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "6. Security and personal data breaches",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "6.1 We maintain the measures in Annex 2 and review them at least annually."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "6.2 We will notify you without undue delay, and in any event within 48 hours, after becoming aware of a personal data breach affecting Customer Personal Data. We will give you the information we have to help you meet your own reporting duties, and further information as it becomes available. Notification is sent to your administrators' registered email addresses."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "6.3 You are responsible for deciding whether to notify the ICO and data subjects."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "7. Sub-processors",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "7.1 You give general authorisation for us to use the sub-processors in our Sub-processor List, which forms part of this DPA."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "7.2 We will give at least 30 days' notice of any new or replacement sub-processor by email to your administrators or by notice in the product. You may object on reasonable data protection grounds within 14 days. If we cannot resolve your objection, you may cancel under the Terms before the change takes effect."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "7.3 We impose data protection terms on each sub-processor that are in substance no less protective than this DPA, and we remain responsible to you for their performance."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "7.4 Services you choose to connect using your own account, such as Xero or a tachograph data provider, and services your users open from their browser, such as WhatsApp or Google Maps, are not our sub-processors. They act under your agreement with them."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "8. Requests from individuals",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "8.1 If an individual contacts us about Customer Personal Data, we will not respond other than to refer them to you, and we will pass the request to you without undue delay."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "8.2 We will give reasonable help for you to respond to requests for access, rectification, erasure, restriction, objection and portability. Your users can already view, edit and delete most individual records in the product. Where you need something the product does not provide, such as a bulk export or the erasure of a person's details from records that are locked, email it@silverlady.group and we will carry it out within 30 days."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "8.3 Some records are locked by design to protect their evidential value (clause 11.4). For these we will anonymise the individual's details on your instruction where erasure is required and the law does not require retention."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "9. Assistance",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "Taking into account the nature of the processing and the information available to us, we will give reasonable help with your data protection impact assessments, consultations with the ICO, and security and breach obligations. We may charge our reasonable costs for help that goes materially beyond the ordinary operation of the service."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "10. Information and audits",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "10.1 On request we will provide our current security overview and answers to reasonable written questions, no more than once a year or after a breach affecting your data."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "10.2 If that information is not enough to show compliance, you may audit us on 30 days' written notice, during business hours, no more than once a year, at your cost, under a duty of confidentiality, and without access to other customers' data. We will contribute to audits required by the ICO at any time."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "11. Retention, return and deletion",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "11.1 During the agreement we apply these default retention periods to Customer Personal Data. You may instruct shorter periods by email where the law allows."
+            }
+          ]
+        },
+        {
+          "kind": "table",
+          "head": [
+            "Data",
+            "Default retention"
+          ],
+          "rows": [
+            [
+              "Driver GPS positions, scan coordinates and route traces",
+              "12 months"
+            ],
+            [
+              "Drivers' hours and imported tachograph activities",
+              "24 months"
+            ],
+            [
+              "Jobs, stops, proof-of-delivery photographs and documents",
+              "6 years from completion of the job"
+            ],
+            [
+              "Quotations, invoices, credit notes, statements and payment records",
+              "6 years from the end of the financial year"
+            ],
+            [
+              "Quotation acceptance evidence, including acceptor name, email, IP address and user agent",
+              "6 years from acceptance"
+            ],
+            [
+              "Public quote-request submissions, including the raw submitted form",
+              "12 months unless converted into a quotation or job"
+            ],
+            [
+              "Raw payloads received from inbound integrations",
+              "90 days. The job created from the payload follows the jobs period."
+            ],
+            [
+              "Email delivery logs and accounting synchronisation logs",
+              "12 months"
+            ],
+            [
+              "Driver, subcontractor and customer master records",
+              "Until you delete them or the agreement ends"
+            ]
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "11.2 We are building automated deletion for these periods. Until it is in place we carry out deletion manually at least quarterly."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "11.3 "
+            },
+            {
+              "text": "After the agreement ends.",
+              "bold": true
+            },
+            {
+              "text": " You keep read access for 90 days. Until 15 months after cancellation we will provide an export of Customer Personal Data on request in a commonly used electronic format. After that we delete or anonymise Customer Personal Data and, on request, confirm this in writing. You may instruct earlier deletion at any time by email from an administrator."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "11.4 "
+            },
+            {
+              "text": "Records we keep.",
+              "bold": true
+            },
+            {
+              "text": " We may keep Customer Personal Data where UK law requires it, and we keep as independent controller the minimum records needed for tax, audit and legal claims: billing and VAT records of your subscription, the administrative audit log, and evidence of contract formation. Backups are overwritten on our providers' standard cycles."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "12. International transfers",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "12.1 Customer Personal Data is hosted in the United Kingdom (London)."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "12.2 We will not transfer Customer Personal Data outside the UK unless the transfer is covered by UK adequacy regulations or by appropriate safeguards under Article 46 of the UK GDPR, such as the International Data Transfer Agreement or the UK Addendum, supported by a transfer risk assessment where required. The Sub-processor List shows the position for each provider."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "12.3 If you are established in the EEA and the EU GDPR applies to you, the parties rely on the European Commission's adequacy decision for the United Kingdom while it remains in force. If it ceases to apply, the parties will enter into the EU Standard Contractual Clauses."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "13. Automated decision-making",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "TMSWizzard does not make decisions about individuals by automated means with legal or similarly significant effect, and does not use artificial intelligence or machine learning services. Route optimisation uses fixed rules and produces suggestions for your planners to accept or change."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "14. Liability and precedence",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "The limits of liability in the Terms apply to this DPA. If this DPA conflicts with the Terms on a data protection matter, this DPA prevails."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "Annex 1: Categories of Customer Personal Data",
+      "blocks": [
+        {
+          "kind": "table",
+          "head": [
+            "Data subject",
+            "Categories"
+          ],
+          "rows": [
+            [
+              "Drivers",
+              "Name, phone, email, employee number, date of birth, home address, start and end dates, notes; emergency contact name and phone; driving licence number, dates, categories, restrictions, licence check references and DVLA share codes; penalty points, endorsements, disqualifications; medical dates and restrictions; right-to-work check dates and references; tachograph card number, Driver CPC, ADR certificate and training records; GPS positions; drivers' hours, breaks, rest, ferry and train crossings"
+            ],
+            [
+              "Your staff users",
+              "Name, email, phone, role, depot"
+            ],
+            [
+              "Your customers and their contacts",
+              "Company and contact names, job titles, phone numbers, email addresses, out-of-hours contacts, addresses, credit terms, instructions, quotations, invoices, statements, chase letters, payment records and bank references"
+            ],
+            [
+              "Consignees and delivery recipients",
+              "Name, address, postcode, coordinates, phone, email, name of the person who signed for goods, delivery notes, timestamps, photographs of goods, premises and paperwork, product serial numbers where supplied"
+            ],
+            [
+              "People who open share links or accept quotations",
+              "Email address, last viewed time; for acceptances: name, email, company, position, IP address, user agent and the terms accepted"
+            ],
+            [
+              "Subcontractors",
+              "Company or sole trader identity, operator licence, insurance policy numbers, contact name, phone, email, address, emergency contact, employees and employment dates, vehicle registrations"
+            ],
+            [
+              "Vehicles",
+              "Registration marks, which are personal data when linked to a driver"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "Annex 2: Technical and organisational measures",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "See our Security Overview, which is incorporated into this Annex. In summary:"
+            }
+          ]
+        },
+        {
+          "kind": "ul",
+          "items": [
+            [
+              {
+                "text": "Tenant isolation enforced in the database by row-level security that fails closed, with server routes authorising against the same rules."
+              }
+            ],
+            [
+              {
+                "text": "Passwordless sign-in by single-use email link, with rate limiting on sign-in, signup and enquiry forms."
+              }
+            ],
+            [
+              {
+                "text": "An edge gate that rejects unauthenticated requests to non-public routes."
+              }
+            ],
+            [
+              {
+                "text": "Proof-of-delivery files held in a private storage bucket, separated by tenant, served only through short-lived signed links. Share links use random tokens stored as hashes, expire, can be revoked and are re-checked on every view."
+              }
+            ],
+            [
+              {
+                "text": "Card data entered only into Square's form, with 3-D Secure. We never receive card numbers."
+              }
+            ],
+            [
+              {
+                "text": "Third-party access tokens encrypted at rest with AES-256-GCM. Encryption in transit with TLS."
+              }
+            ],
+            [
+              {
+                "text": "Security response headers, including frame blocking, content type protection, referrer and permissions policies."
+              }
+            ],
+            [
+              {
+                "text": "Privileged administrative actions logged by field name without recording values."
+              }
+            ],
+            [
+              {
+                "text": "Location metadata removed from photographs taken in the driver app. Photographs uploaded from an office computer keep whatever metadata the file contains."
+              }
+            ],
+            [
+              {
+                "text": "Staff access limited to those who need it, under duties of confidentiality, with a documented breach response procedure."
+              }
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "versionLine": "Version 1.0. Effective September 2026.",
+  "slug": "dpa"
+}

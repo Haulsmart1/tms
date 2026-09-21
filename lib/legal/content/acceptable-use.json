@@ -1,0 +1,173 @@
+{
+  "source": "08-Acceptable-Use-Policy.pdf",
+  "title": "Acceptable Use Policy",
+  "company": [
+    "Silver Lady Holdings Ltd, trading as TMSWizzard",
+    "Church View, Newton Arlosh",
+    "Wigton, Cumbria, CA7 5ET",
+    "Registered in England & Wales: [COMPANY NUMBER]",
+    "VAT number: [VAT NUMBER]",
+    "Email: it@silverlady.group"
+  ],
+  "intro": [
+    {
+      "kind": "p",
+      "runs": [
+        {
+          "text": "This policy sets out the rules for using TMSWizzard. It forms part of our Terms and Conditions and applies to every user of a customer account."
+        }
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "heading": "1. Use TMSWizzard only for your business",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "TMSWizzard is for the lawful internal operation of your transport business. You must not resell it, offer it as a bureau service to others, or use it to build a competing product, unless we agree in writing."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "2. You must not",
+      "blocks": [
+        {
+          "kind": "ul",
+          "items": [
+            [
+              {
+                "text": "use the service in breach of any law, including data protection, road transport, employment and equality law;"
+              }
+            ],
+            [
+              {
+                "text": "upload content that is unlawful, defamatory, obscene, harassing, or that infringes someone else's rights;"
+              }
+            ],
+            [
+              {
+                "text": "upload malware or anything designed to damage or interfere with systems;"
+              }
+            ],
+            [
+              {
+                "text": "try to gain access to another customer's data, or to any part of the service you are not authorised to use;"
+              }
+            ],
+            [
+              {
+                "text": "probe, scan or test the vulnerability of the service without our written consent, or bypass security, rate limits, licence gates or billing controls;"
+              }
+            ],
+            [
+              {
+                "text": "use automated means to scrape or extract data other than through features we provide for that purpose;"
+              }
+            ],
+            [
+              {
+                "text": "reverse engineer, decompile or copy the software, except where the law permits it and that right cannot be excluded;"
+              }
+            ],
+            [
+              {
+                "text": "share sign-in links, let more than one person use a user account, or create accounts under false details;"
+              }
+            ],
+            [
+              {
+                "text": "send unsolicited marketing through the document email, share link or messaging features;"
+              }
+            ],
+            [
+              {
+                "text": "place an unreasonable load on the service."
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "3. Personal data you load",
+      "blocks": [
+        {
+          "kind": "ul",
+          "items": [
+            [
+              {
+                "text": "Record only the personal data you need. Do not put health information, criminal offence details or other sensitive information in free-text notes or instruction fields."
+              }
+            ],
+            [
+              {
+                "text": "Do not use driver tracking covertly. Tell drivers when and why tracking is used."
+              }
+            ],
+            [
+              {
+                "text": "Do not use share links to disclose personal data to anyone who should not receive it, and revoke links that are no longer needed."
+              }
+            ],
+            [
+              {
+                "text": "Do not enter bank card numbers anywhere in the system."
+              }
+            ],
+            [
+              {
+                "text": "Remove users promptly when they leave your business."
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "4. Reporting problems",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "Tell us straight away at it@silverlady.group if you suspect unauthorised access to your account, find a security weakness, or see content that breaches this policy. We welcome good-faith security reports and ask that you give us a reasonable chance to fix an issue before disclosing it."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "5. What we may do",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "If we reasonably believe this policy has been breached we may remove content, suspend the users or account involved, and end the agreement under the Terms. Where there is a risk to other customers, to individuals or to the service, we may act without notice. We may report unlawful activity to the authorities."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "6. Changes",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "We may update this policy under the change process in the Terms."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "versionLine": "Version 1.0. Effective September 2026.",
+  "slug": "acceptable-use"
+}

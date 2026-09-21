@@ -20,6 +20,9 @@ describe("isPublicPath", () => {
     "/api/request-access",
     "/signup",
     "/api/signup",
+    "/terms",
+    "/privacy",
+    "/legal",
     "/api/integrations/cambridge-audio/rma",
     "/api/billing/run",
   ])("allows %s", (path) => {
@@ -65,6 +68,8 @@ describe("isPublicPath", () => {
     "/quotation/share/abc/extra",
     "/auth/confirm/extra",
     "/signup/extra",
+    "/terms/extra",
+    "/legal/terms",
     "/api/signup/extra",
     "/driver/jobs/abc",
     "/api/accounts/accounting/xero/callback",

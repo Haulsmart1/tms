@@ -1,0 +1,221 @@
+{
+  "source": "07-Service-Level-and-Support-Policy.pdf",
+  "title": "Service Level and Support Policy",
+  "company": [
+    "Silver Lady Holdings Ltd, trading as TMSWizzard",
+    "Church View, Newton Arlosh",
+    "Wigton, Cumbria, CA7 5ET",
+    "Registered in England & Wales: [COMPANY NUMBER]",
+    "VAT number: [VAT NUMBER]",
+    "Email: it@silverlady.group"
+  ],
+  "intro": [
+    {
+      "kind": "p",
+      "runs": [
+        {
+          "text": "This policy describes the availability and support you can expect from TMSWizzard. It forms part of our Terms and Conditions."
+        }
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "heading": "1. Availability",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "1.1 We use reasonable endeavours to keep TMSWizzard available 24 hours a day, 7 days a week."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "1.2 "
+            },
+            {
+              "text": "We do not give an uptime guarantee and we do not offer service credits.",
+              "bold": true
+            },
+            {
+              "text": " TMSWizzard depends on third-party platforms, in particular Supabase (database, sign-in and file storage), Vercel (hosting), Square (payments), TomTom (maps and routing) and Microsoft 365 (document email). An outage at one of these providers may affect all or part of the service and is outside our control."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "1.3 You should keep your own means of continuing to operate during an outage, for example printed run sheets for the day's work."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "2. Planned maintenance",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "Most updates are released without downtime. Where we expect maintenance to interrupt the service we will aim to give at least 48 hours' notice by email or in the product, and to carry it out outside 06:00 to 18:00 UK time, Monday to Friday. Urgent security fixes may be applied without notice."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "3. Support",
+      "blocks": [
+        {
+          "kind": "table",
+          "head": [
+            "Item",
+            "Detail"
+          ],
+          "rows": [
+            [
+              "Channel",
+              "Email: it@silverlady.group"
+            ],
+            [
+              "Hours",
+              "Monday to Friday, 09:00 to 17:00 UK time, excluding public holidays in England"
+            ],
+            [
+              "Who can raise a request",
+              "Any user. Billing, cancellation and data requests must come from an administrator."
+            ],
+            [
+              "Language",
+              "English"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "4. Response targets",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "These are targets and not guarantees. Times run within support hours."
+            }
+          ]
+        },
+        {
+          "kind": "table",
+          "head": [
+            "Priority",
+            "Meaning",
+            "Target first response"
+          ],
+          "rows": [
+            [
+              "P1 Critical",
+              "The service is unavailable, or a core function (jobs, planning, proof of delivery, driver app) is unusable for all your users",
+              "4 working hours"
+            ],
+            [
+              "P2 High",
+              "A core function is seriously impaired with no reasonable workaround",
+              "1 business day"
+            ],
+            [
+              "P3 Normal",
+              "A fault with a workaround, a question or a minor issue",
+              "1 business day"
+            ],
+            [
+              "P4 Request",
+              "Feature requests and general feedback",
+              "5 business days"
+            ]
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "Please include your company name, the page or function affected, what you expected, what happened, and the time it happened."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "5. Incident communication",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "For a P1 incident affecting several customers we will email administrators when we confirm the incident, give updates at reasonable intervals and confirm when it is resolved. If an incident involves personal data, our Data Breach Response Procedure and the Data Processing Agreement apply."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "6. Backups and recovery",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "Our database provider takes regular backups of the platform. These protect against platform failure. They are not a service for restoring records that your users delete or change. You remain responsible for keeping copies of records you have a legal duty to retain."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "7. What support does not cover",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "Support does not cover training beyond reasonable guidance, faults in your own devices, networks or browsers, third-party services you connect under your own account (such as Xero or a tachograph provider), or compliance advice."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "8. Supported browsers",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "The current and previous major versions of Chrome, Edge, Safari and Firefox on desktop, and Chrome and Safari on mobile for the driver app."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "9. Review",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "This policy is reviewed annually. Next review: September 2027."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "versionLine": "Version 1.0. Effective September 2026.",
+  "slug": "support-policy"
+}

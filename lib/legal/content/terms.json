@@ -1,0 +1,740 @@
+{
+  "source": "01-Terms-and-Conditions.pdf",
+  "title": "Terms and Conditions",
+  "company": [
+    "Silver Lady Holdings Ltd, trading as TMSWizzard",
+    "Church View, Newton Arlosh",
+    "Wigton, Cumbria, CA7 5ET",
+    "Registered in England & Wales: [COMPANY NUMBER]",
+    "VAT number: [VAT NUMBER]",
+    "Email: it@silverlady.group"
+  ],
+  "intro": [
+    {
+      "kind": "p",
+      "runs": [
+        {
+          "text": "These Terms and Conditions (\"Terms\") govern access to and use of TMSWizzard, a browser-based Transport Management System supplied by Silver Lady Holdings Ltd (\"we\", \"us\", \"our\"). By creating an account, or by using TMSWizzard, the business named at signup (\"you\", \"the Customer\") agrees to these Terms."
+        }
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "heading": "1. About us",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "1.1 TMSWizzard is a trading name of Silver Lady Holdings Ltd, a company registered in England and Wales under company number [COMPANY NUMBER], with its registered office at Church View, Newton Arlosh, Wigton, Cumbria, CA7 5ET. Our VAT number is [VAT NUMBER]."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "1.2 You can contact us at it@silverlady.group."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "2. Business customers only",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "2.1 TMSWizzard is supplied to businesses only. By agreeing to these Terms you confirm that you are acting wholly in the course of your trade, business, craft or profession, and that the person creating the account has authority to bind the Customer. This applies equally to sole traders and owner-drivers."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "2.2 Because you contract as a business, the Consumer Contracts (Information, Cancellation and Additional Charges) Regulations 2013 and other consumer protection legislation do not apply to this agreement. The only cooling-off right is the contractual one set out in clause 9."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "3. The service",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "3.1 TMSWizzard provides tools for job management, planning, proof of delivery, quotations and invoicing, driver and vehicle compliance records, drivers' hours records and live vehicle tracking."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "3.2 We supply the service with reasonable skill and care. We may change, add or remove features where this does not materially reduce the core service."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "3.3 "
+            },
+            {
+              "text": "Drivers' hours checks.",
+              "bold": true
+            },
+            {
+              "text": " The planning screens check planned work against the EU daily and weekly driving limits and the 45-minute break requirement only. They do not check every rule in Regulation (EC) 561/2006, the GB domestic rules or the working time rules. You remain responsible for compliance with all drivers' hours, working time and operator licence obligations."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "3.4 "
+            },
+            {
+              "text": "Routing and distances.",
+              "bold": true
+            },
+            {
+              "text": " Routes, distances, times and geocoding are estimates produced from third-party mapping data. You must check them before relying on them."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "3.5 Uptime and support are described in our Service Level and Support Policy. We do not guarantee uninterrupted availability."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "4. Accounts and your responsibilities",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "4.1 The person who signs up becomes the first administrator. Administrators control who has access, which roles they hold, which vehicles are licensed and the payment card on file."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "4.2 Sign-in is by single-use link sent to the user's email address. You are responsible for the security of your users' mailboxes and devices, for removing users who leave your business, and for everything done through your users' accounts."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "4.3 You must keep your company, contact and billing details accurate and tell us promptly about any suspected unauthorised access."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "4.4 You must comply with our Acceptable Use Policy."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "5. Vehicle licences",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "5.1 TMSWizzard is charged per licensed vehicle. A vehicle must be activated for billing before it can be assigned to work. An unlicensed vehicle cannot be put to work in the system."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "5.2 Administrators can activate and deactivate vehicle licences at any time. Charges follow the days each vehicle was licensed."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "6. Prices",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "6.1 All prices exclude VAT, which is added at the prevailing rate (currently 20%)."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "6.2 "
+            },
+            {
+              "text": "Standard plan (all accounts created on or after the introduction of period billing).",
+              "bold": true
+            },
+            {
+              "text": " The service is billed in 28-day periods."
+            }
+          ]
+        },
+        {
+          "kind": "table",
+          "head": [
+            "Item",
+            "Price (excluding VAT)"
+          ],
+          "rows": [
+            [
+              "Price per licensed vehicle per 28-day period",
+              "£64.50, charged for the days the vehicle was licensed in the period"
+            ],
+            [
+              "Minimum charge per 28-day period",
+              "£129.00, which includes your first 2 vehicles"
+            ],
+            [
+              "Whole-fleet discount, 10 or more vehicles",
+              "10%"
+            ],
+            [
+              "Whole-fleet discount, 15 or more vehicles",
+              "15%"
+            ],
+            [
+              "Whole-fleet discount, 20 or more vehicles",
+              "20%"
+            ],
+            [
+              "Whole-fleet discount, 30 or more vehicles",
+              "22%"
+            ]
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "6.3 Discounts apply to the whole fleet and not only to the vehicles above a threshold. A fleet just below a threshold is not charged more than a fleet at that threshold, so, for example, 19 vehicles and 20 vehicles cost the same per period."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "6.4 "
+            },
+            {
+              "text": "Legacy plan.",
+              "bold": true
+            },
+            {
+              "text": " Customers who joined before period billing remain on the legacy plan unless we agree otherwise. The legacy plan is billed in advance every 28 days at graduated weekly rates of £10, £8, £6 and £5 per vehicle, with a pro-rata charge when a vehicle is added during a cycle."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "6.5 There is no free trial. No payment is taken at signup."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "7. When we take payment",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "7.1 Payment is by card through our payment provider, Square. Your card details are entered directly into Square's secure form and never reach our servers. We hold only a token, the card brand, the last four digits and the expiry date."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "7.2 On the standard plan:"
+            }
+          ]
+        },
+        {
+          "kind": "ul",
+          "items": [
+            [
+              {
+                "text": "Saving a card does not take a payment unless you already have billable vehicles."
+              }
+            ],
+            [
+              {
+                "text": "When you activate your first vehicle, we charge the £129.00 minimum plus VAT and your first 28-day period begins on that day."
+              }
+            ],
+            [
+              {
+                "text": "When each 28-day period closes, we charge any balance above the minimum for the vehicle days used, plus VAT. Charges are processed daily at around 06:00 UTC."
+              }
+            ],
+            [
+              {
+                "text": "Each later period begins with the minimum charge and ends with the balance, in the same way."
+              }
+            ]
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "7.3 You authorise us to charge the card on file for all sums due under these Terms."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "7.4 A receipt for every charge is available from the charge history on your billing page, hosted by Square. We do not currently send receipts by email. If you need a VAT invoice in another form, contact us."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "8. Late or failed payment",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "8.1 If a charge fails we retry on days 1, 3, 5 and 7 after the first attempt."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "8.2 If all retries fail, your account is marked past due. While past due, no new billing period opens and you cannot add vehicles. Saving a valid card collects everything outstanding and restores the account."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "8.3 While your account is past due we may suspend the service on notice to you. A single declined payment will not lead to suspension. If we suspend, we will block new operational work but keep read access and the ability to obtain your records, and we will not charge for suspended time."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "8.4 We may charge interest on overdue sums under the Late Payment of Commercial Debts (Interest) Act 1998."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "9. Cooling-off, cancellation and refunds",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "9.1 You may cancel at any time. Full details are in our Cancellation and Refund Policy, which forms part of these Terms."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "9.2 "
+            },
+            {
+              "text": "48-hour cooling-off.",
+              "bold": true
+            },
+            {
+              "text": " If you cancel within 48 hours of your first payment (the minimum charge taken when you activate your first vehicle), we refund that charge in full, including VAT, to the original card. This applies once per Customer and once per payment card, and only to a Customer's first billing period."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "9.3 "
+            },
+            {
+              "text": "Cancellation after cooling-off, standard plan.",
+              "bold": true
+            },
+            {
+              "text": " Your current period is shortened to end on the day after cancellation. We charge for the vehicle days used to that point, less what you have already paid. If what you have paid exceeds the days used, no further charge is made and no refund is due."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "9.4 "
+            },
+            {
+              "text": "Cancellation, legacy plan.",
+              "bold": true
+            },
+            {
+              "text": " Cancellation takes effect immediately for billing purposes, your prepaid 28-day cycle runs to its end, and no refund is due."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "9.5 To cancel, an administrator must email it@silverlady.group from their registered address. Cancellation takes effect when we confirm it."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "9.6 Except as stated in this clause, or where required by law, payments are non-refundable."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "10. After cancellation",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "10.1 After cancellation your users can still sign in and read your data for 90 days. Existing work can be completed, but new vehicle assignments and new vehicle licences are refused. Saving a new card does not reactivate a cancelled account. Contact us if you wish to return."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "10.2 For a further period ending 15 months after cancellation we will provide an export of your data on request, so that you can meet your own statutory record-keeping duties (for example tachograph and working time records, and vehicle maintenance records)."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "10.3 After that we delete or anonymise your operational data, except records we must keep by law or need for the establishment, exercise or defence of legal claims, such as billing and VAT records, audit logs and contract evidence."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "11. Your data and data protection",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "11.1 You own the data you and your users put into TMSWizzard (\"Customer Data\"). You grant us a licence to host, copy and process it only as needed to provide the service."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "11.2 For personal data within Customer Data, you are the controller and we are your processor. Our Data Processing Agreement forms part of these Terms and applies automatically."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "11.3 You are responsible for having a lawful basis for the personal data you load, for telling your drivers, staff, customers and other individuals how their data is used, and for any data protection impact assessment your use requires. This matters in particular for driver location tracking, driving licence and endorsement data, medical information and right-to-work records."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "11.4 For the personal data we control ourselves (accounts, billing, enquiries and security logs), see our Privacy Notice."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "11.5 You are responsible for keeping your own copies of records you have a legal duty to retain. Some records cannot be deleted or altered in the system once evidence is attached to them, for example a delivery stop with proof of delivery, an accepted quotation, or imported tachograph activity."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "12. Third-party services",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "12.1 TMSWizzard uses third-party providers listed in our Sub-processor List. Mapping and routing are provided by TomTom."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "12.2 If you connect your own third-party accounts, such as Xero or a tachograph data provider, you authorise us to exchange data with them on your behalf. Your use of those services is governed by your agreement with the provider, and we are not responsible for them."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "12.3 Features that open another service from your browser at your request, such as sharing a proof-of-delivery link through WhatsApp or opening navigation in Google Maps, pass the relevant details to that service under its own terms."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "13. Intellectual property",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "13.1 We and our licensors own all rights in TMSWizzard, including its software, design and documentation. We grant you a non-exclusive, non-transferable right to use it for your internal business purposes while your subscription is active and during the read-access period in clause 10."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "13.2 If you send us feedback, we may use it without restriction or payment."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "14. Confidentiality",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "Each party must keep the other's confidential information confidential, use it only for the purposes of this agreement, and disclose it only to those who need it and are bound by equivalent duties, or where the law requires. This obligation continues after the agreement ends."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "15. Liability",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "15.1 Nothing in these Terms limits or excludes liability for death or personal injury caused by negligence, for fraud or fraudulent misrepresentation, or for anything else that cannot lawfully be limited."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "15.2 Subject to clause 15.1, neither party is liable for loss of profit, loss of business or revenue, loss of anticipated savings, loss of goodwill, or any indirect or consequential loss."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "15.3 Subject to clause 15.1, our total liability arising out of or in connection with this agreement in any 12-month period is limited to the fees you paid us in the 12 months before the event giving rise to the claim."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "15.4 We are not liable for fines, penalties, enforcement action or losses arising from your compliance obligations as an operator, including drivers' hours, working time, vehicle maintenance and dangerous goods rules. TMSWizzard is a record-keeping and planning aid and does not replace your own compliance systems or professional advice."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "15.5 All warranties and terms not set out in these Terms are excluded to the fullest extent permitted by law."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "15.6 We are not liable for failure or delay caused by events outside our reasonable control, including failures of hosting, payment, mapping, email or telecommunications providers."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "16. Suspension and termination by us",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "16.1 We may suspend or end your access on notice if you materially breach these Terms or the Acceptable Use Policy, if your account is past due, if you become insolvent, or if we are required to by law."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "16.2 We may end this agreement for convenience on 30 days' notice. Clause 10 then applies as if you had cancelled."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "17. Changes to these Terms or prices",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "17.1 We may change these Terms or our prices. We will give at least 30 days' notice of any material change, by email to your administrators or by notice in the product. Each version carries a version number and date."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "17.2 If you do not accept a change you may cancel before it takes effect. Continuing to use TMSWizzard after the effective date means you accept the change."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "18. General",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "18.1 These Terms, with the Cancellation and Refund Policy, Data Processing Agreement, Acceptable Use Policy and Service Level and Support Policy, are the entire agreement between us about TMSWizzard."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "18.2 You may not transfer this agreement without our consent. We may transfer it to a group company or a successor to the business."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "18.3 No one other than you and us has any right to enforce these Terms."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "18.4 If any part of these Terms is found unenforceable, the rest remains in force. A delay in enforcing a right is not a waiver of it."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "18.5 Notices to us must be sent to it@silverlady.group. Notices to you will be sent to your administrators' registered email addresses."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "19. Governing law",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "These Terms are governed by the laws of England and Wales, and the courts of England and Wales have exclusive jurisdiction."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "versionLine": "Version 1.0. Effective September 2026.",
+  "slug": "terms"
+}

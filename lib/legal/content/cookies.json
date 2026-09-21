@@ -1,0 +1,220 @@
+{
+  "source": "03-Cookie-Notice.pdf",
+  "title": "Cookie Notice",
+  "company": [
+    "Silver Lady Holdings Ltd, trading as TMSWizzard",
+    "Church View, Newton Arlosh",
+    "Wigton, Cumbria, CA7 5ET",
+    "Registered in England & Wales: [COMPANY NUMBER]",
+    "VAT number: [VAT NUMBER]",
+    "Email: it@silverlady.group"
+  ],
+  "intro": [
+    {
+      "kind": "p",
+      "runs": [
+        {
+          "text": "This notice explains what TMSWizzard stores on, or reads from, your device. It is provided under regulation 6 of the Privacy and Electronic Communications Regulations 2003 (PECR)."
+        }
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "heading": "1. Summary",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "TMSWizzard uses only cookies and browser storage that are strictly necessary to provide the service you have asked for. We use no analytics, advertising, social media or tracking cookies, no tag managers and no pixels. For that reason we do not show a cookie consent banner. The service continues to work if your browser blocks local storage, although preferences and unsaved drafts will not be remembered."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "2. Cookies we set",
+      "blocks": [
+        {
+          "kind": "table",
+          "head": [
+            "Cookie",
+            "Purpose",
+            "Type",
+            "Lifetime"
+          ],
+          "rows": [
+            [
+              "sb-[project]-auth-token (may be split into .0, .1)",
+              "Keeps you signed in. Holds your session access token, refresh token and expiry. Refreshed as you browse, including on the public, login and signup pages.",
+              "First party, strictly necessary",
+              "Up to 400 days, renewed on use, removed when you sign out"
+            ],
+            [
+              "xero_oauth_state",
+              "Security token that protects the connection process when an administrator links a Xero account",
+              "First party, strictly necessary",
+              "10 minutes"
+            ],
+            [
+              "xero_oauth_tenant",
+              "Remembers which depot is being connected to Xero during that process",
+              "First party, strictly necessary",
+              "10 minutes"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "3. Browser storage we use",
+      "blocks": [
+        {
+          "kind": "table",
+          "head": [
+            "Key",
+            "Purpose",
+            "Type",
+            "Lifetime"
+          ],
+          "rows": [
+            [
+              "tms-theme",
+              "Remembers that you chose the light theme",
+              "Local storage, user preference",
+              "Until cleared"
+            ],
+            [
+              "tms.activeTenant.[user]",
+              "Remembers which depot or division you last selected",
+              "Local storage, strictly necessary",
+              "Until cleared"
+            ],
+            [
+              "tms:quotation-draft:[depot]",
+              "Recovers an unsaved quotation after a crash or accidental close. May contain a prospect's contact details and addresses.",
+              "Local storage, strictly necessary",
+              "7 days"
+            ],
+            [
+              "tms:planning-draft:[depot]:[date]",
+              "Recovers an unsaved planning board",
+              "Local storage, strictly necessary",
+              "7 days"
+            ],
+            [
+              "tms:quotation-viewed:[reference]",
+              "On a shared quotation page, records that the quotation has been opened in this tab so that one visit counts as one view and automated email scanners are not counted. It stores nothing that identifies you. It supports the delivery and acceptance record for the quotation you were sent.",
+              "Session storage, strictly necessary",
+              "Until the tab is closed"
+            ]
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "If you use a shared computer, sign out when you finish. Drafts are removed when saved, discarded, or after 7 days."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "4. Third parties",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "Square (billing page only).",
+              "bold": true
+            },
+            {
+              "text": " When an administrator opens the billing page to add a card, the card form is loaded from Square inside a secure frame. Square may set its own cookies and storage within that frame for payment security, 3-D Secure authentication and fraud prevention. These are strictly necessary for a payment you have chosen to make and are governed by Square's privacy notice. They are not set on any other page."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "TomTom (pages that show a map).",
+              "bold": true
+            },
+            {
+              "text": " Map images are fetched by your browser directly from TomTom. TomTom receives your IP address and the area of the map being viewed. The map component stores nothing on your device and sends no telemetry."
+            }
+          ]
+        },
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "Links you choose to open.",
+              "bold": true
+            },
+            {
+              "text": " Sharing a proof-of-delivery link through WhatsApp or opening navigation in Google Maps opens that service in a new tab under its own cookie policy."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "5. Device permissions",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "The driver app asks for permission to use your device's location and camera. These are not cookies. They are described in our Privacy Notice."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "6. Managing cookies",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "You can delete or block cookies and site data in your browser settings. If you block the sign-in cookie you will not be able to sign in."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "7. If this changes",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "We do not currently use analytics. If we later introduce first-party analytics solely to improve the service, as permitted without consent under the Data (Use and Access) Act 2025, we will update this notice first and provide a simple way to object. We will ask for consent before using any other non-essential cookie."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "8. Contact",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "Email: it@silverlady.group"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "versionLine": "Version 1.0. Effective September 2026.",
+  "slug": "cookies"
+}
