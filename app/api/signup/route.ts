@@ -11,6 +11,7 @@ import {
   signupFailedResponse,
   type SignupDeps,
 } from "../../../lib/auth/signup";
+import { SIGNUP_ENABLED_ENV, signupClosedResponse, signupEnabled } from "../../../lib/auth/signupGate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,6 +33,14 @@ export const dynamic = "force-dynamic";
        /auth/confirm page as type=invite. */
 
 export async function POST(request: NextRequest) {
+  /* Kill switch first, before any client is built or any body is read:
+     while SIGNUP_ENABLED is not "true" this route does not exist
+     (lib/auth/signupGate.ts). */
+  if (!signupEnabled(process.env[SIGNUP_ENABLED_ENV])) {
+    const closed = signupClosedResponse();
+    return NextResponse.json(closed.body, { status: closed.status });
+  }
+
   const origin = publicAppOrigin(request.url);
 
   let admin;

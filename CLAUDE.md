@@ -179,7 +179,9 @@ signup is `/signup` -> `POST /api/signup`: honeypot, per-IP and per-email rate l
 service-role admin API creates the auth user silently, the `signup_01` RPC
 `create_company_with_admin` writes company, tenant, company profile and founding admin profile in
 one transaction, and only then the invite email goes out (pure logic in `lib/auth/signup.ts`). It
-answers one constant body whether or not the address exists. Supabase's "Allow new users to sign
+answers one constant body whether or not the address exists. Both the page and the route sit behind
+`SIGNUP_ENABLED` (`lib/auth/signupGate.ts`): closed unless the server-only variable is exactly `true`,
+so a fresh deploy refuses signups by default. Supabase's "Allow new users to sign
 up" stays off: the service role creates users regardless, and `supabase.auth.signUp` must never
 appear in browser code.
 
@@ -266,3 +268,13 @@ leftover `console.log`s; a few pages are launchers or read-only pending backing 
 Inventory for exact status per route — treat that table as the source of truth over any assumption you make from
 folder names alone). The tenancy/RLS/storage layer has had the most rigorous review; treat changes there with
 proportionally more care than changes to STUB/LAUNCHER pages.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->
