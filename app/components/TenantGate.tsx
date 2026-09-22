@@ -39,9 +39,14 @@ function RecoveryActions({ showRetry, showRequestAccess }: { showRetry: boolean;
         </button>
       ) : null}
       {showRequestAccess ? (
-        <a href="/#request-access" style={linkStyle}>
-          Request access
-        </a>
+        <>
+          <a href="/#request-access" style={linkStyle}>
+            Request access
+          </a>
+          <a href="/signup" style={linkStyle}>
+            Create a company
+          </a>
+        </>
       ) : null}
       <button
         type="button"
@@ -113,7 +118,8 @@ export default function TenantGate({ children }: { children: ReactNode }) {
           <p style={{ opacity: 0.8 }}>
             {userEmail ? `You are signed in as ${userEmail}. ` : ""}
             Ask an administrator at your company to add you, or request access if your company
-            is not on TMS Wizzard yet.
+            is not on TMS Wizzard yet. Creating a company needs an email address that has no
+            account yet, so use a different one there.
           </p>
           <RecoveryActions showRetry showRequestAccess />
         </div>

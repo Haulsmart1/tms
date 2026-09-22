@@ -70,10 +70,14 @@ export default function RequestAccessForm() {
     <section id="request-access" className="border-t border-line bg-surface py-12 md:py-16">
       <Container className="grid gap-8 lg:grid-cols-2">
         <div>
-          <h2 className="text-xl font-semibold text-ink">Request access</h2>
+          <h2 className="text-xl font-semibold text-ink">Talk to us first</h2>
           <p className="mt-2 max-w-sm text-base text-ink-2">
-            Tell us about your operation and we&apos;ll get you set up. Self-serve signup is
-            coming soon.
+            Prefer to talk it through before you start? Tell us about your operation and
+            we&apos;ll get in touch. Or{" "}
+            <Link href="/signup" className="font-semibold text-primary hover:text-primary-hover">
+              create your account now
+            </Link>
+            .
           </p>
           <p className="mt-3 text-sm text-ink-3">
             Already a customer?{" "}

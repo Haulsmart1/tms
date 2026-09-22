@@ -21,6 +21,12 @@ export type RateLimitRule = {
 
 export const RATE_LIMITS = {
   requestAccessPerIp: { bucket: "request-access:ip", windowSeconds: 3600, max: 5 },
+  /* Self-serve signup (POST /api/signup). Same level as the request-access
+     lead form, not the login route: each accepted request mints an auth user
+     and sends an email, so 5 an hour per IP and 3 a day per address (the
+     request-access per-email rule in lib/auth/leadIntake.ts) is the bar. */
+  signupPerIp: { bucket: "signup:ip", windowSeconds: 3600, max: 5 },
+  signupPerEmail: { bucket: "signup:email", windowSeconds: 86400, max: 3 },
   loginPerEmail: { bucket: "login:email", windowSeconds: 900, max: 5 },
   loginPerIp: { bucket: "login:ip", windowSeconds: 900, max: 20 },
   quoteIntakePerToken: { bucket: "quote-intake:token", windowSeconds: 3600, max: 60 },

@@ -35,15 +35,15 @@ export default function LandingNav() {
           </Link>
           {/* buttonClasses on the anchor itself. Nesting a real <button> inside
               an <a> is invalid HTML and double-stops in the accessibility tree. */}
-          <a href="#request-access" className={buttonClasses("primary", "md")}>
+          <Link href="/signup" className={buttonClasses("primary", "md")}>
             Get started
-          </a>
+          </Link>
         </nav>
 
         <div className="flex items-center gap-2 md:hidden">
-          <a href="#request-access" className={buttonClasses("primary", "md")}>
+          <Link href="/signup" className={buttonClasses("primary", "md")}>
             Get started
-          </a>
+          </Link>
           <button
             type="button"
             aria-label={open ? "Close menu" : "Open menu"}

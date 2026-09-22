@@ -1,3 +1,4 @@
+import { isLegalPath } from "../legal/routes";
 import type { TenantStatus } from "../tenant/context";
 import { isSkeletonReadyRoute } from "./skeletonReadyRoutes";
 
@@ -10,7 +11,17 @@ import { isSkeletonReadyRoute } from "./skeletonReadyRoutes";
 // not a denylist of bad ones, so any future status value not yet accounted
 // for defaults to hidden too.
 export function shouldShowShell(pathname: string, status: TenantStatus): boolean {
-  if (pathname === "/" || pathname === "/login" || pathname.startsWith("/super-admin")) {
+  if (
+    pathname === "/" ||
+    pathname === "/login" ||
+    pathname === "/signup" ||
+    // The public policy pages (/terms, /privacy and the rest). A signed-in
+    // admin who follows a footer link must get the document, not the console
+    // sidebar wrapped around it. lib/legal/routes.ts imports no document text,
+    // so this costs the client shell a list of eleven strings.
+    isLegalPath(pathname) ||
+    pathname.startsWith("/super-admin")
+  ) {
     return false;
   }
   if (status === "ready") return true;

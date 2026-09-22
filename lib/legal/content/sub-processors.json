@@ -1,0 +1,207 @@
+{
+  "source": "09-Sub-processor-List.pdf",
+  "title": "Sub-processor List",
+  "company": [
+    "Silver Lady Holdings Ltd, trading as TMSWizzard",
+    "Church View, Newton Arlosh",
+    "Wigton, Cumbria, CA7 5ET",
+    "Registered in England & Wales: [COMPANY NUMBER]",
+    "Email: it@silverlady.group"
+  ],
+  "intro": [
+    {
+      "kind": "p",
+      "runs": [
+        {
+          "text": "This list names the third parties that process personal data for TMSWizzard. It forms part of our Data Processing Agreement. We give at least 30 days' notice of additions or replacements."
+        }
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "heading": "1. Sub-processors for customer data",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "These providers process Customer Personal Data on our behalf when we act as your processor."
+            }
+          ]
+        },
+        {
+          "kind": "table",
+          "head": [
+            "Provider",
+            "Purpose",
+            "Data involved",
+            "Location and transfer safeguard"
+          ],
+          "rows": [
+            [
+              "Supabase",
+              "Database, authentication, file storage, sign-in and invitation emails",
+              "All customer data, including driver records, GPS positions and proof-of-delivery files",
+              "Hosted in the UK (London). Supabase is a US-headquartered company. Any access from outside the UK is covered by its data processing addendum with the UK Addendum or IDTA."
+            ],
+            [
+              "Vercel",
+              "Application hosting, serverless functions, scheduled tasks and server logs",
+              "All request traffic, IP addresses, and logs that may include postcodes and stop references",
+              "Functions run in the UK (London). Vercel is a US-headquartered company. UK Addendum or UK Extension to the EU-US Data Privacy Framework."
+            ],
+            [
+              "Microsoft (Microsoft 365, Graph API)",
+              "Sends invoices, quotations, credit notes, statements, chase letters and proof-of-delivery emails with PDF attachments. A copy is kept in the sending mailbox.",
+              "Recipient email addresses and the content of the documents, including names, addresses, line items, recipient names and photographs",
+              "Microsoft 365 tenant data held in the UK or EEA. Microsoft Products and Services Data Protection Addendum."
+            ],
+            [
+              "TomTom",
+              "Geocoding, routing, distance calculations and map tiles",
+              "Stop addresses and postcodes, coordinates of a day's route, approximate vehicle positions shown on a map, and the viewing user's IP address",
+              "Netherlands (EEA). Covered by UK adequacy regulations."
+            ],
+            [
+              "postcodes.io (Ideal Postcodes)",
+              "Fallback postcode lookup",
+              "UK postcode of a stop only",
+              "United Kingdom"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "2. Providers we use as a controller",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "These providers process data for which we are the controller, as described in our Privacy Notice."
+            }
+          ]
+        },
+        {
+          "kind": "table",
+          "head": [
+            "Provider",
+            "Purpose",
+            "Data involved",
+            "Location and transfer safeguard"
+          ],
+          "rows": [
+            [
+              "Square",
+              "Subscription card payments, 3-D Secure, refunds and hosted receipts",
+              "Card details entered by the customer directly into Square's form; company name, company reference, card token and charge amounts from us",
+              "UK and US. Square acts as a controller for payment processing. UK Addendum or Data Privacy Framework."
+            ],
+            [
+              "Microsoft Teams (Power Automate)",
+              "Internal alert when a website enquiry is received",
+              "Enquiry company, contact name, email, phone, vehicle count and notes",
+              "As Microsoft above"
+            ],
+            [
+              "Resend",
+              "Internal email alert when a website enquiry is received",
+              "The same enquiry fields",
+              "US. UK Addendum or Data Privacy Framework."
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "3. Services you connect yourself",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "These are not our sub-processors. They act under your own agreement with the provider. We exchange data with them only when an administrator connects them."
+            }
+          ]
+        },
+        {
+          "kind": "table",
+          "head": [
+            "Service",
+            "What is exchanged"
+          ],
+          "rows": [
+            [
+              "Xero",
+              "Customer name, account code and accounts email; invoice numbers, dates, references and line items. Requests and responses are logged in TMSWizzard for 12 months to support troubleshooting. Your Xero access tokens are stored encrypted."
+            ],
+            [
+              "Tachograph data provider (where connected)",
+              "A driver identifier is sent. Drivers' hours activity records are returned."
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "4. Services your users may open from their browser",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "These are opened in a new tab at the user's request. They receive information directly from the user's browser under their own terms."
+            }
+          ]
+        },
+        {
+          "kind": "table",
+          "head": [
+            "Service",
+            "What is passed"
+          ],
+          "rows": [
+            [
+              "WhatsApp (Meta)",
+              "The contact's phone number and a proof-of-delivery link, when a user chooses to share by WhatsApp"
+            ],
+            [
+              "Google Maps",
+              "The delivery address, when a driver chooses to open navigation"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "5. Not used",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "TMSWizzard uses no analytics, advertising or artificial intelligence providers. Fonts are hosted by us and are not fetched from Google."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "6. Changes and objections",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "We will notify administrators of changes by email or in the product. To object to a change, email it@silverlady.group within 14 days of the notice, as described in the Data Processing Agreement."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "versionLine": "Version 1.0. Last updated September 2026.",
+  "slug": "sub-processors"
+}

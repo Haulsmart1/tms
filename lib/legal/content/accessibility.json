@@ -1,0 +1,179 @@
+{
+  "source": "06-Accessibility-Statement.pdf",
+  "title": "Accessibility Statement",
+  "company": [
+    "Silver Lady Holdings Ltd, trading as TMSWizzard",
+    "Church View, Newton Arlosh",
+    "Wigton, Cumbria, CA7 5ET",
+    "Registered in England & Wales: [COMPANY NUMBER]",
+    "Email: it@silverlady.group"
+  ],
+  "intro": [
+    {
+      "kind": "p",
+      "runs": [
+        {
+          "text": "This statement applies to the TMSWizzard website and web application. We want as many people as possible to be able to use TMSWizzard, and we recognise our duty under the Equality Act 2010 to make reasonable adjustments for disabled people."
+        }
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "heading": "1. Conformance status",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "TMSWizzard "
+            },
+            {
+              "text": "partially conforms",
+              "bold": true
+            },
+            {
+              "text": " to the Web Content Accessibility Guidelines (WCAG) 2.2 at level AA. \"Partially conforms\" means that some parts of the service do not yet meet the standard. They are listed below. Our target is full conformance with WCAG 2.2 AA."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "2. What works well",
+      "blocks": [
+        {
+          "kind": "ul",
+          "items": [
+            [
+              {
+                "text": "Every interactive element shows a visible keyboard focus outline that meets a 3:1 contrast ratio in both the light and dark themes."
+              }
+            ],
+            [
+              {
+                "text": "Form fields have properly associated labels, and error messages are linked to the field they describe."
+              }
+            ],
+            [
+              {
+                "text": "Table rows can be operated by keyboard, and depot switching uses a native select control."
+              }
+            ],
+            [
+              {
+                "text": "All images have text alternatives."
+              }
+            ],
+            [
+              {
+                "text": "The application works with browser storage disabled and offers light and dark themes."
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "3. Known issues",
+      "blocks": [
+        {
+          "kind": "table",
+          "head": [
+            "Issue",
+            "WCAG criterion",
+            "Status"
+          ],
+          "rows": [
+            [
+              "Some secondary body text in the light theme has a contrast ratio of 4.15:1 or 2.62:1, below the 4.5:1 requirement. This includes small print on the signup page and the website footer.",
+              "1.4.3 Contrast (Minimum)",
+              "Fix planned"
+            ],
+            [
+              "One user-interface boundary colour in the light theme has a contrast of 1.84:1 against a 3:1 requirement, and one dark theme text colour is 3.10:1.",
+              "1.4.11 Non-text Contrast, 1.4.3",
+              "Fix planned"
+            ],
+            [
+              "There is no \"skip to main content\" link.",
+              "2.4.1 Bypass Blocks",
+              "Fix planned"
+            ],
+            [
+              "Dialog windows do not keep keyboard focus inside the dialog and do not return focus to the control that opened them.",
+              "2.4.3 Focus Order, 2.1.2 No Keyboard Trap",
+              "Fix planned"
+            ],
+            [
+              "The login and signup pages have no main landmark.",
+              "1.3.1 Info and Relationships",
+              "Fix planned"
+            ],
+            [
+              "The mobile navigation menu references a panel that is not present while the menu is closed, and it cannot be closed with the Escape key.",
+              "4.1.2 Name, Role, Value",
+              "Fix planned"
+            ],
+            [
+              "Pages declare their language as generic English although the content is British English.",
+              "3.1.1 Language of Page",
+              "Fix planned"
+            ],
+            [
+              "Only one animation respects the \"reduce motion\" system setting.",
+              "2.3.3 Animation from Interactions (AAA, best practice)",
+              "Fix planned"
+            ],
+            [
+              "Maps used for planning, tracking and telematics are visual and have not yet been assessed with a screen reader.",
+              "1.1.1 Non-text Content",
+              "Under review"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "4. Feedback and contact",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "If you have difficulty using any part of TMSWizzard, or need information in a different format, email it@silverlady.group. Tell us the page, what you were trying to do and the assistive technology you use. We aim to reply within 5 business days and will work with you on a reasonable adjustment."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "5. How we assessed the service",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "This statement is based on a self-assessment in September 2026, made up of a review of the application code and our automated colour contrast tests. It has not yet been independently audited."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "6. Review",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "We will review this statement at least every 12 months and whenever a known issue is resolved. Last reviewed: September 2026. Next review: September 2027."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "versionLine": "Version 1.0. Prepared September 2026.",
+  "slug": "accessibility"
+}

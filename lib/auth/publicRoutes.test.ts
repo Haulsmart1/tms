@@ -18,6 +18,11 @@ describe("isPublicPath", () => {
     "/quotation/share/abc123",
     "/api/pod/share/abc123/pdf",
     "/api/request-access",
+    "/signup",
+    "/api/signup",
+    "/terms",
+    "/privacy",
+    "/legal",
     "/api/integrations/cambridge-audio/rma",
     "/api/billing/run",
   ])("allows %s", (path) => {
@@ -62,6 +67,10 @@ describe("isPublicPath", () => {
     "/pod/share/abc/extra",
     "/quotation/share/abc/extra",
     "/auth/confirm/extra",
+    "/signup/extra",
+    "/terms/extra",
+    "/legal/terms",
+    "/api/signup/extra",
     "/driver/jobs/abc",
     "/api/accounts/accounting/xero/callback",
   ])("denies the non-public neighbour %s", (path) => {
@@ -70,6 +79,7 @@ describe("isPublicPath", () => {
 
   it("does not treat a prefix as a substring match", () => {
     expect(isPublicPath("/loginhack")).toBe(false);
+    expect(isPublicPath("/signups")).toBe(false);
     expect(isPublicPath("/api/publicity")).toBe(false);
     expect(isPublicPath("/pod/shared-secrets")).toBe(false);
   });

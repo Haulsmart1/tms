@@ -80,15 +80,24 @@ export default function Hero() {
             platform built for UK and European haulage.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
-            <a href="#request-access" className={buttonClasses("primary", "lg")}>
+            <Link href="/signup" className={buttonClasses("primary", "lg")}>
               Get started
-            </a>
+            </Link>
             <Link href="/login" className={buttonClasses("secondary", "lg")}>
               Sign in
             </Link>
           </div>
+          {/* This line used to claim "WCAG 2.1 AA". The design system's own
+              contrast test records shipped failures, and the Accessibility
+              Statement published at /accessibility says "partially conforms",
+              so the unqualified claim was untrue. It now links to the statement
+              instead of asserting a conformance level. */}
           <p className="mt-4 text-xs text-ink-2">
-            Built for UK and EU operators · WCAG 2.1 AA · Your data stays yours
+            Built for UK and EU operators ·{" "}
+            <Link href="/accessibility" className="underline hover:text-ink">
+              Accessibility statement
+            </Link>{" "}
+            · Your data stays yours
           </p>
         </div>
         <ProductMock />

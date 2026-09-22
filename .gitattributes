@@ -1,0 +1,4 @@
+# PDFs are binary. Some of the policy PDFs contain no NUL byte, so git guesses
+# "text" and, with core.autocrlf=true, would rewrite their line endings and
+# break the byte offsets inside the file.
+*.pdf binary

@@ -42,7 +42,8 @@ npm test             # vitest run — runs all lib/**/*.test.ts
 - `proxy.ts`'s `matcher` is a plain string compiled by Next, so a regex dot must be written `\\.`. Written
   `\.` it becomes `.`, and the gate silently ran on `/` only until 2026-09-14.
   `lib/auth/proxyMatcher.test.ts` guards this.
-- Two node scripts, both run by hand, never by npm: `node scripts/dev-login.mjs [email] [nextPath]` mints a
+- `scripts/legal/convert-policies.py` regenerates the policy page content (see Policy pages below). Two node
+  scripts, both run by hand, never by npm: `node scripts/dev-login.mjs [email] [nextPath]` mints a
   real single-use magic-link URL so localhost can reach an auth-gated page, and
   `node scripts/migrate-company-to-period-billing.mjs` switches one company from v1 to v2 billing (dry-run
   first). Read the header comment in `dev-login.mjs` before using it: `.env.local` points at the **live**
@@ -174,7 +175,13 @@ IP, never creates a user (`shouldCreateUser: false`) and answers the same whethe
 Email links land on `/auth/confirm` (`verifyOtp` with `token_hash`, open-redirect hardened `next` param). The
 GET `app/api/auth/callback` only exchanges a PKCE `code`; a `token_hash` sent there is forwarded to
 `/auth/confirm` rather than verified, so a link opened by an email scanner is not consumed. Self-service
-signup does not exist yet: accounts come from invites, and Supabase's "Allow new users to sign up" must be off.
+signup is `/signup` -> `POST /api/signup`: honeypot, per-IP and per-email rate limits, then the
+service-role admin API creates the auth user silently, the `signup_01` RPC
+`create_company_with_admin` writes company, tenant, company profile and founding admin profile in
+one transaction, and only then the invite email goes out (pure logic in `lib/auth/signup.ts`). It
+answers one constant body whether or not the address exists. Supabase's "Allow new users to sign
+up" stays off: the service role creates users regardless, and `supabase.auth.signUp` must never
+appear in browser code.
 
 `proxy.ts` is the edge gate: it refreshes the Supabase session cookie and turns away anonymous requests
 (redirect to `/login?next=...` for pages, `401 {"error":"unauthorized"}` for anything `isApiPath`, so a
@@ -193,6 +200,31 @@ table, because in-memory limiters reset per serverless instance.
 `lib/supabase/browser.tsx`, `lib/supabase/server.tsx`, and
 `lib/supabase/admin.ts` are the three Supabase client entry points — `admin.ts` uses the service-role key and is
 server-only (lead intake, super-admin cross-checks); never import it from client code.
+
+### Policy pages
+
+Ten public policy pages (`/terms`, `/privacy`, `/cookies`, `/cancellation-policy`, `/dpa`, `/accessibility`,
+`/support-policy`, `/acceptable-use`, `/sub-processors`, `/security`) plus the `/legal` index. Each
+`app/<path>/page.tsx` is five lines around `components/legal/LegalPage.tsx`.
+
+- **The wording is not written in this repo.** `scripts/legal/convert-policies.py` (PyMuPDF, run by hand)
+  copies the PDFs in `docs/TMS POLICIES/` verbatim into `lib/legal/content/*.json`. To change wording, change
+  the source document and regenerate; never edit the JSON or reword in JSX. Documents 00 and 11 to 14 in
+  that folder are INTERNAL and must not be converted or published.
+- `lib/legal/vendor.ts` holds the company number (14798586, confirmed 2026-09-22), substituted into the
+  `[COMPANY NUMBER]` placeholder at render time. There is no VAT number or ICO reference: the sentences
+  that carried them, and the Sub-processor List's "confirm" notes, are cut by `TRIMS` in the converter
+  because the values were never supplied. If any placeholder survives, the page shows a draft notice and
+  is `noindex`; that is computed (`documentStatus` in `lib/legal/text.ts`), so there is no flag to flip,
+  and `lib/legal/documents.test.ts` asserts none survives today.
+- The same test asserts the prices, VAT rate and cooling-off window quoted in the Terms against
+  `lib/billing/rateCard.ts`, `vat.ts` and `cancellation.ts`. A rate-card change fails it on purpose: the
+  Terms promise 30 days' notice of a price change.
+- `lib/legal/routes.ts` imports no document text because `shouldShowShell` uses it in the client shell.
+  Keep it that way. A new policy page needs the lists named at the top of that file;
+  `lib/legal/routes.test.ts` fails until they agree.
+- The pages avoid `text-ink-3` (a recorded light-mode contrast failure that the Accessibility Statement
+  itself names). Do not reintroduce an unqualified WCAG conformance claim in marketing copy.
 
 ### Directory map (beyond what's obvious from browsing)
 

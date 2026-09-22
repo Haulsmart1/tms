@@ -28,6 +28,29 @@ const PUBLIC_EXACT = new Set([
   /* Lead intake from the landing page form. Rate limited durably inside the
      route; it cannot require a session because the sender has no account. */
   "/api/request-access",
+  /* Self-serve signup: the page and the route that creates the account. The
+     visitor has no session yet by definition. The route honeypots, rate limits
+     per IP and per email, and answers identically whether or not the address
+     exists (lib/auth/signup.ts). */
+  "/signup",
+  "/api/signup",
+  /* The policy pages and their index. Static documents with no data access:
+     the signup form links to /terms and /privacy before an account exists, and
+     a contract nobody can read without signing in is not much of a contract.
+     Listed one by one, like everything else here, and deliberately NOT spread
+     in from lib/legal/routes.ts: this file is the security allowlist and should
+     be readable on its own. lib/legal/routes.test.ts checks the two agree. */
+  "/legal",
+  "/terms",
+  "/privacy",
+  "/cookies",
+  "/cancellation-policy",
+  "/dpa",
+  "/accessibility",
+  "/support-policy",
+  "/acceptable-use",
+  "/sub-processors",
+  "/security",
   /* Bearer-secret auth (CAMBRIDGE_RMA_SECRET), checked inside the route
      handler with a constant-time compare. A machine caller has no cookie. */
   "/api/integrations/cambridge-audio/rma",

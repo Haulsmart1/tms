@@ -1,0 +1,284 @@
+{
+  "source": "10-Security-Overview.pdf",
+  "title": "Security Overview",
+  "company": [
+    "Silver Lady Holdings Ltd, trading as TMSWizzard",
+    "Church View, Newton Arlosh",
+    "Wigton, Cumbria, CA7 5ET",
+    "Registered in England & Wales: [COMPANY NUMBER]",
+    "Email: it@silverlady.group"
+  ],
+  "intro": [
+    {
+      "kind": "p",
+      "runs": [
+        {
+          "text": "This document describes the technical and organisational measures that protect data in TMSWizzard. It is incorporated into Annex 2 of our Data Processing Agreement."
+        }
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "heading": "1. Hosting",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "The database, authentication and file storage run on Supabase, and the application runs on Vercel, both in the United Kingdom (London). Both providers maintain independently audited security programmes. Their current certifications are available from the providers."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "2. Separation of customers",
+      "blocks": [
+        {
+          "kind": "ul",
+          "items": [
+            [
+              {
+                "text": "Each customer's data is separated in the database by row-level security policies. This is the primary isolation boundary."
+              }
+            ],
+            [
+              {
+                "text": "The helper functions those policies rely on fail closed: if a user's company or depot cannot be established, access is refused."
+              }
+            ],
+            [
+              {
+                "text": "Server routes that run with elevated database rights check authorisation explicitly against the same rules."
+              }
+            ],
+            [
+              {
+                "text": "An edge gate turns away unauthenticated requests to non-public pages as a second line of defence."
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "3. Sign-in",
+      "blocks": [
+        {
+          "kind": "ul",
+          "items": [
+            [
+              {
+                "text": "Sign-in is passwordless. Users receive a single-use link by email, so there are no passwords to steal or reuse."
+              }
+            ],
+            [
+              {
+                "text": "Links opened automatically by email security scanners are not consumed."
+              }
+            ],
+            [
+              {
+                "text": "Sign-in, signup and enquiry forms are rate limited, and the limits hold across server instances."
+              }
+            ],
+            [
+              {
+                "text": "Administrators control user access and roles within their company."
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "4. Files and share links",
+      "blocks": [
+        {
+          "kind": "ul",
+          "items": [
+            [
+              {
+                "text": "Proof-of-delivery photographs and documents are held in a private storage bucket, in folders separated by customer."
+              }
+            ],
+            [
+              {
+                "text": "Files are served only through signed links that expire, within 60 minutes on share pages."
+              }
+            ],
+            [
+              {
+                "text": "Links shared with third parties use random tokens. Only a hash of the token is stored. Links expire, can be revoked, and are checked again on every view."
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "5. Payment data",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "Card numbers, expiry dates and security codes are entered into a form served by Square and never reach our servers. Payments use 3-D Secure where the card issuer requires it. We store a token, the card brand, the last four digits and the expiry date. Refunds use fixed idempotency keys so a refund cannot be issued twice."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "6. Encryption",
+      "blocks": [
+        {
+          "kind": "ul",
+          "items": [
+            [
+              {
+                "text": "All traffic between browsers, the application and our providers is encrypted with TLS."
+              }
+            ],
+            [
+              {
+                "text": "Data is encrypted at rest by our hosting providers."
+              }
+            ],
+            [
+              {
+                "text": "Access tokens for accounting connections are additionally encrypted in the application with AES-256-GCM. The cookies used during the connection process are HttpOnly and Secure."
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "7. Application protections",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "The application sends security response headers that block framing by other sites, prevent content type sniffing, limit referrer information and restrict browser features to those the service needs."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "8. Privileged access and audit",
+      "blocks": [
+        {
+          "kind": "ul",
+          "items": [
+            [
+              {
+                "text": "Access to production systems is limited to the small number of our staff who need it, each bound by a duty of confidentiality."
+              }
+            ],
+            [
+              {
+                "text": "Actions taken through our administrative tools are written to an append-only audit log, which records who changed which field and deliberately does not record the values."
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "9. Data minimisation in the product",
+      "blocks": [
+        {
+          "kind": "ul",
+          "items": [
+            [
+              {
+                "text": "Photographs taken in the driver app are reduced in size on the device, which also removes embedded location metadata. Photographs uploaded from an office computer keep whatever metadata the file contains."
+              }
+            ],
+            [
+              {
+                "text": "Unsaved drafts held in the browser expire after 7 days."
+              }
+            ],
+            [
+              {
+                "text": "The map component stores nothing on the device and sends no telemetry."
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "10. Records that cannot be altered",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "To protect their evidential value, the following cannot be deleted or changed through the application: a delivery stop with proof of delivery, evidence or scans attached; an accepted quotation and its acceptance record; imported tachograph activity; billing and charge records; the administrative audit log."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "11. Backups and continuity",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "Our database provider takes regular platform backups. We are documenting and testing a formal backup and restore procedure, and this overview will be updated when that work is complete."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "12. Incidents",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "We maintain a Data Breach Response Procedure. Customers are notified of personal data breaches affecting their data without undue delay and within 48 hours of our becoming aware."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "13. Reporting a security concern",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "Email it@silverlady.group."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "14. Review",
+      "blocks": [
+        {
+          "kind": "p",
+          "runs": [
+            {
+              "text": "This overview is reviewed at least annually and after any significant change to the platform. Next review: September 2027."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "versionLine": "Version 1.0. Effective September 2026.",
+  "slug": "security"
+}

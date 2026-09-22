@@ -157,19 +157,46 @@ Full detail, including which diag section decides each file, is in `prodfix_80_R
 Then run `rls_09_verify.sql` (with real ids substituted locally, never committed) and immediately run
 `prodfix_81_drop_rls_verify.sql` again. Finally re-run `prodfix_80_preflight_readonly.sql` and compare.
 
+## 9. Self-serve signup (after the whole prodfix series)
+
+| # | File | Notes |
+|---|---|---|
+| 34 | `signup_01_create_company_with_admin.sql` | The RPC behind `POST /api/signup`: company, tenant, company profile and founding admin in one transaction, service_role only. Needs prodfix_01 (rate limits), prodfix_20 (`prodfix_role_id`, roles seeded) and prodfix_88 (the tenant/company binding it satisfies). Also adds the unique index on `roles.name`; if the live table holds duplicate role names the file fails and changes nothing, so fix those first. Spec: `docs/superpowers/specs/2026-09-16-self-serve-signup-design.md`. |
+
+Ordering constraints from the signup review (`docs/superpowers/reviews/2026-09-16-self-serve-signup-review.md`,
+B1 and S1): every landing call to action links `/signup` in the same branch, so the branch must not
+deploy before entries 1 to 34 are applied, or every "Get started" submit answers 500. And apply
+`prodfix_20` (#3) and `signup_01` (#34) in the same sitting: between them `/api/signup` answers
+200 to an existing address and 500 to a new one, which is an account-existence oracle, and each
+500 creates and then deletes an auth user. Run the VERIFY 3 block of `signup_01` (rolled back) on
+the hosted project before marking #34 applied: the RPC's column list for `companies` and `tenants`
+was proven only against the local reconstruction.
+
+`docs/sql/local_00_base_tables_reconstructed.sql` is NOT in this list. It rebuilds the
+dashboard-created identity tables for a local `supabase start` stack only, and must never be
+applied to a hosted project.
+
 ## Dashboard and environment steps (not SQL)
 
 Supabase:
-- Auth, Providers, Email: turn off "Allow new users to sign up". Admin invites keep working.
+- Auth, Providers, Email: turn off "Allow new users to sign up". Admin invites keep working, and
+  so does self-serve signup: `/api/signup` creates users with the service-role admin API, which
+  ignores this switch. It stays off after signup launches.
 - Email templates: Invite link `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=invite`;
-  Magic Link template also points at `/auth/confirm?token_hash=...&type=email`.
+  Magic Link template also points at `/auth/confirm?token_hash=...&type=email`. Signup's
+  confirmation email IS the invite template, so it must be in place before `/signup` is live.
 - URL configuration: the redirect allowlist must accept `/auth/confirm?next=...`.
-- Do not enable OTP captcha yet; the login route sends no captcha token.
+- Do not enable OTP captcha yet; the login route and the signup route send no captcha token.
+- Custom SMTP (Auth, SMTP settings): the built-in sender has a low shared hourly cap, and
+  self-serve signup sends one email per accepted signup. Configure a provider with a verified
+  sending domain before `/signup` is linked from the landing page.
 - Storage: confirm `pod-files` allowed MIME types include `image/jpeg` (driver photos are now JPEG).
 
 Vercel (production):
 - `CRON_SECRET`: required, or no billing runs (the cron now answers 500 and logs why).
-- `NEXT_PUBLIC_SITE_URL`: absolute links in emails and share links.
+- `NEXT_PUBLIC_SITE_URL`: absolute links in emails and share links, including the signup
+  invite's `redirectTo`; without it the link falls back to https://tmswizard.cloud.
+- `SUPABASE_SERVICE_ROLE_KEY`: the signup route cannot create accounts without it (500).
 - Remove `POD_SHARE_SECRET`: nothing reads it now.
 - Alerting: a non-200 from `/api/billing/run`, or no successful run in 26 hours. Watch logs for
   `MANUAL REVIEW` and `PAYMENT_INDETERMINATE`.

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import Container from "../Container";
 import { buttonClasses } from "../Button";
 import {
@@ -64,12 +65,12 @@ export default function PricingCard() {
 
           <p className="mt-2 text-xs text-ink-3">{THRESHOLD_PARITY_SENTENCE}</p>
 
-          <a
-            href="#request-access"
+          <Link
+            href="/signup"
             className={buttonClasses("primary", "lg", "mt-5 w-full")}
           >
-            Request access
-          </a>
+            Get started
+          </Link>
         </div>
       </Container>
     </section>
