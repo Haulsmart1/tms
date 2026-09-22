@@ -1,15 +1,23 @@
 /* The vendor's legal identity, as it appears on the policy pages and in the
    landing footer.
 
-   THREE FACTS ARE STILL UNKNOWN and are null on purpose. The policy documents
+   TWO FACTS ARE STILL UNKNOWN and are null on purpose. The policy documents
    carry them as square-bracket placeholders, and lib/legal/text.ts substitutes
-   the values below at render time, so filling in these three constants
-   completes every page at once. While any placeholder is unresolved the page
-   shows a draft notice and is served noindex (see documentStatus in text.ts).
+   the values below at render time, so filling in these constants completes
+   every page at once. While any placeholder is unresolved the page shows a
+   draft notice and is served noindex (see documentStatus in text.ts).
 
-   Do NOT put 14798586 in companyNumber: the publication checklist
-   (docs/TMS POLICIES/00-Publication-Checklist.pdf) records that number as
-   belonging to ADR Carriers Limited, not to Silver Lady Holdings Ltd.
+   companyNumber: the publication checklist
+   (docs/TMS POLICIES/00-Publication-Checklist.pdf) warned that 14798586 is
+   ADR Carriers Limited's number. On 2026-09-22 Ethan confirmed the vendor's
+   facts are the same as ADR Carriers' originals, so the number is used. That
+   means Companies House should list 14798586 under the trading entity named
+   here; if it still shows "ADR Carriers Limited", legalName is what needs
+   correcting, not the number.
+
+   vatNumber and icoReference appear in none of the ADR Carriers originals
+   (GDPR policy, retention schedule, breach procedure, subcontractor terms) and
+   have to come from the VAT certificate and the ICO register.
 
    The name, address and email here must match the company block at the top of
    each document; lib/legal/documents.test.ts asserts that they do. */
@@ -32,7 +40,7 @@ export const VENDOR: Vendor = {
   tradingName: "TMSWizzard",
   addressLines: ["Church View, Newton Arlosh", "Wigton, Cumbria, CA7 5ET"],
   email: "it@silverlady.group",
-  companyNumber: null,
+  companyNumber: "14798586",
   vatNumber: null,
   icoReference: null,
 };

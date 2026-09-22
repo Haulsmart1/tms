@@ -211,7 +211,7 @@ Ten public policy pages (`/terms`, `/privacy`, `/cookies`, `/cancellation-policy
   copies the PDFs in `docs/TMS POLICIES/` verbatim into `lib/legal/content/*.json`. To change wording, change
   the source document and regenerate; never edit the JSON or reword in JSX. Documents 00 and 11 to 14 in
   that folder are INTERNAL and must not be converted or published.
-- `lib/legal/vendor.ts` holds the company number, VAT number and ICO reference, `null` until known. They
+- `lib/legal/vendor.ts` holds the company number (14798586, confirmed 2026-09-22), VAT number and ICO reference, `null` until known. They
   are substituted into the `[COMPANY NUMBER]`-style placeholders at render time. While any placeholder
   survives, the page shows a draft notice and is `noindex`; that is computed (`documentStatus` in
   `lib/legal/text.ts`), so there is no flag to flip. `lib/legal/documents.test.ts` records exactly which

@@ -87,6 +87,7 @@ describe("legal document content shape", () => {
 
 describe("vendor identity", () => {
   it("matches the company block printed at the top of every document", () => {
+    expect(VENDOR.companyNumber).toBe("14798586");
     for (const d of allLegalDocuments()) {
       expect(d.content.company, d.path).toEqual([
         `${VENDOR.legalName}, trading as ${VENDOR.tradingName}`,
@@ -102,10 +103,10 @@ describe("vendor identity", () => {
      publication. When a fact is filled in, delete it here. When every list is
      empty the pages stop showing their draft notice by themselves. */
   it("records exactly which facts are still unresolved, per document", () => {
-    const vendorFacts = ["[COMPANY NUMBER]", "[VAT NUMBER]"];
+    const vendorFacts = ["[VAT NUMBER]"];
     const expected: Record<string, string[]> = Object.fromEntries(LEGAL_DOCUMENTS.map((d) => [d.path, vendorFacts]));
-    expected["/privacy"] = ["[COMPANY NUMBER]", "[ICO REFERENCE]", "[VAT NUMBER]"];
-    expected["/sub-processors"] = ["[COMPANY NUMBER]", "[CONFIRM MECHANISM]", "[CONFIRM TENANT REGION]", "[VAT NUMBER]"];
+    expected["/privacy"] = ["[ICO REFERENCE]", "[VAT NUMBER]"];
+    expected["/sub-processors"] = ["[CONFIRM MECHANISM]", "[CONFIRM TENANT REGION]", "[VAT NUMBER]"];
 
     const actual = Object.fromEntries(allLegalDocuments().map((d) => [d.path, documentStatus(d.content).unresolved]));
     expect(actual).toEqual(expected);
