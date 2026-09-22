@@ -6,7 +6,6 @@
     "Church View, Newton Arlosh",
     "Wigton, Cumbria, CA7 5ET",
     "Registered in England & Wales: [COMPANY NUMBER]",
-    "VAT number: [VAT NUMBER]",
     "Email: it@silverlady.group"
   ],
   "intro": [
@@ -27,7 +26,7 @@
           "kind": "p",
           "runs": [
             {
-              "text": "1.1 TMSWizzard is a trading name of Silver Lady Holdings Ltd, a company registered in England and Wales under company number [COMPANY NUMBER], with its registered office at Church View, Newton Arlosh, Wigton, Cumbria, CA7 5ET. Our VAT number is [VAT NUMBER]."
+              "text": "1.1 TMSWizzard is a trading name of Silver Lady Holdings Ltd, a company registered in England and Wales under company number [COMPANY NUMBER], with its registered office at Church View, Newton Arlosh, Wigton, Cumbria, CA7 5ET."
             }
           ]
         },

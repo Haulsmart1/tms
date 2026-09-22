@@ -6,7 +6,6 @@
     "Church View, Newton Arlosh",
     "Wigton, Cumbria, CA7 5ET",
     "Registered in England & Wales: [COMPANY NUMBER]",
-    "VAT number: [VAT NUMBER]",
     "Email: it@silverlady.group"
   ],
   "intro": [
@@ -44,19 +43,19 @@
               "Supabase",
               "Database, authentication, file storage, sign-in and invitation emails",
               "All customer data, including driver records, GPS positions and proof-of-delivery files",
-              "Hosted in the UK (London). Supabase is a US-headquartered company. Any access from outside the UK is covered by its data processing addendum with the UK Addendum or IDTA. [CONFIRM MECHANISM]"
+              "Hosted in the UK (London). Supabase is a US-headquartered company. Any access from outside the UK is covered by its data processing addendum with the UK Addendum or IDTA."
             ],
             [
               "Vercel",
               "Application hosting, serverless functions, scheduled tasks and server logs",
               "All request traffic, IP addresses, and logs that may include postcodes and stop references",
-              "Functions run in the UK (London). Vercel is a US-headquartered company. UK Addendum or UK Extension to the EU-US Data Privacy Framework. [CONFIRM MECHANISM]"
+              "Functions run in the UK (London). Vercel is a US-headquartered company. UK Addendum or UK Extension to the EU-US Data Privacy Framework."
             ],
             [
               "Microsoft (Microsoft 365, Graph API)",
               "Sends invoices, quotations, credit notes, statements, chase letters and proof-of-delivery emails with PDF attachments. A copy is kept in the sending mailbox.",
               "Recipient email addresses and the content of the documents, including names, addresses, line items, recipient names and photographs",
-              "Microsoft 365 tenant data held in the UK or EEA. [CONFIRM TENANT REGION] Microsoft Products and Services Data Protection Addendum."
+              "Microsoft 365 tenant data held in the UK or EEA. Microsoft Products and Services Data Protection Addendum."
             ],
             [
               "TomTom",
@@ -98,7 +97,7 @@
               "Square",
               "Subscription card payments, 3-D Secure, refunds and hosted receipts",
               "Card details entered by the customer directly into Square's form; company name, company reference, card token and charge amounts from us",
-              "UK and US. Square acts as a controller for payment processing. UK Addendum or Data Privacy Framework. [CONFIRM MECHANISM]"
+              "UK and US. Square acts as a controller for payment processing. UK Addendum or Data Privacy Framework."
             ],
             [
               "Microsoft Teams (Power Automate)",
@@ -110,7 +109,7 @@
               "Resend",
               "Internal email alert when a website enquiry is received",
               "The same enquiry fields",
-              "US. UK Addendum or Data Privacy Framework. [CONFIRM MECHANISM]"
+              "US. UK Addendum or Data Privacy Framework."
             ]
           ]
         }

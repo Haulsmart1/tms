@@ -19,6 +19,13 @@ PATCHES repairs the few places where a narrow table column in the PDF split a
 word across lines. Each patch must match exactly once or the script stops, so a
 revised PDF cannot be silently mis-patched.
 
+TRIMS removes the pieces of the documents that were never filled in: the VAT
+number, the ICO registration reference and the "confirm" notes in the
+Sub-processor List. Ethan decided on 2026-09-22 that these are cut rather
+than left as placeholders. Each trim states how many times it must match. When
+the source PDFs are reissued without them, the trims stop matching and this
+script stops, which is the prompt to delete them here.
+
 Every judgement call the converter makes (a paragraph joined across a page
 break, a table continued on the next page, a hyphen at a line end) is printed,
 so the run can be checked against the PDFs.
@@ -191,6 +198,44 @@ def convert(path):
     return out
 
 
+# (pdf or "*" for every document, text to remove, expected match count)
+TRIMS = [
+    ("*", "VAT number: [VAT NUMBER]", 1),
+    ("01-Terms-and-Conditions.pdf", " Our VAT number is [VAT NUMBER].", 1),
+    ("02-Privacy-Notice.pdf", " ICO registration reference [ICO REFERENCE].", 1),
+    ("09-Sub-processor-List.pdf", " [CONFIRM MECHANISM]", 4),
+    ("09-Sub-processor-List.pdf", " [CONFIRM TENANT REGION]", 1),
+]
+
+def trim(d, pdf):
+    """Apply TRIMS to every string in the document, then drop company lines
+    and runs that became empty."""
+    counts = {}
+    def cut(text):
+        for who, old, _ in TRIMS:
+            if who in ("*", pdf) and old in text:
+                counts[old] = counts.get(old, 0) + text.count(old)
+                text = text.replace(old, "")
+        return text
+    def cut_runs(runs):
+        for r in runs: r["text"] = cut(r["text"])
+        return [r for r in runs if r["text"]]
+    def cut_blocks(blocks):
+        for b in blocks:
+            if b["kind"] == "p": b["runs"] = cut_runs(b["runs"])
+            elif b["kind"] == "ul": b["items"] = [cut_runs(i) for i in b["items"]]
+            else:
+                if b["head"]: b["head"] = [cut(c) for c in b["head"]]
+                b["rows"] = [[cut(c) for c in row] for row in b["rows"]]
+    d["company"] = [line for line in (cut(l) for l in d["company"]) if line]
+    cut_blocks(d["intro"])
+    for s in d["sections"]:
+        s["heading"] = cut(s["heading"]); cut_blocks(s["blocks"])
+    for who, old, expected in TRIMS:
+        if who in ("*", pdf) and counts.get(old, 0) != expected:
+            sys.exit(f"{pdf}: trim {old!r} matched {counts.get(old, 0)} times, expected {expected}")
+    return d
+
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     for pdf, slug in PUBLIC.items():
@@ -202,6 +247,7 @@ def main():
         d["intro"].remove(version[0])
         d["versionLine"] = "".join(r["text"] for r in version[0]["runs"])
         d["slug"] = slug
+        d = trim(d, pdf)
         text = json.dumps(d, ensure_ascii=False, indent=2)
         for old, new in PATCHES.get(pdf, []):
             old_j, new_j = json.dumps(old, ensure_ascii=False)[1:-1], json.dumps(new, ensure_ascii=False)[1:-1]

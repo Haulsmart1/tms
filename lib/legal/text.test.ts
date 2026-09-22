@@ -3,8 +3,8 @@ import { documentStatus, findPlaceholders, linkify, resolvePlaceholders, section
 import type { LegalDocumentContent } from "./types";
 import { VENDOR, type Vendor } from "./vendor";
 
-const FILLED: Vendor = { ...VENDOR, companyNumber: "01234567", vatNumber: "GB123456789", icoReference: "ZA000000" };
-const EMPTY: Vendor = { ...VENDOR, companyNumber: null, vatNumber: null, icoReference: null };
+const FILLED: Vendor = { ...VENDOR, companyNumber: "01234567" };
+const EMPTY: Vendor = { ...VENDOR, companyNumber: null };
 
 function doc(texts: string[]): LegalDocumentContent {
   return {
@@ -20,13 +20,11 @@ function doc(texts: string[]): LegalDocumentContent {
 
 describe("resolvePlaceholders", () => {
   it("substitutes the vendor facts that are known", () => {
-    expect(resolvePlaceholders("Company number [COMPANY NUMBER]. VAT [VAT NUMBER]. ICO [ICO REFERENCE].", FILLED)).toBe(
-      "Company number 01234567. VAT GB123456789. ICO ZA000000.",
-    );
+    expect(resolvePlaceholders("Company number [COMPANY NUMBER].", FILLED)).toBe("Company number 01234567.");
   });
 
   it("leaves an unknown fact as its placeholder, so the draft guard can see it", () => {
-    expect(resolvePlaceholders("VAT number: [VAT NUMBER]", EMPTY)).toBe("VAT number: [VAT NUMBER]");
+    expect(resolvePlaceholders("Company number [COMPANY NUMBER]", EMPTY)).toBe("Company number [COMPANY NUMBER]");
   });
 
   it("never substitutes a placeholder that is not a vendor fact", () => {
@@ -48,14 +46,14 @@ describe("findPlaceholders", () => {
 
 describe("documentStatus", () => {
   it("is a draft while a vendor fact is missing", () => {
-    expect(documentStatus(doc(["VAT [VAT NUMBER]", "No [COMPANY NUMBER]", "again [VAT NUMBER]"]), EMPTY)).toEqual({
+    expect(documentStatus(doc(["No [COMPANY NUMBER]", "again [COMPANY NUMBER]", "[CONFIRM REGION]"]), EMPTY)).toEqual({
       draft: true,
-      unresolved: ["[COMPANY NUMBER]", "[VAT NUMBER]"],
+      unresolved: ["[COMPANY NUMBER]", "[CONFIRM REGION]"],
     });
   });
 
   it("stops being a draft once the vendor facts are filled in, with no flag to flip", () => {
-    expect(documentStatus(doc(["VAT [VAT NUMBER]", "No [COMPANY NUMBER]"]), FILLED)).toEqual({ draft: false, unresolved: [] });
+    expect(documentStatus(doc(["No [COMPANY NUMBER]", "again [COMPANY NUMBER]"]), FILLED)).toEqual({ draft: false, unresolved: [] });
   });
 
   it("stays a draft for a fact only the source document can settle", () => {
@@ -69,10 +67,10 @@ describe("documentStatus", () => {
     const d = doc([]);
     d.company = ["Registered: [COMPANY NUMBER]"];
     d.sections[0].blocks = [
-      { kind: "ul", items: [[{ text: "item [VAT NUMBER]" }]] },
+      { kind: "ul", items: [[{ text: "item [ICO REFERENCE]" }]] },
       { kind: "table", head: ["Provider"], rows: [["Supabase [CONFIRM MECHANISM]"]] },
     ];
-    expect(documentStatus(d, EMPTY).unresolved).toEqual(["[COMPANY NUMBER]", "[CONFIRM MECHANISM]", "[VAT NUMBER]"]);
+    expect(documentStatus(d, EMPTY).unresolved).toEqual(["[COMPANY NUMBER]", "[CONFIRM MECHANISM]", "[ICO REFERENCE]"]);
   });
 });
 

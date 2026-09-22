@@ -6,7 +6,6 @@
     "Church View, Newton Arlosh",
     "Wigton, Cumbria, CA7 5ET",
     "Registered in England & Wales: [COMPANY NUMBER]",
-    "VAT number: [VAT NUMBER]",
     "Email: it@silverlady.group"
   ],
   "intro": [
@@ -27,7 +26,7 @@
           "kind": "p",
           "runs": [
             {
-              "text": "Silver Lady Holdings Ltd, Church View, Newton Arlosh, Wigton, Cumbria, CA7 5ET. Company number [COMPANY NUMBER]. ICO registration reference [ICO REFERENCE]. We have not appointed a Data Protection Officer. Data protection is overseen by our directors. Contact: it@silverlady.group."
+              "text": "Silver Lady Holdings Ltd, Church View, Newton Arlosh, Wigton, Cumbria, CA7 5ET. Company number [COMPANY NUMBER]. We have not appointed a Data Protection Officer. Data protection is overseen by our directors. Contact: it@silverlady.group."
             }
           ]
         }

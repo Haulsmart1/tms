@@ -93,23 +93,25 @@ describe("vendor identity", () => {
         `${VENDOR.legalName}, trading as ${VENDOR.tradingName}`,
         ...VENDOR.addressLines,
         "Registered in England & Wales: [COMPANY NUMBER]",
-        "VAT number: [VAT NUMBER]",
         `Email: ${VENDOR.email}`,
       ]);
     }
   });
 
-  /* Not a to-do list to silence: this is the record of what still blocks
-     publication. When a fact is filled in, delete it here. When every list is
-     empty the pages stop showing their draft notice by themselves. */
-  it("records exactly which facts are still unresolved, per document", () => {
-    const vendorFacts = ["[VAT NUMBER]"];
-    const expected: Record<string, string[]> = Object.fromEntries(LEGAL_DOCUMENTS.map((d) => [d.path, vendorFacts]));
-    expected["/privacy"] = ["[ICO REFERENCE]", "[VAT NUMBER]"];
-    expected["/sub-processors"] = ["[CONFIRM MECHANISM]", "[CONFIRM TENANT REGION]", "[VAT NUMBER]"];
-
+  /* Every placeholder is resolved (the company number is substituted; the VAT
+     number, ICO reference and "confirm" notes were trimmed by the converter),
+     so no page shows a draft notice. A reissued PDF that brings a new
+     bracketed note back fails here, which is the point. */
+  it("leaves no placeholder unresolved on any page", () => {
     const actual = Object.fromEntries(allLegalDocuments().map((d) => [d.path, documentStatus(d.content).unresolved]));
-    expect(actual).toEqual(expected);
+    expect(actual).toEqual(Object.fromEntries(LEGAL_DOCUMENTS.map((d) => [d.path, []])));
+  });
+
+  it("carries no VAT number, ICO reference or unconfirmed note anywhere", () => {
+    for (const d of allLegalDocuments()) {
+      const text = documentTexts(d.content).join("\n");
+      expect(text, d.path).not.toMatch(/VAT number|ICO registration reference|\[CONFIRM/);
+    }
   });
 });
 

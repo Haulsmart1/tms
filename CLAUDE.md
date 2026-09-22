@@ -211,11 +211,12 @@ Ten public policy pages (`/terms`, `/privacy`, `/cookies`, `/cancellation-policy
   copies the PDFs in `docs/TMS POLICIES/` verbatim into `lib/legal/content/*.json`. To change wording, change
   the source document and regenerate; never edit the JSON or reword in JSX. Documents 00 and 11 to 14 in
   that folder are INTERNAL and must not be converted or published.
-- `lib/legal/vendor.ts` holds the company number (14798586, confirmed 2026-09-22), VAT number and ICO reference, `null` until known. They
-  are substituted into the `[COMPANY NUMBER]`-style placeholders at render time. While any placeholder
-  survives, the page shows a draft notice and is `noindex`; that is computed (`documentStatus` in
-  `lib/legal/text.ts`), so there is no flag to flip. `lib/legal/documents.test.ts` records exactly which
-  placeholders are outstanding per page and must be updated as they are resolved.
+- `lib/legal/vendor.ts` holds the company number (14798586, confirmed 2026-09-22), substituted into the
+  `[COMPANY NUMBER]` placeholder at render time. There is no VAT number or ICO reference: the sentences
+  that carried them, and the Sub-processor List's "confirm" notes, are cut by `TRIMS` in the converter
+  because the values were never supplied. If any placeholder survives, the page shows a draft notice and
+  is `noindex`; that is computed (`documentStatus` in `lib/legal/text.ts`), so there is no flag to flip,
+  and `lib/legal/documents.test.ts` asserts none survives today.
 - The same test asserts the prices, VAT rate and cooling-off window quoted in the Terms against
   `lib/billing/rateCard.ts`, `vat.ts` and `cancellation.ts`. A rate-card change fails it on purpose: the
   Terms promise 30 days' notice of a price change.

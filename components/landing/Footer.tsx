@@ -9,9 +9,10 @@ import { VENDOR } from "../../lib/legal/vendor";
    (review SET-26). The pages now exist, so the links are back.
 
    The identity line is the website disclosure a UK company has to make
-   (company name, where registered, number, registered office, VAT number). The
-   company and VAT numbers are printed only once lib/legal/vendor.ts knows them:
-   a marketing page must never show a "[COMPANY NUMBER]" placeholder.
+   (company name, where registered, number, registered office). The company
+   number is printed only when lib/legal/vendor.ts knows it: a marketing page
+   must never show a "[COMPANY NUMBER]" placeholder. No VAT number is shown
+   because none is recorded (see vendor.ts).
 
    Small print is text-ink-2. It used to be text-ink-3, which is 4.15:1 in light
    mode and is named as a known failure in the Accessibility Statement.
@@ -59,8 +60,7 @@ export default function Footer() {
           </nav>
         </div>
         <p className="mt-4 border-t border-line pt-4">
-          {registration}. Registered office: {VENDOR.addressLines.join(", ")}.
-          {VENDOR.vatNumber ? ` VAT number ${VENDOR.vatNumber}.` : ""}{" "}
+          {registration}. Registered office: {VENDOR.addressLines.join(", ")}.{" "}
           <a href={`mailto:${VENDOR.email}`} className="underline hover:text-ink">
             {VENDOR.email}
           </a>

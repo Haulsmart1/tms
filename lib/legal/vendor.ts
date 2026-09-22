@@ -1,11 +1,11 @@
 /* The vendor's legal identity, as it appears on the policy pages and in the
    landing footer.
 
-   TWO FACTS ARE STILL UNKNOWN and are null on purpose. The policy documents
-   carry them as square-bracket placeholders, and lib/legal/text.ts substitutes
-   the values below at render time, so filling in these constants completes
-   every page at once. While any placeholder is unresolved the page shows a
-   draft notice and is served noindex (see documentStatus in text.ts).
+   The documents carry the company number as a [COMPANY NUMBER] placeholder
+   and lib/legal/text.ts substitutes the value below at render time. Should a
+   placeholder ever be left unresolved (a null here, or a new bracketed note in
+   a reissued PDF), the page shows a draft notice and is served noindex (see
+   documentStatus in text.ts).
 
    companyNumber: the publication checklist
    (docs/TMS POLICIES/00-Publication-Checklist.pdf) warned that 14798586 is
@@ -15,9 +15,12 @@
    here; if it still shows "ADR Carriers Limited", legalName is what needs
    correcting, not the number.
 
-   vatNumber and icoReference appear in none of the ADR Carriers originals
-   (GDPR policy, retention schedule, breach procedure, subcontractor terms) and
-   have to come from the VAT certificate and the ICO register.
+   There is deliberately no VAT number or ICO reference. Neither appears in
+   any ADR Carriers original, so on 2026-09-22 Ethan had the sentences that
+   would carry them trimmed out of the documents (TRIMS in
+   scripts/legal/convert-policies.py). If either is added later, restore the
+   wording in the source PDFs, drop the trim, and add the field and its
+   placeholder here.
 
    The name, address and email here must match the company block at the top of
    each document; lib/legal/documents.test.ts asserts that they do. */
@@ -29,10 +32,6 @@ export type Vendor = {
   email: string;
   /** Companies House number for Silver Lady Holdings Ltd. */
   companyNumber: string | null;
-  /** Also has to appear on receipts or VAT invoices (handoff section 12, item 7). */
-  vatNumber: string | null;
-  /** ICO data protection fee registration reference. */
-  icoReference: string | null;
 };
 
 export const VENDOR: Vendor = {
@@ -41,15 +40,11 @@ export const VENDOR: Vendor = {
   addressLines: ["Church View, Newton Arlosh", "Wigton, Cumbria, CA7 5ET"],
   email: "it@silverlady.group",
   companyNumber: "14798586",
-  vatNumber: null,
-  icoReference: null,
 };
 
 /** Placeholder text in the documents, mapped to the vendor field that fills it.
-    Placeholders not listed here ([CONFIRM MECHANISM], [CONFIRM TENANT REGION])
-    are facts to settle in the source document, not values to substitute. */
-export const VENDOR_PLACEHOLDERS: Readonly<Record<string, keyof Pick<Vendor, "companyNumber" | "vatNumber" | "icoReference">>> = {
+    A placeholder not listed here is a fact to settle in the source document,
+    not a value to substitute, and keeps the page in draft. */
+export const VENDOR_PLACEHOLDERS: Readonly<Record<string, keyof Pick<Vendor, "companyNumber">>> = {
   "[COMPANY NUMBER]": "companyNumber",
-  "[VAT NUMBER]": "vatNumber",
-  "[ICO REFERENCE]": "icoReference",
 };
