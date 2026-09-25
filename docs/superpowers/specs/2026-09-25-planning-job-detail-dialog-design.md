@@ -102,13 +102,14 @@ type Props = {
 };
 ```
 
-Markup mirrors the acceptance dialog in `page.tsx`: `fixed inset-0 z-50`
-backdrop with `role="dialog"`, `aria-modal="true"` and `aria-labelledby`
-pointing at the reference heading; a `max-w-2xl` panel with the token
-classes (`border-line`, `bg-surface`, `text-ink`, `text-ink-3`). The panel
-scrolls (`max-h-[85vh] overflow-y-auto`) so a job with many stops or items
-stays usable. Escape is handled with a `keydown` listener added on mount and
-removed on unmount.
+The dialog is rendered through the shared `components/Modal.tsx`, which the
+Jobs delete dialog already uses and which owns the backdrop, `role="dialog"`,
+`aria-modal`, Escape and backdrop-click closing. `Modal` gains an optional
+`size?: "md" | "lg"` prop (`lg` is `max-w-2xl`; the default `md` keeps the
+delete dialog unchanged) and its body scrolls (`max-h-[85vh]` on the panel,
+`overflow-y-auto` on the body) so a job with many stops or items stays
+usable. The reference is the modal title; customer and status sit at the top
+of the body.
 
 ### New: `lib/planning/jobDetail.ts` and `jobDetail.test.ts`
 
@@ -129,6 +130,11 @@ Pure helpers, so vitest covers them:
 Tests cover: both status branches and null; ETA formatting in
 `Europe/London` across a BST boundary and for null; stop type narrowing;
 draft assignment for an assigned, an unassigned and a moved job.
+
+### Changed: `components/Modal.tsx`
+
+Adds the `size` prop and the scrolling body described above. No behaviour
+change for the existing `md` consumer.
 
 ### Changed: `app/planning/page.tsx`
 
