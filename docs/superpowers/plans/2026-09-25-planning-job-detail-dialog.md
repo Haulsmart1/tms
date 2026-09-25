@@ -855,6 +855,9 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 7. Print labels opens the label printer as on the Jobs page.
 8. Open in Jobs lands on `/jobs` with that job expanded.
 9. With "All tenants" selected (admin), the dialog still opens.
+10. Print labels from the dialog for a job with two or more stops or items and check the print preview shows every page, not a clipped first one (the reason the printer overlay is portaled).
+11. Open the dialog, Tab to Close, wait 35 seconds (one position poll) and confirm focus stays on Close.
+12. Close the dialog with Escape and confirm focus returns to the card you opened.
 
 Record anything that fails as a follow-up rather than patching the spec silently.
 
