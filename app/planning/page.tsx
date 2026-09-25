@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
@@ -9,6 +8,8 @@ import Button from "../../components/Button";
 import PlanningMap, { type MapMarker } from "./PlanningMap";
 import UnassignedPool from "./UnassignedPool";
 import VehicleLane from "./VehicleLane";
+import JobDetailDialog from "./JobDetailDialog";
+import { draftAssignment } from "../../lib/planning/jobDetail";
 import { stopsNeedingGeocode } from "../../lib/planning/geocoding";
 import { computeSaveDiff, type LanePlan } from "../../lib/planning/saveDiff";
 import {
@@ -133,7 +134,6 @@ const POSITION_POLL_MS = 30_000;
 const HOURS_REFRESH_MS = 5 * 60_000;
 
 export default function PlanningPage() {
-  const router = useRouter();
   const supabase = createClient();
   const tenant = useTenant();
 
@@ -233,6 +233,7 @@ export default function PlanningPage() {
   >("idle");
   const [recoveryDraft, setRecoveryDraft] = useState<PlanningDraft | null>(null);
   const [optimizing, setOptimizing] = useState(false);
+  const [detailJobId, setDetailJobId] = useState<string | null>(null);
   const [acceptanceTarget, setAcceptanceTarget] = useState<{
     jobs: {
       id: string;
@@ -262,6 +263,13 @@ export default function PlanningPage() {
   const canonicalMutationGeneration = useRef<Record<string, number>>({});
 
   const jobById = useMemo(() => new Map(jobs.map((j) => [j.id, j])), [jobs]);
+
+  /* A reload can drop the open job (moved to another day, deleted elsewhere);
+     an empty dialog would otherwise linger over the board. */
+  useEffect(() => {
+    if (detailJobId && !jobById.has(detailJobId)) setDetailJobId(null);
+  }, [detailJobId, jobById]);
+
   const driverById = useMemo(
     () => new Map(drivers.map((driver) => [driver.id, driver])),
     [drivers]
@@ -2723,9 +2731,7 @@ export default function PlanningPage() {
                 displacedNotes={displacedNotes}
                 selectedJobIds={selectedUnassignedJobIds}
                 onToggleJob={toggleUnassignedSelection}
-                onOpenJob={(jobId) =>
-                  router.push(`/jobs?job=${encodeURIComponent(jobId)}`)
-                }
+                onOpenJob={setDetailJobId}
                 onAcceptJob={openAcceptance}
                 onDropJob={(jobId) => moveJob(jobId, null, null)}
               />
@@ -2969,9 +2975,7 @@ export default function PlanningPage() {
                           return next;
                         });
                       }}
-                      onOpenJob={(jobId) =>
-                        router.push(`/jobs?job=${encodeURIComponent(jobId)}`)
-                      }
+                      onOpenJob={setDetailJobId}
                       onAcceptJob={openAcceptance}
                       onMoveJob={(jobId, offset) =>
                         moveLaneJob(jobId, v.id, offset)
@@ -3094,6 +3098,36 @@ export default function PlanningPage() {
         </div>
       ) : null}
 
+      {(() => {
+        const detailJob = detailJobId ? jobById.get(detailJobId) : undefined;
+        if (!detailJob) return null;
+        const { vehicleId, driverId } = draftAssignment(
+          detailJob.id,
+          laneOrders,
+          laneDrivers
+        );
+        const vehicleLabel = vehicleId
+          ? (vehicles.find((v) => v.id === vehicleId)?.registration ?? "Unknown")
+          : null;
+        const driverLabel =
+          vehicleId && driverId
+            ? (drivers.find((d) => d.id === driverId)?.name ?? "Unknown")
+            : null;
+        return (
+          <JobDetailDialog
+            job={detailJob}
+            vehicleLabel={vehicleLabel}
+            driverLabel={driverLabel}
+            timeZone={planningTimeZone}
+            geocodeSettled={geocodeSettled && !geocodeUnavailable}
+            onClose={() => setDetailJobId(null)}
+            onAccept={(jobId) => {
+              setDetailJobId(null);
+              openAcceptance(jobId);
+            }}
+          />
+        );
+      })()}
     </TenantGate>
   );
 }
