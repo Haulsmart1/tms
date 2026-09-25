@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import JsBarcode from "jsbarcode";
 import Button from "../../components/Button";
 import {
@@ -247,8 +248,9 @@ export default function JobLabelPrinter({
         Print Labels
       </Button>
 
-      {open ? (
-        <div className="fixed inset-0 z-[100] overflow-auto bg-black/50 p-4 print:static print:bg-white print:p-0">
+      {open
+        ? createPortal(
+            <div className="fixed inset-0 z-[100] overflow-auto bg-black/50 p-4 print:static print:bg-white print:p-0">
           <style jsx global>{`
             @media print {
               body * {
@@ -652,8 +654,10 @@ export default function JobLabelPrinter({
                 : null}
             </div>
           </div>
-        </div>
-      ) : null}
+        </div>,
+            document.body
+          )
+        : null}
     </>
   );
 }
