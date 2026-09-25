@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 
 type Props = {
   open: boolean;
@@ -18,10 +18,12 @@ const widths: Record<NonNullable<Props["size"]>, string> = {
   lg: "max-w-2xl",
 };
 
-/* No focus trap or focus-restoration: the consumers today are a two-button
-   confirm dialog (Task 20) and a read-only detail view, and this repo has no
-   focus-trap dependency. Revisit if a modal ever needs multi-field forms or
-   nested focusable content where Tab escaping the dialog would matter more. */
+/* No focus trap or focus-restoration: the consumers today are two confirm
+   dialogs (DeleteJobDialog, and the super-admin MoveTenantModal, which has
+   form fields and records the missing trap as a follow-up) and the Planning
+   job detail view, and this repo has no focus-trap dependency. Revisit if a
+   modal ever needs nested focusable content where Tab escaping the dialog
+   would matter more. */
 export default function Modal({
   open,
   onClose,
@@ -31,6 +33,8 @@ export default function Modal({
   size = "md",
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null);
+  // Per-instance id: a fixed "modal-title" would collide if two ever mount.
+  const titleId = useId();
 
   useEffect(() => {
     if (!open) return;
@@ -51,15 +55,15 @@ export default function Modal({
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="modal-title"
+        aria-labelledby={titleId}
         tabIndex={-1}
         className={`relative z-10 flex max-h-[85vh] w-full flex-col rounded-lg bg-surface p-6 shadow-lg outline-none ${widths[size]}`}
       >
-        <h2 id="modal-title" className="text-lg font-semibold text-ink">
+        <h2 id={titleId} className="text-lg font-semibold text-ink">
           {title}
         </h2>
         <div className="mt-3 min-h-0 overflow-y-auto text-sm text-ink-2">{children}</div>
-        {footer ? <div className="mt-6 flex justify-end gap-2">{footer}</div> : null}
+        {footer ? <div className="mt-6 flex flex-wrap justify-end gap-2">{footer}</div> : null}
       </div>
     </div>
   );
