@@ -8,13 +8,28 @@ type Props = {
   title: string;
   children: ReactNode;
   footer?: ReactNode;
+  /** "md" is the confirm-dialog width. "lg" is for read-only detail views
+      with lists (Planning job detail); the panel scrolls when tall. */
+  size?: "md" | "lg";
 };
 
-/* No focus trap or focus-restoration: the only consumer today is a simple
-   two-button confirm dialog (Task 20), and this repo has no focus-trap
-   dependency. Revisit if a modal ever needs multi-field forms or nested
-   focusable content where Tab escaping the dialog would matter more. */
-export default function Modal({ open, onClose, title, children, footer }: Props) {
+const widths: Record<NonNullable<Props["size"]>, string> = {
+  md: "max-w-md",
+  lg: "max-w-2xl",
+};
+
+/* No focus trap or focus-restoration: the consumers today are a two-button
+   confirm dialog (Task 20) and a read-only detail view, and this repo has no
+   focus-trap dependency. Revisit if a modal ever needs multi-field forms or
+   nested focusable content where Tab escaping the dialog would matter more. */
+export default function Modal({
+  open,
+  onClose,
+  title,
+  children,
+  footer,
+  size = "md",
+}: Props) {
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -38,12 +53,12 @@ export default function Modal({ open, onClose, title, children, footer }: Props)
         aria-modal="true"
         aria-labelledby="modal-title"
         tabIndex={-1}
-        className="relative z-10 w-full max-w-md rounded-lg bg-surface p-6 shadow-lg outline-none"
+        className={`relative z-10 flex max-h-[85vh] w-full flex-col rounded-lg bg-surface p-6 shadow-lg outline-none ${widths[size]}`}
       >
         <h2 id="modal-title" className="text-lg font-semibold text-ink">
           {title}
         </h2>
-        <div className="mt-3 text-sm text-ink-2">{children}</div>
+        <div className="mt-3 min-h-0 overflow-y-auto text-sm text-ink-2">{children}</div>
         {footer ? <div className="mt-6 flex justify-end gap-2">{footer}</div> : null}
       </div>
     </div>
