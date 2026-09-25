@@ -281,7 +281,7 @@ export default function JobLabelPrinter({
                   setOpen(false);
                 }
               }}
-              className="fixed inset-0 z-[100] overflow-auto bg-black/50 p-4 print:static print:bg-white print:p-0"
+              className="fixed inset-0 z-[100] overflow-auto bg-black/50 p-4 outline-none print:static print:bg-white print:p-0"
             >
           <style jsx global>{`
             @media print {

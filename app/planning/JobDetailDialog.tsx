@@ -54,7 +54,7 @@ export default function JobDetailDialog({
   const reference = job.reference ?? "No reference";
 
   const assignment = assignmentLabel({
-    subcontracted: job.subcontractor_id !== null,
+    subcontracted: Boolean(job.subcontractor_id),
     vehicleLabel,
     driverLabel,
   });
