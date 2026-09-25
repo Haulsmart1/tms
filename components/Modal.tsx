@@ -18,12 +18,12 @@ const widths: Record<NonNullable<Props["size"]>, string> = {
   lg: "max-w-2xl",
 };
 
-/* No focus trap or focus-restoration: the consumers today are two confirm
-   dialogs (DeleteJobDialog, and the super-admin MoveTenantModal, which has
-   form fields and records the missing trap as a follow-up) and the Planning
-   job detail view, and this repo has no focus-trap dependency. Revisit if a
+/* No focus trap: the consumers today are two confirm dialogs
+   (DeleteJobDialog, and the super-admin MoveTenantModal, which has form
+   fields and records the missing trap as a follow-up) and the Planning job
+   detail view, and this repo has no focus-trap dependency. Revisit if a
    modal ever needs nested focusable content where Tab escaping the dialog
-   would matter more. */
+   would matter more. Focus does return to the opener on close. */
 export default function Modal({
   open,
   onClose,
@@ -36,15 +36,31 @@ export default function Modal({
   // Per-instance id: a fixed "modal-title" would collide if two ever mount.
   const titleId = useId();
 
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+
+  /* Depends on `open` only. Callers pass inline arrows for onClose, and the
+     Planning page re-renders on a 30-second position poll; with onClose in
+     the deps every poll would pull focus back to the panel, away from a
+     footer button or the label printer overlay. */
   useEffect(() => {
     if (!open) return;
+    const opener =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     panelRef.current?.focus();
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     }
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      opener?.focus();
+    };
+  }, [open]);
 
   if (!open) return null;
 
