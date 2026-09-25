@@ -5,7 +5,7 @@
 import type { LabelStop } from "../printing/jobLabels";
 import type { PlanStop } from "./types";
 
-const ABSENT = "-";
+export const ABSENT = "-";
 
 /** Same wording the Jobs page list uses for a status cell. */
 export function jobStatusLabel(status: string | null): string {
@@ -68,6 +68,27 @@ export function toLabelStops(stops: PlanStop[]): LabelStop[] {
         },
       ];
     });
+}
+
+export type AssignmentLabelInput = {
+  subcontracted: boolean;
+  /** Registration, "Unknown", or null when the job is in no lane. */
+  vehicleLabel: string | null;
+  /** Name, "Unknown", or null when the lane has no driver. */
+  driverLabel: string | null;
+};
+
+/** Subcontracted wins over any lane: the vehicle column is meaningless for
+    a job another haulier is running. */
+export function assignmentLabel({
+  subcontracted,
+  vehicleLabel,
+  driverLabel,
+}: AssignmentLabelInput): string {
+  if (subcontracted) return "Subcontracted";
+  if (vehicleLabel === null) return "Unassigned";
+  if (driverLabel === null) return `${vehicleLabel} · No driver`;
+  return `${vehicleLabel} · ${driverLabel}`;
 }
 
 export type DraftAssignment = {

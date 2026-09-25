@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -94,6 +95,8 @@ export default function JobLabelPrinter({
   items,
 }: Props) {
   const [open, setOpen] = useState(false);
+  const titleId = useId();
+  const overlayRef = useRef<HTMLDivElement | null>(null);
   const [templateId, setTemplateId] =
     useState(BOX_LABEL_TEMPLATES[0].id);
 
@@ -165,6 +168,22 @@ export default function JobLabelPrinter({
       setDeliveryId(deliveries[0].id);
     }
   }, [collections, deliveries]);
+
+  /* The overlay is portaled to document.body, so nothing puts it in the Tab
+     order next to its trigger. Move focus in on open and, on close, back to
+     whatever had it (the Print Labels button: Button does not forward refs,
+     but the click that opened the overlay left focus on it). */
+  useEffect(() => {
+    if (!open) return;
+    const opener =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    overlayRef.current?.focus();
+    return () => {
+      opener?.focus();
+    };
+  }, [open]);
 
   const stopSelection = resolveStopSelection(
     stops,
@@ -250,7 +269,20 @@ export default function JobLabelPrinter({
 
       {open
         ? createPortal(
-            <div className="fixed inset-0 z-[100] overflow-auto bg-black/50 p-4 print:static print:bg-white print:p-0">
+            <div
+              ref={overlayRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={titleId}
+              tabIndex={-1}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.stopPropagation();
+                  setOpen(false);
+                }
+              }}
+              className="fixed inset-0 z-[100] overflow-auto bg-black/50 p-4 print:static print:bg-white print:p-0"
+            >
           <style jsx global>{`
             @media print {
               body * {
@@ -296,7 +328,7 @@ export default function JobLabelPrinter({
             <div className="label-print-controls border-b border-line p-5">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <h2 className="text-lg font-semibold text-ink">
+                  <h2 id={titleId} className="text-lg font-semibold text-ink">
                     Print Box Labels - {jobReference}
                   </h2>
 

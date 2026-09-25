@@ -5,6 +5,8 @@ import Modal from "../../components/Modal";
 import Button, { buttonClasses } from "../../components/Button";
 import JobLabelPrinter from "../jobs/JobLabelPrinter";
 import {
+  ABSENT,
+  assignmentLabel,
   formatEta,
   jobStatusLabel,
   stopTypeLabel,
@@ -29,8 +31,6 @@ type Props = {
   onAccept: (jobId: string) => void;
 };
 
-const ABSENT = "-";
-
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="grid grid-cols-[8rem_1fr] gap-2">
@@ -53,13 +53,11 @@ export default function JobDetailDialog({
   const items = job.items ?? [];
   const reference = job.reference ?? "No reference";
 
-  const assignment = job.subcontractor_id
-    ? "Subcontracted"
-    : vehicleLabel === null
-      ? "Unassigned"
-      : driverLabel === null
-        ? `${vehicleLabel} · No driver`
-        : `${vehicleLabel} · ${driverLabel}`;
+  const assignment = assignmentLabel({
+    subcontracted: job.subcontractor_id !== null,
+    vehicleLabel,
+    driverLabel,
+  });
 
   return (
     <Modal
@@ -131,7 +129,7 @@ export default function JobDetailDialog({
                   .join(", ");
                 return (
                   <li key={stop.id} className="grid grid-cols-[1.5rem_6rem_1fr] gap-2">
-                    <span className="text-ink-3">{index + 1}</span>
+                    <span className="text-ink-3" aria-hidden>{index + 1}</span>
                     <span className="text-ink">{stopTypeLabel(stop.type)}</span>
                     <span className="text-ink">
                       {place || ABSENT}

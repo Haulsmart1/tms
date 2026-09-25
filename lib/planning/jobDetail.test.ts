@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  ABSENT,
+  assignmentLabel,
   draftAssignment,
   formatEta,
   jobStatusLabel,
@@ -148,5 +150,37 @@ describe("draftAssignment", () => {
       vehicleId: "v2",
       driverId: null,
     });
+  });
+});
+
+describe("assignmentLabel", () => {
+  it("says Subcontracted even when the job also sits in a lane", () => {
+    expect(
+      assignmentLabel({ subcontracted: true, vehicleLabel: "AB12 CDE", driverLabel: "Sam" })
+    ).toBe("Subcontracted");
+  });
+
+  it("says Unassigned when the job is in no lane", () => {
+    expect(
+      assignmentLabel({ subcontracted: false, vehicleLabel: null, driverLabel: null })
+    ).toBe("Unassigned");
+  });
+
+  it("names the vehicle and flags a missing driver", () => {
+    expect(
+      assignmentLabel({ subcontracted: false, vehicleLabel: "AB12 CDE", driverLabel: null })
+    ).toBe("AB12 CDE · No driver");
+  });
+
+  it("names the vehicle and driver", () => {
+    expect(
+      assignmentLabel({ subcontracted: false, vehicleLabel: "AB12 CDE", driverLabel: "Sam" })
+    ).toBe("AB12 CDE · Sam");
+  });
+});
+
+describe("ABSENT", () => {
+  it("is the same marker the helpers render for missing values", () => {
+    expect(jobStatusLabel(null)).toBe(ABSENT);
   });
 });
