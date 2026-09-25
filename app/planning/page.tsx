@@ -2990,144 +2990,144 @@ export default function PlanningPage() {
             </div>
           )}
         </div>
-      </div>
-      {acceptanceTarget ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="planning-acceptance-title"
-          onClick={cancelAcceptance}
-        >
-          <form
-            className="w-full max-w-lg rounded-lg border border-line bg-surface p-5 shadow-xl"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void confirmAcceptance();
-            }}
-            onClick={(e) => e.stopPropagation()}
+        {acceptanceTarget ? (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="planning-acceptance-title"
+            onClick={cancelAcceptance}
           >
-            <div className="mb-4">
-              <h2
-                id="planning-acceptance-title"
-                className="text-lg font-semibold text-ink"
-              >
-                {acceptanceTarget.jobs.length === 1
-                  ? "Accept job"
-                  : `Accept ${acceptanceTarget.jobs.length} jobs`}
-              </h2>
-              <p className="mt-1 text-sm text-ink-3">
-                {acceptanceTarget.jobs.length === 1
-                  ? acceptanceTarget.jobs[0].reference ??
-                    acceptanceTarget.jobs[0].id
-                  : "The ETA and acceptance note below will be applied to all pending jobs."}
-              </p>
-            </div>
-
-            <div className="grid gap-4">
-              <label className="grid gap-1 text-sm text-ink">
-                <span>Collection ETA *</span>
-                <input
-                  type="datetime-local"
-                  required
-                  value={acceptanceForm.collection_eta}
-                  onChange={(e) =>
-                    setAcceptanceForm((prev) => ({
-                      ...prev,
-                      collection_eta: e.target.value,
-                    }))
-                  }
-                  className="rounded-md border border-line bg-surface px-3 py-2 text-ink"
-                />
-              </label>
-
-              <label className="grid gap-1 text-sm text-ink">
-                <span>Delivery ETA</span>
-                <input
-                  type="datetime-local"
-                  value={acceptanceForm.delivery_eta}
-                  onChange={(e) =>
-                    setAcceptanceForm((prev) => ({
-                      ...prev,
-                      delivery_eta: e.target.value,
-                    }))
-                  }
-                  className="rounded-md border border-line bg-surface px-3 py-2 text-ink"
-                />
-              </label>
-
-              <label className="grid gap-1 text-sm text-ink">
-                <span>Acceptance note</span>
-                <textarea
-                  rows={3}
-                  value={acceptanceForm.acceptance_note}
-                  onChange={(e) =>
-                    setAcceptanceForm((prev) => ({
-                      ...prev,
-                      acceptance_note: e.target.value,
-                    }))
-                  }
-                  className="rounded-md border border-line bg-surface px-3 py-2 text-ink"
-                />
-              </label>
-            </div>
-
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                disabled={accepting}
-                onClick={cancelAcceptance}
-                className="rounded-md border border-line bg-surface px-3 py-2 text-sm font-medium text-ink disabled:opacity-50"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="submit"
-                disabled={accepting}
-                className="rounded-md border border-line bg-surface-2 px-3 py-2 text-sm font-semibold text-ink disabled:opacity-50"
-              >
-                {accepting
-                  ? "Accepting..."
-                  : acceptanceTarget.jobs.length === 1
+            <form
+              className="w-full max-w-lg rounded-lg border border-line bg-surface p-5 shadow-xl"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void confirmAcceptance();
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-4">
+                <h2
+                  id="planning-acceptance-title"
+                  className="text-lg font-semibold text-ink"
+                >
+                  {acceptanceTarget.jobs.length === 1
                     ? "Accept job"
                     : `Accept ${acceptanceTarget.jobs.length} jobs`}
-              </button>
-            </div>
-          </form>
-        </div>
-      ) : null}
+                </h2>
+                <p className="mt-1 text-sm text-ink-3">
+                  {acceptanceTarget.jobs.length === 1
+                    ? acceptanceTarget.jobs[0].reference ??
+                      acceptanceTarget.jobs[0].id
+                    : "The ETA and acceptance note below will be applied to all pending jobs."}
+                </p>
+              </div>
 
-      {(() => {
-        const detailJob = detailJobId ? jobById.get(detailJobId) : undefined;
-        if (!detailJob) return null;
-        const { vehicleId, driverId } = draftAssignment(
-          detailJob.id,
-          laneOrders,
-          laneDrivers
-        );
-        const vehicleLabel = vehicleId
-          ? (vehicles.find((v) => v.id === vehicleId)?.registration ?? "Unknown")
-          : null;
-        const driverLabel =
-          vehicleId && driverId
-            ? (drivers.find((d) => d.id === driverId)?.name ?? "Unknown")
+              <div className="grid gap-4">
+                <label className="grid gap-1 text-sm text-ink">
+                  <span>Collection ETA *</span>
+                  <input
+                    type="datetime-local"
+                    required
+                    value={acceptanceForm.collection_eta}
+                    onChange={(e) =>
+                      setAcceptanceForm((prev) => ({
+                        ...prev,
+                        collection_eta: e.target.value,
+                      }))
+                    }
+                    className="rounded-md border border-line bg-surface px-3 py-2 text-ink"
+                  />
+                </label>
+
+                <label className="grid gap-1 text-sm text-ink">
+                  <span>Delivery ETA</span>
+                  <input
+                    type="datetime-local"
+                    value={acceptanceForm.delivery_eta}
+                    onChange={(e) =>
+                      setAcceptanceForm((prev) => ({
+                        ...prev,
+                        delivery_eta: e.target.value,
+                      }))
+                    }
+                    className="rounded-md border border-line bg-surface px-3 py-2 text-ink"
+                  />
+                </label>
+
+                <label className="grid gap-1 text-sm text-ink">
+                  <span>Acceptance note</span>
+                  <textarea
+                    rows={3}
+                    value={acceptanceForm.acceptance_note}
+                    onChange={(e) =>
+                      setAcceptanceForm((prev) => ({
+                        ...prev,
+                        acceptance_note: e.target.value,
+                      }))
+                    }
+                    className="rounded-md border border-line bg-surface px-3 py-2 text-ink"
+                  />
+                </label>
+              </div>
+
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={accepting}
+                  onClick={cancelAcceptance}
+                  className="rounded-md border border-line bg-surface px-3 py-2 text-sm font-medium text-ink disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={accepting}
+                  className="rounded-md border border-line bg-surface-2 px-3 py-2 text-sm font-semibold text-ink disabled:opacity-50"
+                >
+                  {accepting
+                    ? "Accepting..."
+                    : acceptanceTarget.jobs.length === 1
+                      ? "Accept job"
+                      : `Accept ${acceptanceTarget.jobs.length} jobs`}
+                </button>
+              </div>
+            </form>
+          </div>
+        ) : null}
+
+        {(() => {
+          const detailJob = detailJobId ? jobById.get(detailJobId) : undefined;
+          if (!detailJob) return null;
+          const { vehicleId, driverId } = draftAssignment(
+            detailJob.id,
+            laneOrders,
+            laneDrivers
+          );
+          const vehicleLabel = vehicleId
+            ? (vehicles.find((v) => v.id === vehicleId)?.registration ?? "Unknown")
             : null;
-        return (
-          <JobDetailDialog
-            job={detailJob}
-            vehicleLabel={vehicleLabel}
-            driverLabel={driverLabel}
-            timeZone={planningTimeZone}
-            geocodeSettled={geocodeSettled && !geocodeUnavailable}
-            onClose={() => setDetailJobId(null)}
-            onAccept={(jobId) => {
-              setDetailJobId(null);
-              openAcceptance(jobId);
-            }}
-          />
-        );
-      })()}
+          const driverLabel =
+            vehicleId && driverId
+              ? (drivers.find((d) => d.id === driverId)?.name ?? "Unknown")
+              : null;
+          return (
+            <JobDetailDialog
+              job={detailJob}
+              vehicleLabel={vehicleLabel}
+              driverLabel={driverLabel}
+              timeZone={planningTimeZone}
+              geocodeSettled={geocodeSettled && !geocodeUnavailable}
+              onClose={() => setDetailJobId(null)}
+              onAccept={(jobId) => {
+                setDetailJobId(null);
+                openAcceptance(jobId);
+              }}
+            />
+          );
+        })()}
+      </div>
     </TenantGate>
   );
 }

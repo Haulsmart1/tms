@@ -277,11 +277,14 @@ export default function JobLabelPrinter({
               tabIndex={-1}
               onKeyDown={(e) => {
                 if (e.key === "Escape") {
-                  e.stopPropagation();
+                  /* Modal (components/Modal.tsx) listens for Escape on
+                     document, which is also React's root container here,
+                     so a plain stopPropagation would not reach it. */
+                  e.nativeEvent.stopImmediatePropagation();
                   setOpen(false);
                 }
               }}
-              className="fixed inset-0 z-[100] overflow-auto bg-black/50 p-4 outline-none print:static print:bg-white print:p-0"
+              className="ds fixed inset-0 z-[100] overflow-auto bg-black/50 p-4 font-sans text-ink outline-none print:static print:bg-white print:p-0"
             >
           <style jsx global>{`
             @media print {

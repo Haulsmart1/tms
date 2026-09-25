@@ -133,8 +133,15 @@ draft assignment for an assigned, an unassigned and a moved job.
 
 ### Changed: `components/Modal.tsx`
 
-Adds the `size` prop and the scrolling body described above. No behaviour
-change for the existing `md` consumer.
+Adds the `size` prop and the scrolling body described above, plus four
+review follow-ups that also reach the existing consumers (DeleteJobDialog and
+the super-admin MoveTenantModal): the title id comes from `useId` so two
+mounted modals cannot share one; the footer wraps so four controls fit at
+phone width; the focus-and-Escape effect depends on `open` only, with
+`onClose` held in a ref, because callers pass inline arrows and the Planning
+page re-renders on a 30-second position poll (with `onClose` in the deps that
+poll pulled focus back to the panel, and in MoveTenantModal every keystroke
+did); and focus returns to whatever had it when the dialog opened.
 
 ### Changed: `app/planning/page.tsx`
 
@@ -144,7 +151,11 @@ change for the existing `md` consumer.
 - An effect clears `detailJobId` when `jobById` no longer contains it.
 - Renders `<JobDetailDialog>` after the acceptance dialog when
   `detailJobId` resolves to a job, passing the labels computed through
-  `draftAssignment`, `vehicles` and `drivers`.
+  `draftAssignment`, `vehicles` and `drivers`. Both dialogs sit inside the
+  page's `ds` root div. The acceptance dialog used to render after that div
+  closed, so it had no borders or Plex font; moving it in is a two-line fix
+  taken with this change because Accept opens it straight from the new
+  dialog.
 - The `useRouter` import and the `router` const are removed: the two
   navigations were its only uses in the page.
 
@@ -154,10 +165,16 @@ The printer's full-screen overlay is rendered through `createPortal` to
 `document.body` instead of inline. Inside the Modal it would otherwise sit
 under a fixed, max-height, scrolling ancestor, and the print stylesheet's
 `position: absolute` label root would be clipped to the modal body, so a
-multi-page label run printed from the dialog would come out truncated. The
-Jobs page, where the printer is not inside a modal, renders identically.
-One consequence: Escape while the print overlay is open closes the whole
-detail dialog, because Modal listens on `document`. That is accepted.
+multi-page label run printed from the dialog would come out truncated.
+Because the portal leaves every ancestor, the overlay root carries the `ds`
+reset and `font-sans` itself (the `.ds` scope is per page root, not on
+`body`), and it gets dialog semantics (`role="dialog"`, `aria-modal`, a
+`useId` label), takes focus on open and hands it back on close, so keyboard
+and screen-reader users can still reach it. Escape inside the overlay closes
+only the overlay: the handler calls `stopImmediatePropagation` on the native
+event, because Modal's Escape listener sits on `document`, which is also
+React's root container, so a synthetic `stopPropagation` would not stop it.
+The Jobs page gets the same overlay behaviour.
 
 ### Unchanged
 
