@@ -53,6 +53,10 @@ describe("formatEta", () => {
     expect(formatEta(null, "Europe/London")).toBe("-");
     expect(formatEta("not a date", "Europe/London")).toBe("-");
   });
+
+  it("renders an invalid timezone as the absent-value marker rather than throwing", () => {
+    expect(formatEta("2026-01-15T09:00:00Z", "Not/AZone")).toBe("-");
+  });
 });
 
 describe("stopTypeLabel", () => {
