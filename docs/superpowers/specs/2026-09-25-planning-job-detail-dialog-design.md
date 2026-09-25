@@ -148,10 +148,20 @@ change for the existing `md` consumer.
 - The `useRouter` import and the `router` const are removed: the two
   navigations were its only uses in the page.
 
+### Changed: `app/jobs/JobLabelPrinter.tsx`
+
+The printer's full-screen overlay is rendered through `createPortal` to
+`document.body` instead of inline. Inside the Modal it would otherwise sit
+under a fixed, max-height, scrolling ancestor, and the print stylesheet's
+`position: absolute` label root would be clipped to the modal body, so a
+multi-page label run printed from the dialog would come out truncated. The
+Jobs page, where the printer is not inside a modal, renders identically.
+One consequence: Escape while the print overlay is open closes the whole
+detail dialog, because Modal listens on `document`. That is accepted.
+
 ### Unchanged
 
-`PlanJobCard.tsx`, `VehicleLane.tsx`, `UnassignedPool.tsx`,
-`app/jobs/JobLabelPrinter.tsx`.
+`PlanJobCard.tsx`, `VehicleLane.tsx`, `UnassignedPool.tsx`.
 
 ## Error handling
 

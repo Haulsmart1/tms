@@ -29,6 +29,7 @@ Repo rules that apply to every task:
 | `lib/planning/jobDetail.test.ts` (create) | Unit tests for the five helpers. |
 | `components/Modal.tsx` (modify) | Add optional `size?: "md" \| "lg"` prop; panel scrolls when tall. |
 | `app/planning/JobDetailDialog.tsx` (create) | The dialog: header, assignment, times, stops, items, actions. |
+| `app/jobs/JobLabelPrinter.tsx` (modify) | Render the print overlay through a portal to `document.body` so it is not clipped by the Modal when printing. |
 | `app/planning/page.tsx` (modify) | Replace the two `router.push` calls with dialog state; render the dialog. |
 | `README.md` (modify) | Planning page inventory line. |
 
@@ -415,9 +416,45 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 3: The `JobDetailDialog` component
 
 **Files:**
+- Modify: `app/jobs/JobLabelPrinter.tsx` (the `{open ? ... : null}` block near line 248)
 - Create: `app/planning/JobDetailDialog.tsx`
 
 Depends on Task 1 (helpers) and Task 2 (`size="lg"`).
+
+- [ ] **Step 0: Render the label printer overlay through a portal**
+
+Why: the printer's overlay is a `fixed inset-0` div rendered inline. Inside the Modal it becomes a descendant of the Modal's fixed, `max-h-[85vh]`, `overflow-y-auto` body. In print, the stylesheet makes `.label-print-root` `position: absolute`, whose containing block would then be the Modal panel, so a multi-page label run would be clipped to the modal body. A portal to `document.body` puts the overlay beside the Modal instead of inside it; the Jobs page renders identically.
+
+In `app/jobs/JobLabelPrinter.tsx`, add to the imports:
+
+```ts
+import { createPortal } from "react-dom";
+```
+
+Then change the overlay block. It currently reads:
+
+```tsx
+      {open ? (
+        <div className="fixed inset-0 z-[100] overflow-auto bg-black/50 p-4 print:static print:bg-white print:p-0">
+          ...everything inside, unchanged...
+        </div>
+      ) : null}
+```
+
+Make it:
+
+```tsx
+      {open
+        ? createPortal(
+            <div className="fixed inset-0 z-[100] overflow-auto bg-black/50 p-4 print:static print:bg-white print:p-0">
+              ...everything inside, unchanged...
+            </div>,
+            document.body
+          )
+        : null}
+```
+
+Do not alter anything inside the overlay div (the `<style jsx global>` block, the controls, the pages). `document` is safe here because `open` only becomes true from a click handler on the client. Run `npm run typecheck` after this step.
 
 - [ ] **Step 1: Write the component**
 
@@ -512,7 +549,7 @@ export default function JobDetailDialog({
           />
           <Link
             href={`/jobs?job=${encodeURIComponent(job.id)}`}
-            className={buttonClasses("secondary")}
+            className={buttonClasses("secondary", "md", "whitespace-nowrap")}
           >
             Open in Jobs
           </Link>
@@ -624,7 +661,7 @@ Expected: exits 0. If it reports that `LabelJobItem` and `PlanJobItem` differ, c
 - [ ] **Step 3: Commit**
 
 ```powershell
-git add app/planning/JobDetailDialog.tsx
+git add app/jobs/JobLabelPrinter.tsx app/planning/JobDetailDialog.tsx
 git commit -m "Add the Planning job detail dialog component
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
@@ -828,5 +865,5 @@ Record anything that fails as a follow-up rather than patching the spec silently
 - Opening and closing: Task 4 Steps 4 and 5 (open), Modal in Task 2 (Close, backdrop, Escape), `PlanJobCard` drag suppression unchanged, Accept closes first (Task 4 Step 5), reload clears the id (Task 4 Step 3).
 - Contents 1 to 6: Task 3, one block each; status wording and ETA zone in Task 1.
 - Read-only board: nothing gates the dialog on a tenant; Accept still goes through `openAcceptance`, which calls `planningReadOnly()` downstream.
-- Files: `jobDetail.ts` and test (Task 1), `Modal.tsx` (Task 2, a deviation from the spec's "mirror the acceptance dialog markup" that the spec now records), `JobDetailDialog.tsx` (Task 3), `page.tsx` (Task 4), README (Task 5). `PlanJobCard`, `VehicleLane`, `UnassignedPool` and `JobLabelPrinter` untouched.
+- Files: `jobDetail.ts` and test (Task 1), `Modal.tsx` (Task 2, a deviation from the spec's "mirror the acceptance dialog markup" that the spec now records), `JobDetailDialog.tsx` and the `JobLabelPrinter` portal (Task 3, added after the Task 2 review found the print clipping risk), `page.tsx` (Task 4), README (Task 5). `PlanJobCard`, `VehicleLane` and `UnassignedPool` untouched.
 - Types: `draftAssignment` returns `{ vehicleId, driverId }` in Task 1 and is destructured the same way in Task 4. `toLabelStops` takes `PlanStop[]` and is called with `job.stops` in Task 3. `JobDetailDialog` props in Task 3 match the call in Task 4 field for field.
