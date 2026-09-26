@@ -91,6 +91,11 @@ export function pickInitialActiveTenant(
 ): string | null {
   if (role === "staff") return homeTenantId;
   if (persisted && tenants.some((t) => t.id === persisted)) return persisted;
+
+  // A single available tenant should be selected automatically.
+  // This keeps tenant-scoped pages such as Planning writable.
+  if (tenants.length === 1) return tenants[0].id;
+
   return null; // "All tenants"
 }
 
