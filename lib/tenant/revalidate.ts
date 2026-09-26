@@ -101,6 +101,10 @@ export function preserveActiveTenant(input: {
     return pickInitialActiveTenant(role, homeTenantId, tenants, persisted);
   }
   /* null is a real admin choice ("All tenants"), not an absent one. */
+  /* A single available tenant has no meaningful "All tenants" scope. */
+  if (tenants.length === 1) return tenants[0].id;
+
+  /* null remains a real admin choice when multiple tenants exist. */
   if (current === null) return null;
   if (tenants.some((t) => t.id === current)) return current;
   /* The selected tenant is gone from under them. Rebuild from scratch. */

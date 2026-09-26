@@ -198,6 +198,17 @@ describe("preserveActiveTenant", () => {
     ).toBe("t2");
   });
 
+  it("selects the only tenant for an admin during revalidation", () => {
+    expect(
+      preserveActiveTenant({
+        current: null,
+        tenants: [{ id: "t1", name: "Depot A" }],
+        role: "admin",
+        homeTenantId: "t1",
+        persisted: null,
+      })
+    ).toBe("t1");
+  });
   it("keeps an admin on All tenants", () => {
     expect(
       preserveActiveTenant({
