@@ -69,9 +69,11 @@ export default function PlanJobCard({
           : `Drops ${dropNumbers.join(", ")}`;
 
   function handleDragStart(e: DragEvent) {
+    console.log("[REAL DRAG START]", { jobId: job.id, mime: JOB_ID_MIME });
     dragged.current = true;
     e.dataTransfer.setData(JOB_ID_MIME, job.id);
     e.dataTransfer.effectAllowed = "move";
+    console.log("[REAL DRAG DATA]", { types: Array.from(e.dataTransfer.types) });
   }
 
   function handleDragEnd() {

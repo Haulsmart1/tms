@@ -43,12 +43,22 @@ export default function VehicleLane({
 }: Props) {
   function handleDragOver(e: DragEvent) {
     e.preventDefault();
+    console.log("[REAL LANE OVER]", {
+      vehicleId: vehicle.id,
+      types: Array.from(e.dataTransfer.types),
+    });
     e.dataTransfer.dropEffect = "move";
   }
 
   function handleDrop(e: DragEvent) {
     e.preventDefault();
     const draggedId = e.dataTransfer.getData(JOB_ID_MIME);
+    console.log("[REAL LANE DROP]", {
+      vehicleId: vehicle.id,
+      draggedId,
+      mime: JOB_ID_MIME,
+      types: Array.from(e.dataTransfer.types),
+    });
     if (draggedId) onDropJob(draggedId, null);
   }
 
