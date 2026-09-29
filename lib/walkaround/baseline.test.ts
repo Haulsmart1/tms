@@ -40,6 +40,6 @@ describe("BASELINE_CATALOGUE", () => {
   });
 
   it("contains no em-dashes", () => {
-    expect(JSON.stringify(BASELINE_CATALOGUE)).not.toContain("—");
+    expect(JSON.stringify(BASELINE_CATALOGUE)).not.toContain("\u2014");
   });
 });
