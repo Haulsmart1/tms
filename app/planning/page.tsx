@@ -13,6 +13,21 @@ import { draftAssignment } from "../../lib/planning/jobDetail";
 import { stopsNeedingGeocode } from "../../lib/planning/geocoding";
 import { computeSaveDiff, type LanePlan } from "../../lib/planning/saveDiff";
 import {
+  createSavedPlanSnapshot,
+  savedPlanSnapshotToPendingItineraries,
+  type SavedPlanSummary,
+} from "../../lib/planning/savedPlan";
+import {
+  createSavedPlan,
+  deleteSavedPlan,
+  duplicateSavedPlan,
+  listSavedPlans,
+  loadSavedPlan,
+  renameSavedPlan,
+  updateSavedPlanSnapshot,
+  type LoadedSavedPlan,
+} from "../../lib/planning/savedPlanStore";
+import {
   createPlanningDraft,
   parsePlanningDraft,
   planningDraftBaseline,
@@ -228,6 +243,13 @@ export default function PlanningPage() {
   const [geocodeUnavailable, setGeocodeUnavailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savedPlans, setSavedPlans] = useState<SavedPlanSummary[]>([]);
+  const [savedPlansLoading, setSavedPlansLoading] = useState(false);
+  const [savedPlanBusy, setSavedPlanBusy] = useState(false);
+  const [savedPlanName, setSavedPlanName] = useState("");
+  const [stagedSavedPlan, setStagedSavedPlan] =
+    useState<LoadedSavedPlan | null>(null);
+  const pendingSavedPlanOpen = useRef<LoadedSavedPlan | null>(null);
   const [saveStatus, setSaveStatus] = useState<
     "idle" | "pending" | "saving" | "saved" | "local-only"
   >("idle");
@@ -338,6 +360,9 @@ export default function PlanningPage() {
     if (tenant.status !== "ready") return;
 
     loadedPlanningScope.current = null;
+    if (!pendingSavedPlanOpen.current) {
+      setStagedSavedPlan(null);
+    }
     setRecoveryDraft(null);
     setSaveStatus("idle");
     setLoading(true);
@@ -1643,15 +1668,423 @@ export default function PlanningPage() {
     }
   }
 
+  function currentSavedPlanSnapshot() {
+    return createSavedPlanSnapshot({
+      planningDate: date,
+      lanes: lanePlans.map((lane) => ({
+        vehicleId: lane.vehicleId,
+        driverId: lane.driverId,
+        jobIds: [...lane.jobIds],
+      })),
+      pendingItineraries,
+      persistedItineraries,
+    });
+  }
+
+  async function refreshSavedPlans() {
+    if (!planningTenantId) {
+      setSavedPlans([]);
+      return;
+    }
+
+    setSavedPlansLoading(true);
+
+    try {
+      setSavedPlans(await listSavedPlans(supabase, planningTenantId));
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Saved plans could not be loaded."
+      );
+    } finally {
+      setSavedPlansLoading(false);
+    }
+  }
+
+  function stageLoadedSavedPlan(loaded: LoadedSavedPlan) {
+    const activeVehicleIds = new Set(vehicles.map((vehicle) => vehicle.id));
+    const knownJobIds = new Set(jobs.map((job) => job.id));
+    const knownDriverIds = new Set(drivers.map((driver) => driver.id));
+
+    const orders: Record<string, string[]> = {};
+    const driverAssignments: Record<string, string | null> = {};
+
+    for (const vehicle of vehicles) {
+      orders[vehicle.id] = [];
+      driverAssignments[vehicle.id] = null;
+    }
+
+    let omittedJobs = 0;
+    let omittedVehicles = 0;
+    let omittedDrivers = 0;
+
+    for (const lane of loaded.snapshot.lanes) {
+      if (!activeVehicleIds.has(lane.vehicleId)) {
+        omittedVehicles += 1;
+        omittedJobs += lane.jobIds.length;
+        continue;
+      }
+
+      orders[lane.vehicleId] = lane.jobIds.filter((jobId) => {
+        if (!knownJobIds.has(jobId)) {
+          omittedJobs += 1;
+          return false;
+        }
+
+        return true;
+      });
+
+      if (lane.driverId && knownDriverIds.has(lane.driverId)) {
+        driverAssignments[lane.vehicleId] = lane.driverId;
+      } else {
+        driverAssignments[lane.vehicleId] = null;
+        if (lane.driverId) omittedDrivers += 1;
+      }
+    }
+
+    const reconstructed =
+      savedPlanSnapshotToPendingItineraries(loaded.snapshot);
+
+    const usableCanonical: Record<string, PendingPlanningItinerary> = {};
+    let staleCanonicalRoutes = 0;
+
+    for (const [vehicleId, itinerary] of Object.entries(reconstructed)) {
+      if (!activeVehicleIds.has(vehicleId)) continue;
+
+      const laneJobIds = new Set(orders[vehicleId] ?? []);
+      const laneJobs = jobs.filter((job) => laneJobIds.has(job.id));
+      const expectedStopIds = new Set(
+        laneJobs.flatMap((job) => job.stops.map((stop) => stop.id))
+      );
+      const seenStopIds = new Set<string>();
+      let canonicalMatchesLane = itinerary.serviceStops.length > 0;
+
+      for (const service of itinerary.serviceStops) {
+        const job = laneJobs.find((candidate) => candidate.id === service.jobId);
+
+        if (
+          !job ||
+          !knownJobIds.has(service.jobId) ||
+          !laneJobIds.has(service.jobId) ||
+          seenStopIds.has(service.stopId) ||
+          !job.stops.some((stop) => stop.id === service.stopId)
+        ) {
+          canonicalMatchesLane = false;
+          break;
+        }
+
+        seenStopIds.add(service.stopId);
+      }
+
+      if (
+        canonicalMatchesLane &&
+        expectedStopIds.size === seenStopIds.size &&
+        [...expectedStopIds].every((stopId) => seenStopIds.has(stopId))
+      ) {
+        usableCanonical[vehicleId] = itinerary;
+      } else {
+        staleCanonicalRoutes += 1;
+      }
+    }
+
+    const canonicalVehicleIds = new Set(Object.keys(usableCanonical));
+
+    setLaneOrders(orders);
+    setLaneDrivers(driverAssignments);
+    setPendingItineraries(usableCanonical);
+    setItineraryInvalidations(
+      new Set(
+        Object.keys(persistedItineraries).filter(
+          (vehicleId) => !canonicalVehicleIds.has(vehicleId)
+        )
+      )
+    );
+    setRoutes({});
+    setSelectedUnassignedJobIds(new Set());
+    setBulkVehicleId("");
+    setDriverConflicts(new Set());
+    setRecoveryDraft(null);
+    setStagedSavedPlan(loaded);
+    setSaveStatus("pending");
+
+    setSelectedVehicleId(
+      vehicles.find(
+        (vehicle) => (orders[vehicle.id] ?? []).length > 0
+      )?.id ??
+        vehicles[0]?.id ??
+        null
+    );
+
+    const warnings: string[] = [];
+
+    if (omittedVehicles) {
+      warnings.push(`${omittedVehicles} unavailable vehicle(s) omitted`);
+    }
+
+    if (omittedJobs) {
+      warnings.push(`${omittedJobs} unavailable job(s) omitted`);
+    }
+
+    if (omittedDrivers) {
+      warnings.push(`${omittedDrivers} unavailable driver(s) cleared`);
+    }
+
+    if (staleCanonicalRoutes) {
+      warnings.push(
+        `Smart Optimize order for ${staleCanonicalRoutes} ${
+          staleCanonicalRoutes === 1 ? "vehicle" : "vehicles"
+        } no longer matches its current jobs or stops and was not restored; re-run Smart Optimize for those lanes`
+      );
+    }
+
+    setMessage(
+      warnings.length
+        ? `Loaded "${loaded.name}". ${warnings.join(
+            "; "
+          )}. Review it, then press Apply plan.`
+        : `Loaded "${loaded.name}". Review it, then press Apply plan.`
+    );
+  }
+
+  async function saveNamedPlan() {
+    if (!planningTenantId || savedPlanBusy) return;
+
+    const name = savedPlanName.trim();
+
+    if (!name) {
+      setMessage("Enter a name for the saved plan.");
+      return;
+    }
+
+    setSavedPlanBusy(true);
+
+    try {
+      const { data, error } = await supabase.auth.getUser();
+
+      if (error || !data.user) {
+        throw new Error("You must be signed in to save a plan.");
+      }
+
+      const created = await createSavedPlan(supabase, {
+        tenantId: planningTenantId,
+        planningDate: date,
+        name,
+        snapshot: currentSavedPlanSnapshot(),
+        userId: data.user.id,
+      });
+
+      setSavedPlanName("");
+      setMessage(`Saved plan "${created.name}".`);
+      await refreshSavedPlans();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Saved plan could not be created."
+      );
+    } finally {
+      setSavedPlanBusy(false);
+    }
+  }
+
+  async function openNamedPlan(id: string) {
+    if (!planningTenantId || savedPlanBusy) return;
+
+    setSavedPlanBusy(true);
+
+    try {
+      const loaded = await loadSavedPlan(
+        supabase,
+        planningTenantId,
+        id
+      );
+
+      if (loaded.planningDate !== date) {
+        pendingSavedPlanOpen.current = loaded;
+        setStagedSavedPlan(null);
+        setDate(loaded.planningDate);
+        return;
+      }
+
+      stageLoadedSavedPlan(loaded);
+    } catch (error) {
+      pendingSavedPlanOpen.current = null;
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Saved plan could not be opened."
+      );
+    } finally {
+      setSavedPlanBusy(false);
+    }
+  }
+
+  async function updateNamedPlan() {
+    if (!planningTenantId || !stagedSavedPlan?.id || savedPlanBusy) {
+      return;
+    }
+
+    setSavedPlanBusy(true);
+
+    try {
+      await updateSavedPlanSnapshot(supabase, {
+        tenantId: planningTenantId,
+        id: stagedSavedPlan.id,
+        planningDate: date,
+        snapshot: currentSavedPlanSnapshot(),
+      });
+
+      setMessage(`Updated saved plan "${stagedSavedPlan.name}".`);
+      await refreshSavedPlans();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Saved plan could not be updated."
+      );
+    } finally {
+      setSavedPlanBusy(false);
+    }
+  }
+
+  async function renameNamedPlan(plan: SavedPlanSummary) {
+    if (!planningTenantId || savedPlanBusy) return;
+
+    const proposed = window.prompt("Saved plan name", plan.name);
+    if (proposed === null) return;
+
+    const name = proposed.trim();
+    if (!name || name === plan.name) return;
+
+    setSavedPlanBusy(true);
+
+    try {
+      await renameSavedPlan(
+        supabase,
+        planningTenantId,
+        plan.id,
+        name
+      );
+
+      if (stagedSavedPlan?.id === plan.id) {
+        setStagedSavedPlan({ ...stagedSavedPlan, name });
+      }
+
+      await refreshSavedPlans();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Saved plan could not be renamed."
+      );
+    } finally {
+      setSavedPlanBusy(false);
+    }
+  }
+
+  async function duplicateNamedPlan(plan: SavedPlanSummary) {
+    if (!planningTenantId || savedPlanBusy) return;
+
+    setSavedPlanBusy(true);
+
+    try {
+      const { data, error } = await supabase.auth.getUser();
+
+      if (error || !data.user) {
+        throw new Error("You must be signed in to duplicate a plan.");
+      }
+
+      const duplicate = await duplicateSavedPlan(
+        supabase,
+        planningTenantId,
+        plan.id,
+        data.user.id
+      );
+
+      setMessage(`Duplicated as "${duplicate.name}".`);
+      await refreshSavedPlans();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Saved plan could not be duplicated."
+      );
+    } finally {
+      setSavedPlanBusy(false);
+    }
+  }
+
+  async function deleteNamedPlan(plan: SavedPlanSummary) {
+    if (!planningTenantId || savedPlanBusy) return;
+
+    if (!window.confirm(`Delete saved plan "${plan.name}"?`)) return;
+
+    setSavedPlanBusy(true);
+
+    try {
+      await deleteSavedPlan(
+        supabase,
+        planningTenantId,
+        plan.id
+      );
+
+      if (stagedSavedPlan?.id === plan.id) {
+        setStagedSavedPlan({
+          ...stagedSavedPlan,
+          id: "",
+          name: `${stagedSavedPlan.name} (deleted)`,
+        });
+      }
+
+      setMessage(`Deleted saved plan "${plan.name}".`);
+      await refreshSavedPlans();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Saved plan could not be deleted."
+      );
+    } finally {
+      setSavedPlanBusy(false);
+    }
+  }
+
+  async function discardStagedPlan() {
+    pendingSavedPlanOpen.current = null;
+    setStagedSavedPlan(null);
+    await loadData(() => false);
+    setMessage("Staged saved plan discarded.");
+  }
+
   async function savePlan() {
+    if (stagedSavedPlan) {
+      const applied = await persistPlan("manual");
+
+      if (applied) {
+        setStagedSavedPlan(null);
+        setMessage("Saved plan applied to the live plan.");
+      }
+
+      return;
+    }
+
     await persistPlan("manual");
   }
+
+  useEffect(() => {
+    void refreshSavedPlans();
+
+    // Refresh only when the tenant changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planningTenantId]);
 
   useEffect(() => {
     if (
       !planningTenantId ||
       loading ||
       recoveryDraft ||
+      stagedSavedPlan ||
       !hasUnsavedWork
     ) {
       return;
@@ -1727,6 +2160,7 @@ export default function PlanningPage() {
     date,
     loading,
     recoveryDraft,
+    stagedSavedPlan,
     dirty,
     hasCanonicalWork,
     hasUnsavedWork,
@@ -1739,6 +2173,20 @@ export default function PlanningPage() {
     laneDrivers,
     selectedVehicleId,
   ]);
+
+  useEffect(() => {
+    const pending = pendingSavedPlanOpen.current;
+
+    if (loading || !pending || pending.planningDate !== date) {
+      return;
+    }
+
+    pendingSavedPlanOpen.current = null;
+    stageLoadedSavedPlan(pending);
+
+    // Uses the freshly loaded board for the Saved Plan's date.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, date]);
 
   function restoreRecoveryDraft() {
     if (!recoveryDraft || planningReadOnly()) return;
@@ -2652,15 +3100,48 @@ export default function PlanningPage() {
               size="sm"
               onClick={savePlan}
               loading={saving}
-              disabled={!planningTenantId || (!dirty && !hasCanonicalWork)}
+              disabled={
+                !planningTenantId ||
+                (!stagedSavedPlan && !dirty && !hasCanonicalWork)
+              }
             >
-              Save plan
+              {stagedSavedPlan ? "Apply plan" : "Save plan"}
             </Button>
+
+            {stagedSavedPlan ? (
+              <>
+                {stagedSavedPlan.id ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void updateNamedPlan()}
+                    disabled={savedPlanBusy}
+                  >
+                    Update saved
+                  </Button>
+                ) : null}
+
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void discardStagedPlan()}
+                  disabled={savedPlanBusy}
+                >
+                  Discard loaded plan
+                </Button>
+
+                <span className="text-xs font-medium text-ink">
+                  Loaded: {stagedSavedPlan.name}
+                </span>
+              </>
+            ) : null}
 
             <span className="text-xs text-ink-3">
               {!planningTenantId
                 ? "Read-only: pick a tenant to plan"
-                : saveStatus === "saving"
+                : stagedSavedPlan
+                  ? "Loaded saved plan — not applied"
+                  : saveStatus === "saving"
                   ? "Saving…"
                   : saveConflict
                     ? "Not saved: newer changes exist on the server"
@@ -2719,6 +3200,126 @@ export default function PlanningPage() {
               job order; autosave persists vehicle, driver and drop order. Save plan remains available as a manual fallback.
             </span>
           </section>
+
+          {planningTenantId ? (
+            <section
+              aria-label="Saved plans"
+              className="rounded-lg border border-line bg-surface p-3"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="mr-2 text-sm font-semibold">Saved Plans</h2>
+
+                <input
+                  type="text"
+                  value={savedPlanName}
+                  onChange={(event) => setSavedPlanName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") void saveNamedPlan();
+                  }}
+                  maxLength={120}
+                  placeholder="Plan name"
+                  aria-label="Saved plan name"
+                  className="min-w-52 rounded-md border border-line bg-surface px-2 py-1.5 text-sm text-ink"
+                />
+
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => void saveNamedPlan()}
+                  loading={savedPlanBusy}
+                  disabled={savedPlanBusy || !savedPlanName.trim()}
+                >
+                  Save As
+                </Button>
+
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => void refreshSavedPlans()}
+                  disabled={savedPlansLoading || savedPlanBusy}
+                >
+                  Refresh
+                </Button>
+              </div>
+
+              <div className="mt-3 overflow-x-auto">
+                {savedPlansLoading ? (
+                  <p className="text-sm text-ink-3">
+                    Loading saved plans...
+                  </p>
+                ) : savedPlans.length === 0 ? (
+                  <p className="text-sm text-ink-3">
+                    No saved plans yet.
+                  </p>
+                ) : (
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-line text-xs text-ink-3">
+                        <th className="px-2 py-1.5 font-medium">Name</th>
+                        <th className="px-2 py-1.5 font-medium">Date</th>
+                        <th className="px-2 py-1.5 font-medium">Updated</th>
+                        <th className="px-2 py-1.5 font-medium">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {savedPlans.map((plan) => (
+                        <tr
+                          key={plan.id}
+                          className="border-b border-line last:border-b-0"
+                        >
+                          <td className="px-2 py-2 font-medium text-ink">
+                            {plan.name}
+                          </td>
+                          <td className="px-2 py-2 text-ink-2">
+                            {plan.planningDate}
+                          </td>
+                          <td className="px-2 py-2 text-ink-2">
+                            {new Date(plan.updatedAt).toLocaleString()}
+                          </td>
+                          <td className="px-2 py-2">
+                            <div className="flex flex-wrap gap-1">
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => void openNamedPlan(plan.id)}
+                                disabled={savedPlanBusy}
+                              >
+                                Open
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => void renameNamedPlan(plan)}
+                                disabled={savedPlanBusy}
+                              >
+                                Rename
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => void duplicateNamedPlan(plan)}
+                                disabled={savedPlanBusy}
+                              >
+                                Duplicate
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => void deleteNamedPlan(plan)}
+                                disabled={savedPlanBusy}
+                              >
+                                Delete
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </section>
+          ) : null}
 
           {loading ? (
             <p className="text-sm text-ink-3">Loading the day&apos;s jobs...</p>
