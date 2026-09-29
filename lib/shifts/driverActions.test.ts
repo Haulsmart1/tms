@@ -47,7 +47,7 @@ const defect: DriverDefectView = {
   label: "Brakes: Air leak",
   finalSeverity: "dangerous",
   severitySource: "baseline",
-  reason: "Classed dangerous in the DVSA baseline checklist.",
+  reason: "Classed dangerous in the baseline checklist (based on DVSA guidance).",
   guidance: "Listen.",
   note: null,
   photoCount: 0,

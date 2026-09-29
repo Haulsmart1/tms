@@ -80,7 +80,7 @@ export function dangerReason(
   companyName: string | null,
 ): string | null {
   if (defect.finalSeverity !== "dangerous") return null;
-  if (defect.severitySource === "baseline") return "Classed dangerous in the DVSA baseline checklist.";
+  if (defect.severitySource === "baseline") return "Classed dangerous in the baseline checklist (based on DVSA guidance).";
   if (defect.severitySource === "company") return `Classed dangerous by ${companyName || "your company"} for this item.`;
   return "You marked this as dangerous.";
 }

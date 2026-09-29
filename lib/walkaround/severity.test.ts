@@ -68,7 +68,7 @@ describe("checkResult", () => {
 
 describe("dangerReason", () => {
   it("explains where the classification came from", () => {
-    expect(dangerReason({ finalSeverity: "dangerous", severitySource: "baseline" }, "Acme")).toBe("Classed dangerous in the DVSA baseline checklist.");
+    expect(dangerReason({ finalSeverity: "dangerous", severitySource: "baseline" }, "Acme")).toBe("Classed dangerous in the baseline checklist (based on DVSA guidance).");
     expect(dangerReason({ finalSeverity: "dangerous", severitySource: "company" }, "Acme")).toBe("Classed dangerous by Acme for this item.");
     expect(dangerReason({ finalSeverity: "dangerous", severitySource: "company" }, null)).toBe("Classed dangerous by your company for this item.");
     expect(dangerReason({ finalSeverity: "dangerous", severitySource: "driver" }, "Acme")).toBe("You marked this as dangerous.");

@@ -93,7 +93,7 @@ function NoShift({ state }: { state: DriverShiftState }) {
       <p className={`${ui.body} mt-2`}>
         {state.assignedVehicle ? `Assigned today: ${state.assignedVehicle.registration}` : "No vehicle assigned today"}
       </p>
-      <p className={`${ui.muted} mt-1`}>Start your shift with a walkaround check. Today&apos;s jobs unlock once the check is submitted.</p>
+      <p className={`${ui.muted} mt-1`}>Start your shift with a walkaround check. Today&apos;s jobs unlock once the check passes (or passes with minor defects) and has synced.</p>
       <Link className={`${ui.primary} mt-4 w-full`} href="/driver/walkaround?phase=start">
         Start shift
       </Link>

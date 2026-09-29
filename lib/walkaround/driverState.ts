@@ -11,7 +11,7 @@ export type DriverDefectView = {
   label: string;
   finalSeverity: Severity;
   severitySource: SeveritySource;
-  /** "Classed dangerous in the DVSA baseline checklist." etc. Null for minor. */
+  /** "Classed dangerous in the baseline checklist (based on DVSA guidance)." etc. Null for minor. */
   reason: string | null;
   guidance: string | null;
   note: string | null;

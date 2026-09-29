@@ -72,7 +72,7 @@ describe("projectDriverState", () => {
     expect(s.blockingCheck).toMatchObject({
       checkClientId: "c1",
       registration: "AB12 CDE",
-      defects: [{ clientId: "d1", label: "Brakes and air build-up: Audible air leak", finalSeverity: "dangerous", reason: "Classed dangerous in the DVSA baseline checklist.", guidance: "Listen.", note: "hiss at rear", objection: null }],
+      defects: [{ clientId: "d1", label: "Brakes and air build-up: Audible air leak", finalSeverity: "dangerous", reason: "Classed dangerous in the baseline checklist (based on DVSA guidance).", guidance: "Listen.", note: "hiss at rear", objection: null }],
     });
   });
 

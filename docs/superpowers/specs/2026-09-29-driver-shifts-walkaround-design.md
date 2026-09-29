@@ -167,7 +167,7 @@ the history is shown.
 
 ## Driver flow (`/driver/...`, fixed light palette like `/driver/jobs/[jobId]`)
 
-1. `/driver/dashboard` shows "Start shift". Today's jobs are visible but locked until a check is submitted.
+1. `/driver/dashboard` shows "Start shift". Today's jobs are visible but locked until a check passes (or passes with minor defects) and has synced.
 2. **Confirm vehicle.** Assigned vehicle pre-selected (active `vehicle_assignments`, else today's jobs'
    `vehicle_id`). Confirm by scanning the cab QR (existing camera barcode code in `lib/driver/cameraBarcode.ts`)
    or typing the registration. "Different vehicle" needs a reason and sets `assigned_vehicle_mismatch`.
@@ -179,7 +179,7 @@ the history is shown.
 5. **Result.**
    - Pass or minor: the shift starts at the check's `performed_at`; jobs unlock.
    - Dangerous: "Do not drive this vehicle" screen that lists **every defect causing the VOR**, each with the
-     catalogue wording, the reason it is dangerous ("Classed dangerous in the DVSA baseline" / "Classed
+     catalogue wording, the reason it is dangerous ("Classed dangerous in the baseline checklist (based on DVSA guidance)" / "Classed
      dangerous by <company> for this item" / "You marked this as dangerous"), the guidance text, and the
      driver's own photo and note. Buttons: "Object to this", "Call transport manager" (a `tel:` link to the
      company's `on_call_phone`, hidden with an explanation when none is set), "Check a different vehicle".
