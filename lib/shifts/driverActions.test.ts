@@ -91,6 +91,21 @@ describe("endShiftEvent", () => {
     expect(endShiftEvent(noVehicle, "1200", [d], stamp).ok).toBe(false);
     expect(endShiftEvent(noVehicle, "1200", [], stamp).ok).toBe(true);
   });
+
+  it("sends no odometer when no vehicle is on the shift (office-started)", () => {
+    const noVehicle = { ...onShift, openShift: { ...onShift.openShift!, currentVehicle: null } };
+    expect(endShiftEvent(noVehicle, "", [], stamp)).toEqual({
+      ok: true,
+      event: { type: "shift_ended", ...stamp, shiftClientId: "shift-client", odometer: null, newDefects: [] },
+    });
+    // Not a reading of any vehicle, so not sent even if something was typed.
+    const typed = endShiftEvent(noVehicle, "1200", [], stamp);
+    expect(typed.ok && typed.event.odometer).toBeNull();
+  });
+
+  it("still needs the odometer while a vehicle is on the shift", () => {
+    expect(endShiftEvent(onShift, "", [], stamp)).toEqual({ ok: false, error: "Enter the odometer reading as a whole number." });
+  });
 });
 
 describe("objectionEvent", () => {

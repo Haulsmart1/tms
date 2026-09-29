@@ -186,7 +186,7 @@ the history is shown.
      No shift starts until a different vehicle passes.
 6. **During the shift:** Start break / End break, Swap vehicle (end odometer, then a full walkaround on the
    new vehicle), End shift.
-7. **End shift:** odometer, then "Any new defects since your check?" A defect here follows the same severity
+7. **End shift:** odometer (not asked when no vehicle is on the shift, as after an office start), then "Any new defects since your check?" A defect here follows the same severity
    rules and can VOR the vehicle before the next driver takes it.
 
 An abandoned check leaves no open shift: a shift exists only once a check with result pass or minor has

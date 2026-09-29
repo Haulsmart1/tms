@@ -1,6 +1,7 @@
 "use client";
 /*
-  End shift: the odometer, then "Any new defects since your check?". A defect
+  End shift: the odometer (only when a vehicle is on the shift), then "Any
+  new defects since your check?". A defect
   here follows the same severity rules as a walkaround and can take the
   vehicle off the road before the next driver takes it. Works offline: it
   only queues.
@@ -66,10 +67,13 @@ export default function EndShiftForm({ state, shift, onClose }: { state: DriverS
   return (
     <div className="mt-4 grid gap-3 border-t border-line pt-4">
       <h3 className={ui.subTitle}>End shift</h3>
-      <label className="grid gap-1">
-        <span className={ui.label}>Odometer{vehicle ? ` on ${vehicle.registration}` : ""}</span>
-        <input className={ui.input} inputMode="numeric" pattern="[0-9]*" value={odometer} onChange={(e) => setOdometer(e.target.value)} />
-      </label>
+      {/* No vehicle on the shift (office-started): nothing to read, so no odometer is asked for or sent. */}
+      {vehicle ? (
+        <label className="grid gap-1">
+          <span className={ui.label}>Odometer on {vehicle.registration}</span>
+          <input className={ui.input} inputMode="numeric" pattern="[0-9]*" value={odometer} onChange={(e) => setOdometer(e.target.value)} />
+        </label>
+      ) : null}
 
       <fieldset className="m-0 grid gap-2 border-0 p-0">
         <legend className={`${ui.label} mb-1`}>Any new defects since your check?</legend>

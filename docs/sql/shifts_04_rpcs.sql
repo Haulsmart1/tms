@@ -296,7 +296,7 @@ end $$;
 
 -- Break start / break end / shift end. p keys: tenant_id, driver_id, type,
 -- client_id, shift_client_id, occurred_at, flags; for shift_ended also
--- odometer, and end_check (null, or {client_id, result, snapshot, vor_reason,
+-- odometer (null only when no vehicle is out), and end_check (null, or {client_id, result, snapshot, vor_reason,
 -- defects}).
 --
 -- On a shift the office has already ended (office wins):
@@ -450,6 +450,11 @@ begin
     for update;
     if v_period.id is not null and v_at < v_period.started_at then
       raise exception 'The time is before the current vehicle was taken out.' using errcode = 'SHF06';
+    end if;
+    -- The odometer may be null only when no vehicle is out (an office-started
+    -- shift ended before any check): then no period row is written below.
+    if v_period.id is not null and v_odometer is null then
+      raise exception 'Enter the odometer reading for the vehicle you are on.' using errcode = 'SHF05';
     end if;
   end if;
 

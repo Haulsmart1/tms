@@ -47,10 +47,15 @@ export function endShiftEvent(
 ): Built<Extract<DriverEvent, { type: "shift_ended" }>> {
   const shift = state.openShift;
   if (!shift) return { ok: false, error: "You are not on shift." };
-  const odometer = parseOdometer(odometerText);
-  if (odometer === null) return { ok: false, error: "Enter the odometer reading as a whole number." };
   if (newDefects.length > 0 && !shift.currentVehicle) {
     return { ok: false, error: "You have no checked vehicle to report defects on. Tell the office." };
+  }
+  // No vehicle on the shift (office-started, never checked): there is no
+  // vehicle to read, so no odometer is sent rather than a made-up one.
+  let odometer: number | null = null;
+  if (shift.currentVehicle) {
+    odometer = parseOdometer(odometerText);
+    if (odometer === null) return { ok: false, error: "Enter the odometer reading as a whole number." };
   }
   return { ok: true, event: { type: "shift_ended", ...stamp, shiftClientId: shift.clientId, odometer, newDefects: [...newDefects] } };
 }

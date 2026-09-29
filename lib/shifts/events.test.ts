@@ -56,6 +56,13 @@ describe("parseDriverEvent", () => {
     expect(parseDriverEvent({ type: "objection_raised", clientId: id(8), occurredAt: "2026-09-29T05:50:00Z", defectClientId: id(4), reason: "Leak was a loose fitting, now tight" }).ok).toBe(true);
   });
 
+  it("lets a shift end without an odometer only when it reports no defects", () => {
+    const end = { type: "shift_ended", clientId: id(7), shiftClientId: id(1), occurredAt: "2026-09-29T14:00:00Z", odometer: null };
+    expect(parseDriverEvent({ ...end, newDefects: [] }).ok).toBe(true);
+    const defect = { clientId: id(9), catalogueItemId: null, driverSeverity: null, note: "Mirror loose" };
+    expect(parseDriverEvent({ ...end, newDefects: [defect] })).toEqual({ ok: false, error: "Enter the odometer reading." });
+  });
+
   it("requires break and end events to name their shift", () => {
     expect(parseDriverEvent({ type: "break_started", clientId: id(5), occurredAt: "2026-09-29T09:00:00Z" }).ok).toBe(false);
     expect(parseDriverEvent({ type: "break_ended", clientId: id(6), shiftClientId: null, occurredAt: "2026-09-29T09:45:00Z" }).ok).toBe(false);
