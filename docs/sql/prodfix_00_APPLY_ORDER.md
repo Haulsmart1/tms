@@ -210,8 +210,17 @@ App data:
 ## Driver shifts and walkaround checks (shifts_01..05), 2026-09-29
 
 Spec: `docs/superpowers/specs/2026-09-29-driver-shifts-walkaround-design.md`. Apply in this order, then run
-`shifts_verify.sql`. **Apply before inviting the first driver**: until these exist, the job gate in the
-driver stop routes fails closed and no driver can complete a stop.
+`shifts_verify.sql`.
+
+**Deploy this branch and apply shifts_01..05 together, in the same sitting.** The driver job gate in the
+stop routes fails closed: once the code is live and the tables and RPCs are not, every own-fleet driver
+gets 409 on every stop completion, for every company, not just those that have started using shifts.
+Apply the SQL first and deploy straight after, or deploy only when you are ready to apply immediately.
+
+**After shifts_05, test a real walkaround photo upload** from a driver phone (or `scripts/dev-login.mjs`
+as a driver). shifts_05 adds restrictive storage policies, and a restrictive policy also applies to
+uploads made through a server-issued signed upload URL; the only way to know the two agree is to upload
+a photo and see it recorded on the check.
 
 | Order | File | Needs | Applied |
 |---|---|---|---|
