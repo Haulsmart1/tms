@@ -6,6 +6,7 @@ import { isWorkableJobStatus, jobNotWorkableMessage } from "../../../../../../..
 import { validateEvidenceMetadata } from "../../../../../../../../../lib/pod/evidenceRules";
 import { createEvidenceUploadUrl } from "../../../../../../../../../lib/pod/evidenceServer";
 import { createAdminClient } from "../../../../../../../../../lib/supabase/admin";
+import { jobGateResponse } from "../../../../../../../../../lib/walkaround/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,6 +42,9 @@ export async function POST(request: Request, context: RouteContext) {
 
     const session = await requireDriverSession({ jobId });
     const admin = createAdminClient();
+    const gate = await jobGateResponse(admin, session);
+    if (gate) return gate;
+
     const loaded = await loadDriverJobStop(admin, session, jobId, stopId);
 
     if (!loaded || loaded.stop.type !== "delivery") {
