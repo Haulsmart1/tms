@@ -137,6 +137,7 @@ const PROTECTED_ROUTES = [
   "/dashboard",
   "/driver/dashboard",
   "/driver/jobs/[jobId]",
+  "/driver/walkaround",
   "/drivers",
   "/invoices",
   "/jobs",
