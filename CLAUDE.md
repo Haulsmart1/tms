@@ -107,6 +107,24 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
   billing was optional.
 - **Deleting a vehicle goes through `DELETE /api/vehicles/[id]`**, never a browser delete. It answers 409 when
   billing history exists, and `prodfix_31` makes billing evidence tables RESTRICT rather than cascade.
+- **Walkaround checks gate driver work.** Own-fleet drivers need an open shift whose current vehicle passed
+  (or passed with only minor defects) a walkaround before completing stops or saving PODs
+  (`lib/walkaround/jobGate.ts`, enforced in the stop and POD routes, fails closed: no shift, no vehicle
+  period, no passing check or a VOR vehicle all refuse). Severity is decided by the catalogue, never the
+  phone (`lib/walkaround/severity.ts`); the locked baseline in `lib/walkaround/baseline.ts` must match
+  `docs/sql/shifts_02_catalogue_seed.sql` (`lib/walkaround/baselineSql.test.ts`). Shift and walkaround
+  tables are read-only from the browser, the same shape as the accounts ledger; every write goes through a
+  `shifts_04` RPC that takes the driver's advisory lock, checks the phone-generated `client_id` for
+  idempotency, and only then runs its business checks, so a retry of an already-saved event is never
+  refused because the world moved on (vehicle now VOR, break now closed). Every event inside a shift is
+  named by `shiftClientId` (the client id of the start check that opened it), so a late event can only ever
+  attach to its own shift. `WLK01` refuses lifting VOR while a dangerous defect is open with no rectification
+  or approved objection; `WLK04` is the database's own severity backstop, refusing a defect whose stored
+  catalogue severity disagrees with the submission; `WLK05` refuses any client write to a vehicle's QR token
+  hash, which stays server-only. A shared phone's offline queue sends only the signed-in driver's own
+  items; another driver's queued items are held, not deleted, until they sign in
+  (`lib/offline/driverSync.ts`). Shift hours are recorded hours, not a legal calculation: tachograph data
+  stays the legal record, and nothing here checks Working Time, daily or weekly rest.
 - **Two billing models run side by side**, routed on `company_billing.billing_model`. Everything above
   describes **v1** (`v1_immediate`): charge in advance every 28 days, charge pro-rata the moment a vehicle
   is added, `vehicle_cycle_coverage` records what a payment bought.
@@ -139,14 +157,14 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
   and the UI says so. Never add copy that implies a check that does not run. Planning is read-only while
   "All tenants" is selected, and saves go through the atomic `prodfix_70` RPC.
 
-### One styling system, plus three deliberately excluded public pages
+### One styling system, plus four deliberately excluded public pages
 
 - **Every console page is on the design system.** The inline-styled legacy tier no longer exists; Tailwind
   Preflight stays disabled globally, which is why the `ds` reset is still required rather than optional.
 - **Deliberately NOT tokenised**, and absent from `themeableRoutes.ts` on purpose: `/pod/share/[token]`,
-  `/quotation/share/[token]` and `/driver/jobs/[jobId]` — customer/driver-facing pages outside the console
-  shell with a fixed light palette. Do not "finish the job" on these without deciding a delivery-receipt
-  recipient should see the operator's theme.
+  `/quotation/share/[token]`, `/driver/jobs/[jobId]` and `/driver/walkaround`, customer/driver-facing pages
+  outside the console shell with a fixed light palette. Do not "finish the job" on these without deciding a
+  delivery-receipt (or walkaround) recipient should see the operator's theme.
 - **Design-system ("ds") pages**: opt in via `className="ds font-sans bg-canvas text-ink"` on the root element.
   `ds` re-applies a scoped CSS reset; `font-sans` switches to IBM Plex. Tokens live in `app/tokens.css`, consumed
   by `app/globals.css`. Forgetting `font-sans` silently falls back to Inter; forgetting `ds` breaks borders/layout
@@ -246,9 +264,11 @@ lib/printing/pdfFonts.ts    Unicode fonts and text sanitising for every generate
 docs/sql/                   numbered migrations, applied by hand in order in the Supabase SQL editor:
                              rls_01..rls_12 (tenancy, storage, job-files lockdown), billing_01..billing_07
                              (v1 platform billing, then v2 period billing), prodfix_01..prodfix_93 (the
-                             2026-09-14 review fixes; order in prodfix_00_APPLY_ORDER.md). `*_verify.sql`,
-                             `diag_*` and `prodfix_80_preflight_readonly.sql` are read-only check scripts,
-                             not migrations. Not every file has been applied: check the apply-order doc.
+                             2026-09-14 review fixes; order in prodfix_00_APPLY_ORDER.md), and
+                             shifts_01..05 (driver shifts and walkaround check tables, triggers, RPCs and
+                             storage policies, 2026-09-29; none applied yet). `*_verify.sql`, `diag_*` and
+                             `prodfix_80_preflight_readonly.sql` are read-only check scripts, not
+                             migrations. Not every file has been applied: check the apply-order doc.
 supabase/migrations/        15 more hand-applied migrations (planning, manifests, Xero credentials, driver
                              activity). CLI-style names, but applied via the SQL editor: NEVER run
                              `supabase db push`, it would replay all of them. rls_01/rls_01b now raise if run.
