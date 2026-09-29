@@ -28,6 +28,10 @@ export type Vehicle = {
     | "other"
     | null;
   home_country_code: string | null;
+  /* Server-only to write (POST /api/vehicles/[id]/walkaround-qr issues it);
+     read here only to know whether a cab QR code already exists, so
+     WalkaroundQrButton can warn before a reprint invalidates the old sticker. */
+  walkaround_qr_token_hash: string | null;
 };
 
 export type FleetInsurancePolicy = {

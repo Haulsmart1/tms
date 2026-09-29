@@ -10,6 +10,7 @@ import {
   vehicleCardStyle,
 } from "./compliance";
 import type { FleetInsurancePolicy, Vehicle } from "./types";
+import WalkaroundQrButton from "./WalkaroundQrButton";
 
 type Props = {
   vehicle: Vehicle;
@@ -165,6 +166,14 @@ export default function VehicleCard({
             >
               Delete
             </Button>
+
+            {loading ? null : (
+              <WalkaroundQrButton
+                vehicleId={vehicle.id}
+                registration={vehicle.registration}
+                hasExistingCode={vehicle.walkaround_qr_token_hash !== null}
+              />
+            )}
           </>
         ) : null}
 

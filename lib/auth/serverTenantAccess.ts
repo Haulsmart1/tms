@@ -9,6 +9,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   decideTenantAccess,
+  hasValidHome,
+  roleTier,
   type AccessLevel,
   type CallerProfile,
   type RoleTier,
@@ -93,4 +95,45 @@ export async function authorizeTenant(
   const decision = decideTenantAccess({ caller, homeTenant, target, level, allowedRoles });
   if (!decision.ok) throw new TenantAccessError(403, decision.reason);
   return { caller, tier: decision.tier, tenant: target };
+}
+
+/**
+  Authorize management access to a legacy vehicle row: one written before
+  tenants existed, which carries a COMPANY id in tenant_id rather than a real
+  tenant id (see CLAUDE.md: "vehicles has no company_id column"). There is no
+  tenant row for authorizeTenant to find, so this mirrors can_manage_tenant for
+  that shape directly: super_admin, or a company admin of that company whose
+  own profile is coherent.
+*/
+export async function authorizeLegacyCompanyVehicle(
+  admin: SupabaseClient,
+  userId: string,
+  companyId: string,
+): Promise<boolean> {
+  const caller = await loadCallerProfile(admin, userId);
+  const tier = roleTier(caller.roleName);
+  if (tier === "super_admin") return true;
+  if (tier !== "admin") return false;
+  const homeTenant = await loadTenantRef(admin, caller.homeTenantId);
+  return hasValidHome(caller, homeTenant) && caller.companyId === companyId;
+}
+
+/**
+  Authorize "manage" access to a vehicle's tenant_id, whether it is a real
+  tenant or a legacy company id (see authorizeLegacyCompanyVehicle above).
+  Throws TenantAccessError on failure, the same as authorizeTenant.
+*/
+export async function authorizeVehicleTenant(
+  admin: SupabaseClient,
+  userId: string,
+  vehicleTenantId: string,
+): Promise<void> {
+  const tenantRow = await loadTenantRef(admin, vehicleTenantId);
+  if (tenantRow) {
+    await authorizeTenant(admin, userId, vehicleTenantId, "manage");
+    return;
+  }
+  if (!(await authorizeLegacyCompanyVehicle(admin, userId, vehicleTenantId))) {
+    throw new TenantAccessError(403, "forbidden");
+  }
 }

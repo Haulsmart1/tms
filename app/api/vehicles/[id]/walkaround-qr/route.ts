@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createApiSupabase } from "../../../../../lib/api/server";
-import { authorizeTenant, isUuid, TenantAccessError } from "../../../../../lib/auth/serverTenantAccess";
+import { authorizeVehicleTenant, isUuid, TenantAccessError } from "../../../../../lib/auth/serverTenantAccess";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { encodeQrPayload } from "../../../../../lib/walkaround/qrToken";
 import { generateQrToken, hashQrToken } from "../../../../../lib/walkaround/qrTokenServer";
@@ -43,7 +43,10 @@ export async function POST(_request: NextRequest, context: RouteContext) {
     }
 
     try {
-      await authorizeTenant(admin, user.id, String(vehicle.tenant_id), "manage");
+      // Some legacy vehicles carry a COMPANY id in tenant_id, not a real
+      // tenant id (CLAUDE.md); authorizeVehicleTenant handles both shapes the
+      // same way DELETE /api/vehicles/[id] does.
+      await authorizeVehicleTenant(admin, user.id, String(vehicle.tenant_id));
     } catch (error) {
       if (error instanceof TenantAccessError) {
         if (error.status === 401) return NextResponse.json({ error: "You must be signed in." }, { status: 401 });
