@@ -120,7 +120,7 @@ create or replace function public.guard_vehicle_qr_token_hash()
 returns trigger
 language plpgsql
 set search_path = public
-as $
+as $$
 begin
   if tg_op = 'INSERT' then
     if new.walkaround_qr_token_hash is not null
@@ -137,13 +137,13 @@ begin
       using errcode = 'WLK05';
   end if;
   return new;
-end $;
+end $$;
 
 drop trigger if exists guard_vehicle_qr_token_hash on public.vehicles;
 create trigger guard_vehicle_qr_token_hash before insert or update on public.vehicles
   for each row execute function public.guard_vehicle_qr_token_hash();
 
-do $
+do $$
 begin
   if to_regprocedure('public.guard_vehicle_assignment_licensed()') is null then
     raise notice 'shifts_03: prodfix_30 is not applied, shift_vehicle_periods is NOT licence-gated. Re-run shifts_03 after prodfix_30.';
