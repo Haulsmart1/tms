@@ -7,10 +7,18 @@
 --      approved objection. errcode WLK01. THE CONTRACT with
 --      lib/walkaround/vor.ts (RETURN_BLOCKED_MESSAGE, verbatim).
 --   3. rectify_walkaround_defect: completing the linked maintenance record
---      sets walkaround_defects.rectified_at.
+--      sets walkaround_defects.rectified_at; moving it out of completed
+--      again clears it, so a reopened repair reopens the defect.
 --   4. gate_vehicle_licensed on shift_vehicle_periods, reusing prodfix_30's
 --      function, so an unlicensed or cancelled-company vehicle cannot be taken
 --      out on a shift (LIC01 / LIC02).
+--   5. guard_vehicle_qr_token_hash: vehicles.walkaround_qr_token_hash is
+--      server-only (errcode WLK05). The browser writes other vehicles columns
+--      directly, so a grant cannot protect this one; a client that could set
+--      the hash could mint a working cab QR for any token it chose. Same
+--      shape as billing_03's guard_vehicle_licence_active, including its
+--      pre-flight: confirm the server's role name with select current_user
+--      over the service-role path before applying.
 --
 -- Apply after shifts_01 and shifts_02. Safe to re-run.
 
@@ -90,6 +98,11 @@ begin
        set rectified_at = now()
      where maintenance_record_id = new.id
        and rectified_at is null;
+  elsif old.status = 'completed' and new.status is distinct from 'completed' then
+    update public.walkaround_defects
+       set rectified_at = null
+     where maintenance_record_id = new.id
+       and rectified_at is not null;
   end if;
   return new;
 end $$;
@@ -100,7 +113,37 @@ drop trigger if exists rectify_walkaround_defect on public.maintenance_records;
 create trigger rectify_walkaround_defect after update of status on public.maintenance_records
   for each row execute function public.rectify_walkaround_defect();
 
-do $$
+-- NOT security definer, deliberately (see billing_03 STEP 3): under SECURITY
+-- DEFINER current_user would be the owner, every check below would pass and
+-- the trigger would enforce nothing while looking installed.
+create or replace function public.guard_vehicle_qr_token_hash()
+returns trigger
+language plpgsql
+set search_path = public
+as $
+begin
+  if tg_op = 'INSERT' then
+    if new.walkaround_qr_token_hash is not null
+       and current_user not in ('postgres', 'supabase_admin', 'service_role') then
+      raise exception 'The cab QR code can only be issued from the vehicles page.'
+        using errcode = 'WLK05';
+    end if;
+    return new;
+  end if;
+
+  if new.walkaround_qr_token_hash is distinct from old.walkaround_qr_token_hash
+     and current_user not in ('postgres', 'supabase_admin', 'service_role') then
+    raise exception 'The cab QR code can only be issued from the vehicles page.'
+      using errcode = 'WLK05';
+  end if;
+  return new;
+end $;
+
+drop trigger if exists guard_vehicle_qr_token_hash on public.vehicles;
+create trigger guard_vehicle_qr_token_hash before insert or update on public.vehicles
+  for each row execute function public.guard_vehicle_qr_token_hash();
+
+do $
 begin
   if to_regprocedure('public.guard_vehicle_assignment_licensed()') is null then
     raise notice 'shifts_03: prodfix_30 is not applied, shift_vehicle_periods is NOT licence-gated. Re-run shifts_03 after prodfix_30.';
@@ -118,7 +161,8 @@ commit;
 -- VERIFY
 --   select c.relname, t.tgname from pg_trigger t join pg_class c on c.oid = t.tgrelid
 --   where t.tgname in ('guard_defect_catalogue','guard_vehicle_return_to_service',
---                      'rectify_walkaround_defect','gate_vehicle_licensed')
+--                      'rectify_walkaround_defect','guard_vehicle_qr_token_hash',
+--                      'gate_vehicle_licensed')
 --     and not t.tgisinternal order by 1, 2;
---   -- expect defect_catalogue_items, vehicles, maintenance_records and
+--   -- expect defect_catalogue_items, vehicles (two), maintenance_records and
 --   -- shift_vehicle_periods (plus prodfix_30's own gated tables).

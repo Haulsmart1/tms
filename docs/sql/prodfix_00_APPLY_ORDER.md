@@ -217,7 +217,7 @@ driver stop routes fails closed and no driver can complete a stop.
 |---|---|---|---|
 | 1 | `shifts_01_tables.sql` | rls_02 | no |
 | 2 | `shifts_02_catalogue_seed.sql` | shifts_01 | no |
-| 3 | `shifts_03_triggers.sql` | shifts_02; re-run after prodfix_30 if that is applied later | no |
+| 3 | `shifts_03_triggers.sql` | shifts_02; re-run after prodfix_30 if that is applied later. Confirm the server role name first (billing_03 pre-flight): the QR hash guard exempts `postgres`, `supabase_admin`, `service_role` | no |
 | 4 | `shifts_04_rpcs.sql` | shifts_03 | no |
-| 5 | `shifts_05_storage.sql` | none | no |
+| 5 | `shifts_05_storage.sql` | none. Creates restrictive storage policies: if it raises 42501, create them in the dashboard as its header says | no |
 | check | `shifts_verify.sql` | all of the above | |
