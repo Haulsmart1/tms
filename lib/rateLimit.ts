@@ -40,6 +40,10 @@ export const RATE_LIMITS = {
   /* Added by review PLAN-13: counts stops that need upstream geocoding (each
      can cost several TomTom calls), not incoming requests. */
   tomtomGeocodeStopsPerUser: { bucket: "tomtom-geocode:user", windowSeconds: 3600, max: 600 },
+  /* Driver shift/walkaround events (POST /api/driver/shift/events), one
+     request per queued event: generous enough for a normal shift plus a
+     backlog of offline events replaying at once. */
+  driverShiftEvent: { bucket: "driver-shift-event:user", windowSeconds: 600, max: 120 },
 } as const satisfies Record<string, RateLimitRule>;
 
 const MISSING_FUNCTION_CODES = new Set(["42883", "PGRST202"]);
