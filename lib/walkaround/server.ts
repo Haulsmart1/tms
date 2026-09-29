@@ -300,6 +300,7 @@ export async function loadDriverShiftState(admin: SupabaseClient, session: Drive
 
   return {
     today,
+    timeZone: operator.timeZone,
     companyName: operator.companyName,
     onCallPhone: settings.data?.on_call_phone ? String(settings.data.on_call_phone) : null,
     assignedVehicle: assigned ? { id: assigned.id, registration: assigned.registration } : null,

@@ -20,6 +20,7 @@ const leak: CatalogueItem = {
 
 const server: DriverShiftState = {
   today: "2026-09-29",
+  timeZone: "Europe/London",
   companyName: "Acme Haulage",
   onCallPhone: "07700 900000",
   assignedVehicle: { id: "v1", registration: "AB12 CDE" },

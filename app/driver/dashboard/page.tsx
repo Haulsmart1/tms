@@ -2,9 +2,12 @@
 
 import Link from "next/link";
 import Skeleton from "../../../components/Skeleton";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { isDriverJobForDate } from "../../../lib/driver/dashboardJobs";
+import { gateForState } from "../../../lib/shifts/driverActions";
 import { operatorDay } from "../../../lib/time";
+import { useDriverShift } from "../useDriverShift";
+import ShiftPanel from "./ShiftPanel";
 
 type Driver = {
   id: string;
@@ -53,6 +56,14 @@ export default function DriverDashboardPage() {
   const [data, setData] = useState<DriverResponse | null>(null);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  const shift = useDriverShift();
+
+  // Jobs stay locked until the walkaround gate would pass. The server
+  // enforces the same rule on every stop save; this only saves a wasted
+  // trip. A subcontractor driver (403) is not gated, and while the shift
+  // state is unknown the server remains the judge.
+  const gate = !shift.forbidden && shift.state ? gateForState(shift.state) : null;
+  const lockedMessage = gate && !gate.ok ? gate.message : null;
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
@@ -182,6 +193,8 @@ export default function DriverDashboardPage() {
           </div>
         </header>
 
+        <ShiftPanel shift={shift} />
+
         <section className={styles.card}>
           <h2 className={styles.sectionTitle}>Compliance</h2>
           <div className={styles.complianceGrid}>
@@ -216,17 +229,14 @@ export default function DriverDashboardPage() {
 
         <section className={styles.card}>
           <h2 className={styles.sectionTitle}>Today's Jobs</h2>
+          {lockedMessage ? <p className={styles.locked}>{lockedMessage}</p> : null}
 
           {todaysJobs.length === 0 ? (
             <p className={styles.muted}>No jobs assigned for today.</p>
           ) : (
             <div className={styles.listGrid}>
               {todaysJobs.map((job) => (
-                <Link
-                  key={job.id}
-                  href={`/driver/jobs/${job.id}`}
-                  className={styles.jobLink}
-                >
+                <JobLink key={job.id} jobId={job.id} locked={lockedMessage !== null}>
                   <article className={styles.listCard}>
                     <div className={styles.rowBetween}>
                       <strong>{job.reference || "Job"}</strong>
@@ -264,11 +274,13 @@ export default function DriverDashboardPage() {
                       </p>
                     ) : null}
 
-                    <div className={styles.openJob}>
-                      Open job →
-                    </div>
+                    {lockedMessage ? null : (
+                      <div className={styles.openJob}>
+                        Open job →
+                      </div>
+                    )}
                   </article>
-                </Link>
+                </JobLink>
               ))}
             </div>
           )}
@@ -276,13 +288,10 @@ export default function DriverDashboardPage() {
 
         <section className={styles.card}>
           <h2 className={styles.sectionTitle}>Recent Assigned Jobs</h2>
+          {lockedMessage ? <p className={styles.locked}>{lockedMessage}</p> : null}
           <div className={styles.listGrid}>
             {data.jobs.slice(0, 20).map((job) => (
-              <Link
-                key={job.id}
-                href={`/driver/jobs/${job.id}`}
-                className={styles.jobLink}
-              >
+              <JobLink key={job.id} jobId={job.id} locked={lockedMessage !== null}>
                 <article className={styles.listCard}>
                   <div className={styles.rowBetween}>
                     <strong>{job.reference || "Job"}</strong>
@@ -298,16 +307,28 @@ export default function DriverDashboardPage() {
                     )}
                   </p>
 
-                  <div className={styles.openJob}>
-                    Open job →
-                  </div>
+                  {lockedMessage ? null : (
+                    <div className={styles.openJob}>
+                      Open job →
+                    </div>
+                  )}
                 </article>
-              </Link>
+              </JobLink>
             ))}
           </div>
         </section>
       </div>
     </main>
+  );
+}
+
+/* A job row is a link only once the walkaround gate would pass. */
+function JobLink({ jobId, locked, children }: { jobId: string; locked: boolean; children: ReactNode }) {
+  if (locked) return <div className={styles.jobLink}>{children}</div>;
+  return (
+    <Link href={`/driver/jobs/${jobId}`} className={styles.jobLink}>
+      {children}
+    </Link>
   );
 }
 
@@ -402,5 +423,7 @@ const styles = {
   smallLabel: "block text-kicker uppercase text-ink-3",
   infoValue: "mt-1 block text-ink",
   muted: "m-0 text-xs text-ink-3",
+  locked:
+    "m-0 mb-3 rounded-md border border-warning-border bg-warning-tint p-3 text-sm font-semibold text-warning-strong",
 } as const;
 

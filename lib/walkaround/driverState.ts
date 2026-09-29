@@ -23,6 +23,8 @@ export type DriverVehicleOption = { id: string; registration: string; vor: boole
 
 export type DriverShiftState = {
   today: string;
+  /** The operator's IANA time zone, for showing shift times as the office sees them. */
+  timeZone: string;
   companyName: string | null;
   onCallPhone: string | null;
   assignedVehicle: { id: string; registration: string } | null;
