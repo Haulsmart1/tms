@@ -17,6 +17,7 @@ import {
   readJsonSafe,
   uploadEvidenceViaSignedUrl,
 } from "../../../../lib/pod/uploadClient";
+import { flushDriverQueue } from "../../driverQueue";
 
 type PodEvidence = {
   id: string;
@@ -400,6 +401,11 @@ function StopCard({
     setMessage("");
 
     try {
+      // Send any queued shift or walkaround check first, so a check done with
+      // no signal does not block the first delivery. If some are still
+      // queued, carry on: the server gate answers with a clear message.
+      await flushDriverQueue();
+
       // Shrink large camera photos on the phone, then send the bytes straight
       // to storage with a server-issued signed URL (review POD-2).
       const photo =
@@ -442,6 +448,9 @@ function StopCard({
     setMessage("");
 
     try {
+      // Queued shift and walkaround events go first (see uploadPhoto).
+      await flushDriverQueue();
+
       const response =
         await fetch(
           `${stopEndpoint}/complete`,
