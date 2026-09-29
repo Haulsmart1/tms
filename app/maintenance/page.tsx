@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent, ReactNode } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
@@ -12,7 +13,10 @@ import MessageBanner from "../../components/MessageBanner";
 import Select from "../../components/Select";
 import Skeleton from "../../components/Skeleton";
 import Textarea from "../../components/Textarea";
+import Tabs from "../../components/Tabs";
 import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
+import { isReturnBlockedError, RETURN_BLOCKED_MESSAGE } from "../../lib/walkaround/vor";
+import WalkaroundChecksTab from "./WalkaroundChecksTab";
 
 type Vehicle = {
     id: string;
@@ -60,7 +64,63 @@ type MaintenanceRecordWithVehicle = MaintenanceRecord & {
     asset: Asset | null;
 };
 
+/* Records created from a walkaround defect carry this prefix (shifts_04). */
+const WALKAROUND_RECORD_PREFIX = "Walkaround defect:";
+
 export default function MaintenancePage() {
+    return (
+        <Suspense fallback={<div className="ds min-h-screen bg-canvas font-sans text-ink" />}>
+            <MaintenanceTabs />
+        </Suspense>
+    );
+}
+
+/* Two views on one route: "Records" (the maintenance page as it was) and
+   "Walkaround checks" (?tab=walkaround). */
+function MaintenanceTabs() {
+    const supabase = useMemo(() => createClient(), []);
+    const router = useRouter();
+    const pathname = usePathname();
+    const tab = useSearchParams().get("tab") === "walkaround" ? "walkaround" : "records";
+
+    const tabBar = (
+        <div className="mb-4">
+            <Tabs
+                label="Maintenance views"
+                activeId={tab}
+                onChange={(id) =>
+                    router.replace(id === "walkaround" ? `${pathname}?tab=walkaround` : pathname, { scroll: false })
+                }
+                tabs={[
+                    { id: "records", label: "Records" },
+                    { id: "walkaround", label: "Walkaround checks" },
+                ]}
+            />
+        </div>
+    );
+
+    if (tab === "records") return <MaintenanceRecords tabBar={tabBar} />;
+
+    return (
+        <TenantGate>
+            <div className="ds min-h-screen bg-canvas font-sans text-ink">
+                <main className="mx-auto max-w-[1480px] px-6 py-8">
+                    {tabBar}
+                    <header className="mb-4">
+                        <div className="text-kicker uppercase text-ink-2">Fleet Compliance</div>
+                        <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">Walkaround checks</h1>
+                        <p className="text-sm text-ink-2">
+                            Daily checks drivers record in the app, based on the DVSA daily walkaround check.
+                        </p>
+                    </header>
+                    <WalkaroundChecksTab supabase={supabase} />
+                </main>
+            </div>
+        </TenantGate>
+    );
+}
+
+function MaintenanceRecords({ tabBar }: { tabBar: ReactNode }) {
     const supabase = useMemo(() => createClient(), []);
     const tenant = useTenant();
 
@@ -749,7 +809,9 @@ export default function MaintenancePage() {
             await loadData();
         } catch (error) {
             setErrorMessage(
-                error instanceof Error
+                isReturnBlockedError(error)
+                    ? RETURN_BLOCKED_MESSAGE
+                    : error instanceof Error
                     ? error.message
                     : "Unable to return vehicle to service."
             );
@@ -779,6 +841,7 @@ export default function MaintenancePage() {
         <TenantGate>
         <div className="ds min-h-screen bg-canvas font-sans text-ink">
             <main className="mx-auto max-w-[1480px] px-6 py-8">
+                {tabBar}
                 <header className="mb-4 flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0">
                         <div className="text-kicker uppercase text-ink-3">
@@ -1378,6 +1441,13 @@ export default function MaintenancePage() {
                                                     record.maintenance_type
                                                 }
                                             </h3>
+                                            {record.maintenance_type?.startsWith(
+                                                WALKAROUND_RECORD_PREFIX
+                                            ) ? (
+                                                <div className="mt-1">
+                                                    <Badge tone="info">Walkaround</Badge>
+                                                </div>
+                                            ) : null}
 
                                             <p className="mt-1 break-words text-sm text-ink-3">
                                                 {record.asset

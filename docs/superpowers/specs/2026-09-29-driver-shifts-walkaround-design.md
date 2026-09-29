@@ -119,8 +119,8 @@ company rows), `declaration_accepted` bool, `flags` text[].
 `id`, `tenant_id`, `check_id`, `vehicle_id`, `catalogue_item_id` null (null for "Other"),
 `catalogue_severity` (`minor` | `dangerous` | null), `final_severity` (`minor` | `dangerous`),
 `escalated_by_driver` bool, `severity_source` (`baseline` | `company` | `driver`), `note`,
-`photo_paths` text[], `maintenance_record_id`, `rectified_at` null, `phase` (`start_check` | `end_of_shift`),
-`client_id`, `created_at`.
+`photo_paths` text[], `maintenance_record_id`, `rectified_at` null, `client_id`, `created_at`. The phase
+lives on the check, not the defect (see Clarifications below).
 
 ### `defect_objections`
 
@@ -148,6 +148,17 @@ the history is shown.
 - Trigger on `vehicles`: refuses `vor = false` (errcode `WLK01`) while the vehicle has any
   `walkaround_defects` row with `final_severity = 'dangerous'`, `rectified_at is null` and no approved
   objection. Database-level backstop in the style of `LIC01`.
+
+## Clarifications decided while planning
+
+1. `phase` lives on `walkaround_checks` (`start` | `swap` | `end_of_shift`), not on defects. End-of-shift
+   defects are recorded as an `end_of_shift` check whose snapshot holds only the reported items.
+2. The QR payload is short: `TMSW1:<16-char Crockford base32 token>`. The server finds the vehicle by the
+   token's SHA-256 hash within the driver's tenant.
+3. Rectification is a database trigger: when a `maintenance_records` row linked to a defect becomes
+   `completed`, the defect's `rectified_at` is set. `/maintenance` needs no new write path for this.
+4. An office-started shift (driver's phone unavailable) records hours only: it has no vehicle period, so the
+   job gate still blocks stop completion until the driver completes a walkaround check.
 
 ## Driver flow (`/driver/...`, fixed light palette like `/driver/jobs/[jobId]`)
 
