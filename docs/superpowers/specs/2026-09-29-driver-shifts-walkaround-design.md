@@ -143,6 +143,8 @@ the history is shown.
   in a column named `tenant_id` and is client-writable, so a server-only setting does not belong there.
 - Storage: private bucket `walkaround-photos`, path `<tenant_id>/<check_id>/<defect_client_id>/<file>`,
   tenant-scoped exactly like `pod-files` (`lib/pod/evidencePath.ts` rule), served by short-lived signed URLs.
+  Restrictive `storage.objects` policies (prodfix_83 style) block every client role from the bucket.
+- `vehicles.walkaround_qr_token_hash` is server-only: a trigger refuses any client change (errcode `WLK05`).
 - Trigger on `vehicles`: refuses `vor = false` (errcode `WLK01`) while the vehicle has any
   `walkaround_defects` row with `final_severity = 'dangerous'`, `rectified_at is null` and no approved
   objection. Database-level backstop in the style of `LIC01`.
@@ -206,25 +208,41 @@ text-ink`) and are added to `lib/nav/themeableRoutes.ts`. Every new page and rou
   time. Photos are stored as blobs and uploaded after the check row exists, through server-issued signed
   upload URLs (Vercel 4.5 MB body cap), then attached by a JSON call.
 - Items sync in order with backoff, reusing the approach of `lib/driver/gpsRetry.ts`. The queue logic is pure
-  (`lib/offline/queue.ts`) with an IndexedDB adapter kept thin.
+  (`lib/offline/queue.ts`) with an IndexedDB adapter kept thin. A head item that gets five consecutive 5xx
+  answers is set aside like a refusal ("The server could not save this. It has been set aside; tell the
+  office.") so one bad event cannot block the queue forever.
+- Break, swap and end events carry `shiftClientId`: the client id of the start check that opened the shift
+  (the server returns it as `openShift.clientId`; an office-started shift has its own). The server resolves
+  the shift by that id, never "whichever shift is open now".
 - A visible "N items waiting to sync" indicator. Signing out with items queued warns first.
 - The phone always flushes its queue before any POD save, so an offline check never blocks the first
   delivery once signal returns.
 
 ## Server rules
 
-- **Idempotent.** A repeated `client_id` returns the original result and writes nothing.
+- **Idempotent, first.** A repeated `client_id` returns the original result and writes nothing. The route
+  looks the id up before any business check, and every RPC takes the per-driver advisory lock and repeats the
+  lookup before anything else, so a retry is never refused because the vehicle went VOR or a break closed
+  since it was saved.
 - **The server recomputes severity** from the catalogue rows in the submitted snapshot, re-validated against
   the database (a snapshot row that does not exist, belongs to another company or is retired is refused).
-  The phone's claimed severity is ignored except to detect escalation; a mismatch is logged.
+  The phone's claimed severity is ignored except to detect escalation; a mismatch is logged. The database
+  repeats this: `walkaround_insert_defects` reads the stored severity, company and retirement of every
+  catalogue defect and refuses a missing, retired, other-company or downgraded one (errcode `WLK04`), and
+  the check's result must agree with its defects.
 - **Occurrence-time sanity.** Future times (beyond 5 minutes of clock skew) are refused. Times more than
   72 hours old, or earlier than the previous event in the same shift, are accepted and flagged
-  (`late_sync`, `out_of_order`), never silently corrected.
+  (`late_sync`, `out_of_order`), never silently corrected. A time before the shift start or the break start
+  is refused with `SHF06` / `SHF07` rather than tripping a table constraint.
 - **Auto-VOR on arrival.** A dangerous defect sets `vehicles.vor = true`, `vor_since` = the defect's
   occurrence time, `vor_reason` naming the defect. Already VOR: the defect is added, nothing else changes.
   The office sees both occurrence and receipt times.
 - **Office corrections win.** Late driver events for a shift the office has corrected are attached and
-  flagged, not applied over the correction.
+  flagged, not applied over the correction, and never touch any other shift. On an ended shift a late break
+  is kept (flagged `after_office_end`) only if it falls inside the shift, otherwise the shift is flagged
+  `late_break_skipped`; a late end records the driver's odometer and any end-of-shift defects; a late swap
+  check is recorded with its defects (so a dangerous one still takes the vehicle off the road) but opens no
+  period. End-of-shift defects go on the vehicle the driver is on now; with none, `SHF05`.
 - **Vehicle eligibility.** VOR vehicles are refused. The existing `LIC01` / `LIC02` trigger refusals on
   `shift_vehicle_periods.vehicle_id` (the trigger is extended to this table) are turned into a message by
   `lib/billing/unlicensedVehicle.ts`.

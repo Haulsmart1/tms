@@ -3779,6 +3779,12 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ### Task 18: Driver event processing and the driver routes
 
+> **Note (review fixes, 2026-09-29):** the code below is the original draft; the committed
+> `lib/walkaround/processEvent.ts` differs. Break, swap and end events carry `shiftClientId` and the shift is
+> loaded by it (`loadShiftByClientId`), never as "the open shift". `findDuplicate` looks the clientId up
+> BEFORE any business check. RPC refusals are `KNOWN_RPC_REFUSALS` in `lib/walkaround/server.ts`, which adds
+> `SHF06`, `SHF07` and `WLK04`. `validateBreakEnd` takes the closed breaks as a third argument.
+
 **Files:**
 - Create: `lib/walkaround/processEvent.ts`
 - Create: `app/api/driver/shift/route.ts`, `app/api/driver/shift/events/route.ts`
