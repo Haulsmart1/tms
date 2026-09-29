@@ -84,6 +84,7 @@ export const THEMEABLE_ROUTES: readonly string[] = [
   "/dashboard",               // app/dashboard/page.tsx
   "/jobs",                    // app/jobs/page.tsx
   "/planning",                // app/planning/page.tsx
+  "/shifts",                  // app/shifts/page.tsx
   "/pod",                     // app/pod/page.tsx
   "/tracking",                // app/tracking/page.tsx
   "/drivers",                 // app/drivers/page.tsx

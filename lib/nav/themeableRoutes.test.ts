@@ -113,6 +113,7 @@ describe("isThemeableRoute", () => {
         "/dashboard",
         "/jobs",
         "/planning",
+        "/shifts",
         "/pod",
         "/tracking",
         "/drivers",
