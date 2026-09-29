@@ -286,6 +286,9 @@ async function createStops(
       city: collection.locality,
       postcode: collection.postal_code.toUpperCase(),
       status: "pending",
+      contact_name: combineName(rma),
+      contact_phone: rma.telephone.length ? rma.telephone.join(", ") : null,
+      contact_email: rma.email || null,
       recipient_name: combineName(rma),
     });
   }
@@ -302,6 +305,9 @@ async function createStops(
       city: delivery.locality,
       postcode: delivery.postal_code.toUpperCase(),
       status: "pending",
+      contact_name: combineName(rma),
+      contact_phone: rma.telephone.length ? rma.telephone.join(", ") : null,
+      contact_email: rma.email || null,
       recipient_name: combineName(rma),
     });
   }
