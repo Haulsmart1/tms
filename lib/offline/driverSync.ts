@@ -6,14 +6,18 @@
   one defect photo (signed upload, then attached to its defect). Photos are
   always queued after the event that carries their defect, and the queue is
   strictly ordered, so a photo is only sent once its defect has synced.
+
+  Every item records the signed-in user who queued it (ownerId). A phone can
+  be shared: items queued by driver A are only ever sent while A is signed in,
+  never under driver B's session. They are held, not deleted, until A returns.
 */
 
 import type { DriverEvent } from "../shifts/events";
 import { classifySyncFailure, type QueueItem, type SendOutcome } from "./queue";
 
 export type DriverQueuePayload =
-  | { kind: "event"; event: DriverEvent }
-  | { kind: "photo"; defectClientId: string; blob: Blob; mimeType: string; filename: string };
+  | { kind: "event"; ownerId: string; event: DriverEvent }
+  | { kind: "photo"; ownerId: string; defectClientId: string; blob: Blob; mimeType: string; filename: string };
 
 /** `stop`: the session has gone (401/403). The item stays put and the queue pauses. */
 export type SyncResult = SendOutcome | { kind: "stop"; error: string };
@@ -71,4 +75,25 @@ export function pendingEvents(queue: readonly QueueItem<DriverQueuePayload>[]): 
   const out: DriverEvent[] = [];
   for (const item of queue) if (item.payload.kind === "event") out.push(item.payload.event);
   return out;
+}
+
+/**
+ * The items the signed-in user may send, in queue order, and how many belong
+ * to someone else. With nobody signed in, nothing is sendable. An item with no
+ * owner (never written by this code) is held too: sending it could put
+ * another driver's check under this driver's name.
+ */
+export function partitionByOwner<I extends QueueItem<{ ownerId?: string | null }>>(
+  queue: readonly I[],
+  userId: string | null,
+): { mine: I[]; heldForOthers: number } {
+  const mine = userId ? queue.filter((i) => i.payload.ownerId === userId) : [];
+  return { mine, heldForOthers: queue.length - mine.length };
+}
+
+export function heldForOthersMessage(count: number): string | null {
+  if (count <= 0) return null;
+  return count === 1
+    ? "1 item queued by another driver on this phone is waiting for them to sign in."
+    : `${count} items queued by another driver on this phone are waiting for them to sign in.`;
 }

@@ -8,6 +8,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { heldForOthersMessage } from "../../../lib/offline/driverSync";
 import { breakEvent, clockTime, recordedHours } from "../../../lib/shifts/driverActions";
 import { formatMinutes } from "../../../lib/shifts/hours";
 import type { DriverShiftState } from "../../../lib/walkaround/driverState";
@@ -51,7 +52,8 @@ export default function ShiftPanel({ shift }: { shift: DriverShift }) {
 
 function SyncStrip({ shift }: { shift: DriverShift }) {
   const online = useOnline();
-  if (shift.pendingCount === 0 && shift.rejected.length === 0 && !shift.paused && online && !shift.error) return null;
+  const held = heldForOthersMessage(shift.heldForOthers);
+  if (shift.pendingCount === 0 && shift.rejected.length === 0 && !shift.paused && online && !shift.error && !held) return null;
 
   return (
     <section className="mb-5 grid gap-2 rounded-lg border border-warning-border bg-warning-tint p-4 text-sm text-ink" aria-live="polite">
@@ -71,6 +73,7 @@ function SyncStrip({ shift }: { shift: DriverShift }) {
         </p>
       ) : null}
       {shift.error && online ? <p className="m-0">{shift.error}</p> : null}
+      {held ? <p className="m-0">{held}</p> : null}
       {shift.rejected.map((item) => (
         <div key={item.id} className="flex items-start justify-between gap-3 rounded-md border border-danger-border bg-danger-tint p-3">
           <span className="text-danger-strong">{item.message}</span>

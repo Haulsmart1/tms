@@ -7,21 +7,36 @@
 
   One queue per browser tab, shared by every component through this module.
   Only one flush runs at a time: every flush is chained on the previous one.
+
+  Phones are shared. Each item records the Supabase user who queued it, and
+  only the signed-in user's own items are sent (lib/offline/driverSync.ts,
+  partitionByOwner). Anyone else's are held, not deleted, until they sign in.
 */
 
 import { idbDelete, idbLoadAll, idbPut, type StoredItem } from "../../lib/offline/idbStore";
-import { eventOutcome, orphanedPhotoIds, photoOutcome, type DriverQueuePayload, type SyncResult } from "../../lib/offline/driverSync";
+import {
+  eventOutcome,
+  orphanedPhotoIds,
+  partitionByOwner,
+  photoOutcome,
+  SIGN_IN_AGAIN_MESSAGE,
+  type DriverQueuePayload,
+  type SyncResult,
+} from "../../lib/offline/driverSync";
 import { applyOutcome, enqueue, nextDue, type QueueItem } from "../../lib/offline/queue";
 import { readJsonSafe } from "../../lib/pod/uploadClient";
 import type { DriverEvent } from "../../lib/shifts/events";
 import { createClient } from "../../lib/supabase/browser";
 
 export type QueuePayload = DriverQueuePayload;
-export type RejectedItem = { id: string; message: string };
+export type RejectedItem = { id: string; message: string; ownerId?: string };
 /** Events the server accepted in this tab, so the page can keep showing them until it re-reads the server state. */
 export type SentEvent = { event: DriverEvent; sentAt: number };
 export type QueueSnapshot = {
+  /** The signed-in user's own items, in the order they will be sent. */
   pending: QueueItem<QueuePayload>[];
+  /** Items queued on this phone by someone else, held until they sign in. */
+  heldForOthers: number;
   rejected: RejectedItem[];
   /** Set when the session has gone: nothing is sent until the next flushDriverQueue call. */
   paused: string | null;
@@ -33,6 +48,7 @@ const PHOTO_UPLOAD_URL = "/api/driver/walkaround/photos/upload-url";
 const PHOTO_RECORD_URL = "/api/driver/walkaround/photos";
 const PHOTO_BUCKET = "walkaround-photos";
 const REJECTED_KEY = "tms-driver-queue-rejected";
+const LAST_USER_KEY = "tms-driver-queue-user";
 const REQUEST_TIMEOUT_MS = 20_000;
 
 let queue: StoredItem<QueuePayload>[] = [];
@@ -40,16 +56,69 @@ let seq = 0;
 let rejected: RejectedItem[] = [];
 let paused: string | null = null;
 let sent: SentEvent[] = [];
+/** The signed-in user as far as this phone knows (see refreshUser). */
+let currentUser: string | null = null;
 let loading: Promise<void> | null = null;
 let chain: Promise<unknown> = Promise.resolve();
 let timer: ReturnType<typeof setTimeout> | null = null;
 const listeners = new Set<(snapshot: QueueSnapshot) => void>();
-let snapshot: QueueSnapshot = { pending: [], rejected: [], paused: null, sent: [] };
+let snapshot: QueueSnapshot = { pending: [], heldForOthers: 0, rejected: [], paused: null, sent: [] };
 const EMPTY_SNAPSHOT: QueueSnapshot = snapshot;
 
+function mine(): StoredItem<QueuePayload>[] {
+  return partitionByOwner(queue, currentUser).mine;
+}
+
 function emit(): void {
-  snapshot = { pending: queue, rejected, paused, sent };
+  const { mine: own, heldForOthers } = partitionByOwner(queue, currentUser);
+  const visible = rejected.filter((r) => !r.ownerId || r.ownerId === currentUser);
+  snapshot = { pending: own, heldForOthers, rejected: visible, paused, sent };
   for (const listener of listeners) listener(snapshot);
+}
+
+function readRememberedUser(): string | null {
+  try {
+    return window.localStorage.getItem(LAST_USER_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function rememberUser(id: string): void {
+  try {
+    window.localStorage.setItem(LAST_USER_KEY, id);
+  } catch {
+    // Storage blocked: the session read below still works while online.
+  }
+}
+
+function setCurrentUser(id: string | null): void {
+  if (id === currentUser) return;
+  currentUser = id;
+  // Accepted events and pauses belong to the previous user's session.
+  sent = [];
+  paused = null;
+  emit();
+}
+
+/*
+  Who is signed in. getSession reads local storage, but with an expired access
+  token and no signal it answers null (the refresh needs the network), so fall
+  back to the last user this phone saw signed in: offline, the driver still
+  sees their own queued work. Sending needs the real session cookie anyway;
+  without one the server answers 401 and the queue pauses.
+*/
+async function refreshUser(): Promise<string | null> {
+  let id: string | null = null;
+  try {
+    const { data } = await createClient().auth.getSession();
+    id = data.session?.user.id ?? null;
+  } catch {
+    id = null;
+  }
+  if (id) rememberUser(id);
+  setCurrentUser(id ?? readRememberedUser());
+  return currentUser;
 }
 
 function readRejected(): RejectedItem[] {
@@ -70,12 +139,26 @@ function saveRejected(): void {
 }
 
 function installWindowHooks(): void {
+  try {
+    createClient().auth.onAuthStateChange((_event, session) => {
+      const id = session?.user.id ?? null;
+      if (!id) return;
+      rememberUser(id);
+      // Deferred: calling back into supabase-js inside this callback can deadlock.
+      setTimeout(() => {
+        setCurrentUser(id);
+        void runChained(false);
+      }, 0);
+    });
+  } catch {
+    // No Supabase config: the session read in each flush still applies.
+  }
   window.addEventListener("online", () => void runChained(true));
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") void runChained(true);
   });
   window.addEventListener("beforeunload", (event) => {
-    if (queue.length === 0) return;
+    if (mine().length === 0) return;
     event.preventDefault();
     event.returnValue = "";
   });
@@ -88,6 +171,7 @@ function ensureLoaded(): Promise<void> {
       rejected = readRejected();
       queue = await idbLoadAll<QueuePayload>();
       seq = queue.reduce((max, item) => Math.max(max, item.seq), 0);
+      await refreshUser();
       emit();
       schedule();
     })();
@@ -144,25 +228,32 @@ async function sendItem(item: QueueItem<QueuePayload>): Promise<SyncResult> {
 function schedule(): void {
   if (timer) clearTimeout(timer);
   timer = null;
-  const head = queue[0];
+  const head = mine()[0];
   if (paused !== null || !head) return;
   timer = setTimeout(() => void runChained(false), Math.max(0, head.nextAttemptAt - Date.now()));
 }
 
 async function flushOnce(force: boolean): Promise<void> {
   await ensureLoaded();
+  await refreshUser();
   if (force) {
     paused = null;
-    const head = queue[0];
+    const head = mine()[0];
     if (head && head.nextAttemptAt > Date.now()) {
-      queue = [{ ...head, nextAttemptAt: Date.now() }, ...queue.slice(1)];
-      await idbPut(queue[0]);
+      const reset = { ...head, nextAttemptAt: Date.now() };
+      queue = queue.map((i) => (i.id === head.id ? reset : i));
+      await idbPut(reset);
     }
+    emit();
+  }
+  if (currentUser === null && queue.length > 0 && paused === null) {
+    paused = SIGN_IN_AGAIN_MESSAGE;
     emit();
   }
 
   while (paused === null) {
-    const head = nextDue(queue, Date.now());
+    // Only the signed-in user's items, in order: the head of their own run.
+    const head = nextDue(mine(), Date.now());
     if (!head) break;
     const outcome = await sendItem(head);
     if (outcome.kind === "stop") {
@@ -186,7 +277,7 @@ async function flushOnce(force: boolean): Promise<void> {
         next = next.filter((i) => !orphans.has(i.id));
         for (const id of orphans) await idbDelete(id);
       }
-      rejected = [...rejected, { id: head.id, message }];
+      rejected = [...rejected, { id: head.id, message, ownerId: head.payload.ownerId }];
       saveRejected();
     }
     queue = next;
@@ -205,8 +296,11 @@ function runChained(force: boolean): Promise<void> {
   return run;
 }
 
-async function add(id: string, payload: QueuePayload): Promise<void> {
+async function add(id: string, build: (ownerId: string) => QueuePayload): Promise<void> {
   await ensureLoaded();
+  const owner = await refreshUser();
+  if (!owner) throw new Error(SIGN_IN_AGAIN_MESSAGE);
+  const payload = build(owner);
   const grown = enqueue(queue, id, payload, Date.now());
   if (grown.length === queue.length) return;
   seq += 1;
@@ -217,24 +311,24 @@ async function add(id: string, payload: QueuePayload): Promise<void> {
   void runChained(false);
 }
 
-/** Queue one driver event. Resolves once it is stored, not once it is sent. */
+/** Queue one driver event. Resolves once it is stored, not once it is sent. Rejects when nobody is signed in. */
 export function enqueueEvent(event: DriverEvent): Promise<void> {
-  return add(event.clientId, { kind: "event", event });
+  return add(event.clientId, (ownerId) => ({ kind: "event", ownerId, event }));
 }
 
 /** Queue one defect photo. It is sent after the event carrying its defect. */
 export function enqueuePhoto(defectClientId: string, blob: Blob, mimeType: string, filename: string): Promise<void> {
-  return add(crypto.randomUUID(), { kind: "photo", defectClientId, blob, mimeType, filename });
+  return add(crypto.randomUUID(), (ownerId) => ({ kind: "photo", ownerId, defectClientId, blob, mimeType, filename }));
 }
 
-/** Try to send everything now, ignoring any backoff. Resolves when this attempt is over. */
+/** Try to send everything now, ignoring any backoff. `remaining` counts only the signed-in user's items. */
 export async function flushDriverQueue(): Promise<{ remaining: number }> {
   try {
     await runChained(true);
   } catch {
     // Logged by runChained; the count below still tells the caller what is left.
   }
-  return { remaining: queue.length };
+  return { remaining: mine().length };
 }
 
 export function subscribe(listener: (snapshot: QueueSnapshot) => void): () => void {

@@ -31,6 +31,8 @@ export type DriverShift = {
   /** The last load failed. `state` keeps the previous value when there was one. */
   error: string | null;
   pendingCount: number;
+  /** Items another driver queued on this phone, held until they sign in. */
+  heldForOthers: number;
   rejected: RejectedItem[];
   /** Set when sending has paused because the session has gone. */
   paused: string | null;
@@ -102,6 +104,7 @@ export function useDriverShift(): DriverShift {
     forbidden,
     error,
     pendingCount: queue.pending.length,
+    heldForOthers: queue.heldForOthers,
     rejected: queue.rejected,
     paused: queue.paused,
     reload,

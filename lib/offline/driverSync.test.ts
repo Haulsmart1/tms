@@ -3,7 +3,9 @@ import type { DriverEvent } from "../shifts/events";
 import {
   defectClientIdsOf,
   eventOutcome,
+  heldForOthersMessage,
   orphanedPhotoIds,
+  partitionByOwner,
   pendingEvents,
   photoOutcome,
   PHOTO_UNMATCHED_AFTER,
@@ -35,6 +37,7 @@ const check: DriverEvent = {
 
 const photo = (defectClientId: string): DriverQueuePayload => ({
   kind: "photo",
+  ownerId: "u1",
   defectClientId,
   blob: new Blob(["x"]),
   mimeType: "image/jpeg",
@@ -100,11 +103,53 @@ describe("dependants", () => {
 
   it("finds the photos orphaned by a refused event", () => {
     let queue: QueueItem<DriverQueuePayload>[] = [];
-    queue = enqueue(queue, "e1", { kind: "event", event: check }, 0);
+    queue = enqueue(queue, "e1", { kind: "event", ownerId: "u1", event: check }, 0);
     queue = enqueue(queue, "p1", photo("d1"), 0);
     queue = enqueue(queue, "p2", photo("other"), 0);
     queue = enqueue(queue, "p3", photo("d2"), 0);
     expect(orphanedPhotoIds(queue, check)).toEqual(["p1", "p3"]);
     expect(pendingEvents(queue)).toEqual([check]);
+  });
+});
+
+describe("partitionByOwner", () => {
+  const owned = (ownerId: string): DriverQueuePayload => ({ ...photo("d1"), ownerId });
+  function build(): QueueItem<DriverQueuePayload>[] {
+    let queue: QueueItem<DriverQueuePayload>[] = [];
+    queue = enqueue(queue, "a1", owned("driver-a"), 0);
+    queue = enqueue(queue, "b1", owned("driver-b"), 0);
+    queue = enqueue(queue, "a2", { kind: "event", ownerId: "driver-a", event: check }, 0);
+    queue = enqueue(queue, "b2", owned("driver-b"), 0);
+    queue = enqueue(queue, "a3", owned("driver-a"), 0);
+    return queue;
+  }
+
+  it("keeps only the signed-in driver's items, in their original order", () => {
+    const { mine, heldForOthers } = partitionByOwner(build(), "driver-a");
+    expect(mine.map((i) => i.id)).toEqual(["a1", "a2", "a3"]);
+    expect(heldForOthers).toBe(2);
+  });
+
+  it("holds everything when nobody is signed in", () => {
+    expect(partitionByOwner(build(), null)).toEqual({ mine: [], heldForOthers: 5 });
+  });
+
+  it("holds an item with no recorded owner", () => {
+    const legacy = { id: "x", payload: { kind: "photo" } as unknown as DriverQueuePayload, attempts: 0, serverFailures: 0, nextAttemptAt: 0, lastError: null };
+    expect(partitionByOwner([legacy], "driver-a")).toEqual({ mine: [], heldForOthers: 1 });
+  });
+
+  it("offers only the driver's own head, so a held item never blocks them", () => {
+    const queue = build();
+    expect(partitionByOwner(queue, "driver-b").mine[0].id).toBe("b1");
+    const after = applyOutcome(queue, "b1", { kind: "sent" }, 0).queue;
+    expect(partitionByOwner(after, "driver-b").mine.map((i) => i.id)).toEqual(["b2"]);
+    expect(partitionByOwner(after, "driver-a").mine.map((i) => i.id)).toEqual(["a1", "a2", "a3"]);
+  });
+
+  it("words the held count for the sync strip", () => {
+    expect(heldForOthersMessage(0)).toBeNull();
+    expect(heldForOthersMessage(1)).toBe("1 item queued by another driver on this phone is waiting for them to sign in.");
+    expect(heldForOthersMessage(3)).toBe("3 items queued by another driver on this phone are waiting for them to sign in.");
   });
 });
