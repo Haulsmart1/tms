@@ -72,15 +72,22 @@ export function validateBreakStart(
   if (shift.endedAt !== null) return { ok: false, error: "The shift has already ended." };
   if (t < Date.parse(shift.startedAt)) return { ok: false, error: "A break cannot start before the shift." };
   if (shift.breaks.some((b) => b.endedAt === null)) return { ok: false, error: "A break is already running." };
-  if (shift.breaks.some((b) => b.endedAt !== null && t >= Date.parse(b.startedAt) && t < Date.parse(b.endedAt))) {
-    return { ok: false, error: "That time overlaps an earlier break." };
+  // The new break has no end yet, so it overlaps every closed break that is
+  // still running at t or starts after it (a later break synced out of order).
+  if (shift.breaks.some((b) => b.endedAt !== null && t < Date.parse(b.endedAt))) {
+    return { ok: false, error: "That time overlaps another break." };
   }
   return { ok: true };
 }
 
-export function validateBreakEnd(openBreak: TimeInterval | null, at: string): Result {
+export function validateBreakEnd(openBreak: TimeInterval | null, at: string, closedBreaks: readonly TimeInterval[]): Result {
   if (!openBreak || openBreak.endedAt !== null) return { ok: false, error: "No break is running." };
-  if (Date.parse(at) < Date.parse(openBreak.startedAt)) return { ok: false, error: "A break cannot end before it starts." };
+  const start = Date.parse(openBreak.startedAt);
+  const end = Date.parse(at);
+  if (end < start) return { ok: false, error: "A break cannot end before it starts." };
+  if (closedBreaks.some((b) => b.endedAt !== null && Date.parse(b.startedAt) < end && Date.parse(b.endedAt) > start)) {
+    return { ok: false, error: "That time overlaps another break." };
+  }
   return { ok: true };
 }
 

@@ -30,6 +30,8 @@ export type DriverShiftState = {
   catalogue: CatalogueItem[];
   openShift: null | {
     id: string;
+    /** The shift's client id: queued break, swap and end events name it as shiftClientId. */
+    clientId: string;
     startedAt: string;
     onBreak: boolean;
     breaks: TimeInterval[];

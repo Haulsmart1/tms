@@ -2,6 +2,14 @@
   Apply one queued driver event (lib/shifts/events.ts). Server-only.
   The phone is never trusted for severity, vehicle identity or time sanity:
   each is recomputed here before the RPC in shifts_04 writes atomically.
+
+  Idempotency comes FIRST: a repeated clientId answers 200 duplicate before any
+  business check runs, so the retry of an event that was saved (whose vehicle
+  has since gone VOR, or whose break has since closed) is never refused and
+  never wedges the phone's queue. The RPCs repeat the lookup under their lock.
+
+  Break, swap and end events name their shift (shiftClientId), so a late event
+  only ever attaches to its own shift, never to whichever one is open now.
 */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -13,7 +21,14 @@ import { parseQrPayload, registrationsMatch } from "./qrToken";
 import { toSnapshot } from "./catalogue";
 import { checkResult, resolveDefect, type ResolvedDefect } from "./severity";
 import { vorReasonForDefects } from "./vor";
-import { loadAssignedVehicleId, loadCatalogueRows, loadOpenShift, loadTenantVehicles } from "./server";
+import {
+  KNOWN_RPC_REFUSALS,
+  loadAssignedVehicleId,
+  loadCatalogueRows,
+  loadShiftByClientId,
+  loadTenantVehicles,
+  type OpenShiftRows,
+} from "./server";
 import { occurrenceCheck, type EventFlag } from "../shifts/syncRules";
 import { validateBreakEnd, validateBreakStart } from "../shifts/hours";
 import type { CheckSubmittedEvent, DriverEvent, QueuedDefect } from "../shifts/events";
@@ -22,6 +37,8 @@ import type { CatalogueItem } from "./types";
 export type ProcessResult = { status: number; body: Record<string, unknown> };
 
 const refuse = (status: number, error: string): ProcessResult => ({ status, body: { error } });
+
+export const SHIFT_NOT_FOUND = "That shift was not found. Ask the office.";
 
 function rpcDefects(resolved: readonly ResolvedDefect[]) {
   return resolved.map((d) => ({
@@ -50,23 +67,63 @@ function resolveAll(
 }
 
 function rpcError(error: { code?: string; message?: string }): ProcessResult {
-  const known = ["SHF01", "SHF02", "SHF03", "SHF04", "SHF05", "WLK02", "LIC01", "LIC02"];
-  if (known.includes(error.code ?? "")) return refuse(409, error.message ?? "Refused.");
+  if (KNOWN_RPC_REFUSALS.includes(error.code ?? "")) return refuse(409, error.message ?? "Refused.");
   console.error("[walkaround] rpc failed", error.code, error.message);
   return refuse(500, "Unable to save. Try again.");
+}
+
+/** The latest time already recorded on the shift, for the out-of-order flag. */
+function lastRecorded(rows: OpenShiftRows): string | null {
+  if (!rows.shift) return null;
+  return [rows.shift.startedAt, ...rows.breaks.flatMap((b) => [b.startedAt, b.endedAt ?? b.startedAt])].sort().at(-1) ?? null;
+}
+
+/*
+  Where each event type's clientId is stored once it has been saved. A
+  shift_ended with new defects also writes an end_of_shift check under the same
+  clientId; driver_shifts.end_client_id is written in the same transaction.
+*/
+const IDEMPOTENCY_KEY: Record<DriverEvent["type"], { table: string; column: string; select: string }> = {
+  check_submitted: { table: "walkaround_checks", column: "client_id", select: "id,shift_id,result" },
+  break_started: { table: "shift_breaks", column: "client_id", select: "id" },
+  break_ended: { table: "shift_breaks", column: "end_client_id", select: "id" },
+  shift_ended: { table: "driver_shifts", column: "end_client_id", select: "id" },
+  objection_raised: { table: "defect_objections", column: "client_id", select: "id,status" },
+};
+
+/** 200 duplicate when this event's clientId was already saved, else null. Runs before any business check. */
+export async function findDuplicate(admin: SupabaseClient, tenantId: string, event: DriverEvent): Promise<ProcessResult | null> {
+  const key = IDEMPOTENCY_KEY[event.type];
+  const { data, error } = await admin
+    .from(key.table)
+    .select(key.select)
+    .eq("tenant_id", tenantId)
+    .eq(key.column, event.clientId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  const row = data as unknown as Record<string, unknown>;
+  if (event.type === "check_submitted") {
+    return { status: 200, body: { ok: true, duplicate: true, check_id: row.id, shift_id: row.shift_id ?? null, result: row.result } };
+  }
+  if (event.type === "objection_raised") {
+    return { status: 200, body: { ok: true, duplicate: true, objectionId: row.id, status: row.status } };
+  }
+  return { status: 200, body: { ok: true, duplicate: true } };
 }
 
 async function processCheck(admin: SupabaseClient, session: DriverSession, event: CheckSubmittedEvent, receivedAt: Date): Promise<ProcessResult> {
   const operator = await loadOperatorProfile(admin, session.tenantId);
   const companyId = operator.companyId ?? session.tenantId;
-  const [vehicles, open, catalogueRows] = await Promise.all([
+  const [vehicles, named, catalogueRows] = await Promise.all([
     loadTenantVehicles(admin, session.tenantId, operator.companyId),
-    loadOpenShift(admin, session),
+    event.shiftClientId ? loadShiftByClientId(admin, session, event.shiftClientId) : Promise.resolve(null),
     loadCatalogueRows(admin, companyId),
   ]);
+  // A swap names its shift; a start opens a new one (the RPC refuses SHF01 if one is open).
+  if (event.phase === "swap" && !named?.shift) return refuse(409, SHIFT_NOT_FOUND);
 
-  const previous = open.shift ? [open.shift.startedAt, ...open.breaks.flatMap((b) => [b.startedAt, b.endedAt ?? b.startedAt])].sort().at(-1) ?? null : null;
-  const timing = occurrenceCheck({ occurredAt: event.occurredAt, receivedAt, previousOccurredAt: previous });
+  const timing = occurrenceCheck({ occurredAt: event.occurredAt, receivedAt, previousOccurredAt: named ? lastRecorded(named) : null });
   if (!timing.ok) return refuse(400, timing.error);
   const flags: string[] = [...timing.flags];
 
@@ -117,6 +174,7 @@ async function processCheck(admin: SupabaseClient, session: DriverSession, event
       driver_id: session.driverId,
       user_id: session.userId,
       client_id: event.clientId,
+      shift_client_id: event.shiftClientId,
       phase: event.phase,
       performed_at: event.occurredAt,
       vehicle_id: vehicle.id,
@@ -136,18 +194,24 @@ async function processCheck(admin: SupabaseClient, session: DriverSession, event
 }
 
 async function processShiftEvent(admin: SupabaseClient, session: DriverSession, event: Exclude<DriverEvent, CheckSubmittedEvent | { type: "objection_raised" }>, receivedAt: Date): Promise<ProcessResult> {
-  const open = await loadOpenShift(admin, session);
-  const previous = open.shift ? [open.shift.startedAt, ...open.breaks.flatMap((b) => [b.startedAt, b.endedAt ?? b.startedAt])].sort().at(-1) ?? null : null;
-  const timing = occurrenceCheck({ occurredAt: event.occurredAt, receivedAt, previousOccurredAt: previous });
+  const named = await loadShiftByClientId(admin, session, event.shiftClientId);
+  if (!named.shift) return refuse(409, SHIFT_NOT_FOUND);
+  const timing = occurrenceCheck({ occurredAt: event.occurredAt, receivedAt, previousOccurredAt: lastRecorded(named) });
   if (!timing.ok) return refuse(400, timing.error);
   const flags: EventFlag[] = timing.flags;
 
-  if (open.shift && event.type === "break_started") {
-    const v = validateBreakStart({ startedAt: open.shift.startedAt, endedAt: null, breaks: open.breaks }, event.occurredAt);
+  // Break rules apply to a shift that is still open. For one the office has
+  // already ended, the RPC attaches or flags the late event instead (office wins).
+  if (named.shift.endedAt === null && event.type === "break_started") {
+    const v = validateBreakStart({ startedAt: named.shift.startedAt, endedAt: null, breaks: named.breaks }, event.occurredAt);
     if (!v.ok) return refuse(409, v.error);
   }
-  if (open.shift && event.type === "break_ended") {
-    const v = validateBreakEnd(open.breaks.find((b) => b.endedAt === null) ?? null, event.occurredAt);
+  if (named.shift.endedAt === null && event.type === "break_ended") {
+    const v = validateBreakEnd(
+      named.breaks.find((b) => b.endedAt === null) ?? null,
+      event.occurredAt,
+      named.breaks.filter((b) => b.endedAt !== null),
+    );
     if (!v.ok) return refuse(409, v.error);
   }
 
@@ -175,6 +239,7 @@ async function processShiftEvent(admin: SupabaseClient, session: DriverSession, 
       driver_id: session.driverId,
       type: event.type,
       client_id: event.clientId,
+      shift_client_id: event.shiftClientId,
       occurred_at: event.occurredAt,
       flags,
       odometer: event.type === "shift_ended" ? event.odometer : null,
@@ -186,15 +251,6 @@ async function processShiftEvent(admin: SupabaseClient, session: DriverSession, 
 }
 
 async function processObjection(admin: SupabaseClient, session: DriverSession, event: Extract<DriverEvent, { type: "objection_raised" }>): Promise<ProcessResult> {
-  const { data: existing, error: existingError } = await admin
-    .from("defect_objections")
-    .select("id,status")
-    .eq("tenant_id", session.tenantId)
-    .eq("client_id", event.clientId)
-    .maybeSingle();
-  if (existingError) throw new Error(existingError.message);
-  if (existing) return { status: 200, body: { ok: true, duplicate: true, objectionId: existing.id, status: existing.status } };
-
   // The defect must be on one of THIS driver's checks and be dangerous.
   const { data: defect, error } = await admin
     .from("walkaround_defects")
@@ -214,13 +270,20 @@ async function processObjection(admin: SupabaseClient, session: DriverSession, e
     .select("id")
     .single();
   if (insertError) {
-    if (insertError.code === "23505") return refuse(409, "An objection to this defect is already waiting for a decision.");
+    if (insertError.code === "23505") {
+      // A concurrent retry of this same event won the insert: still a duplicate, not a refusal.
+      const again = await findDuplicate(admin, session.tenantId, event);
+      if (again) return again;
+      return refuse(409, "An objection to this defect is already waiting for a decision.");
+    }
     throw new Error(insertError.message);
   }
   return { status: 200, body: { ok: true, duplicate: false, objectionId: inserted.id } };
 }
 
 export async function processDriverEvent(admin: SupabaseClient, session: DriverSession, event: DriverEvent, receivedAt: Date): Promise<ProcessResult> {
+  const duplicate = await findDuplicate(admin, session.tenantId, event);
+  if (duplicate) return duplicate;
   if (event.type === "check_submitted") return processCheck(admin, session, event, receivedAt);
   if (event.type === "objection_raised") return processObjection(admin, session, event);
   return processShiftEvent(admin, session, event, receivedAt);

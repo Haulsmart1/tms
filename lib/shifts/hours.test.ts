@@ -77,13 +77,30 @@ describe("validateBreakStart", () => {
     expect(validateBreakStart({ ...shift, breaks: [{ startedAt: "2026-09-29T09:00:00Z", endedAt: null }] }, "2026-09-29T10:00:00Z").ok).toBe(false);
     expect(validateBreakStart({ ...shift, endedAt: "2026-09-29T09:00:00Z" }, "2026-09-29T10:00:00Z").ok).toBe(false);
   });
+
+  it("refuses a start that would run into a later closed break (an out-of-order sync)", () => {
+    expect(validateBreakStart(shift, "2026-09-29T07:00:00Z").ok).toBe(false);
+    expect(validateBreakStart(shift, "2026-09-29T08:30:00Z")).toEqual({ ok: true });
+  });
 });
 
 describe("validateBreakEnd", () => {
   it("needs a running break and a later time", () => {
-    expect(validateBreakEnd(null, "2026-09-29T10:00:00Z").ok).toBe(false);
-    expect(validateBreakEnd({ startedAt: "2026-09-29T10:00:00Z", endedAt: null }, "2026-09-29T09:59:00Z").ok).toBe(false);
-    expect(validateBreakEnd({ startedAt: "2026-09-29T10:00:00Z", endedAt: null }, "2026-09-29T10:45:00Z")).toEqual({ ok: true });
+    expect(validateBreakEnd(null, "2026-09-29T10:00:00Z", []).ok).toBe(false);
+    expect(validateBreakEnd({ startedAt: "2026-09-29T10:00:00Z", endedAt: null }, "2026-09-29T09:59:00Z", []).ok).toBe(false);
+    expect(validateBreakEnd({ startedAt: "2026-09-29T10:00:00Z", endedAt: null }, "2026-09-29T10:45:00Z", [])).toEqual({ ok: true });
+  });
+
+  it("refuses an end that would overlap a later closed break", () => {
+    const open = { startedAt: "2026-09-29T10:00:00Z", endedAt: null };
+    const closed = [
+      { startedAt: "2026-09-29T08:00:00Z", endedAt: "2026-09-29T08:30:00Z" },
+      { startedAt: "2026-09-29T11:00:00Z", endedAt: "2026-09-29T11:15:00Z" },
+    ];
+    expect(validateBreakEnd(open, "2026-09-29T11:05:00Z", closed).ok).toBe(false);
+    expect(validateBreakEnd(open, "2026-09-29T12:00:00Z", closed).ok).toBe(false);
+    expect(validateBreakEnd(open, "2026-09-29T11:00:00Z", closed)).toEqual({ ok: true });
+    expect(validateBreakEnd(open, "2026-09-29T10:30:00Z", closed)).toEqual({ ok: true });
   });
 });
 

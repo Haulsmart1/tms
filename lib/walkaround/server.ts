@@ -98,28 +98,23 @@ export async function loadAssignedVehicleId(admin: SupabaseClient, session: Driv
 }
 
 export type OpenShiftRows = {
-  shift: { id: string; startedAt: string; flags: string[] } | null;
+  shift: { id: string; clientId: string; startedAt: string; endedAt: string | null; flags: string[] } | null;
   breaks: { startedAt: string; endedAt: string | null }[];
   period: { id: string; vehicleId: string; startOdometer: number; checkResult: CheckResult | null; vehicleVor: boolean } | null;
 };
 
-export async function loadOpenShift(admin: SupabaseClient, session: DriverSession): Promise<OpenShiftRows> {
-  const { data: shift, error } = await admin
-    .from("driver_shifts")
-    .select("id,started_at,flags")
-    .eq("tenant_id", session.tenantId)
-    .eq("driver_id", session.driverId)
-    .is("ended_at", null)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
+const SHIFT_SELECT = "id,client_id,started_at,ended_at,flags";
+
+async function shiftDetail(admin: SupabaseClient, shift: Record<string, unknown> | null): Promise<OpenShiftRows> {
   if (!shift) return { shift: null, breaks: [], period: null };
+  const shiftId = String(shift.id);
 
   const [breaksResult, periodResult] = await Promise.all([
-    admin.from("shift_breaks").select("started_at,ended_at").eq("shift_id", shift.id).order("started_at"),
+    admin.from("shift_breaks").select("started_at,ended_at").eq("shift_id", shiftId).order("started_at"),
     admin
       .from("shift_vehicle_periods")
       .select("id,vehicle_id,start_odometer,walkaround_check_id")
-      .eq("shift_id", shift.id)
+      .eq("shift_id", shiftId)
       .is("ended_at", null)
       .maybeSingle(),
   ]);
@@ -145,10 +140,41 @@ export async function loadOpenShift(admin: SupabaseClient, session: DriverSessio
   }
 
   return {
-    shift: { id: String(shift.id), startedAt: String(shift.started_at), flags: (shift.flags as string[]) ?? [] },
+    shift: {
+      id: shiftId,
+      clientId: String(shift.client_id),
+      startedAt: String(shift.started_at),
+      endedAt: shift.ended_at ? String(shift.ended_at) : null,
+      flags: (shift.flags as string[]) ?? [],
+    },
     breaks: (breaksResult.data ?? []).map((b) => ({ startedAt: String(b.started_at), endedAt: b.ended_at ? String(b.ended_at) : null })),
     period,
   };
+}
+
+export async function loadOpenShift(admin: SupabaseClient, session: DriverSession): Promise<OpenShiftRows> {
+  const { data: shift, error } = await admin
+    .from("driver_shifts")
+    .select(SHIFT_SELECT)
+    .eq("tenant_id", session.tenantId)
+    .eq("driver_id", session.driverId)
+    .is("ended_at", null)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return shiftDetail(admin, shift as Record<string, unknown> | null);
+}
+
+/** The shift a queued event names (open or already ended), for this driver only. */
+export async function loadShiftByClientId(admin: SupabaseClient, session: DriverSession, shiftClientId: string): Promise<OpenShiftRows> {
+  const { data: shift, error } = await admin
+    .from("driver_shifts")
+    .select(SHIFT_SELECT)
+    .eq("tenant_id", session.tenantId)
+    .eq("driver_id", session.driverId)
+    .eq("client_id", shiftClientId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return shiftDetail(admin, shift as Record<string, unknown> | null);
 }
 
 export async function loadJobGateInput(admin: SupabaseClient, session: DriverSession): Promise<JobGateInput> {
@@ -282,6 +308,7 @@ export async function loadDriverShiftState(admin: SupabaseClient, session: Drive
     openShift: open.shift
       ? {
           id: open.shift.id,
+          clientId: open.shift.clientId,
           startedAt: open.shift.startedAt,
           onBreak: open.breaks.some((b) => b.endedAt === null),
           breaks: open.breaks,
@@ -295,10 +322,15 @@ export async function loadDriverShiftState(admin: SupabaseClient, session: Drive
   };
 }
 
+/** Business refusals raised by the shifts_04 RPCs (and prodfix_30's licence gate): 409 with the database's sentence. */
+export const KNOWN_RPC_REFUSALS: readonly string[] = [
+  "SHF01", "SHF02", "SHF03", "SHF04", "SHF05", "SHF06", "SHF07", "WLK02", "WLK04", "LIC01", "LIC02",
+];
+
 /** Map an RPC error to an HTTP answer. Known business refusals are 409 with the database's sentence. */
 export function rpcErrorResponse(error: { code?: string; message?: string } | null): NextResponse {
   const code = error?.code ?? "";
-  if (["SHF01", "SHF02", "SHF03", "SHF04", "SHF05", "WLK02", "LIC01", "LIC02"].includes(code)) {
+  if (KNOWN_RPC_REFUSALS.includes(code)) {
     return NextResponse.json({ error: error?.message ?? "Refused." }, { status: 409 });
   }
   console.error("[walkaround] rpc failed", code, error?.message);

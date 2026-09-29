@@ -39,6 +39,7 @@ function check(over: Partial<Extract<DriverEvent, { type: "check_submitted" }>>)
     clientId: "c1",
     occurredAt: "2026-09-29T05:40:00Z",
     phase: "start",
+    shiftClientId: null,
     vehicleId: "v1",
     confirmation: "registration",
     qrPayload: null,
@@ -61,7 +62,7 @@ describe("projectDriverState", () => {
   it("opens a shift locally for a passing check", () => {
     const s = projectDriverState(server, [check({})]);
     expect(s.syncPending).toBe(true);
-    expect(s.openShift).toMatchObject({ startedAt: "2026-09-29T05:40:00Z", onBreak: false, currentVehicle: { vehicleId: "v1", registration: "AB12 CDE", startOdometer: 1000, checkResult: "pass" } });
+    expect(s.openShift).toMatchObject({ clientId: "c1", startedAt: "2026-09-29T05:40:00Z", onBreak: false, currentVehicle: { vehicleId: "v1", registration: "AB12 CDE", startOdometer: 1000, checkResult: "pass" } });
   });
 
   it("shows a blocking check, with reasons, for a dangerous one", () => {
@@ -75,14 +76,27 @@ describe("projectDriverState", () => {
   });
 
   it("tracks breaks, swaps and the end of the shift", () => {
-    let s = projectDriverState(server, [check({}), { type: "break_started", clientId: "b1", occurredAt: "2026-09-29T09:00:00Z" }]);
+    let s = projectDriverState(server, [check({}), { type: "break_started", clientId: "b1", shiftClientId: "c1", occurredAt: "2026-09-29T09:00:00Z" }]);
     expect(s.openShift?.onBreak).toBe(true);
-    s = projectDriverState(server, [check({}), { type: "break_started", clientId: "b1", occurredAt: "2026-09-29T09:00:00Z" }, { type: "break_ended", clientId: "b2", occurredAt: "2026-09-29T09:45:00Z" }]);
+    s = projectDriverState(server, [check({}), { type: "break_started", clientId: "b1", shiftClientId: "c1", occurredAt: "2026-09-29T09:00:00Z" }, { type: "break_ended", clientId: "b2", shiftClientId: "c1", occurredAt: "2026-09-29T09:45:00Z" }]);
     expect(s.openShift?.onBreak).toBe(false);
     expect(s.openShift?.breaks).toEqual([{ startedAt: "2026-09-29T09:00:00Z", endedAt: "2026-09-29T09:45:00Z" }]);
-    s = projectDriverState(server, [check({}), check({ clientId: "c2", phase: "swap", vehicleId: "v2", previousEndOdometer: 1100, odometer: 5000 })]);
+    s = projectDriverState(server, [check({}), check({ clientId: "c2", phase: "swap", shiftClientId: "c1", vehicleId: "v2", previousEndOdometer: 1100, odometer: 5000 })]);
     expect(s.openShift?.currentVehicle).toMatchObject({ vehicleId: "v2", startOdometer: 5000 });
-    s = projectDriverState(server, [check({}), { type: "shift_ended", clientId: "e1", occurredAt: "2026-09-29T14:00:00Z", odometer: 1200, newDefects: [] }]);
+    s = projectDriverState(server, [check({}), { type: "shift_ended", clientId: "e1", shiftClientId: "c1", occurredAt: "2026-09-29T14:00:00Z", odometer: 1200, newDefects: [] }]);
+    expect(s.openShift).toBeNull();
+  });
+
+  it("never lets an event for another shift touch the open one", () => {
+    const open: DriverShiftState = {
+      ...server,
+      openShift: { id: "s2", clientId: "new", startedAt: "2026-09-29T10:00:00Z", onBreak: false, breaks: [], currentVehicle: null },
+    };
+    let s = projectDriverState(open, [{ type: "break_started", clientId: "b1", shiftClientId: "old", occurredAt: "2026-09-29T11:00:00Z" }]);
+    expect(s.openShift).toMatchObject({ id: "s2", onBreak: false, breaks: [] });
+    s = projectDriverState(open, [{ type: "shift_ended", clientId: "e1", shiftClientId: "old", occurredAt: "2026-09-29T11:00:00Z", odometer: 1, newDefects: [] }]);
+    expect(s.openShift?.id).toBe("s2");
+    s = projectDriverState(open, [{ type: "shift_ended", clientId: "e2", shiftClientId: "new", occurredAt: "2026-09-29T11:00:00Z", odometer: 1, newDefects: [] }]);
     expect(s.openShift).toBeNull();
   });
 

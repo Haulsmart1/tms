@@ -40,6 +40,10 @@ export function projectDriverState(server: DriverShiftState, pending: readonly D
   const registration = (id: string) => server.vehicles.find((v) => v.id === id)?.registration ?? "Vehicle";
   let state: DriverShiftState = { ...server, syncPending: true };
 
+  // An event only ever touches the shift it names (a late event for a shift
+  // the office has since ended must not change the one open now).
+  const ours = (shiftClientId: string | null) => state.openShift !== null && state.openShift.clientId === shiftClientId;
+
   for (const event of pending) {
     if (event.type === "check_submitted") {
       const resolved = resolveAll(event.defects, catalogue);
@@ -54,7 +58,7 @@ export function projectDriverState(server: DriverShiftState, pending: readonly D
             performedAt: event.occurredAt,
             defects: resolved.map((d) => view(d, catalogue, server.companyName)),
           },
-          openShift: state.openShift && event.phase === "swap" ? { ...state.openShift, currentVehicle: null } : state.openShift,
+          openShift: state.openShift && event.phase === "swap" && ours(event.shiftClientId) ? { ...state.openShift, currentVehicle: null } : state.openShift,
         };
         continue;
       }
@@ -63,16 +67,18 @@ export function projectDriverState(server: DriverShiftState, pending: readonly D
         ...state,
         blockingCheck: null,
         openShift:
-          event.phase === "swap" && state.openShift
-            ? { ...state.openShift, currentVehicle }
-            : { id: `pending:${event.clientId}`, startedAt: event.occurredAt, onBreak: false, breaks: [], currentVehicle },
+          event.phase === "swap"
+            ? state.openShift && ours(event.shiftClientId)
+              ? { ...state.openShift, currentVehicle }
+              : state.openShift
+            : { id: `pending:${event.clientId}`, clientId: event.clientId, startedAt: event.occurredAt, onBreak: false, breaks: [], currentVehicle },
       };
-    } else if (event.type === "break_started" && state.openShift) {
+    } else if (event.type === "break_started" && state.openShift && ours(event.shiftClientId)) {
       state = { ...state, openShift: { ...state.openShift, onBreak: true, breaks: [...state.openShift.breaks, { startedAt: event.occurredAt, endedAt: null }] } };
-    } else if (event.type === "break_ended" && state.openShift) {
+    } else if (event.type === "break_ended" && state.openShift && ours(event.shiftClientId)) {
       const breaks = state.openShift.breaks.map((b) => (b.endedAt === null ? { ...b, endedAt: event.occurredAt } : b));
       state = { ...state, openShift: { ...state.openShift, onBreak: false, breaks } };
-    } else if (event.type === "shift_ended") {
+    } else if (event.type === "shift_ended" && ours(event.shiftClientId)) {
       state = { ...state, openShift: null, blockingCheck: null };
     } else if (event.type === "objection_raised" && state.blockingCheck) {
       const defects = state.blockingCheck.defects.map((d) =>
