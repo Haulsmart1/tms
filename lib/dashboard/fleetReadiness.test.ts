@@ -63,4 +63,15 @@ describe("fleetTodayRows", () => {
     expect(rows.find((r) => r.vehicleId === "v3")).toMatchObject({ driverName: null, checkResult: null, shiftState: "none", onJobToday: true });
     expect(rows.find((r) => r.vehicleId === "v1")).toMatchObject({ checkResult: "dangerous", dangerousDefects: 1, vor: true });
   });
+
+  it("says ended only when a shift actually ended on the vehicle, not merely because it was checked", () => {
+    const rows = fleetTodayRows(input);
+    // v1 failed its check this morning and no shift ever ran on it.
+    expect(rows.find((r) => r.vehicleId === "v1")).toMatchObject({ shiftState: "none" });
+    const withEnded = fleetTodayRows({
+      ...input,
+      shifts: [...input.shifts, { id: "s3", driverId: "d3", driverName: "P. Brown", startedAt: "2026-09-29T05:00:00Z", endedAt: "2026-09-29T10:00:00Z", onBreak: false, currentVehicleId: "v3", flags: [] }],
+    });
+    expect(withEnded.find((r) => r.vehicleId === "v3")).toMatchObject({ shiftState: "ended", driverName: "P. Brown" });
+  });
 });

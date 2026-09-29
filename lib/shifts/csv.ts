@@ -1,6 +1,7 @@
 /*
   Shift history CSV for /shifts. Times are shown in the operator's time zone.
-  Cells that a spreadsheet would treat as a formula are prefixed with a quote.
+  Cells that a spreadsheet would treat as a formula (including one hidden
+  behind a leading tab or carriage return) are prefixed with a quote.
 */
 
 import { operatorDayInTimeZone } from "../time";
@@ -17,7 +18,7 @@ export type ShiftCsvRow = {
 
 export function csvCell(value: string): string {
   let v = value;
-  if (/^[=+\-@]/.test(v)) v = `'${v}`;
+  if (/^[=+\-@\t\r]/.test(v)) v = `'${v}`;
   return /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 }
 

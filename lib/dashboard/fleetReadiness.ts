@@ -118,16 +118,23 @@ export function fleetTodayRows(input: FleetInput): FleetTodayRow[] {
     const checks = input.checksToday.filter((c) => c.vehicleId === v.id).sort((a, b) => b.performedAt.localeCompare(a.performedAt));
     const latest = checks[0] ?? null;
     const shift = input.shifts.find((s) => s.currentVehicleId === v.id && s.endedAt === null) ?? null;
+    // "ended" needs a shift that actually ended on this vehicle. A check alone
+    // (a dangerous one that started nothing, say) is not a shift.
+    const ended = shift
+      ? null
+      : input.shifts
+          .filter((s) => s.currentVehicleId === v.id && s.endedAt !== null)
+          .sort((a, b) => (b.endedAt as string).localeCompare(a.endedAt as string))[0] ?? null;
     const defects = input.openDefects.filter((d) => d.vehicleId === v.id);
-    const shiftState: ShiftState = shift ? (shift.onBreak ? "on_break" : "on_duty") : latest ? "ended" : "none";
+    const shiftState: ShiftState = shift ? (shift.onBreak ? "on_break" : "on_duty") : ended ? "ended" : "none";
     return {
       vehicleId: v.id,
       registration: v.registration,
-      driverName: shift?.driverName ?? latest?.driverName ?? null,
+      driverName: shift?.driverName ?? ended?.driverName ?? latest?.driverName ?? null,
       checkTime: latest?.performedAt ?? null,
       checkResult: latest?.result ?? null,
       shiftState,
-      shiftStartedAt: shift?.startedAt ?? null,
+      shiftStartedAt: (shift ?? ended)?.startedAt ?? null,
       openDefects: defects.length,
       dangerousDefects: defects.filter((d) => d.finalSeverity === "dangerous").length,
       vor: v.vor,

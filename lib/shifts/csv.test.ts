@@ -14,6 +14,11 @@ describe("csvCell", () => {
     expect(csvCell("-1")).toBe("'-1");
     expect(csvCell("@x")).toBe("'@x");
   });
+
+  it("neutralises a leading tab or carriage return too", () => {
+    expect(csvCell("\t=1+1")).toBe("'\t=1+1");
+    expect(csvCell("\r=1+1")).toBe('"\'\r=1+1"');
+  });
 });
 
 describe("shiftsToCsv", () => {
@@ -34,6 +39,20 @@ describe("shiftsToCsv", () => {
     const lines = csv.trim().split("\r\n");
     expect(lines[0]).toBe("Driver,Date,Start,End,Vehicles,Duty,Breaks,Worked (excl. breaks),Mileage,Flags,Corrected by office");
     expect(lines[1]).toBe("J. Smith,2026-09-29,05:48,15:00,AB12 CDE; FG34 HIJ,9:12,0:45,8:27,292,,yes");
+  });
+
+  it("renders London clock times across the October 2026 clock change", () => {
+    // 00:30 BST on 25 October to 05:30 GMT the same morning: six real hours.
+    const csv = shiftsToCsv(
+      [{ driverName: "N", startedAt: "2026-10-24T23:30:00Z", endedAt: "2026-10-25T05:30:00Z", vehicles: [], summary: { dutyMinutes: 360, breakMinutes: 0, workedMinutes: 360, mileage: null, flags: [] }, corrected: false }],
+      "Europe/London",
+    );
+    expect(csv.trim().split("\r\n")[1]).toBe("N,2026-10-25,00:30,05:30,,6:00,0:00,6:00,,,no");
+    const after = shiftsToCsv(
+      [{ driverName: "N", startedAt: "2026-10-25T01:30:00Z", endedAt: "2026-10-25T09:00:00Z", vehicles: [], summary: { dutyMinutes: 450, breakMinutes: 0, workedMinutes: 450, mileage: null, flags: [] }, corrected: false }],
+      "Europe/London",
+    );
+    expect(after.trim().split("\r\n")[1]).toBe("N,2026-10-25,01:30,09:00,,7:30,0:00,7:30,,,no");
   });
 
   it("leaves end and mileage empty for an open shift", () => {
