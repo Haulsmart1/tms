@@ -67,7 +67,6 @@ export async function POST(request: NextRequest) {
     if (!driver) {
       return NextResponse.json({ error: "Driver not found." }, { status: 404 });
     }
-    // Strictly true: a deactivated (or never activated) driver cannot be put on shift.
     // The drivers page treats a null `active` as active, so only an explicit false refuses.
     if (driver.active === false) {
       return NextResponse.json({ error: "That driver is not active." }, { status: 400 });
