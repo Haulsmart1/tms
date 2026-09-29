@@ -153,6 +153,7 @@ const PROTECTED_ROUTES = [
   "/settings/permissions",
   "/settings/portal-invites",
   "/settings/users",
+  "/settings/walkaround",
   "/shifts",
   "/stats",
   "/subcontractor/dashboard",

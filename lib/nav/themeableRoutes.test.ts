@@ -135,6 +135,7 @@ describe("isThemeableRoute", () => {
         "/settings/company",
         "/settings/billing",
         "/settings/documents",
+        "/settings/walkaround",
       ].sort(),
     );
   });

@@ -106,6 +106,7 @@ export const THEMEABLE_ROUTES: readonly string[] = [
   "/settings/company",        // app/settings/company/page.tsx
   "/settings/billing",        // app/settings/billing/page.tsx
   "/settings/documents",      // app/settings/documents/page.tsx
+  "/settings/walkaround",     // app/settings/walkaround/page.tsx
 ];
 
 /* The ONLY prefix rule, and it stays that way. /super-admin/companies/[id] is
