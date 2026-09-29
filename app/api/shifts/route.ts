@@ -59,13 +59,17 @@ export async function POST(request: NextRequest) {
 
     const { data: driver, error: driverError } = await admin
       .from("drivers")
-      .select("id")
+      .select("id,active")
       .eq("id", driverId)
       .eq("tenant_id", tenantId)
       .maybeSingle();
     if (driverError) throw new Error(driverError.message);
     if (!driver) {
       return NextResponse.json({ error: "Driver not found." }, { status: 404 });
+    }
+    // Strictly true: a deactivated (or never activated) driver cannot be put on shift.
+    if (driver.active !== true) {
+      return NextResponse.json({ error: "That driver is not active." }, { status: 400 });
     }
 
     const startedAtIso = new Date(startedAtMs).toISOString();
