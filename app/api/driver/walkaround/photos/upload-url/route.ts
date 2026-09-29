@@ -2,13 +2,14 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { isUuid } from "../../../../../../lib/auth/serverTenantAccess";
 import { driverErrorResponse } from "../../../../../../lib/driver/server";
+import { checkRateLimit, RATE_LIMITS } from "../../../../../../lib/rateLimit";
 import { createAdminClient } from "../../../../../../lib/supabase/admin";
+import { MAX_PHOTOS_PER_DEFECT } from "../../../../../../lib/walkaround/photoPaths";
 import { requireDirectDriver } from "../../../../../../lib/walkaround/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MAX_PHOTOS_PER_DEFECT = 5;
 const MAX_PHOTO_BYTES = 10485760;
 
 const PHOTO_EXTENSIONS: Record<string, string> = {
@@ -52,6 +53,11 @@ export async function POST(request: Request) {
     }
 
     const admin = createAdminClient();
+    const limit = await checkRateLimit(admin, RATE_LIMITS.driverWalkaroundPhoto, session.userId);
+    if (!limit.allowed) {
+      return NextResponse.json({ error: "Too many photos. Try again shortly." }, { status: 429 });
+    }
+
     const { data: defect, error } = await admin
       .from("walkaround_defects")
       .select("id,check_id,photo_paths,walkaround_checks!inner(driver_id)")

@@ -13,6 +13,7 @@ import {
   withoutQrPayload,
   type DriverQueuePayload,
 } from "./driverSync";
+import { PHOTO_RACE_MESSAGE } from "../walkaround/photoPaths";
 import { applyOutcome, enqueue, MAX_SERVER_FAILURES, type QueueItem } from "./queue";
 
 const check: DriverEvent = {
@@ -87,6 +88,10 @@ describe("photoOutcome", () => {
 
   it("sets a photo aside once its defect has been missing for too long", () => {
     expect(photoOutcome(404, null, PHOTO_UNMATCHED_AFTER - 1).kind).toBe("rejected");
+  });
+
+  it("retries a lost race recording the photo, rather than dropping it", () => {
+    expect(photoOutcome(409, PHOTO_RACE_MESSAGE, 0)).toMatchObject({ kind: "retry", status: 409 });
   });
 
   it("otherwise reads the answer like an event", () => {

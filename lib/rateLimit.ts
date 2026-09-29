@@ -44,6 +44,10 @@ export const RATE_LIMITS = {
      request per queued event: generous enough for a normal shift plus a
      backlog of offline events replaying at once. */
   driverShiftEvent: { bucket: "driver-shift-event:user", windowSeconds: 600, max: 120 },
+  /* Walkaround defect photos, per signed-in user, shared by both steps (upload
+     URL, then record), so 120 requests is 60 photos in ten minutes: a
+     backlog of offline photos replays without tripping it, a loop does. */
+  driverWalkaroundPhoto: { bucket: "driver-walkaround-photo:user", windowSeconds: 600, max: 120 },
 } as const satisfies Record<string, RateLimitRule>;
 
 const MISSING_FUNCTION_CODES = new Set(["42883", "PGRST202"]);

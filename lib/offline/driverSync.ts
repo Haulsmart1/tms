@@ -13,6 +13,7 @@
 */
 
 import type { DriverEvent } from "../shifts/events";
+import { PHOTO_RACE_MESSAGE } from "../walkaround/photoPaths";
 import { classifySyncFailure, type QueueItem, type SendOutcome } from "./queue";
 
 export type DriverQueuePayload =
@@ -46,13 +47,15 @@ export function eventOutcome(status: number | null, error: string | null): SyncR
 
 /**
  * A 404 from either photo route means the defect has not synced yet: retry,
- * unless it has gone on long enough that it never will.
+ * unless it has gone on long enough that it never will. A 409 carrying
+ * PHOTO_RACE_MESSAGE lost a race with another photo on the same defect: retry.
  */
 export function photoOutcome(status: number | null, error: string | null, attempts: number): SyncResult {
   if (status === 404) {
     if (attempts + 1 >= PHOTO_UNMATCHED_AFTER) return { kind: "rejected", error: PHOTO_UNMATCHED_MESSAGE };
     return { kind: "retry", error: "Waiting for the check to sync.", status };
   }
+  if (status === 409 && error === PHOTO_RACE_MESSAGE) return { kind: "retry", error: "Retrying the photo.", status };
   return eventOutcome(status, error);
 }
 
