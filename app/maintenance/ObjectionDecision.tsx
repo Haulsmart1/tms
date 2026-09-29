@@ -15,6 +15,7 @@ import Textarea from "../../components/Textarea";
 import { dateTimeIn } from "../../lib/shifts/zonedTime";
 import type { DefectObjection } from "../../lib/walkaround/checksQuery";
 import { LIABILITY_NOTICE_TEXT, LIABILITY_NOTICE_VERSION } from "../../lib/walkaround/liability";
+import { decisionNoteError } from "../../lib/walkaround/objectionDecision";
 
 export type ObjectionView = DefectObjection;
 
@@ -42,6 +43,11 @@ export default function ObjectionDecision({
     if (saving) return;
     if (decision === "approve" && !accepted) {
       setError("Tick the box to accept the notice before approving.");
+      return;
+    }
+    const noteError = decisionNoteError(decision, note);
+    if (noteError) {
+      setError(noteError);
       return;
     }
     setSaving(decision);
@@ -98,7 +104,7 @@ export default function ObjectionDecision({
         <div className="mt-3 grid gap-3">
           <Textarea
             id={`objection-note-${objection.id}`}
-            label="Note (optional)"
+            label="Note (optional to approve, required to reject)"
             value={note}
             onChange={(e) => setNote(e.target.value)}
             rows={2}

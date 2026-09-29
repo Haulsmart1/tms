@@ -3,6 +3,7 @@ import { createApiSupabase } from "../../../../../lib/api/server";
 import { authorizeTenant, isUuid, TenantAccessError } from "../../../../../lib/auth/serverTenantAccess";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { LIABILITY_NOTICE_VERSION } from "../../../../../lib/walkaround/liability";
+import { decisionNoteError } from "../../../../../lib/walkaround/objectionDecision";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,6 +36,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "decision must be approve or reject." }, { status: 400 });
     }
     const note = typeof body.note === "string" ? body.note.trim() || null : null;
+    const noteError = decisionNoteError(decision, note);
+    if (noteError) {
+      return NextResponse.json({ error: noteError }, { status: 400 });
+    }
 
     if (decision === "approve") {
       if (body.liabilityAccepted !== true || body.liabilityVersion !== LIABILITY_NOTICE_VERSION) {
