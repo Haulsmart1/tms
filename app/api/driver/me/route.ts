@@ -4,11 +4,8 @@ import {
   driverErrorResponse,
   requireDriverSession,
 } from "../../../../lib/driver/server";
-import {
-  OPERATOR_TIME_ZONE,
-  isValidIanaTimeZone,
-  operatorDayInTimeZone,
-} from "../../../../lib/time";
+import { operatorDayInTimeZone } from "../../../../lib/time";
+import { loadOperatorTimeZone } from "../../../../lib/driver/operatorTimeZone";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -95,35 +92,4 @@ export async function GET() {
       { status: response.status },
     );
   }
-}
-
-async function loadOperatorTimeZone(
-  admin: ReturnType<typeof createAdminClient>,
-  tenantId: string,
-): Promise<string> {
-  const { data: tenant, error: tenantError } = await admin
-    .from("tenants")
-    .select("company_id")
-    .eq("id", tenantId)
-    .maybeSingle();
-
-  if (tenantError || !tenant?.company_id) {
-    return OPERATOR_TIME_ZONE;
-  }
-
-  // company_profiles is keyed by the COMPANY id in its tenant_id column.
-  const { data: profile, error: profileError } = await admin
-    .from("company_profiles")
-    .select("timezone")
-    .eq("tenant_id", tenant.company_id)
-    .maybeSingle();
-
-  if (profileError) {
-    console.warn("[driver-me] company time zone lookup failed", profileError.code);
-    return OPERATOR_TIME_ZONE;
-  }
-
-  const candidate = typeof profile?.timezone === "string" ? profile.timezone.trim() : "";
-
-  return candidate && isValidIanaTimeZone(candidate) ? candidate : OPERATOR_TIME_ZONE;
 }
