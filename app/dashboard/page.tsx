@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
@@ -9,7 +10,10 @@ import Stat from "../../components/Stat";
 import DataTable, { type Column } from "../../components/DataTable";
 import { buildNeedsAttention, type AttentionItem, type RevenueDay } from "../../lib/dashboard/aggregate";
 import { buildRevenueForDays, lastNDayKeys, NON_COLLECTABLE_STATUS_FILTER } from "../../lib/dashboard/days";
-import { operatorDay } from "../../lib/time";
+import { fleetAttention, fleetTiles, type FleetTiles } from "../../lib/dashboard/fleetReadiness";
+import { loadCompanyTimeZone } from "../../lib/planning/companyTimeZone";
+import { loadFleetInput } from "../../lib/shifts/fleetQuery";
+import { operatorDay, operatorDayInTimeZone } from "../../lib/time";
 import { isAwaitingPod } from "../../lib/pod/overdue";
 import Skeleton from "../../components/Skeleton";
 import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
@@ -38,6 +42,7 @@ function money(value: number): string {
 export default function DashboardPage() {
   const supabase = createClient();
   const tenant = useTenant();
+  const router = useRouter();
 
   const [state, setState] = useState<"loading" | "error" | "ready">("loading");
   const [kpis, setKpis] = useState<Kpis>({
@@ -51,6 +56,13 @@ export default function DashboardPage() {
      dashboard down; a failed count reads as zero and the panel errs toward
      showing. Admin only: staff cannot add a card, a vehicle or a driver. */
   const [gettingStarted, setGettingStarted] = useState<GettingStartedCounts | null>(null);
+  /* Shifts/walkaround tiles and attention items. Loaded and failed
+     independently of the KPIs above, same reasoning as gettingStarted: the
+     shifts_* SQL may not be applied in every environment yet, and a failure
+     here must hide this row rather than take the whole dashboard down.
+     fleet stays null on any failure, which is also what hides the row. */
+  const [fleet, setFleet] = useState<FleetTiles | null>(null);
+  const [fleetItems, setFleetItems] = useState<AttentionItem[]>([]);
   // The tenant the KPIs/rows on screen were loaded FOR. Set only when the
   // load below reaches "ready", never on "error". See
   // lib/loading/skeletonVisibility.ts.
@@ -224,8 +236,31 @@ export default function DashboardPage() {
       });
     }
 
+    async function loadFleet() {
+      if (tenant.status !== "ready") return;
+      try {
+        const ids = tenant.activeTenantId ? [tenant.activeTenantId] : tenant.tenants.map((t) => t.id);
+        const zone = await loadCompanyTimeZone(supabase, ids);
+        const now = new Date();
+        const today = operatorDayInTimeZone(now, zone.timeZone);
+        const input = await loadFleetInput(supabase, tenant.activeTenantId, today, now, zone.timeZone);
+        if (cancelled) return;
+        setFleet(fleetTiles(input));
+        setFleetItems(fleetAttention(input));
+      } catch (error) {
+        // Fails closed: hides the fleet tiles/attention items rather than the
+        // whole dashboard. Most likely cause today is the shifts_* SQL not
+        // being applied yet in this environment.
+        console.error("[dashboard] fleet load failed", error);
+        if (cancelled) return;
+        setFleet(null);
+        setFleetItems([]);
+      }
+    }
+
     load();
     void loadGettingStarted();
+    void loadFleet();
     return () => { cancelled = true; };
   }, [tenant.activeTenantId, tenant.status]);
 
@@ -243,6 +278,10 @@ export default function DashboardPage() {
   ];
 
   const maxRevenue = Math.max(1, ...revenue.map((d) => d.total));
+
+  // fleetItems first: dangerous defects and pending objections must never be
+  // pushed off the list by older, less urgent items before the slice below.
+  const combinedAttention = [...fleetItems, ...attention];
 
   const showSkeleton = shouldShowSkeleton({
     tenantStatus: tenant.status,
@@ -304,6 +343,42 @@ export default function DashboardPage() {
             />
           </div>
 
+          {/* Own-fleet shifts and walkaround checks. Absent (not skeletoned)
+              until the fleet load above succeeds, same as GettingStartedPanel
+              above: the shifts_* SQL may not be applied in every environment
+              yet, and this row simply does not appear rather than blocking
+              the rest of the dashboard on it. */}
+          {fleet ? (
+            <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+              <Stat
+                label="On shift now"
+                value={String(fleet.onShift)}
+                sub={`of ${fleet.activeDrivers} drivers`}
+                onClick={() => router.push("/shifts")}
+              />
+              <Stat
+                label="Walkarounds today"
+                value={String(fleet.vehiclesChecked)}
+                sub={fleet.vehiclesOutUnchecked > 0 ? `${fleet.vehiclesOutUnchecked} on jobs unchecked` : undefined}
+                subTone="warning"
+                onClick={() => router.push("/shifts")}
+              />
+              <Stat
+                label="Open defects"
+                value={String(fleet.openDefects)}
+                sub={fleet.dangerousDefects > 0 ? `${fleet.dangerousDefects} dangerous` : undefined}
+                subTone="danger"
+                onClick={() => router.push("/maintenance?tab=walkaround")}
+              />
+              <Stat
+                label="Objections"
+                value={String(fleet.pendingObjections)}
+                sub="awaiting approval"
+                onClick={() => router.push("/maintenance?tab=walkaround")}
+              />
+            </div>
+          ) : null}
+
           <div className="mt-6 grid gap-4 lg:grid-cols-[1.6fr_1fr]">
             <section>
               <div className="mb-2 flex items-center justify-between">
@@ -333,11 +408,11 @@ export default function DashboardPage() {
                       </li>
                     ))}
                   </ul>
-                ) : attention.length === 0 ? (
+                ) : combinedAttention.length === 0 ? (
                   <p className="text-sm text-ink-3">Nothing needs attention right now.</p>
                 ) : (
                   <ul className="flex flex-col gap-2">
-                    {attention.slice(0, 5).map((item) => (
+                    {combinedAttention.slice(0, 5).map((item) => (
                       <li key={item.id}>
                         <Link href={item.href} className="block rounded-md px-2 py-1.5 -mx-2 hover:bg-surface-hover">
                           <span className="block text-sm font-medium text-ink">{item.title}</span>

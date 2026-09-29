@@ -75,8 +75,13 @@ export function stopMediaTracks(
   }
 }
 
+/**
+ * `manualEntry` names what the person can type instead: "serial" on the POD
+ * item scanner, "registration" on the walkaround cab QR scanner.
+ */
 export function cameraAccessErrorMessage(
   error: unknown,
+  manualEntry = "serial",
 ): string {
   const name =
     error &&
@@ -92,7 +97,7 @@ export function cameraAccessErrorMessage(
   ) {
     return (
       "Camera permission was denied. Allow camera access " +
-      "in your browser settings, or enter the serial manually."
+      `in your browser settings, or enter the ${manualEntry} manually.`
     );
   }
 
@@ -101,7 +106,7 @@ export function cameraAccessErrorMessage(
     name === "DevicesNotFoundError"
   ) {
     return (
-      "No usable camera was found. Enter the serial manually."
+      `No usable camera was found. Enter the ${manualEntry} manually.`
     );
   }
 
@@ -111,13 +116,13 @@ export function cameraAccessErrorMessage(
   ) {
     return (
       "The camera could not be started. It may already be in " +
-      "use by another app. You can enter the serial manually."
+      `use by another app. You can enter the ${manualEntry} manually.`
     );
   }
 
   return (
     "Camera scanning is unavailable on this device or browser. " +
-    "You can enter the serial manually."
+    `You can enter the ${manualEntry} manually.`
   );
 }
 

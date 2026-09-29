@@ -13,6 +13,7 @@ import {
   jobNotWorkableMessage,
 } from "../../../../../../../../lib/jobs/jobStatus";
 import { createAdminClient } from "../../../../../../../../lib/supabase/admin";
+import { jobGateResponse } from "../../../../../../../../lib/walkaround/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,6 +53,9 @@ export async function POST(request: Request, context: RouteContext) {
     let completedAt = stop.delivered_at ?? new Date().toISOString();
 
     if (!alreadyCompleted) {
+      const gate = await jobGateResponse(admin, session);
+      if (gate) return gate;
+
       if (!isWorkableJobStatus(job.status)) {
         return NextResponse.json({ error: jobNotWorkableMessage(job.status) }, { status: 409 });
       }

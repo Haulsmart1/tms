@@ -1,4 +1,4 @@
-import { Building2, Users, Lock, FileText, Banknote, CreditCard, type LucideIcon } from "lucide-react";
+import { Building2, Users, Lock, FileText, Banknote, CreditCard, ClipboardCheck, type LucideIcon } from "lucide-react";
 
 export default function SettingsPage() {
     const cards: Array<{ title: string; description: string; href: string; icon: LucideIcon }> = [
@@ -26,6 +26,12 @@ export default function SettingsPage() {
             description: "Add or remove licences and manage 4-weekly billing",
             href: "/settings/licences",
             icon: FileText,
+        },
+        {
+            title: "Walkaround checklist",
+            description: "Edit the company's defect items and the on-call number drivers see",
+            href: "/settings/walkaround",
+            icon: ClipboardCheck,
         },
         {
             title: "Documents & Branding",

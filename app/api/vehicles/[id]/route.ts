@@ -17,13 +17,12 @@ import { NextRequest, NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient, createUserClient } from "../../../../lib/accounts/server";
 import {
+  authorizeLegacyCompanyVehicle,
   authorizeTenant,
   isUuid,
-  loadCallerProfile,
   loadTenantRef,
   TenantAccessError,
 } from "../../../../lib/auth/serverTenantAccess";
-import { hasValidHome, roleTier } from "../../../../lib/auth/tenantAccess";
 import {
   decideVehicleDelete,
   isLicenceEverActive,
@@ -36,25 +35,6 @@ export const dynamic = "force-dynamic";
 
 function json(status: number, body: Record<string, unknown>) {
   return NextResponse.json(body, { status });
-}
-
-/**
- * Legacy vehicles carry a COMPANY id in tenant_id (rows written before tenants
- * existed), so there is no tenant row for authorizeTenant to find. Mirror
- * can_manage_tenant for that shape: super_admin, or a company admin of that
- * company whose own profile is coherent.
- */
-async function authorizeLegacyCompanyVehicle(
-  admin: SupabaseClient,
-  userId: string,
-  companyId: string
-): Promise<boolean> {
-  const caller = await loadCallerProfile(admin, userId);
-  const tier = roleTier(caller.roleName);
-  if (tier === "super_admin") return true;
-  if (tier !== "admin") return false;
-  const homeTenant = await loadTenantRef(admin, caller.homeTenantId);
-  return hasValidHome(caller, homeTenant) && caller.companyId === companyId;
 }
 
 async function countRows(

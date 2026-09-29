@@ -113,6 +113,7 @@ describe("isThemeableRoute", () => {
         "/dashboard",
         "/jobs",
         "/planning",
+        "/shifts",
         "/pod",
         "/tracking",
         "/drivers",
@@ -134,6 +135,7 @@ describe("isThemeableRoute", () => {
         "/settings/company",
         "/settings/billing",
         "/settings/documents",
+        "/settings/walkaround",
       ].sort(),
     );
   });

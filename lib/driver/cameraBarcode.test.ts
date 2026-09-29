@@ -76,6 +76,18 @@ describe(
     );
 
     it(
+      "names what can be typed instead of scanning",
+      () => {
+        expect(cameraAccessErrorMessage({ name: "NotFoundError" })).toBe(
+          "No usable camera was found. Enter the serial manually.",
+        );
+        expect(cameraAccessErrorMessage({ name: "NotFoundError" }, "registration")).toBe(
+          "No usable camera was found. Enter the registration manually.",
+        );
+      },
+    );
+
+    it(
       "gives a no-camera fallback message",
       () => {
         expect(
