@@ -136,7 +136,7 @@ export default function JobsPage() {
         journey_scope, origin_country_code, destination_country_code,
         compliance_regime_override, compliance_override_reason,
         accepted_at, accepted_by, collection_eta, delivery_eta, acceptance_note,
-        customers ( name ), vehicles ( registration ), drivers ( name ),
+        customers ( name, contact_name, phone, mobile, email, accounts_email, operations_email, address_line_1, address_line_2, city, county_region, postcode, country_code ), vehicles ( registration ), drivers ( name ),
         subcontractors ( name, vehicle_reg, driver_name ),
         job_stops ( id, stop_order, type, address_line, city, postcode, status, pod_status, recipient_name, delivered_at, collected_at, pod_notes, pod_photo_url ),
         job_items ( id, sku, description, quantity, serial_numbers, external_reference, notes )
@@ -1539,16 +1539,87 @@ export default function JobsPage() {
                 ) : null}
 
 
-                {/* COMMERCIAL / RESOURCE INFO */}
+                                  {/* COMMERCIAL / RESOURCE INFO */}
                 <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-                  <div className="rounded-md bg-surface-2 p-3">
+                  <div className="col-span-2 rounded-md bg-surface-2 p-3 sm:col-span-2 lg:col-span-2">
                     <div className="text-xs font-semibold text-ink-3">
                       Customer
                     </div>
-                    <div className="truncate text-sm text-ink">
-                      {selectedJob.customers?.name ||
-                        "-"}
+                    <div className="text-sm font-semibold text-ink">
+                      {selectedJob.customers?.name || "-"}
                     </div>
+
+                    {selectedJob.customers?.contact_name ? (
+                      <div className="mt-2 text-sm text-ink">
+                        Contact: {selectedJob.customers.contact_name}
+                      </div>
+                    ) : null}
+
+                    {selectedJob.customers?.phone ? (
+                      <div className="mt-1 text-sm text-ink">
+                        Tel:{" "}
+                        <a
+                          className="font-medium underline underline-offset-2"
+                          href={`tel:${selectedJob.customers.phone}`}
+                        >
+                          {selectedJob.customers.phone}
+                        </a>
+                      </div>
+                    ) : null}
+
+                    {selectedJob.customers?.mobile ? (
+                      <div className="mt-1 text-sm text-ink">
+                        Mobile:{" "}
+                        <a
+                          className="font-medium underline underline-offset-2"
+                          href={`tel:${selectedJob.customers.mobile}`}
+                        >
+                          {selectedJob.customers.mobile}
+                        </a>
+                      </div>
+                    ) : null}
+
+                    {selectedJob.customers?.email ? (
+                      <div className="mt-1 break-all text-sm text-ink">
+                        Email:{" "}
+                        <a
+                          className="font-medium underline underline-offset-2"
+                          href={`mailto:${selectedJob.customers.email}`}
+                        >
+                          {selectedJob.customers.email}
+                        </a>
+                      </div>
+                    ) : null}
+
+                    {selectedJob.customers?.operations_email &&
+                    selectedJob.customers.operations_email !==
+                      selectedJob.customers?.email ? (
+                      <div className="mt-1 break-all text-sm text-ink">
+                        Operations:{" "}
+                        <a
+                          className="font-medium underline underline-offset-2"
+                          href={`mailto:${selectedJob.customers.operations_email}`}
+                        >
+                          {selectedJob.customers.operations_email}
+                        </a>
+                      </div>
+                    ) : null}
+
+                    {selectedJob.customers?.accounts_email &&
+                    selectedJob.customers.accounts_email !==
+                      selectedJob.customers?.email &&
+                    selectedJob.customers.accounts_email !==
+                      selectedJob.customers?.operations_email ? (
+                      <div className="mt-1 break-all text-sm text-ink">
+                        Accounts:{" "}
+                        <a
+                          className="font-medium underline underline-offset-2"
+                          href={`mailto:${selectedJob.customers.accounts_email}`}
+                        >
+                          {selectedJob.customers.accounts_email}
+                        </a>
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="rounded-md bg-surface-2 p-3">
