@@ -54,6 +54,9 @@ export type Stop = {
   address_line: string;
   city: string | null;
   postcode: string | null;
+  contact_name: string | null;
+  contact_phone: string | null;
+  contact_email: string | null;
   status: string | null;
   pod_status: string | null;
   recipient_name: string | null;
@@ -341,6 +344,38 @@ export default function StopCard({
           {stop.postcode ? `, ${stop.postcode}` : ""}
         </span>
       </div>
+
+      {stop.contact_name || stop.contact_phone || stop.contact_email ? (
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink">
+          {stop.contact_name ? (
+            <span>Contact: {stop.contact_name}</span>
+          ) : null}
+
+          {stop.contact_phone ? (
+            <span>
+              Tel:{" "}
+              <a
+                href={`tel:${stop.contact_phone}`}
+                className="font-medium underline underline-offset-2"
+              >
+                {stop.contact_phone}
+              </a>
+            </span>
+          ) : null}
+
+          {stop.contact_email ? (
+            <span>
+              Email:{" "}
+              <a
+                href={`mailto:${stop.contact_email}`}
+                className="font-medium underline underline-offset-2"
+              >
+                {stop.contact_email}
+              </a>
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="mt-1.5 text-xs text-ink-3">
         Stop status: {stop.status || "-"} · POD:{" "}

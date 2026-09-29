@@ -11,6 +11,9 @@ type Stop = {
   address_line: string;
   city: string;
   postcode: string;
+  contact_name: string;
+  contact_phone: string;
+  contact_email: string;
 };
 
 type FormState = {
@@ -78,6 +81,32 @@ function StopRow({
         disabled={locked}
         onChange={(e) => onChange("postcode", e.target.value)}
         wrapperClassName="w-32 min-w-0"
+      />
+      <Field
+        id={`stop-${stop.type}-${index}-contact-name`}
+        label="Contact"
+        value={stop.contact_name}
+        disabled={locked}
+        onChange={(e) => onChange("contact_name", e.target.value)}
+        wrapperClassName="min-w-0 basis-[180px]"
+      />
+      <Field
+        id={`stop-${stop.type}-${index}-contact-phone`}
+        label="Telephone"
+        type="tel"
+        value={stop.contact_phone}
+        disabled={locked}
+        onChange={(e) => onChange("contact_phone", e.target.value)}
+        wrapperClassName="min-w-0 basis-[160px]"
+      />
+      <Field
+        id={`stop-${stop.type}-${index}-contact-email`}
+        label="Email"
+        type="email"
+        value={stop.contact_email}
+        disabled={locked}
+        onChange={(e) => onChange("contact_email", e.target.value)}
+        wrapperClassName="min-w-0 flex-1 basis-[220px]"
       />
       {locked ? (
         <span className="pb-2.5 text-xs text-ink-3">POD recorded, not editable</span>

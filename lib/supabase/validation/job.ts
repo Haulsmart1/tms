@@ -76,6 +76,22 @@ export const JobPageValidation = z.object({
         ),
 });
 
+const optionalContactEmail = z
+    .string()
+    .trim()
+    .refine(
+        (value) =>
+            value === "" ||
+            z.string().email().safeParse(value).success,
+        "Enter a valid contact email address.",
+    );
+
+const optionalContactFields = {
+    contact_name: z.string().trim().optional(),
+    contact_phone: z.string().trim().optional(),
+    contact_email: optionalContactEmail.optional(),
+};
+
 export const CollectionStopValidation = z.object({
     type: z.literal("collection"),
 
@@ -93,6 +109,8 @@ export const CollectionStopValidation = z.object({
         .string()
         .trim()
         .min(1, "A postcode is required."),
+
+    ...optionalContactFields,
 });
 
 export const DeliveryStopValidation = z.object({
@@ -112,4 +130,6 @@ export const DeliveryStopValidation = z.object({
         .string()
         .trim()
         .min(1, "A postcode is required."),
+
+    ...optionalContactFields,
 });

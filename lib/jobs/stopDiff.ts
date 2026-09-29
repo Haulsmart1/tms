@@ -28,6 +28,9 @@ export type ExistingStop = {
   address_line: string | null;
   city: string | null;
   postcode: string | null;
+  contact_name?: string | null;
+  contact_phone?: string | null;
+  contact_email?: string | null;
   status: string | null;
   pod_status: string | null;
   delivered_at?: string | null;
@@ -43,6 +46,9 @@ export type SubmittedStop = {
   address_line: string;
   city: string;
   postcode: string;
+  contact_name?: string | null;
+  contact_phone?: string | null;
+  contact_email?: string | null;
 };
 
 export type StopFields = {
@@ -51,6 +57,9 @@ export type StopFields = {
   address_line: string;
   city: string | null;
   postcode: string | null;
+  contact_name: string | null;
+  contact_phone: string | null;
+  contact_email: string | null;
 };
 
 export type StopPlan =
@@ -96,6 +105,9 @@ export function planStopChanges(existing: readonly ExistingStop[], submitted: re
       address_line: String(stop.address_line ?? "").trim(),
       city: clean(stop.city),
       postcode: clean(stop.postcode),
+      contact_name: clean(stop.contact_name),
+      contact_phone: clean(stop.contact_phone),
+      contact_email: clean(stop.contact_email),
     };
 
     if (!stop.id) {
@@ -113,7 +125,10 @@ export function planStopChanges(existing: readonly ExistingStop[], submitted: re
       current.type !== fields.type ||
       clean(current.address_line) !== fields.address_line ||
       clean(current.city) !== fields.city ||
-      clean(current.postcode) !== fields.postcode;
+      clean(current.postcode) !== fields.postcode ||
+      clean(current.contact_name) !== fields.contact_name ||
+      clean(current.contact_phone) !== fields.contact_phone ||
+      clean(current.contact_email) !== fields.contact_email;
 
     if (isStopLocked(current)) {
       if (contentChanged) {

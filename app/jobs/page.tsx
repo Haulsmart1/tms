@@ -26,9 +26,20 @@ type FormStop = {
   address_line: string;
   city: string;
   postcode: string;
+  contact_name: string;
+  contact_phone: string;
+  contact_email: string;
 };
 
-const emptyStop = (type: "collection" | "delivery"): FormStop => ({ type, address_line: "", city: "", postcode: "" });
+const emptyStop = (type: "collection" | "delivery"): FormStop => ({
+  type,
+  address_line: "",
+  city: "",
+  postcode: "",
+  contact_name: "",
+  contact_phone: "",
+  contact_email: "",
+});
 
 /* Hard ceiling for the jobs list. Past it the page says so instead of
    silently losing rows at Supabase's 1000-row cap (review POD-13). */
@@ -138,7 +149,7 @@ export default function JobsPage() {
         accepted_at, accepted_by, collection_eta, delivery_eta, acceptance_note,
         customers ( name, contact_name, phone, mobile, email, accounts_email, operations_email, address_line_1, address_line_2, city, county_region, postcode, country_code ), vehicles ( registration ), drivers ( name ),
         subcontractors ( name, vehicle_reg, driver_name ),
-        job_stops ( id, stop_order, type, address_line, city, postcode, status, pod_status, recipient_name, delivered_at, collected_at, pod_notes, pod_photo_url ),
+        job_stops ( id, stop_order, type, address_line, city, postcode, contact_name, contact_phone, contact_email, status, pod_status, recipient_name, delivered_at, collected_at, pod_notes, pod_photo_url ),
         job_items ( id, sku, description, quantity, serial_numbers, external_reference, notes )
       `, { count: "exact" });
 
@@ -274,6 +285,9 @@ export default function JobsPage() {
             address_line: s.address_line || "",
             city: s.city || "",
             postcode: s.postcode || "",
+            contact_name: s.contact_name || "",
+            contact_phone: s.contact_phone || "",
+            contact_email: s.contact_email || "",
           }))
         : [emptyStop("collection"), emptyStop("delivery")],
     });
@@ -308,7 +322,15 @@ export default function JobsPage() {
     const reference = validation.data.reference;
 
     const validStops = form.stops
-      .map((stop) => ({ ...stop, address_line: stop.address_line.trim(), city: stop.city.trim(), postcode: stop.postcode.trim() }))
+      .map((stop) => ({
+        ...stop,
+        address_line: stop.address_line.trim(),
+        city: stop.city.trim(),
+        postcode: stop.postcode.trim(),
+        contact_name: stop.contact_name.trim(),
+        contact_phone: stop.contact_phone.trim(),
+        contact_email: stop.contact_email.trim(),
+      }))
       .filter((stop) => stop.address_line);
 
     if (validStops.length === 0) { setLoading(false); setMessage("Add at least one stop."); return; }
@@ -394,7 +416,7 @@ export default function JobsPage() {
 
       const { data: currentStops, error: currentStopsError } = await supabase
         .from("job_stops")
-        .select("id, stop_order, type, address_line, city, postcode, status, pod_status, delivered_at, collected_at")
+        .select("id, stop_order, type, address_line, city, postcode, contact_name, contact_phone, contact_email, status, pod_status, delivered_at, collected_at")
         .eq("job_id", editingJobId)
         .eq("tenant_id", jobTenantId);
       if (currentStopsError) { setLoading(false); setMessage(`Load stops error: ${currentStopsError.message}`); return; }
@@ -424,6 +446,12 @@ export default function JobsPage() {
           address_line: stop.address_line,
           city: stop.city,
           postcode: stop.postcode,
+
+          contact_name: stop.contact_name,
+
+          contact_phone: stop.contact_phone,
+
+          contact_email: stop.contact_email,
         })),
       );
       if (!plan.ok) { setLoading(false); setMessage(plan.message); return; }
@@ -511,7 +539,17 @@ export default function JobsPage() {
 
     const stopsToInsert = validStops.map((stop, index) => ({
       tenant_id: tenant.writeTenantId, job_id: jobId, stop_order: index + 1, type: stop.type,
-      address_line: stop.address_line, city: stop.city || null, postcode: stop.postcode || null,
+      address_line: stop.address_line,
+
+      city: stop.city || null,
+
+      postcode: stop.postcode || null,
+
+      contact_name: stop.contact_name || null,
+
+      contact_phone: stop.contact_phone || null,
+
+      contact_email: stop.contact_email || null,
       planned_at: plannedAt,
       status: "planned", pod_status: "pending",
     }));

@@ -52,8 +52,26 @@ describe("planStopChanges", () => {
     ]);
     expect(plan).toEqual({
       ok: true,
-      updates: [{ id: "c1", patch: { stop_order: 1, type: "collection", address_line: "Depot 2", city: "York", postcode: null } }],
-      inserts: [{ stop_order: 3, type: "delivery", address_line: "9 Low Rd", city: null, postcode: "M1" }],
+      updates: [{ id: "c1", patch: {
+          stop_order: 1,
+          type: "collection",
+          address_line: "Depot 2",
+          city: "York",
+          postcode: null,
+          contact_name: null,
+          contact_phone: null,
+          contact_email: null,
+        } }],
+      inserts: [{
+        stop_order: 3,
+        type: "delivery",
+        address_line: "9 Low Rd",
+        city: null,
+        postcode: "M1",
+        contact_name: null,
+        contact_phone: null,
+        contact_email: null,
+      }],
       deletes: [],
     });
   });
@@ -91,7 +109,16 @@ describe("planStopChanges", () => {
       ]),
     ).toEqual({
       ok: true,
-      updates: [{ id: "d1", patch: { stop_order: 1 } }, { id: "c1", patch: { stop_order: 2, type: "collection", address_line: "Depot", city: "York", postcode: "YO1" } }],
+      updates: [{ id: "d1", patch: { stop_order: 1 } }, { id: "c1", patch: {
+            stop_order: 2,
+            type: "collection",
+            address_line: "Depot",
+            city: "York",
+            postcode: "YO1",
+            contact_name: null,
+            contact_phone: null,
+            contact_email: null,
+          } }],
       inserts: [],
       deletes: [],
     });
@@ -106,4 +133,95 @@ describe("planStopChanges", () => {
       ]),
     ).toMatchObject({ ok: false });
   });
+
+  it("normalizes and persists collection or delivery contact details", () => {
+    const stop = existing({ id: "contact-1" });
+
+    const plan = planStopChanges(
+      [stop],
+      [
+        {
+          id: "contact-1",
+          type: "collection",
+          address_line: stop.address_line ?? "",
+          city: stop.city ?? "",
+          postcode: stop.postcode ?? "",
+          contact_name: "  Jane Smith  ",
+          contact_phone: "  01234 567890  ",
+          contact_email: "  jane@example.com  ",
+        },
+      ],
+    );
+
+    expect(plan).toMatchObject({
+      ok: true,
+      updates: [
+        {
+          id: "contact-1",
+          patch: {
+            contact_name: "Jane Smith",
+            contact_phone: "01234 567890",
+            contact_email: "jane@example.com",
+          },
+        },
+      ],
+    });
+  });
+
+  it("normalizes blank stop contact details to null", () => {
+    const plan = planStopChanges(
+      [],
+      [
+        {
+          type: "delivery",
+          address_line: "1 Test Road",
+          city: "London",
+          postcode: "SW1A 1AA",
+          contact_name: " ",
+          contact_phone: "",
+          contact_email: "   ",
+        },
+      ],
+    );
+
+    expect(plan).toMatchObject({
+      ok: true,
+      inserts: [
+        {
+          contact_name: null,
+          contact_phone: null,
+          contact_email: null,
+        },
+      ],
+    });
+  });
+
+  it("does not allow contact details on a locked POD stop to be changed", () => {
+    const stop = existing({
+      id: "locked-contact",
+      status: "delivered",
+      contact_name: "Original Contact",
+      contact_phone: "0113 000 0000",
+      contact_email: "original@example.com",
+    });
+
+    const plan = planStopChanges(
+      [stop],
+      [
+        {
+          id: stop.id,
+          type: "collection",
+          address_line: stop.address_line ?? "",
+          city: stop.city ?? "",
+          postcode: stop.postcode ?? "",
+          contact_name: "Different Contact",
+          contact_phone: "0113 111 1111",
+          contact_email: "different@example.com",
+        },
+      ],
+    );
+
+    expect(plan).toMatchObject({ ok: false });
+  });
+
 });
