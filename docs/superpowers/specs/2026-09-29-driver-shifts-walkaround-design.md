@@ -37,6 +37,11 @@ There are no live drivers today, so the feature is always on: no per-company swi
   ("on duty over 13h"), never "infringement".
 - **A QR scan shows the driver was probably at the truck; it does not prove it.** A revocable QR token defeats
   old and copied stickers once reissued, but not a driver holding a photo of the current sticker.
+- **A queued start or swap check keeps the scanned QR payload on the phone until it is sent.** It sits in the
+  phone's IndexedDB with the rest of the queued event, because offline that is the only record of the scan and
+  the server confirms the vehicle from it when the event arrives. The token is printed on the cab anyway, so
+  holding it adds little. The stored item is deleted as soon as it is sent or refused, and the copy the page
+  keeps in memory to show what was sent has the payload removed.
 - **The catalogue is DVSA-based, not DVSA-endorsed.** The baseline follows the DVSA guide to maintaining
   roadworthiness daily walkaround items for HGVs and trailers. The app never claims DVSA approval.
 - **The liability wording is not written in this repo.** The Terms clause "an override is the operator's

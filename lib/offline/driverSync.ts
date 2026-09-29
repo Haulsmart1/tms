@@ -63,6 +63,18 @@ export function defectClientIdsOf(event: DriverEvent): string[] {
   return [];
 }
 
+/*
+  A queued start or swap check holds the scanned cab QR payload in IndexedDB
+  until it is sent: offline, that is the only record of the scan. Once the
+  item is sent or refused it is deleted from storage, and the copy kept in
+  memory for the page (the "sent" list) goes through this, so the payload is
+  not held any longer than it has to be.
+*/
+export function withoutQrPayload(event: DriverEvent): DriverEvent {
+  if (event.type !== "check_submitted" || event.qrPayload === null) return event;
+  return { ...event, qrPayload: null };
+}
+
 /** Queued photos that belong to an event the server refused: they can never be attached. */
 export function orphanedPhotoIds(queue: readonly QueueItem<DriverQueuePayload>[], refused: DriverEvent): string[] {
   const defects = new Set(defectClientIdsOf(refused));

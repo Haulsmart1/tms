@@ -22,6 +22,7 @@ import {
   SIGN_IN_AGAIN_MESSAGE,
   type DriverQueuePayload,
   type SyncResult,
+  withoutQrPayload,
 } from "../../lib/offline/driverSync";
 import { applyOutcome, enqueue, nextDue, type QueueItem } from "../../lib/offline/queue";
 import { readJsonSafe } from "../../lib/pod/uploadClient";
@@ -267,7 +268,7 @@ async function flushOnce(force: boolean): Promise<void> {
     const result = applyOutcome(queue, head.id, outcome, now);
     let next = result.queue as StoredItem<QueuePayload>[];
     if (outcome.kind === "sent" && head.payload.kind === "event") {
-      sent = [...sent, { event: head.payload.event, sentAt: now }].slice(-50);
+      sent = [...sent, { event: withoutQrPayload(head.payload.event), sentAt: now }].slice(-50);
     }
     if (result.rejected) {
       let message = result.rejected.lastError ?? "The server refused this.";
@@ -282,6 +283,7 @@ async function flushOnce(force: boolean): Promise<void> {
     }
     queue = next;
     const updated = queue.find((i) => i.id === head.id);
+    // Sent or refused items leave IndexedDB here, and with them any scanned QR payload.
     if (updated) await idbPut(updated);
     else await idbDelete(head.id);
     emit();

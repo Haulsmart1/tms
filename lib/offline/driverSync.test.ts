@@ -10,6 +10,7 @@ import {
   photoOutcome,
   PHOTO_UNMATCHED_AFTER,
   SIGN_IN_AGAIN_MESSAGE,
+  withoutQrPayload,
   type DriverQueuePayload,
 } from "./driverSync";
 import { applyOutcome, enqueue, MAX_SERVER_FAILURES, type QueueItem } from "./queue";
@@ -151,5 +152,19 @@ describe("partitionByOwner", () => {
     expect(heldForOthersMessage(0)).toBeNull();
     expect(heldForOthersMessage(1)).toBe("1 item queued by another driver on this phone is waiting for them to sign in.");
     expect(heldForOthersMessage(3)).toBe("3 items queued by another driver on this phone are waiting for them to sign in.");
+  });
+});
+
+describe("withoutQrPayload", () => {
+  it("drops the scanned cab QR payload from a check", () => {
+    const scanned: DriverEvent = { ...check, confirmation: "qr", qrPayload: "v1.abc.def" } as DriverEvent;
+    const kept = withoutQrPayload(scanned);
+    expect(kept.type === "check_submitted" && kept.qrPayload).toBeNull();
+    expect(scanned.type === "check_submitted" && scanned.qrPayload).toBe("v1.abc.def");
+  });
+
+  it("returns other events unchanged", () => {
+    const ended: DriverEvent = { type: "break_started", clientId: "b1", occurredAt: "2026-09-29T09:00:00Z", shiftClientId: "c1" };
+    expect(withoutQrPayload(ended)).toBe(ended);
   });
 });
