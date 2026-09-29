@@ -532,6 +532,9 @@ begin
     if exists (select 1 from public.shift_breaks where shift_id = v_shift.id and started_at < v_value) then
       raise exception 'A break starts before that time. The start cannot be after the first break.' using errcode = 'SHF06';
     end if;
+    if exists (select 1 from public.shift_vehicle_periods where shift_id = v_shift.id and started_at < v_value) then
+      raise exception 'A vehicle was taken out before that time. The start cannot be after the first vehicle check.' using errcode = 'SHF06';
+    end if;
     v_old := v_shift.started_at;
     update public.driver_shifts set started_at = v_value where id = v_shift.id;
   elsif v_field = 'ended_at' then
