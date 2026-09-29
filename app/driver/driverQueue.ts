@@ -6,7 +6,11 @@
   does the fetching, storage (lib/offline/idbStore.ts) and scheduling.
 
   One queue per browser tab, shared by every component through this module.
-  Only one flush runs at a time: every flush is chained on the previous one.
+  Only one flush runs at a time: every flush is chained on the previous one,
+  and across tabs each flush holds the "tms-driver-queue-flush" Web Lock and
+  re-reads IndexedDB once it has it, so two tabs never send the same item.
+  Without Web Locks (old browsers) two open tabs can still both send an item:
+  an event is idempotent on its clientId, but a photo could be stored twice.
 
   Phones are shared. Each item records the Supabase user who queued it, and
   only the signed-in user's own items are sent (lib/offline/driverSync.ts,
@@ -148,6 +152,11 @@ function installWindowHooks(): void {
       // Deferred: calling back into supabase-js inside this callback can deadlock.
       setTimeout(() => {
         setCurrentUser(id);
+        // A session exists again (same user signing back in included): unpause.
+        if (paused !== null) {
+          paused = null;
+          emit();
+        }
         void runChained(false);
       }, 0);
     });
@@ -234,8 +243,21 @@ function schedule(): void {
   timer = setTimeout(() => void runChained(false), Math.max(0, head.nextAttemptAt - Date.now()));
 }
 
+const FLUSH_LOCK = "tms-driver-queue-flush";
+
+/* Runs `work` holding the cross-tab flush lock, or directly when the browser has no Web Locks. */
+function withFlushLock(work: () => Promise<void>): Promise<void> {
+  const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+  if (!locks || typeof locks.request !== "function") return work();
+  return locks.request(FLUSH_LOCK, () => work());
+}
+
 async function flushOnce(force: boolean): Promise<void> {
   await ensureLoaded();
+  // Another tab may have sent, retried or added items while this one waited
+  // for the lock: IndexedDB is the shared truth, memory is only this tab's copy.
+  queue = await idbLoadAll<QueuePayload>();
+  seq = queue.reduce((max, item) => Math.max(max, item.seq), seq);
   await refreshUser();
   if (force) {
     paused = null;
@@ -293,7 +315,7 @@ async function flushOnce(force: boolean): Promise<void> {
 }
 
 function runChained(force: boolean): Promise<void> {
-  const run = chain.then(() => flushOnce(force));
+  const run = chain.then(() => withFlushLock(() => flushOnce(force)));
   chain = run.catch((error) => console.warn("[driver-queue] flush failed", error));
   return run;
 }
@@ -307,8 +329,11 @@ async function add(id: string, build: (ownerId: string) => QueuePayload): Promis
   if (grown.length === queue.length) return;
   seq += 1;
   const item: StoredItem<QueuePayload> = { ...grown[grown.length - 1], seq };
-  queue = [...queue, item];
+  // Stored before it joins the in-memory queue, so a flush re-reading
+  // IndexedDB can never see memory ahead of storage. That re-read may already
+  // have picked it up during the await, hence the filter.
   await idbPut(item);
+  queue = [...queue.filter((i) => i.id !== item.id), item];
   emit();
   void runChained(false);
 }
