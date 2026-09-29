@@ -171,7 +171,7 @@ export default function VehicleCard({
               <WalkaroundQrButton
                 vehicleId={vehicle.id}
                 registration={vehicle.registration}
-                hasExistingCode={vehicle.walkaround_qr_token_hash !== null}
+                hasExistingCode={Boolean(vehicle.walkaround_qr_token_hash)}
               />
             )}
           </>

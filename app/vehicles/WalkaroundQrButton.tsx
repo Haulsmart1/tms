@@ -63,11 +63,26 @@ export default function WalkaroundQrButton({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  /* Set after a successful issue so a second click on the same card confirms
+     before overwriting, even before the vehicles list is reloaded. */
+  const [issuedHere, setIssuedHere] = useState(false);
+  const codeExists = hasExistingCode || issuedHere;
 
   async function printCode() {
-    if (hasExistingCode && !window.confirm(REISSUE_CONFIRM)) return;
-    setBusy(true);
+    if (codeExists && !window.confirm(REISSUE_CONFIRM)) return;
     setError("");
+
+    /* Opened synchronously, before any await: browsers only allow a pop-up
+       inside the click's user gesture, and an await ends that gesture. If it
+       is blocked, the API is not called, so no new token is issued and the
+       old sticker keeps working. */
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      setError("Allow pop-ups to print the cab QR code.");
+      return;
+    }
+
+    setBusy(true);
     try {
       const response = await fetch(`/api/vehicles/${vehicleId}/walkaround-qr`, { method: "POST" });
       const body = await response.json().catch(() => ({}));
@@ -75,18 +90,18 @@ export default function WalkaroundQrButton({
 
       const payload = typeof body.payload === "string" ? body.payload : "";
       if (!payload) throw new Error("Unable to issue a QR code.");
+      setIssuedHere(true);
       const printedRegistration =
         typeof body.registration === "string" && body.registration.trim() ? body.registration : registration;
 
       const qrDataUrl = await QRCode.toDataURL(payload, { errorCorrectionLevel: "M", margin: 2, width: 512 });
 
-      const printWindow = window.open("", "_blank");
-      if (!printWindow) throw new Error("Allow pop-ups for this site to print the QR code.");
       printWindow.document.write(printDocument(qrDataUrl, printedRegistration));
       printWindow.document.close();
       printWindow.focus();
       printWindow.print();
     } catch (err) {
+      printWindow.close();
       setError(err instanceof Error ? err.message : "Unable to issue a QR code.");
     } finally {
       setBusy(false);
