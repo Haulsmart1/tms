@@ -206,3 +206,18 @@ App data:
 - Xero customers on 0% or mixed VAT: save `settings.xeroTaxTypes` (for example `{"0":"ZERORATEDOUTPUT"}`)
   through `POST /api/accounts/accounting`; there is no UI for it yet, and a sync with an unmapped rate is refused.
 - Invitees who were locked out before this fix: re-invite them.
+
+## Driver shifts and walkaround checks (shifts_01..05), 2026-09-29
+
+Spec: `docs/superpowers/specs/2026-09-29-driver-shifts-walkaround-design.md`. Apply in this order, then run
+`shifts_verify.sql`. **Apply before inviting the first driver**: until these exist, the job gate in the
+driver stop routes fails closed and no driver can complete a stop.
+
+| Order | File | Needs | Applied |
+|---|---|---|---|
+| 1 | `shifts_01_tables.sql` | rls_02 | no |
+| 2 | `shifts_02_catalogue_seed.sql` | shifts_01 | no |
+| 3 | `shifts_03_triggers.sql` | shifts_02; re-run after prodfix_30 if that is applied later | no |
+| 4 | `shifts_04_rpcs.sql` | shifts_03 | no |
+| 5 | `shifts_05_storage.sql` | none | no |
+| check | `shifts_verify.sql` | all of the above | |
