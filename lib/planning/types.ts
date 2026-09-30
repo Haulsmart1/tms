@@ -23,6 +23,8 @@ export type PlanStop = {
   /** TomTom geocode cache, written by app/api/tomtom/geocode. NULL until then. */
   lat: number | null;
   lng: number | null;
+  booked_from?: string | null;
+  booked_to?: string | null;
 };
 
 export type PlanJob = {

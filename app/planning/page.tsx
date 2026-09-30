@@ -400,7 +400,7 @@ export default function PlanningPage() {
         journey_scope, origin_country_code, destination_country_code,
         compliance_regime_override, compliance_override_reason,
         customers ( name ),
-        job_stops ( id, stop_order, type, address_line, city, postcode, lat, lng ),
+        job_stops (id, stop_order, type, address_line, city, postcode, lat, lng, booked_from, booked_to),
         job_items (
           id, sku, description, quantity, serial_numbers,
           external_reference, notes
