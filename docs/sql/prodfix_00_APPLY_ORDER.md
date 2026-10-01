@@ -239,3 +239,16 @@ a photo and see it recorded on the check.
 | 4 | `shifts_04_rpcs.sql` | shifts_03 | no |
 | 5 | `shifts_05_storage.sql` | none. Creates restrictive storage policies: if it raises 42501, create them in the dashboard as its header says | no |
 | check | `shifts_verify.sql` | all of the above | |
+
+## Stop contacts, saved plans and load transfers, 2026-09-29/30
+
+Moved here from `supabase/migrations/` on 2026-10-01 so every migration still to apply sits in this folder.
+They keep their timestamp names. None depends on the shifts series, so they can run before or after it.
+Whether any was already applied is unknown: check for the table before running (`load_transfers` uses a
+plain `create table` for `load_transfer_batches` and `load_transfer_items`, so it fails on a second run).
+
+| Order | File | Needs | Applied |
+|---|---|---|---|
+| 1 | `20260929093000_job_stop_contacts.sql` | none | unknown |
+| 2 | `20260929123000_planning_saved_plans.sql` | rls_02 (`can_access_tenant`). Needed by the Saved Plans section on Planning | unknown |
+| 3 | `20260930150000_load_transfers_and_stop_windows.sql` | rls_02 (`can_access_tenant`). Needed by `/load-transfer` | unknown |

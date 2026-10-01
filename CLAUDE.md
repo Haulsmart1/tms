@@ -284,15 +284,16 @@ docs/sql/                   numbered migrations, applied by hand in order in the
                              (v1 platform billing, then v2 period billing), prodfix_01..prodfix_95 (the
                              2026-09-14 review fixes plus two follow-ups; order in prodfix_00_APPLY_ORDER.md),
                              signup_01 (self-serve signup RPC), and shifts_01..05 (driver shifts and walkaround
-                             check tables, triggers, RPCs and storage policies, 2026-09-29; none applied yet).
-                             `*_verify.sql`, `diag_*`, `schema_rls_dump.sql` and
+                             check tables, triggers, RPCs and storage policies, 2026-09-29; none applied yet),
+                             and three timestamp-named files from 2026-09-29/30 (stop contacts, saved plans,
+                             load transfers and stop windows; moved here from supabase/migrations/ because
+                             they were not yet applied). `*_verify.sql`, `diag_*`, `schema_rls_dump.sql` and
                              `prodfix_80_preflight_readonly.sql` are read-only check scripts, not migrations;
                              `local_00_base_tables_reconstructed.sql` is a local-only schema reconstruction.
                              Not every file has been applied: check the apply-order doc.
-supabase/migrations/        20 more hand-applied migrations (planning, manifests, Xero credentials, driver
-                             activity, tachograph ledger, atomic planning save, stop contacts, saved plans,
-                             load transfers and stop windows). CLI-style names, but applied via the SQL
-                             editor: NEVER run `supabase db push`, it would replay all of them.
+supabase/migrations/        17 more hand-applied migrations (planning, manifests, Xero credentials, driver
+                             activity, tachograph ledger, atomic planning save). CLI-style names, but applied
+                             via the SQL editor: NEVER run `supabase db push`, it would replay all of them.
                              rls_01/rls_01b now raise if run. `20260921090000_rate_limits.sql` is a
                              byte-for-byte copy of prodfix_01; apply one, not both.
 scripts/                    dev-login.mjs (local magic link), migrate-company-to-period-billing.mjs
