@@ -1194,6 +1194,91 @@ describe("Fast Plot V5", () => {
     expect(loader.mock.calls.length).toBeLessThanOrEqual(12);
   });
 
+  it("relocates a collection stranded more than 48 positions late", async () => {
+    const jobs = Array.from({ length: 70 }, (_, index) => {
+      const collection =
+        index === 69
+          ? { lat: 50, lng: 0.2 }
+          : { lat: 50, lng: -index * 0.01 };
+
+      return job(`far-sweep-${index}`, [
+        stop(
+          `far-sweep-c-${index}`,
+          1,
+          "collection",
+          collection.lat,
+          collection.lng
+        ),
+        stop(
+          `far-sweep-d-${index}`,
+          2,
+          "delivery",
+          50,
+          -1 - index * 0.01
+        ),
+      ]);
+    });
+
+    const loader = vi.fn(
+      async (
+        origins: LatLng[],
+        destinations: LatLng[]
+      ) =>
+        origins.map((origin) =>
+          destinations.map((destination) =>
+            Math.round(
+              (
+                Math.abs(destination.lat - origin.lat) +
+                Math.abs(destination.lng - origin.lng)
+              ) * 100000
+            )
+          )
+        )
+    );
+
+    const result = await optimizeFastPlotOrderFromStart(
+      jobs,
+      { lat: 50, lng: 0.01 },
+      loader
+    );
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.orderedVisits).toHaveLength(140);
+
+    const outlierCollectionIndex =
+      result.orderedVisits.findIndex(
+        (visit) =>
+          visit.requirements["far-sweep-69"]?.includes(0) === true
+      );
+
+    const outlierDeliveryIndex =
+      result.orderedVisits.findIndex(
+        (visit) =>
+          visit.requirements["far-sweep-69"]?.includes(1) === true
+      );
+
+    expect(outlierCollectionIndex).toBeGreaterThanOrEqual(0);
+    expect(outlierDeliveryIndex).toBeGreaterThanOrEqual(0);
+
+    // This collection begins far beyond the former 48-position horizon.
+    // Large-route repair must pull it into the earlier geographic sweep.
+    expect(outlierCollectionIndex).toBeLessThan(30);
+
+    expect(outlierCollectionIndex).toBeLessThan(
+      outlierDeliveryIndex
+    );
+
+    expect(loader.mock.calls.length).toBeLessThanOrEqual(9);
+
+    expect(
+      result.orderedVisits.map((visit) => visit.point)
+    ).toEqual(result.route);
+  });
   it("relocates a stranded large-lane collection without breaking precedence", async () => {
     const jobs = Array.from({ length: 31 }, (_, index) => {
       const collection =

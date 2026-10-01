@@ -1035,6 +1035,97 @@ function relocateFastPlotVisit(
  * the geographic fallback suffix and every accepted route must preserve all
  * physical-stop precedence.
  */
+function forwardRelocationImprovementKm(
+  route: FastPlotVisit[],
+  insertionIndex: number,
+  fromIndex: number
+): number {
+  const previousInsertion = route[insertionIndex - 1];
+  const displacedInsertion = route[insertionIndex];
+  const moved = route[fromIndex];
+  const previousMoved = route[fromIndex - 1];
+  const nextMoved = route[fromIndex + 1];
+
+  let beforeDistance =
+    haversineKm(
+      previousInsertion.point,
+      displacedInsertion.point
+    ) +
+    haversineKm(
+      previousMoved.point,
+      moved.point
+    );
+
+  let afterDistance =
+    haversineKm(
+      previousInsertion.point,
+      moved.point
+    ) +
+    haversineKm(
+      moved.point,
+      displacedInsertion.point
+    );
+
+  if (nextMoved) {
+    beforeDistance += haversineKm(
+      moved.point,
+      nextMoved.point
+    );
+
+    afterDistance += haversineKm(
+      previousMoved.point,
+      nextMoved.point
+    );
+  }
+
+  // For an adjacent move, previousMoved === displacedInsertion and the
+  // shared edge would otherwise be counted twice in the generic formula.
+  if (fromIndex === insertionIndex + 1) {
+    beforeDistance =
+      haversineKm(
+        previousInsertion.point,
+        displacedInsertion.point
+      ) +
+      haversineKm(
+        displacedInsertion.point,
+        moved.point
+      );
+
+    afterDistance =
+      haversineKm(
+        previousInsertion.point,
+        moved.point
+      ) +
+      haversineKm(
+        moved.point,
+        displacedInsertion.point
+      );
+
+    if (nextMoved) {
+      beforeDistance += haversineKm(
+        moved.point,
+        nextMoved.point
+      );
+
+      afterDistance += haversineKm(
+        displacedInsertion.point,
+        nextMoved.point
+      );
+    }
+  }
+
+  return beforeDistance - afterDistance;
+}
+
+/**
+ * Repair geographic backtracking on large sparse routes.
+ *
+ * The TomTom-selected prefix remains fixed. Later visits can move earlier
+ * when the relocation shortens the route and preserves physical precedence.
+ *
+ * Distance screening is O(1) per candidate pair. A candidate route is only
+ * allocated for an improving move, keeping very large lanes practical.
+ */
 function improveLargeSparseGeographicRoute(
   route: FastPlotVisit[],
   counts: Map<string, number>,
@@ -1046,7 +1137,6 @@ function improveLargeSparseGeographicRoute(
     return route;
   }
 
-  const lookAhead = 48;
   const maxPasses = 4;
   let bestRoute = route.slice();
 
@@ -1058,101 +1148,49 @@ function improveLargeSparseGeographicRoute(
       insertionIndex < bestRoute.length - 1;
       insertionIndex++
     ) {
-      const previous =
-        bestRoute[insertionIndex - 1];
-
-      let bestCandidate: FastPlotVisit[] | null =
-        null;
-
+      let bestFromIndex = -1;
       let bestImprovement =
         FAST_PLOT_SPARSE_RELOCATION_MIN_IMPROVEMENT_KM;
 
-      const searchEnd = Math.min(
-        bestRoute.length,
-        insertionIndex + lookAhead + 1
-      );
-
       for (
         let fromIndex = insertionIndex + 1;
-        fromIndex < searchEnd;
+        fromIndex < bestRoute.length;
         fromIndex++
       ) {
-        const currentEntryDistance =
-          haversineKm(
-            previous.point,
-            bestRoute[insertionIndex].point
-          );
-
-        const candidateEntryDistance =
-          haversineKm(
-            previous.point,
-            bestRoute[fromIndex].point
-          );
-
-        if (
-          currentEntryDistance -
-            candidateEntryDistance <
-          bestImprovement
-        ) {
-          continue;
-        }
-
-        const candidate =
-          relocateFastPlotVisit(
-            bestRoute,
-            fromIndex,
-            insertionIndex
-          );
-
-        if (
-          !routeMaintainsPhysicalPrecedence(
-            candidate,
-            counts
-          )
-        ) {
-          continue;
-        }
-
-        const localEnd = Math.min(
-          bestRoute.length - 1,
-          insertionIndex + 2
-        );
-
-        let beforeDistance = 0;
-        let afterDistance = 0;
-
-        for (
-          let index = Math.max(
-            1,
-            insertionIndex
-          );
-          index <= localEnd;
-          index++
-        ) {
-          beforeDistance += haversineKm(
-            bestRoute[index - 1].point,
-            bestRoute[index].point
-          );
-
-          afterDistance += haversineKm(
-            candidate[index - 1].point,
-            candidate[index].point
-          );
-        }
-
         const improvement =
-          beforeDistance - afterDistance;
+          forwardRelocationImprovementKm(
+            bestRoute,
+            insertionIndex,
+            fromIndex
+          );
 
         if (improvement > bestImprovement) {
           bestImprovement = improvement;
-          bestCandidate = candidate;
+          bestFromIndex = fromIndex;
         }
       }
 
-      if (bestCandidate) {
-        bestRoute = bestCandidate;
-        changed = true;
+      if (bestFromIndex < 0) {
+        continue;
       }
+
+      const candidate = relocateFastPlotVisit(
+        bestRoute,
+        bestFromIndex,
+        insertionIndex
+      );
+
+      if (
+        !routeMaintainsPhysicalPrecedence(
+          candidate,
+          counts
+        )
+      ) {
+        continue;
+      }
+
+      bestRoute = candidate;
+      changed = true;
     }
 
     if (!changed) {
