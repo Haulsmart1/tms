@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildPlanningSavePlan,
   classifyPlanningSaveError,
+  PLANNING_ASSIGNMENT_BLOCKED_MESSAGE,
   PLANNING_SAVE_ERROR_MESSAGES,
   planningSaveErrorMessage,
   type PlanningSaveJobFacts,
@@ -78,5 +79,16 @@ describe("classifyPlanningSaveError", () => {
     expect(kind).toBe("unlicensed_vehicle");
     expect(planningSaveErrorMessage(kind, error)).toContain("Vehicle AB12 CDE has no active licence.");
     expect(planningSaveErrorMessage("conflict", error)).toBe(PLANNING_SAVE_ERROR_MESSAGES.conflict);
+  });
+});
+
+describe("PLANNING_ASSIGNMENT_BLOCKED_MESSAGE", () => {
+  it("names the cause and tells the planner where to pick a tenant", () => {
+    // Shown beside the board when a drop or bulk assign is refused because
+    // "All tenants" is active. The top-of-page notice is off screen by then.
+    expect(PLANNING_ASSIGNMENT_BLOCKED_MESSAGE).toContain("All tenants");
+    expect(PLANNING_ASSIGNMENT_BLOCKED_MESSAGE).toContain("read-only");
+    expect(PLANNING_ASSIGNMENT_BLOCKED_MESSAGE).toContain("Active tenant");
+    expect(PLANNING_ASSIGNMENT_BLOCKED_MESSAGE).toContain("sidebar");
   });
 });

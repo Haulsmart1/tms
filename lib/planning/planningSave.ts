@@ -49,6 +49,14 @@ export const PLANNING_SAVE_BLOCKED_MESSAGES = {
     "This plan includes a job from another tenant, so it was not saved. Reload the board.",
 } as const;
 
+/* Shown beside the board, at the point of the refused drop or bulk assign,
+   when "All tenants" is active. The header notice above says the same, but
+   it sits above the map and lanes and is off screen on a laptop-height
+   viewport by the time anyone drags a card, so the refusal used to look like
+   a drop that silently failed. */
+export const PLANNING_ASSIGNMENT_BLOCKED_MESSAGE =
+  "That job was not planned. All tenants is selected, so Planning is read-only: a lane can never mix jobs from different tenants. Choose one tenant in the Active tenant selector at the bottom of the sidebar, then drag the job or assign it again.";
+
 export function buildPlanningSavePlan(
   updates: JobUpdate[],
   jobsById: Map<string, PlanningSaveJobFacts>,
