@@ -62,9 +62,11 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
 
 - **RLS in Postgres is the actual isolation boundary**, not client-side filtering. SECURITY DEFINER helpers
   (`can_access_tenant`, `can_manage_tenant`) fail closed. Migrations live in `docs/sql/` as `rls_01`..`rls_12`,
-  then `prodfix_01`..`prodfix_93` from the 2026-09-14 review (numbered, applied by hand in the Supabase SQL
-  editor; there is no automated migration runner). `docs/sql/prodfix_00_APPLY_ORDER.md` is the order and
-  records what was applied. `rls_09_verify.sql` is the check script; re-run `prodfix_81` after using it.
+  then `prodfix_01`..`prodfix_95` (01 to 93 from the 2026-09-14 review, 94 and 95 later follow-ups; numbered,
+  applied by hand in the Supabase SQL editor; there is no automated migration runner).
+  `docs/sql/prodfix_00_APPLY_ORDER.md` is the order and records what was applied; most of the series is
+  still unapplied, so several server-side checks refuse in prod until it is. `rls_09_verify.sql` is the
+  check script; re-run `prodfix_81` after using it.
 - **Roles and tenancy come from `profiles` only** (`role_id` -> `roles.name`, `company_id`, `tenant_id`), the
   same columns RLS and `get_tenant_context()` read. `memberships` is legacy: it may still be written for
   compatibility, but never read it for authorization. Route handlers that use the service-role client
@@ -95,6 +97,16 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
   `POST /api/licences/activate`, which charges pro-rata for the rest of the cycle first and only then writes
   the row. Other columns on that table (`licence_type`, `issue_date`, `expiry_date`, `notes`) are still
   client-writable. Never reintroduce a direct client write to either column.
+- **The accounts ledger is read-only from the browser.** Invoices, invoice lines, quotations, credit notes,
+  payments, statements, purchase orders, customer contacts and `document_delivery_log` are written only by
+  `app/api/accounts/**` (service role, after `requireTenantAccess`) and, for the two platform-wide status
+  flips, `PATCH /api/super-admin/invoices/[id]` (`lib/superAdmin/invoiceStatus.ts` is the closed list).
+  `prodfix_95` makes the database agree: it revokes client DML on those tables and leaves one
+  `tenant_read` SELECT policy, so a browser insert or update fails once it is applied. `customers`,
+  `customer_integrations` and `subcontractors*` are deliberately excluded because `app/api/customers/**`
+  writes them through the user client. `document_delivery_log.share_reference` holds an opaque pointer
+  to the share row (`lib/documents/shareReference.ts`), never the share URL: the email routes assert
+  that before inserting, because the log is readable by every member of the tenant.
 - `lib/billing/vehicleCount.ts` is the single definition of billable: a company vehicle with at least one
   active licence. What a cycle actually paid for is a separate fact, recorded per vehicle in
   `vehicle_cycle_coverage`; `lib/billing/addon.ts` charges a mid-cycle addition only when the current cycle
@@ -185,6 +197,12 @@ so a fresh deploy refuses signups by default. Supabase's "Allow new users to sig
 up" stays off: the service role creates users regardless, and `supabase.auth.signUp` must never
 appear in browser code.
 
+Sign-in and invite emails are sent by Supabase Auth, not by Resend, and the built-in Supabase sender is
+capped at a handful of messages per hour. When the cap is hit, `signInWithOtp` answers
+`429 over_email_send_rate_limit`, the magic-link route deliberately swallows it (a different answer
+would reveal which addresses exist) and only logs a warning, so "nobody is receiving sign-in emails"
+looks like a client bug from the browser. Check the Vercel function logs for that warning first.
+
 `proxy.ts` is the edge gate: it refreshes the Supabase session cookie and turns away anonymous requests
 (redirect to `/login?next=...` for pages, `401 {"error":"unauthorized"}` for anything `isApiPath`, so a
 `fetch()` never gets a login page where it expected JSON). It is **defence in depth, not the boundary** — it
@@ -245,13 +263,17 @@ lib/rateLimit.ts            durable rate limits (RATE_LIMITS rules, checkRateLim
 lib/printing/pdfFonts.ts    Unicode fonts and text sanitising for every generated PDF
 docs/sql/                   numbered migrations, applied by hand in order in the Supabase SQL editor:
                              rls_01..rls_12 (tenancy, storage, job-files lockdown), billing_01..billing_07
-                             (v1 platform billing, then v2 period billing), prodfix_01..prodfix_93 (the
-                             2026-09-14 review fixes; order in prodfix_00_APPLY_ORDER.md). `*_verify.sql`,
-                             `diag_*` and `prodfix_80_preflight_readonly.sql` are read-only check scripts,
-                             not migrations. Not every file has been applied: check the apply-order doc.
-supabase/migrations/        15 more hand-applied migrations (planning, manifests, Xero credentials, driver
-                             activity). CLI-style names, but applied via the SQL editor: NEVER run
-                             `supabase db push`, it would replay all of them. rls_01/rls_01b now raise if run.
+                             (v1 platform billing, then v2 period billing), prodfix_01..prodfix_95 (the
+                             2026-09-14 review fixes plus two follow-ups; order in prodfix_00_APPLY_ORDER.md),
+                             signup_01 (self-serve signup RPC). `*_verify.sql`, `diag_*`, `schema_rls_dump.sql`
+                             and `prodfix_80_preflight_readonly.sql` are read-only check scripts, not
+                             migrations; `local_00_base_tables_reconstructed.sql` is a local-only schema
+                             reconstruction. Not every file has been applied: check the apply-order doc.
+supabase/migrations/        17 more hand-applied migrations (planning, manifests, Xero credentials, driver
+                             activity, tachograph ledger, atomic planning save). CLI-style names, but applied
+                             via the SQL editor: NEVER run `supabase db push`, it would replay all of them.
+                             rls_01/rls_01b now raise if run. `20260921090000_rate_limits.sql` is a
+                             byte-for-byte copy of prodfix_01; apply one, not both.
 scripts/                    dev-login.mjs (local magic link), migrate-company-to-period-billing.mjs
 docs/superpowers/specs/     design specs (read before large features — several trade-offs, like the theme
                              inversion, are only explained here)

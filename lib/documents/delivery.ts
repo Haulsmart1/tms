@@ -1,3 +1,5 @@
+import { assertOpaqueShareReference } from "./shareReference";
+
 type DeliveryDocumentType =
   | "quotation"
   | "invoice"
@@ -27,6 +29,7 @@ type SendLoggedDocumentEmailInput = {
   text: string;
   html?: string;
   attachments?: DeliveryAttachment[];
+  /** Opaque pointer to the share row (lib/documents/shareReference.ts). Never the URL. */
   shareReference?: string | null;
   initiatedBy?: string | null;
   metadata?: Record<string, unknown>;
@@ -330,6 +333,10 @@ export async function sendLoggedDocumentEmail(
       attachments
     );
 
+  // Refuses a share URL before anything is sent or stored (review M-3).
+  const shareReference =
+    assertOpaqueShareReference(input.shareReference);
+
   const metadata = {
     ...(input.metadata ?? {}),
     mailProvider:
@@ -365,7 +372,7 @@ export async function sendLoggedDocumentEmail(
         "microsoft_graph",
 
       share_reference:
-        input.shareReference ?? null,
+        shareReference,
 
       attachments:
         manifest,

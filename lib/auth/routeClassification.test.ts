@@ -112,6 +112,7 @@ const PROTECTED_ROUTES = [
   "/api/subcontractor/users/invite",
   "/api/subcontractors",
   "/api/super-admin/companies/[id]",
+  "/api/super-admin/invoices/[id]",
   "/api/super-admin/tenants/[id]",
   "/api/super-admin/users",
   "/api/tachograph/activity",

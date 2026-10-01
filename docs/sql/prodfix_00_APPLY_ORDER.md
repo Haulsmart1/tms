@@ -157,6 +157,15 @@ Full detail, including which diag section decides each file, is in `prodfix_80_R
 Then run `rls_09_verify.sql` (with real ids substituted locally, never committed) and immediately run
 `prodfix_81_drop_rls_verify.sql` again. Finally re-run `prodfix_80_preflight_readonly.sql` and compare.
 
+## 8b. Ledger lockdown (independent; can run any time after rls_08)
+
+| # | File | Notes |
+|---|---|---|
+| 33b | `prodfix_95_ledger_readonly.sql` | Findings H-1 and M-3 of the 2026-09-22 OWASP review. Revokes INSERT/UPDATE/DELETE from client roles on the accounts ledger tables (invoices, quotations, credit notes, payments, statements, purchase orders, customer contacts, delivery log, ...), replaces their policies with one `tenant_read` SELECT policy, and nulls the share URLs stored in `document_delivery_log`. Deploy branch `ethan/ledger-readonly` FIRST: the super-admin invoices page now writes through `PATCH /api/super-admin/invoices/[id]` instead of the browser. Leaves `customers`, `customer_integrations` and `subcontractors*` alone on purpose (see the file header). |
+
+Live-state note (2026-09-22, Appendix A of the same review): `prodfix_01` and `prodfix_70` are already
+applied (`rate_limit_hits` and `save_planning_assignments` exist), so entries 1 and 16 can be marked done.
+
 ## 9. Self-serve signup (after the whole prodfix series)
 
 | # | File | Notes |
