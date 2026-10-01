@@ -145,6 +145,7 @@ const PROTECTED_ROUTES = [
   "/jobs",
   "/load-transfer",
   "/maintenance",
+  "/load-transfer",
   "/planning",
   "/pod",
   "/settings",

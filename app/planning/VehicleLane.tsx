@@ -10,6 +10,7 @@ import {
   type LaneRegimeSummary,
 } from "../../lib/planning/laneRegime";
 import { formatDuration } from "../../lib/planning/format";
+import { jobsInCanonicalDropOrder } from "../../lib/planning/canonicalLaneOrder";
 
 type Props = {
   vehicle: { id: string; registration: string };
@@ -41,6 +42,10 @@ export default function VehicleLane({
   geocodeSettled, driverConflict, onSelect, onDriverChange, onOpenJob,
   onAcceptJob, onMoveJob, onDropJob,
 }: Props) {
+  const displayedJobs = jobsInCanonicalDropOrder(
+    jobs,
+    canonicalDropNumbersByJobId
+  );
   function handleDragOver(e: DragEvent) {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
@@ -195,7 +200,7 @@ export default function VehicleLane({
       </div>
 
       <div className="flex flex-wrap items-stretch gap-2">
-        {jobs.map((job, index) => (
+        {displayedJobs.map((job, index) => (
           <PlanJobCard
             key={job.id}
             job={job}
@@ -208,8 +213,8 @@ export default function VehicleLane({
             geocodeSettled={geocodeSettled}
             onOpen={onOpenJob}
             onAccept={onAcceptJob}
-            canMoveUp={index > 0}
-            canMoveDown={index < jobs.length - 1}
+            canMoveUp={canonicalDropNumbersByJobId === undefined && index > 0}
+            canMoveDown={canonicalDropNumbersByJobId === undefined && index < displayedJobs.length - 1}
             onMoveUp={() => onMoveJob(job.id, -1)}
             onMoveDown={() => onMoveJob(job.id, 1)}
             onDropBefore={(draggedId) => onDropJob(draggedId, job.id)}
