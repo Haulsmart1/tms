@@ -1027,6 +1027,141 @@ function relocateFastPlotVisit(
  * never moving a delivery ahead of its prerequisite collection/intermediate
  * stop.
  */
+/**
+ * Apply a bounded geographic repair to sparse routes that are too large for
+ * exhaustive relocation.
+ *
+ * The anchored/TomTom prefix remains fixed. Candidate moves are restricted to
+ * the geographic fallback suffix and every accepted route must preserve all
+ * physical-stop precedence.
+ */
+function improveLargeSparseGeographicRoute(
+  route: FastPlotVisit[],
+  counts: Map<string, number>,
+  movableStartIndex: number
+): FastPlotVisit[] {
+  const firstMovable = Math.max(1, movableStartIndex);
+
+  if (firstMovable >= route.length - 1) {
+    return route;
+  }
+
+  const lookAhead = 48;
+  const maxPasses = 4;
+  let bestRoute = route.slice();
+
+  for (let pass = 0; pass < maxPasses; pass++) {
+    let changed = false;
+
+    for (
+      let insertionIndex = firstMovable;
+      insertionIndex < bestRoute.length - 1;
+      insertionIndex++
+    ) {
+      const previous =
+        bestRoute[insertionIndex - 1];
+
+      let bestCandidate: FastPlotVisit[] | null =
+        null;
+
+      let bestImprovement =
+        FAST_PLOT_SPARSE_RELOCATION_MIN_IMPROVEMENT_KM;
+
+      const searchEnd = Math.min(
+        bestRoute.length,
+        insertionIndex + lookAhead + 1
+      );
+
+      for (
+        let fromIndex = insertionIndex + 1;
+        fromIndex < searchEnd;
+        fromIndex++
+      ) {
+        const currentEntryDistance =
+          haversineKm(
+            previous.point,
+            bestRoute[insertionIndex].point
+          );
+
+        const candidateEntryDistance =
+          haversineKm(
+            previous.point,
+            bestRoute[fromIndex].point
+          );
+
+        if (
+          currentEntryDistance -
+            candidateEntryDistance <
+          bestImprovement
+        ) {
+          continue;
+        }
+
+        const candidate =
+          relocateFastPlotVisit(
+            bestRoute,
+            fromIndex,
+            insertionIndex
+          );
+
+        if (
+          !routeMaintainsPhysicalPrecedence(
+            candidate,
+            counts
+          )
+        ) {
+          continue;
+        }
+
+        const localEnd = Math.min(
+          bestRoute.length - 1,
+          insertionIndex + 2
+        );
+
+        let beforeDistance = 0;
+        let afterDistance = 0;
+
+        for (
+          let index = Math.max(
+            1,
+            insertionIndex
+          );
+          index <= localEnd;
+          index++
+        ) {
+          beforeDistance += haversineKm(
+            bestRoute[index - 1].point,
+            bestRoute[index].point
+          );
+
+          afterDistance += haversineKm(
+            candidate[index - 1].point,
+            candidate[index].point
+          );
+        }
+
+        const improvement =
+          beforeDistance - afterDistance;
+
+        if (improvement > bestImprovement) {
+          bestImprovement = improvement;
+          bestCandidate = candidate;
+        }
+      }
+
+      if (bestCandidate) {
+        bestRoute = bestCandidate;
+        changed = true;
+      }
+    }
+
+    if (!changed) {
+      break;
+    }
+  }
+
+  return bestRoute;
+}
 function improveSparseGeographicRoute(
   route: FastPlotVisit[],
   counts: Map<string, number>,
@@ -1288,10 +1423,24 @@ async function sparseFastPlotOrder(
     currentCluster = chosenCluster;
   }
 
-  return improveSparseGeographicRoute(
+  const refinementIndex =
+    refinementStartIndex ?? route.length;
+
+  if (
+    route.length <=
+    FAST_PLOT_SPARSE_RELOCATION_MAX_VISITS
+  ) {
+    return improveSparseGeographicRoute(
+      route,
+      counts,
+      refinementIndex
+    );
+  }
+
+  return improveLargeSparseGeographicRoute(
     route,
     counts,
-    refinementStartIndex ?? route.length
+    refinementIndex
   );
 }
 

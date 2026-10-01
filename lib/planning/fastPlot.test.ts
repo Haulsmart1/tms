@@ -1054,6 +1054,101 @@ describe("Fast Plot V5", () => {
     });
   });
 
+  it("keeps a 220-visit sparse route geographically progressive", async () => {
+    const jobs = Array.from(
+      { length: 110 },
+      (_, index) => {
+        const latitude =
+          55.5 - (index / 109) * 5.5;
+
+        return job(`progressive-${index}`, [
+          stop(
+            `progressive-c-${index}`,
+            1,
+            "collection",
+            latitude,
+            -2
+          ),
+          stop(
+            `progressive-d-${index}`,
+            2,
+            "delivery",
+            latitude - 0.015,
+            -2
+          ),
+        ]);
+      }
+    );
+
+    const loader = async (
+      origins: { lat: number; lng: number }[],
+      destinations: { lat: number; lng: number }[]
+    ): Promise<number[][]> =>
+      origins.map((origin) =>
+        destinations.map((destination) =>
+          Math.abs(
+            origin.lat - destination.lat
+          ) * 3600
+        )
+      );
+
+    const result =
+      await optimizeFastPlotOrderFromStart(
+        jobs,
+        { lat: 55.6, lng: -2 },
+        loader
+      );
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      throw new Error(
+        "Expected large sparse route to optimize."
+      );
+    }
+
+    expect(result.orderedVisits).toHaveLength(220);
+
+    const positions = new Map(
+      result.orderedVisits.map(
+        (visit, index) => [visit.key, index]
+      )
+    );
+
+    for (const plannedJob of jobs) {
+      const visits =
+        buildFastPlotVisits([plannedJob]);
+
+      expect(visits).toHaveLength(2);
+
+      const collectionIndex =
+        positions.get(visits[0].key);
+
+      const deliveryIndex =
+        positions.get(visits[1].key);
+
+      expect(collectionIndex).toBeDefined();
+      expect(deliveryIndex).toBeDefined();
+
+      expect(collectionIndex!).toBeLessThan(
+        deliveryIndex!
+      );
+    }
+
+    const extremeJumps =
+      result.orderedVisits
+        .slice(1)
+        .filter((visit, index) => {
+          const previous =
+            result.orderedVisits[index];
+
+          return Math.abs(
+            previous.point.lat - visit.point.lat
+          ) > 1;
+        });
+
+    expect(extremeJumps).toHaveLength(0);
+  });
   it("keeps anchored lookup requests within 100 cells for a large lane", async () => {
     const jobs = Array.from({ length: 350 }, (_, index) =>
       job(`anchor-${index}`, [
