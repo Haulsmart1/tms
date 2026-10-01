@@ -1475,10 +1475,18 @@ async function sparseFastPlotOrder(
     );
   }
 
+  /*
+   * Large lanes need global geographic repair.
+   *
+   * Drop 1 remains anchored at index 0, but TomTom-guided transitions after
+   * it are advisory rather than immutable. Freezing that prefix can preserve
+   * an early decision that later strands otherwise legal work hundreds of
+   * miles behind the route.
+   */
   return improveLargeSparseGeographicRoute(
     route,
     counts,
-    refinementIndex
+    1
   );
 }
 

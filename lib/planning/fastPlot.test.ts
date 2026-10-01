@@ -1194,6 +1194,86 @@ describe("Fast Plot V5", () => {
     expect(loader.mock.calls.length).toBeLessThanOrEqual(12);
   });
 
+  it("keeps Drop 1 fixed while globally repairing a large sparse route", async () => {
+    const jobs = Array.from({ length: 110 }, (_, index) =>
+      job(`global-repair-${index}`, [
+        stop(
+          `global-repair-c-${index}`,
+          1,
+          "collection",
+          50,
+          index === 109 ? 0.05 : -index * 0.01
+        ),
+        stop(
+          `global-repair-d-${index}`,
+          2,
+          "delivery",
+          50,
+          -1.2 - index * 0.01
+        ),
+      ])
+    );
+
+    const loader = vi.fn(
+      async (
+        origins: LatLng[],
+        destinations: LatLng[]
+      ) =>
+        origins.map((origin) =>
+          destinations.map((destination) =>
+            Math.round(
+              (
+                Math.abs(destination.lat - origin.lat) +
+                Math.abs(destination.lng - origin.lng)
+              ) * 100000
+            )
+          )
+        )
+    );
+
+    const result = await optimizeFastPlotOrderFromStart(
+      jobs,
+      { lat: 50, lng: 0.01 },
+      loader
+    );
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.orderedVisits).toHaveLength(220);
+
+    const firstVisitKey = result.orderedVisits[0]?.key;
+
+    expect(firstVisitKey).toBeTruthy();
+
+    const strandedCollectionIndex =
+      result.orderedVisits.findIndex(
+        (visit) =>
+          visit.requirements["global-repair-109"]?.includes(0) === true
+      );
+
+    const strandedDeliveryIndex =
+      result.orderedVisits.findIndex(
+        (visit) =>
+          visit.requirements["global-repair-109"]?.includes(1) === true
+      );
+
+    expect(strandedCollectionIndex).toBeGreaterThanOrEqual(0);
+    expect(strandedCollectionIndex).toBeLessThan(50);
+
+    expect(strandedDeliveryIndex).toBeGreaterThan(
+      strandedCollectionIndex
+    );
+
+    expect(loader.mock.calls.length).toBeLessThanOrEqual(10);
+
+    expect(
+      result.orderedVisits.map((visit) => visit.point)
+    ).toEqual(result.route);
+  });
   it("relocates a collection stranded more than 48 positions late", async () => {
     const jobs = Array.from({ length: 70 }, (_, index) => {
       const collection =
