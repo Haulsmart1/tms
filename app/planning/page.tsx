@@ -5,6 +5,7 @@ import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
 import Button from "../../components/Button";
+import MessageBanner from "../../components/MessageBanner";
 import PlanningMap, { type MapMarker } from "./PlanningMap";
 import UnassignedPool from "./UnassignedPool";
 import VehicleLane from "./VehicleLane";
@@ -39,6 +40,7 @@ import {
 import {
   buildPlanningSavePlan,
   classifyPlanningSaveError,
+  PLANNING_ASSIGNMENT_BLOCKED_MESSAGE,
   PLANNING_SAVE_BLOCKED_MESSAGES,
   PLANNING_SAVE_ERROR_MESSAGES,
   planningSaveErrorMessage,
@@ -270,6 +272,12 @@ export default function PlanningPage() {
   });
   const [accepting, setAccepting] = useState(false);
   const [message, setMessage] = useState("");
+  /* Why the last drop or bulk assign was refused, shown beside the board.
+     Cleared by the next accepted assignment and by every board load, which
+     is what a tenant change triggers. */
+  const [assignmentRefusal, setAssignmentRefusal] = useState<string | null>(
+    null
+  );
   const [mapNotice, setMapNotice] = useState<string | null>(null);
   /* Generation counter: each load claims the next value, and its predicate
      checks whether a newer load (or unmount) has since claimed a later one.
@@ -378,6 +386,7 @@ export default function PlanningPage() {
     setTimeZoneNote(null);
     setAutosaveFailure(null);
     setSaveConflict(false);
+    setAssignmentRefusal(null);
 
     /* company_profiles is keyed by company id, so the zone is resolved through
        tenants.company_id rather than filterByTenant, validated, and never
@@ -1008,7 +1017,11 @@ export default function PlanningPage() {
   }
 
   function moveJob(jobId: string, vehicleId: string | null, beforeJobId: string | null) {
-    if (planningReadOnly()) return;
+    if (planningReadOnly()) {
+      setAssignmentRefusal(PLANNING_ASSIGNMENT_BLOCKED_MESSAGE);
+      return;
+    }
+    setAssignmentRefusal(null);
     const job = jobById.get(jobId);
     if (!job || job.subcontractor_id) return;
 
@@ -1331,7 +1344,11 @@ export default function PlanningPage() {
   }
 
   function assignSelectedToVehicle() {
-    if (planningReadOnly()) return;
+    if (planningReadOnly()) {
+      setAssignmentRefusal(PLANNING_ASSIGNMENT_BLOCKED_MESSAGE);
+      return;
+    }
+    setAssignmentRefusal(null);
     const vehicleId = bulkVehicleId || selectedVehicleId;
 
     if (!vehicleId || !vehicles.some((vehicle) => vehicle.id === vehicleId)) {
@@ -3320,6 +3337,12 @@ export default function PlanningPage() {
               </div>
             </section>
           ) : null}
+          {/* Always mounted (live region); see components/MessageBanner.tsx.
+              Sits directly above the pool and lanes so a refused drop is
+              explained where it happened, not only in the page header. */}
+          <MessageBanner tone="warning" className="mb-0">
+            {assignmentRefusal}
+          </MessageBanner>
 
           {loading ? (
             <p className="text-sm text-ink-3">Loading the day&apos;s jobs...</p>

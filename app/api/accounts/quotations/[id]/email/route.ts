@@ -1,3 +1,4 @@
+import { quotationShareReference } from "../../../../../../lib/documents/shareReference";
 import {
   randomUUID,
 } from "crypto";
@@ -708,7 +709,7 @@ const quoteNumber =
         text,
         html,
         shareReference:
-          shareUrl,
+          quotationShareReference(shareLinkId),
         attachments: [
           {
             filename:

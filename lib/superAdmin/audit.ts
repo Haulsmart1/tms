@@ -12,7 +12,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export type SuperAdminAuditEntry = {
   actorId: string;
   action: string;
-  targetType: "tenant" | "company";
+  targetType: "tenant" | "company" | "invoice";
   targetId: string;
   changedFields: readonly string[];
   result: "ok" | "partial";

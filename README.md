@@ -8,8 +8,9 @@ A multi-tenant Transport Management System (TMS) for UK and EU road-haulage oper
 
 ## What it does
 
-- **Operations:** create and edit transport jobs with collection and delivery stops, capture proof of delivery (photos, documents, recipient, notes), mark stops delivered, and track vehicles.
-- **Commercial:** manage customers and subcontractors, raise and track invoices, and see business KPIs (revenue, margins, driver and customer leaderboards).
+- **Operations:** create and edit transport jobs with collection and delivery stops, build load manifests, plan the day, capture proof of delivery (photos, documents, recipient, notes), mark stops delivered, and track vehicles.
+- **Drivers and partners:** a mobile driver web app (today's jobs, camera barcode scanning, photo POD, stop completion, background GPS), a subcontractor portal, and invitations for both.
+- **Commercial:** manage customers and subcontractors, take quote requests from a haulier's own website, send quotations customers accept online, raise and track invoices, statements, chase letters and purchase orders, sync invoices to Xero, and see business KPIs (revenue, margins, driver and customer leaderboards).
 - **Fleet and compliance:** manage vehicles, drivers, trailers and assets, record maintenance and vehicle-off-road (VOR) status, track vehicle licences, and view tachograph / working-time activity.
 - **Telematics and tracking:** view latest GPS positions and speed from the company telematics feed.
 - **Administration:** company profile and settings, user invites, per-page permissions, and a super-admin console for companies, users, billing and lead requests.
@@ -22,10 +23,10 @@ A multi-tenant Transport Management System (TMS) for UK and EU road-haulage oper
 - **Auth:** passwordless magic-link, sent by a rate-limited server route that never creates accounts, confirmed on `/auth/confirm` (token_hash + verifyOtp). Accounts come from invites or from self-serve signup (`/signup`), which creates the company, its first tenant and the founding admin through a service-role route and one SQL transaction, then sends the invite email last.
 - **Validation:** Zod.
 - **Tests:** Vitest.
-- **Styling:** a hybrid of inline styles (legacy pages) and Tailwind + IBM Plex on opt-in "ds" pages (see Design System). Fonts: IBM Plex Sans / Mono and Inter.
+- **Styling:** Tailwind + IBM Plex through the "ds" design system on every console page (see Design System); three customer- and driver-facing pages keep a fixed light palette. Fonts: IBM Plex Sans / Mono and Inter.
 - **QR codes:** `qrcode` (npm) renders the printable cab QR codes used for walkaround vehicle confirmation; scanning reuses the existing `@zxing/browser` camera barcode reader.
 - **Hosting:** Vercel.
-- **Integrations:** Microsoft Teams (lead alerts), Resend (transactional email), Square (platform subscription billing), TomTom (live tracking, planned).
+- **Integrations:** Microsoft Teams (lead alerts), Resend (lead email), Microsoft Graph (invoice, quotation and POD emails), Square (platform subscription billing), Stripe Connect (tenant-to-customer invoice payments), Xero (invoice sync), TomTom (maps, geocoding, routing and travel-time matrix for planning and tracking).
 
 ## Multi-tenant architecture and security
 
@@ -84,9 +85,18 @@ Status tags: [OK] functional against live data, [PARTIAL] real data but view-onl
 - **`/jobs`** [OK]: create / edit / delete jobs with collection and delivery stops; inline POD capture and "mark delivered"; margin display. The heaviest operational page. Editing a job updates its stops in place and refuses to change or remove a stop that already has a POD; deleting a job is office-staff only and refused once evidence or scans exist. Assigning a vehicle with no active licence is refused.
 - **`/planning`** [OK]: day planning lanes, Smart Optimize and driver-hours preview. Hours checks cover EU driving limits and the 45-minute break only (no rest, Working Time, ferry or HGV routing, and the page says so). Read-only while "All tenants" is selected; saves are atomic and refuse to overwrite a plan someone else changed. Clicking a job card opens a read-only detail dialog on the board (stops, items, ETAs, draft vehicle and driver) with Accept, Print labels and an Open in Jobs link; the card no longer navigates away.
 - **`/pod`** [OK]: dedicated proof-of-delivery workflow; upload photos and delivery documents to private storage, record recipient / notes, mark stops delivered. Served via signed URLs.
-- **`/tracking`** [PARTIAL]: read-only view of vehicles and their latest GPS locations (newest fix per vehicle); jobs are placed on their `planning_date`, falling back to `scheduled_date`.
+- **`/tracking`** [PARTIAL]: read-only view of vehicles and their latest GPS locations (newest fix per vehicle) on a TomTom map; jobs are placed on their `planning_date`, falling back to `scheduled_date`.
 - **`/telematics`** [PARTIAL]: read-only list of the latest vehicle GPS positions (lat / long / speed / time).
-- **`/tachograph`** [PARTIAL]: read-only driver-hours / working-time view (driver cards + recent activity logs). No compliance logic yet.
+- **`/tachograph`** [PARTIAL]: driver-hours / working-time view (driver cards + activity logs) with manual activity entry. There is a provider registry and a sync route (`lib/tachograph/provider.ts`, `/api/tachograph/sync`), but no provider is registered yet, so nothing syncs. No infringement or compliance logic yet.
+- **Load manifests** [OK]: built from `/jobs` (`MasterLoadBuilder`) and scanned by drivers (`/api/driver/load-manifests/scan`), with conflict checks in `lib/driver/manifestConflicts.ts`.
+
+### Driver and partner portals
+- **`/driver/dashboard`** [OK]: the driver's own compliance summary, today's jobs and recent assigned jobs. Every `/driver` page mounts `DriverGpsTracker`: once the driver opts in on that device, it posts the phone's position to `/api/driver/location`, holding a bounded in-memory queue and retrying with backoff while signal drops.
+- **`/driver/jobs/[jobId]`** [OK]: mobile job view: photo evidence (resized in the browser, uploaded through signed URLs), camera barcode scanning of job items, recipient capture and stop completion. Fixed light palette, deliberately not themed. POD saves have no offline queue: the driver needs signal to save.
+- **`/subcontractor/dashboard`** [OK]: a subcontractor's assigned jobs, vehicles and portal users; subcontractor admins can invite their own users.
+- **`/settings/portal-invites`** [OK]: invite drivers and subcontractor users into their portals.
+- **`/pod/share/[token]`** [OK]: public, revocable POD view and PDF for a customer; the POD page can also send the link by email or WhatsApp.
+- **`/quotation/share/[token]`** [OK]: public quotation acceptance portal; the only way a quotation becomes accepted.
 
 ### Driver portal
 - **`/driver/dashboard`** [OK, pending SQL]: own-fleet drivers' landing page. Now shows a shift panel (Start shift, Start / End break, Swap vehicle, End shift) built on an offline IndexedDB queue that syncs one event at a time; today's jobs are visible but locked until the driver's shift has a passing (or minor) walkaround check on their current vehicle (`lib/walkaround/jobGate.ts`), enforced server-side on the stop and POD routes too. A shared phone only sends the signed-in driver's own queued items; another driver's are held until they sign in. SQL `shifts_01..05` is unapplied and this flow has never had a signed-in pass on a phone.
@@ -95,7 +105,7 @@ Status tags: [OK] functional against live data, [PARTIAL] real data but view-onl
 ### Commercial
 - **`/customers`** [OK]: customer directory with create / edit / activate.
 - **`/subcontractors`** [OK]: subcontractor directory with create / edit / activate.
-- **`/invoices`** [OK]: raise and track tenant invoices, quotations, payments and credit notes. Lists page with "Load more" (the list APIs take `page` / `pageSize`), and the outstanding / overdue KPIs are computed server-side across every invoice. Only the customer acceptance portal can accept a quotation; share links expire at the end of `valid_until`, London time.
+- **`/invoices`** [OK]: raise and track tenant invoices, quotations, payments and credit notes, plus a ready-to-invoice queue, customer statements, chase letters, purchase orders, a quote-requests inbox and per-invoice Xero sync. Lists page with "Load more" (the list APIs take `page` / `pageSize`), and the outstanding / overdue KPIs are computed server-side across every invoice. Only the customer acceptance portal can accept a quotation; share links expire at the end of `valid_until`, London time.
 - **`/stats`** [OK]: company KPI dashboard (revenue, margins, job / POD / fleet counts, driver leaderboard, top customers) with a period selector and client-side aggregation.
 
 ### Fleet and compliance
@@ -110,6 +120,7 @@ Status tags: [OK] functional against live data, [PARTIAL] real data but view-onl
 ### Settings
 - **`/settings`** [LAUNCHER]: settings hub cards.
 - **`/settings/company`** [OK]: the most complete form in the app; multi-section company profile with country-driven fields (GB VAT / EORI / O-licence vs US EIN / USDOT / MC / IFTA), currency / timezone defaults, validation.
+- **`/settings/documents`** [OK]: document branding (logo) and defaults for invoices, quotations and other generated documents; company identity still comes from `/settings/company`.
 - **`/settings/users`** [OK]: invite users by magic link, change roles and remove users from the company (admin action). Invites and role changes write `profiles` (company, tenant, role) atomically through the `prodfix_20` RPCs; you cannot remove yourself or the last admin, and only a super_admin can change a super_admin.
 - **`/settings/permissions`** [STUB]: shows a notice only. The checkboxes never restricted anything, so they were removed until it is decided what a page permission should restrict and where it is enforced.
 - **`/settings/invoices`** [PARTIAL]: this tenant's 4-weekly charge (active licensed vehicles priced on the graduated weekly bands). Shows the v1 model only; a v2 company's charges live in `billing_periods` / `period_invoice_lines` and are not surfaced here yet.
@@ -141,7 +152,12 @@ Status tags: [OK] functional against live data, [PARTIAL] real data but view-onl
     `card.configure({ postalCode })` override cannot work around it: the hydrate response for this
     application returns the feature flag `can_override_postal_code: "false"`, so a supplied value is
     ignored and the field stays on screen.
-- **TomTom** (planned): live vehicle tracking to replace the current read-only telematics views.
+- **TomTom** (`TOMTOM_API_KEY` server-side, `NEXT_PUBLIC_TOMTOM_MAP_KEY` for map tiles): geocoding, routing and the travel-time matrix behind `/planning`'s Smart Optimize, and the map on `/tracking`, through `/api/tomtom/*`. Live telematics from TomTom is still planned.
+- **Xero** (`XERO_CLIENT_ID`, `XERO_CLIENT_SECRET`, `XERO_REDIRECT_URI`, `ACCOUNTING_TOKEN_ENCRYPTION_KEY`): per-tenant OAuth connection and per-invoice sync from `/invoices`, under `/api/accounts/accounting/xero/*`. Tokens are stored AES-256-GCM encrypted.
+- **Stripe Connect** (`STRIPE_SECRET_KEY`): per-tenant connected account so a haulier's customers can pay invoices; set up from `/settings/company`. Unrelated to platform billing, which is Square.
+- **Microsoft Graph** (`MS_GRAPH_TENANT_ID`, `MS_GRAPH_CLIENT_ID`, `MS_GRAPH_CLIENT_SECRET`, `MS_GRAPH_SENDER`): sends invoice, quotation and POD emails (`lib/documents/delivery.ts`).
+- **Public quote requests** (`/api/public/quote-request/[token]`): a haulier's own website form can post quote requests into their `/invoices` inbox.
+- **Cambridge Audio RMA** (`CAMBRIDGE_RMA_SECRET`): a bespoke intake at `/api/integrations/cambridge-audio/rma` that creates jobs for one customer of one tenant. The tenant and customer ids are hardcoded in the route, so it is a one-off, not a general customer API.
 
 ## Getting started
 
@@ -180,12 +196,33 @@ CRON_SECRET=                        # REQUIRED for billing: bearer token for /ap
 # App
 NEXT_PUBLIC_SITE_URL=               # absolute base URL for links in emails and share links (falls back to https://tmswizard.cloud)
 SIGNUP_ENABLED=                     # self-serve signup kill switch: closed unless exactly "true" (server-only, no NEXT_PUBLIC_)
+QUOTATION_SHARE_SECRET=             # server-only, at least 32 characters; signs quotation share tokens
+
+# Document email (invoices, quotations, POD links)
+MS_GRAPH_TENANT_ID=
+MS_GRAPH_CLIENT_ID=
+MS_GRAPH_CLIENT_SECRET=
+MS_GRAPH_SENDER=
+
+# TomTom (planning and tracking)
+TOMTOM_API_KEY=                     # server-only; geocode, route, matrix
+NEXT_PUBLIC_TOMTOM_MAP_KEY=         # browser; map tiles
+
+# Xero and Stripe Connect (tenant accounts)
+XERO_CLIENT_ID=
+XERO_CLIENT_SECRET=
+XERO_REDIRECT_URI=
+ACCOUNTING_TOKEN_ENCRYPTION_KEY=    # base64, 32 bytes; encrypts stored Xero tokens
+STRIPE_SECRET_KEY=
+
+# Bespoke integrations
+CAMBRIDGE_RMA_SECRET=               # shared secret for the Cambridge Audio RMA intake
 ```
 
 Database: the schema is managed in Supabase. Migrations are SQL files applied by hand in the Supabase SQL editor; there is no automated migration runner. They live in two places:
 
 - `docs/sql/`: `rls_*`, `billing_01`..`billing_07` and the `prodfix_*` series.
-- `supabase/migrations/` (15 files, 2026-08-13 .. 2026-09-11): planning, load manifests, quotation acceptance, Xero credentials, driver activity. The folder uses Supabase CLI naming but the files were pasted into the SQL editor, so the CLI's history is empty. Never run `supabase db push` against this project: it would replay all 15.
+- `supabase/migrations/` (17 files, 2026-08-13 .. 2026-09-21): portal invites, planning, load manifests, quotation acceptance, Xero credentials, driver activity, tachograph ledger, atomic planning save, rate limits. The folder uses Supabase CLI naming but the files were pasted into the SQL editor, so the CLI's history is empty. Never run `supabase db push` against this project: it would replay all 17. `20260921090000_rate_limits.sql` is a byte-for-byte copy of `prodfix_01`; apply one, not both.
 
 `billing_01`..`billing_07` and `supabase/migrations/` are the applied baseline. Do not re-run them (in particular `billing_03` STEP 1, which mints coverage nobody paid for outside its original deploy window). `rls_01` and `rls_01b` now raise if run. Outstanding migrations, their order and a baseline check query are in `docs/sql/prodfix_00_APPLY_ORDER.md`; the reasoning behind each billing step is in its own file header.
 
@@ -223,10 +260,11 @@ docs/
 - **Payments:** platform subscription billing (Square card on file, daily charge cron, dunning) is live at `/settings/billing`; self-serve signup is built (`/signup`, 2026-09-16): a company creates its own account, lands on `/dashboard` with a getting-started panel (card, first vehicle, first driver), and is billed on v2 from its first vehicle activation. It is switched OFF in production by `SIGNUP_ENABLED` (closed unless `true`) until the launch blockers clear. Before it can be opened: a solicitor's review of the policy pages and recorded terms acceptance at signup, custom SMTP, and the SQL in `docs/sql/prodfix_00_APPLY_ORDER.md` including `signup_01`.
 - **Analytics dashboards:** make `/dashboard` data-driven; add cross-tenant "which tenant is performing best" views on top of the admin tenant selector; charts and SQL-view aggregation at scale.
 - **Admin management:** super-admin user management (the users page is read-only) and a "view as tenant" mode; decide and build the per-page permissions model. Done on the review branch: the `super_admin_audit` table and an atomic tenant-move RPC (`prodfix_10`).
-- **Design-system rollout:** move the remaining ~14 legacy inline-styled pages onto the design system so they follow the theme. The dark-default "operator theme" itself shipped on 2026-08-13 (see Design system above); what is left is converting those pages' hardcoded colour literals to tokens and adding each path to `lib/nav/themeableRoutes.ts`.
+- **Design-system rollout:** done. Every console page is on tokens and listed in `lib/nav/themeableRoutes.ts`; a new page still needs adding there.
 - **User invite flow:** invites now provision `profiles` atomically; self-serve signup makes the first profile of a new company its admin (`create_company_with_admin`).
 - **Driver walkaround checks with defect reporting that feeds `/maintenance` and VOR:** built 2026-09-29 (see `/shifts`, `/driver/walkaround`, `/driver/dashboard`, `/settings/walkaround` and the `/maintenance` Walkaround checks tab above). The SQL (`docs/sql/shifts_01..05`) is unapplied, so the job gate fails closed until it is; the driver flow has never had a signed-in pass on a phone.
 - **Queued features (designs pending):** past-due read-only suspension, billing health alerts, per-tenant timezone, and data export on cancellation.
+- **Competitive gaps (candidates, not yet decided; from a 2026-09-29 comparison with Mandata, Podfather and HaulierMagic):** driver walkaround checks with defect reporting that feeds `/maintenance` and VOR; customer ETA and live-tracking links by SMS or email; a real tachograph provider plus infringement reporting; subcontractor self-billing; per-customer rate cards that price a job automatically; bulk job import and a general customer booking API (replacing one-off routes like the Cambridge Audio intake); an offline queue for driver POD saves; per-job CO2 reporting; pallet-network integrations.
 
 ## Notes on maturity
 

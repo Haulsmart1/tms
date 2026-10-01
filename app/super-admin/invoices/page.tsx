@@ -97,10 +97,23 @@ export default function SuperAdminInvoicesPage() {
     setMessage("");
     setErrorMessage("");
 
-    const { error } = await supabase.from("invoices").update({ status }).eq("id", id);
+    // Server-side since prodfix_95: the ledger tables take no browser writes,
+    // and the route records a super_admin_audit row the direct update never did.
+    let response: Response;
+    try {
+      response = await fetch(`/api/super-admin/invoices/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+    } catch {
+      setErrorMessage("Could not reach the server. Try again.");
+      return;
+    }
 
-    if (error) {
-      setErrorMessage(error.message);
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      setErrorMessage(payload?.error ?? "Unable to update this invoice.");
       return;
     }
 
