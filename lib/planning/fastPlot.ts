@@ -1728,7 +1728,7 @@ async function sparseFastPlotOrder(
       return null;
     }
 
-    return largeRoute;
+    return improveLargeSparseGeographicRoute(largeRoute, counts, 1);
   }
   const clusters = buildFastPlotClusters(visits);
   const progress = new Map<string, number>();
