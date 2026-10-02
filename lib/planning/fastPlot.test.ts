@@ -1193,11 +1193,197 @@ describe("Fast Plot V5", () => {
 
     expect(lateNorthernIndex).toBe(-1);
 
+
+
     expect(loader.mock.calls.length).toBeLessThanOrEqual(10);
 
     expect(
       result.orderedVisits.map((visit) => visit.point)
     ).toEqual(result.route);
+  });
+  it("does not reopen distant regions in a multi-region national route", async () => {
+    /*
+     * Production-shaped geography rather than a single north/south strip.
+     * Each row contains nearby collection/delivery work, while alternating
+     * longitude creates distant regions with similar one-dimensional sweep
+     * progress.
+     */
+    const centres: LatLng[] = [
+      { lat: 55.75, lng: -3.2 },
+      { lat: 54.95, lng: -1.6 },
+      { lat: 54.35, lng: -3.0 },
+      { lat: 53.75, lng: -1.5 },
+      { lat: 53.35, lng: -3.0 },
+      { lat: 52.9, lng: -1.4 },
+      { lat: 52.45, lng: -3.2 },
+      { lat: 52.2, lng: -0.5 },
+      { lat: 51.75, lng: -3.1 },
+      { lat: 51.45, lng: -1.1 },
+      { lat: 51.15, lng: -3.0 },
+      { lat: 51.0, lng: 0.3 },
+    ];
+
+    const jobs = Array.from(
+      { length: 108 },
+      (_, index) => {
+        const regionIndex =
+          index % centres.length;
+
+        const pass =
+          Math.floor(index / centres.length);
+
+        const centre =
+          centres[regionIndex]!;
+
+        const offset =
+          (pass - 4) * 0.025;
+
+        const collectionLat =
+          centre.lat + offset;
+
+        const collectionLng =
+          centre.lng +
+          ((pass % 3) - 1) * 0.04;
+
+        const deliveryLat =
+          collectionLat - 0.035;
+
+        const deliveryLng =
+          collectionLng +
+          (pass % 2 === 0 ? 0.045 : -0.045);
+
+        return job(
+          `multi-region-${index}`,
+          [
+            stop(
+              `multi-region-c-${index}`,
+              1,
+              "collection",
+              collectionLat,
+              collectionLng
+            ),
+            stop(
+              `multi-region-d-${index}`,
+              2,
+              "delivery",
+              deliveryLat,
+              deliveryLng
+            ),
+          ]
+        );
+      }
+    );
+
+    const loader = vi.fn(
+      async (
+        origins: LatLng[],
+        destinations: LatLng[]
+      ) =>
+        origins.map((origin) =>
+          destinations.map((destination) =>
+            Math.round(
+              (
+                Math.abs(
+                  destination.lat - origin.lat
+                ) +
+                Math.abs(
+                  destination.lng - origin.lng
+                )
+              ) * 100000
+            )
+          )
+        )
+    );
+
+    const result =
+      await optimizeFastPlotOrderFromStart(
+        jobs,
+        { lat: 55.8, lng: -3.2 },
+        loader
+      );
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.orderedVisits).toHaveLength(216);
+
+    for (let index = 0; index < 108; index++) {
+      const collectionIndex =
+        result.orderedVisits.findIndex(
+          (visit) =>
+            visit.requirements[
+              `multi-region-${index}`
+            ]?.includes(0) === true
+        );
+
+      const deliveryIndex =
+        result.orderedVisits.findIndex(
+          (visit) =>
+            visit.requirements[
+              `multi-region-${index}`
+            ]?.includes(1) === true
+        );
+
+      expect(collectionIndex).toBeGreaterThanOrEqual(0);
+      expect(deliveryIndex).toBeGreaterThan(
+        collectionIndex
+      );
+    }
+
+    /*
+     * Divide the journey into broad geographic bands. Once the route has
+     * reached the southern band, it must not later reopen northern work.
+     */
+    const firstSouthernIndex =
+      result.orderedVisits.findIndex(
+        (visit) => visit.point.lat <= 51.5
+      );
+
+    expect(firstSouthernIndex).toBeGreaterThanOrEqual(0);
+
+    const reopenedNorth =
+      result.orderedVisits.findIndex(
+        (visit, index) =>
+          index > firstSouthernIndex + 30 &&
+          visit.point.lat >= 53
+      );
+
+    expect(reopenedNorth).toBe(-1);
+
+    /*
+     * Detect large lateral zig-zags in the late route. Once the route is in
+     * the eastern/south-eastern side, it must not later reopen the far west.
+     */
+    const firstSouthEastIndex =
+      result.orderedVisits.findIndex(
+        (visit) =>
+          visit.point.lat <= 52.2 &&
+          visit.point.lng >= -1.2
+      );
+
+    expect(firstSouthEastIndex).toBeGreaterThanOrEqual(0);
+
+    const reopenedFarWest =
+      result.orderedVisits.findIndex(
+        (visit, index) =>
+          index > firstSouthEastIndex + 30 &&
+          visit.point.lng <= -2.5
+      );
+
+    expect(reopenedFarWest).toBe(-1);
+
+    expect(
+      result.orderedVisits.map(
+        (visit) => visit.point
+      )
+    ).toEqual(result.route);
+
+    expect(
+      loader.mock.calls.length
+    ).toBeLessThanOrEqual(10);
   });
   it("keeps a 220-visit sparse route geographically progressive", async () => {
     const jobs = Array.from(

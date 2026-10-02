@@ -1633,61 +1633,61 @@ function largePrecedenceAwareGeographicOrder(
           nextLocalSuccessors.has(visit.key)
       );
 
-    let candidates: FastPlotVisit[];
+    /*
+     * Keep local precedence closure authoritative. Otherwise advance strictly
+     * along the route-derived Drop-1-to-farthest geographic projection.
+     */
+    const candidates =
+      immediateSuccessors.length > 0
+        ? immediateSuccessors
+        : eligible;
 
-    if (immediateSuccessors.length > 0) {
-      candidates = immediateSuccessors;
-    } else if (sweepOrigin) {
-      /*
-       * Work from the current geographic frontier outward. Among unfinished
-       * visits, first consider the earliest remaining progression band rather
-       * than allowing nearest-neighbour to skip work and return hundreds of
-       * drops later.
-       *
-       * The band is derived from the route itself: 5% of the full projected
-       * span, with no latitude-, country-, or customer-specific direction.
-       */
-      const progressValues =
-        eligible.map(sweepProgress);
+    let chosen: FastPlotVisit | null = null;
 
-      const minimumProgress =
-        Math.min(...progressValues);
-
-      const allProgress =
-        visits.map(sweepProgress);
-
-      const progressSpan =
-        Math.max(...allProgress) -
-        Math.min(...allProgress);
-
-      const frontierWidth =
-        Math.max(
-          progressSpan * 0.05,
-          Number.EPSILON
-        );
-
-      const frontierLimit =
-        minimumProgress + frontierWidth;
-
-      const frontierCandidates =
-        eligible.filter(
-          (visit) =>
-            sweepProgress(visit) <=
-            frontierLimit
-        );
-
-      candidates =
-        frontierCandidates.length > 0
-          ? frontierCandidates
-          : eligible;
+    if (
+      immediateSuccessors.length > 0 ||
+      !sweepOrigin
+    ) {
+      chosen = chooseNearest(
+        candidates,
+        current
+      );
     } else {
-      candidates = eligible;
-    }
+      chosen =
+        candidates
+          .slice()
+          .sort((left, right) => {
+            const progressDifference =
+              sweepProgress(left) -
+              sweepProgress(right);
 
-    const chosen = chooseNearest(
-      candidates,
-      current
-    );
+            if (progressDifference !== 0) {
+              return progressDifference;
+            }
+
+            if (current) {
+              const leftDistance =
+                haversineKm(
+                  current.point,
+                  left.point
+                );
+
+              const rightDistance =
+                haversineKm(
+                  current.point,
+                  right.point
+                );
+
+              if (leftDistance !== rightDistance) {
+                return leftDistance - rightDistance;
+              }
+            }
+
+            return left.key.localeCompare(
+              right.key
+            );
+          })[0] ?? null;
+    }
 
     if (!chosen) {
       return null;
@@ -1695,7 +1695,6 @@ function largePrecedenceAwareGeographicOrder(
 
     completeVisit(chosen);
   }
-
   if (
     route.length !== visits.length ||
     !routeMaintainsPhysicalPrecedence(
@@ -1729,11 +1728,7 @@ async function sparseFastPlotOrder(
       return null;
     }
 
-    return improveLargeSparseGeographicRoute(
-      largeRoute,
-      counts,
-      1
-    );
+    return largeRoute;
   }
   const clusters = buildFastPlotClusters(visits);
   const progress = new Map<string, number>();
