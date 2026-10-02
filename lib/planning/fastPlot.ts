@@ -1457,10 +1457,21 @@ async function sparseFastPlotOrder(
     visits.length >
     FAST_PLOT_SPARSE_RELOCATION_MAX_VISITS
   ) {
-    return largePrecedenceAwareGeographicOrder(
-      visits,
+    const largeRoute =
+      largePrecedenceAwareGeographicOrder(
+        visits,
+        counts,
+        firstVisit
+      );
+
+    if (!largeRoute) {
+      return null;
+    }
+
+    return improveLargeSparseGeographicRoute(
+      largeRoute,
       counts,
-      firstVisit
+      1
     );
   }
   const clusters = buildFastPlotClusters(visits);
