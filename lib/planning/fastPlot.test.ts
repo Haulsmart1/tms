@@ -1054,6 +1054,151 @@ describe("Fast Plot V5", () => {
     });
   });
 
+  it("does not finish a nationwide large lane by returning to completed northern regions", async () => {
+    /*
+     * Production-shaped large lane:
+     *
+     * - 110 jobs / 220 physical visits.
+     * - Collections sweep from northern Britain towards the south.
+     * - Deliveries remain geographically close to their own collections.
+     * - Every delivery is precedence-locked behind its collection.
+     *
+     * A large-route constructor must not sweep south and then leave a
+     * substantial batch of northern deliveries until drops 180-220.
+     */
+    const jobs = Array.from({ length: 110 }, (_, index) => {
+      const fraction = index / 109;
+      const collectionLat = 55.8 - fraction * 5.7;
+      const collectionLng =
+        -2.4 +
+        Math.sin(index * 0.73) * 1.35;
+
+      const deliveryLat =
+        collectionLat -
+        0.08 -
+        (index % 4) * 0.015;
+      const deliveryLng =
+        collectionLng +
+        ((index % 5) - 2) * 0.035;
+
+      return job(`uk-sweep-${index}`, [
+        stop(
+          `uk-sweep-c-${index}`,
+          1,
+          "collection",
+          collectionLat,
+          collectionLng
+        ),
+        stop(
+          `uk-sweep-d-${index}`,
+          2,
+          "delivery",
+          deliveryLat,
+          deliveryLng
+        ),
+      ]);
+    });
+
+    const loader = vi.fn(
+      async (
+        origins: LatLng[],
+        destinations: LatLng[]
+      ) =>
+        origins.map((origin) =>
+          destinations.map((destination) =>
+            Math.round(
+              (
+                Math.abs(destination.lat - origin.lat) +
+                Math.abs(destination.lng - origin.lng)
+              ) * 100000
+            )
+          )
+        )
+    );
+
+    const result = await optimizeFastPlotOrderFromStart(
+      jobs,
+      { lat: 55.9, lng: -2.4 },
+      loader
+    );
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.orderedVisits).toHaveLength(220);
+
+    const first = result.orderedVisits[0];
+
+    expect(
+      first?.requirements["uk-sweep-0"]?.includes(0)
+    ).toBe(true);
+
+    for (let index = 0; index < 110; index++) {
+      const collectionIndex =
+        result.orderedVisits.findIndex(
+          (visit) =>
+            visit.requirements[
+              `uk-sweep-${index}`
+            ]?.includes(0) === true
+        );
+
+      const deliveryIndex =
+        result.orderedVisits.findIndex(
+          (visit) =>
+            visit.requirements[
+              `uk-sweep-${index}`
+            ]?.includes(1) === true
+        );
+
+      expect(collectionIndex).toBeGreaterThanOrEqual(0);
+      expect(deliveryIndex).toBeGreaterThan(collectionIndex);
+    }
+
+    /*
+     * Once the route is deep into its final quarter, it must not contain a
+     * sizeable return to the northern half of this synthetic Britain sweep.
+     */
+    const finalQuarter =
+      result.orderedVisits.slice(
+        Math.floor(result.orderedVisits.length * 0.75)
+      );
+
+    const northernReturns = finalQuarter.filter(
+      (visit) => visit.point.lat >= 53.5
+    );
+
+    expect(northernReturns.length).toBeLessThanOrEqual(5);
+
+    /*
+     * Detect the stronger version of the production failure: a northern
+     * visit appearing extremely late after the lane has already reached
+     * southern Britain.
+     */
+    const firstSouthernIndex =
+      result.orderedVisits.findIndex(
+        (visit) => visit.point.lat <= 51.5
+      );
+
+    expect(firstSouthernIndex).toBeGreaterThanOrEqual(0);
+
+    const lateNorthernIndex =
+      result.orderedVisits.findIndex(
+        (visit, index) =>
+          index > firstSouthernIndex + 50 &&
+          visit.point.lat >= 53.5
+      );
+
+    expect(lateNorthernIndex).toBe(-1);
+
+    expect(loader.mock.calls.length).toBeLessThanOrEqual(10);
+
+    expect(
+      result.orderedVisits.map((visit) => visit.point)
+    ).toEqual(result.route);
+  });
   it("keeps a 220-visit sparse route geographically progressive", async () => {
     const jobs = Array.from(
       { length: 110 },

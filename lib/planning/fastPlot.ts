@@ -1313,6 +1313,27 @@ function validSparseCosts(
  * deterministic geographic ordering is used while the same precedence and
  * cluster rules continue to apply.
  */
+function buildLargeRouteRequirementIndex(
+  visits: FastPlotVisit[]
+): Map<string, FastPlotVisit> {
+  const result = new Map<string, FastPlotVisit>();
+
+  for (const visit of visits) {
+    for (
+      const [jobId, indexes] of
+      Object.entries(visit.requirements)
+    ) {
+      for (const index of indexes) {
+        result.set(
+          `${jobId}:${index}`,
+          visit
+        );
+      }
+    }
+  }
+
+  return result;
+}
 function largePrecedenceAwareGeographicOrder(
   visits: FastPlotVisit[],
   counts: Map<string, number>,
@@ -1322,106 +1343,184 @@ function largePrecedenceAwareGeographicOrder(
   const visited = new Set<string>();
   const route: FastPlotVisit[] = [];
 
-  if (firstVisit) {
-    if (!visitIsEligible(firstVisit, progress)) {
-      return null;
-    }
+  const requirementIndex =
+    buildLargeRouteRequirementIndex(visits);
 
-    applyVisit(firstVisit, progress, counts);
-    visited.add(firstVisit.key);
-    route.push(firstVisit);
-  }
+  const localSuccessorRadiusKm = 35;
 
   /*
-   * Before committing a very large lane to one geographic direction,
-   * consume legal work in the immediate neighbourhood of Drop 1.
+   * Establish one deterministic geographic progression axis for very large
+   * routes. It starts at Drop 1 and points toward the most distant physical
+   * visit. Longitude is scaled at the route latitude so the projection is
+   * approximately geographic rather than raw lat/lng degrees.
    *
-   * This prevents a nearby stop just behind the initial heading from
-   * becoming a 200-stop end-of-route return.
+   * This does not replace precedence or local successor closure. It is used
+   * only when choosing between otherwise legal independent visits.
    */
-  if (firstVisit) {
-    const anchorRadiusKm = 10;
+  const sweepOrigin = firstVisit?.point ?? visits[0]?.point ?? null;
 
-    while (true) {
-      let nearby: FastPlotVisit | null = null;
-      let nearbyDistanceKm = Number.POSITIVE_INFINITY;
+  const meanLatitudeRadians =
+    visits.length > 0
+      ? (
+          visits.reduce(
+            (sum, visit) => sum + visit.point.lat,
+            0
+          ) / visits.length
+        ) * Math.PI / 180
+      : 0;
 
-      for (const candidate of visits) {
-        if (
-          visited.has(candidate.key) ||
-          !visitIsEligible(candidate, progress)
-        ) {
-          continue;
-        }
+  const longitudeScale =
+    Math.max(
+      0.01,
+      Math.abs(Math.cos(meanLatitudeRadians))
+    );
 
-        const distanceKm = haversineKm(
-          firstVisit.point,
-          candidate.point
-        );
+  const projectedDelta = (
+    point: LatLng
+  ): { x: number; y: number } => {
+    if (!sweepOrigin) {
+      return { x: 0, y: 0 };
+    }
 
-        if (distanceKm > anchorRadiusKm) {
-          continue;
-        }
+    return {
+      x:
+        (point.lng - sweepOrigin.lng) *
+        longitudeScale,
+      y:
+        point.lat - sweepOrigin.lat,
+    };
+  };
 
-        if (
-          !nearby ||
-          distanceKm < nearbyDistanceKm ||
-          (
-            distanceKm === nearbyDistanceKm &&
-            candidate.key.localeCompare(nearby.key) < 0
-          )
-        ) {
-          nearby = candidate;
-          nearbyDistanceKm = distanceKm;
-        }
+  let sweepDirectionX = 0;
+  let sweepDirectionY = 0;
+
+  if (sweepOrigin) {
+    let farthestSquared = -1;
+
+    for (const visit of visits) {
+      const delta = projectedDelta(
+        visit.point
+      );
+
+      const squared =
+        delta.x * delta.x +
+        delta.y * delta.y;
+
+      if (squared > farthestSquared) {
+        farthestSquared = squared;
+        sweepDirectionX = delta.x;
+        sweepDirectionY = delta.y;
       }
+    }
 
-      if (!nearby) {
-        break;
-      }
+    const magnitude = Math.sqrt(
+      sweepDirectionX * sweepDirectionX +
+      sweepDirectionY * sweepDirectionY
+    );
 
-      applyVisit(nearby, progress, counts);
-      visited.add(nearby.key);
-      route.push(nearby);
+    if (magnitude > 0) {
+      sweepDirectionX /= magnitude;
+      sweepDirectionY /= magnitude;
     }
   }
 
-  while (route.length < visits.length) {
-    const current = route.at(-1) ?? null;
+  const sweepProgress = (
+    visit: FastPlotVisit
+  ): number => {
+    const delta = projectedDelta(
+      visit.point
+    );
 
-    let chosen: FastPlotVisit | null = null;
-    let chosenDistanceKm = Number.POSITIVE_INFINITY;
+    return (
+      delta.x * sweepDirectionX +
+      delta.y * sweepDirectionY
+    );
+  };
 
-    for (const candidate of visits) {
+  let nextLocalSuccessors = new Set<string>();
+
+  const findLocalSuccessors = (
+    completedVisit: FastPlotVisit
+  ): Set<string> => {
+    const successors = new Set<string>();
+
+    for (
+      const jobId of
+      Object.keys(completedVisit.requirements)
+    ) {
+      const nextIndex = progress.get(jobId) ?? 0;
+      const count = counts.get(jobId) ?? 0;
+
+      if (nextIndex >= count) {
+        continue;
+      }
+
+      const successor =
+        requirementIndex.get(
+          `${jobId}:${nextIndex}`
+        );
+
       if (
-        visited.has(candidate.key) ||
-        !visitIsEligible(candidate, progress)
+        !successor ||
+        visited.has(successor.key) ||
+        successor.key === completedVisit.key
       ) {
         continue;
       }
 
-      if (!current) {
-        if (
-          !chosen ||
-          candidate.key.localeCompare(chosen.key) < 0
-        ) {
-          chosen = candidate;
-        }
-
-        continue;
+      if (
+        haversineKm(
+          completedVisit.point,
+          successor.point
+        ) <= localSuccessorRadiusKm
+      ) {
+        successors.add(successor.key);
       }
+    }
 
-      const distanceKm = haversineKm(
-        current.point,
-        candidate.point
-      );
+    return successors;
+  };
+
+  const completeVisit = (
+    visit: FastPlotVisit
+  ): void => {
+    applyVisit(
+      visit,
+      progress,
+      counts
+    );
+
+    visited.add(visit.key);
+    route.push(visit);
+
+    nextLocalSuccessors =
+      findLocalSuccessors(visit);
+  };
+
+  const chooseNearest = (
+    candidates: FastPlotVisit[],
+    current: FastPlotVisit | null
+  ): FastPlotVisit | null => {
+    let chosen: FastPlotVisit | null = null;
+    let chosenDistanceKm =
+      Number.POSITIVE_INFINITY;
+
+    for (const candidate of candidates) {
+      const distanceKm = current
+        ? haversineKm(
+            current.point,
+            candidate.point
+          )
+        : 0;
 
       if (
         !chosen ||
         distanceKm < chosenDistanceKm ||
         (
           distanceKm === chosenDistanceKm &&
-          candidate.key.localeCompare(chosen.key) < 0
+          candidate.key.localeCompare(
+            chosen.key
+          ) < 0
         )
       ) {
         chosen = candidate;
@@ -1429,18 +1528,180 @@ function largePrecedenceAwareGeographicOrder(
       }
     }
 
+    return chosen;
+  };
+
+  if (firstVisit) {
+    if (!visitIsEligible(firstVisit, progress)) {
+      return null;
+    }
+
+    completeVisit(firstVisit);
+  }
+
+  /*
+   * Protect initially legal work around Drop 1, but close a directly
+   * unlocked local precedence chain before opening another nearby job.
+   */
+  if (firstVisit) {
+    const anchorRadiusKm = 10;
+
+    while (true) {
+      const anchorSuccessors = visits.filter(
+        (visit) =>
+          !visited.has(visit.key) &&
+          nextLocalSuccessors.has(visit.key) &&
+          visitIsEligible(
+            visit,
+            progress
+          )
+      );
+
+      const anchorCandidates =
+        anchorSuccessors.length > 0
+          ? anchorSuccessors
+          : visits.filter(
+              (visit) =>
+                !visited.has(visit.key) &&
+                visitIsEligible(
+                  visit,
+                  progress
+                ) &&
+                haversineKm(
+                  firstVisit.point,
+                  visit.point
+                ) <= anchorRadiusKm
+            );
+
+      if (anchorCandidates.length === 0) {
+        break;
+      }
+
+      const chosen = chooseNearest(
+        anchorCandidates,
+        route.at(-1) ?? firstVisit
+      );
+
+      if (!chosen) {
+        return null;
+      }
+
+      completeVisit(chosen);
+
+      const remainingAnchorWork =
+        visits.some(
+          (visit) =>
+            !visited.has(visit.key) &&
+            visitIsEligible(
+              visit,
+              progress
+            ) &&
+            haversineKm(
+              firstVisit.point,
+              visit.point
+            ) <= anchorRadiusKm
+        );
+
+      if (
+        !remainingAnchorWork &&
+        nextLocalSuccessors.size === 0
+      ) {
+        break;
+      }
+    }
+  }
+
+  while (route.length < visits.length) {
+    const current = route.at(-1) ?? null;
+
+    const eligible = visits.filter(
+      (visit) =>
+        !visited.has(visit.key) &&
+        visitIsEligible(
+          visit,
+          progress
+        )
+    );
+
+    if (eligible.length === 0) {
+      return null;
+    }
+
+    const immediateSuccessors =
+      eligible.filter(
+        (visit) =>
+          nextLocalSuccessors.has(visit.key)
+      );
+
+    let candidates: FastPlotVisit[];
+
+    if (immediateSuccessors.length > 0) {
+      candidates = immediateSuccessors;
+    } else if (sweepOrigin) {
+      /*
+       * Work from the current geographic frontier outward. Among unfinished
+       * visits, first consider the earliest remaining progression band rather
+       * than allowing nearest-neighbour to skip work and return hundreds of
+       * drops later.
+       *
+       * The band is derived from the route itself: 5% of the full projected
+       * span, with no latitude-, country-, or customer-specific direction.
+       */
+      const progressValues =
+        eligible.map(sweepProgress);
+
+      const minimumProgress =
+        Math.min(...progressValues);
+
+      const allProgress =
+        visits.map(sweepProgress);
+
+      const progressSpan =
+        Math.max(...allProgress) -
+        Math.min(...allProgress);
+
+      const frontierWidth =
+        Math.max(
+          progressSpan * 0.05,
+          Number.EPSILON
+        );
+
+      const frontierLimit =
+        minimumProgress + frontierWidth;
+
+      const frontierCandidates =
+        eligible.filter(
+          (visit) =>
+            sweepProgress(visit) <=
+            frontierLimit
+        );
+
+      candidates =
+        frontierCandidates.length > 0
+          ? frontierCandidates
+          : eligible;
+    } else {
+      candidates = eligible;
+    }
+
+    const chosen = chooseNearest(
+      candidates,
+      current
+    );
+
     if (!chosen) {
       return null;
     }
 
-    applyVisit(chosen, progress, counts);
-    visited.add(chosen.key);
-    route.push(chosen);
+    completeVisit(chosen);
   }
 
   if (
     route.length !== visits.length ||
-    !routeMaintainsPhysicalPrecedence(route, counts)
+    !routeMaintainsPhysicalPrecedence(
+      route,
+      counts
+    )
   ) {
     return null;
   }
