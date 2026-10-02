@@ -1313,12 +1313,156 @@ function validSparseCosts(
  * deterministic geographic ordering is used while the same precedence and
  * cluster rules continue to apply.
  */
+function largePrecedenceAwareGeographicOrder(
+  visits: FastPlotVisit[],
+  counts: Map<string, number>,
+  firstVisit: FastPlotVisit | null
+): FastPlotVisit[] | null {
+  const progress = new Map<string, number>();
+  const visited = new Set<string>();
+  const route: FastPlotVisit[] = [];
+
+  if (firstVisit) {
+    if (!visitIsEligible(firstVisit, progress)) {
+      return null;
+    }
+
+    applyVisit(firstVisit, progress, counts);
+    visited.add(firstVisit.key);
+    route.push(firstVisit);
+  }
+
+  /*
+   * Before committing a very large lane to one geographic direction,
+   * consume legal work in the immediate neighbourhood of Drop 1.
+   *
+   * This prevents a nearby stop just behind the initial heading from
+   * becoming a 200-stop end-of-route return.
+   */
+  if (firstVisit) {
+    const anchorRadiusKm = 10;
+
+    while (true) {
+      let nearby: FastPlotVisit | null = null;
+      let nearbyDistanceKm = Number.POSITIVE_INFINITY;
+
+      for (const candidate of visits) {
+        if (
+          visited.has(candidate.key) ||
+          !visitIsEligible(candidate, progress)
+        ) {
+          continue;
+        }
+
+        const distanceKm = haversineKm(
+          firstVisit.point,
+          candidate.point
+        );
+
+        if (distanceKm > anchorRadiusKm) {
+          continue;
+        }
+
+        if (
+          !nearby ||
+          distanceKm < nearbyDistanceKm ||
+          (
+            distanceKm === nearbyDistanceKm &&
+            candidate.key.localeCompare(nearby.key) < 0
+          )
+        ) {
+          nearby = candidate;
+          nearbyDistanceKm = distanceKm;
+        }
+      }
+
+      if (!nearby) {
+        break;
+      }
+
+      applyVisit(nearby, progress, counts);
+      visited.add(nearby.key);
+      route.push(nearby);
+    }
+  }
+
+  while (route.length < visits.length) {
+    const current = route.at(-1) ?? null;
+
+    let chosen: FastPlotVisit | null = null;
+    let chosenDistanceKm = Number.POSITIVE_INFINITY;
+
+    for (const candidate of visits) {
+      if (
+        visited.has(candidate.key) ||
+        !visitIsEligible(candidate, progress)
+      ) {
+        continue;
+      }
+
+      if (!current) {
+        if (
+          !chosen ||
+          candidate.key.localeCompare(chosen.key) < 0
+        ) {
+          chosen = candidate;
+        }
+
+        continue;
+      }
+
+      const distanceKm = haversineKm(
+        current.point,
+        candidate.point
+      );
+
+      if (
+        !chosen ||
+        distanceKm < chosenDistanceKm ||
+        (
+          distanceKm === chosenDistanceKm &&
+          candidate.key.localeCompare(chosen.key) < 0
+        )
+      ) {
+        chosen = candidate;
+        chosenDistanceKm = distanceKm;
+      }
+    }
+
+    if (!chosen) {
+      return null;
+    }
+
+    applyVisit(chosen, progress, counts);
+    visited.add(chosen.key);
+    route.push(chosen);
+  }
+
+  if (
+    route.length !== visits.length ||
+    !routeMaintainsPhysicalPrecedence(route, counts)
+  ) {
+    return null;
+  }
+
+  return route;
+}
 async function sparseFastPlotOrder(
   visits: FastPlotVisit[],
   counts: Map<string, number>,
   loadCosts: FastPlotCostLoader,
   firstVisit: FastPlotVisit | null = null
 ): Promise<FastPlotVisit[] | null> {
+  if (
+    visits.length >
+    FAST_PLOT_SPARSE_RELOCATION_MAX_VISITS
+  ) {
+    return largePrecedenceAwareGeographicOrder(
+      visits,
+      counts,
+      firstVisit
+    );
+  }
   const clusters = buildFastPlotClusters(visits);
   const progress = new Map<string, number>();
   const visited = new Set<string>();
