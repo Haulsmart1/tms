@@ -2771,6 +2771,9 @@ export default function PlanningPage() {
               "DAY driver scheduling needs an operating-base coordinate.",
             physical_route_mismatch:
               "The canonical service order does not match the physical itinerary.",
+            seven_day_horizon_exceeded: "The canonical route requires more than seven planning days.",
+            schedule_unschedulable: "The canonical route cannot be scheduled with the available driver-hours state and planning rules.",
+            canonical_order_mismatch: "The driver schedule did not preserve the canonical drop order.",
           } as const;
 
           setDriverScheduleNotice(notices[result.reason]);

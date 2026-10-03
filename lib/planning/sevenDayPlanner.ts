@@ -8,6 +8,7 @@ import {
   type DriverScheduleTask,
   type DriverTravelResolver,
 } from "./driverSchedule";
+import type { DriverScheduleResult } from "./driverSchedule";
 import type { DriverRuleProfile } from "./driverRules";
 
 export const MAX_ROUTE_DAYS = 7;
@@ -23,6 +24,7 @@ export type SevenDayRouteDay = {
 
 export type SevenDayPlanSuccess = {
   ok: true;
+  schedule: DriverScheduleResult;
   status: DriverScheduleStatus;
   planningAssumption: boolean;
   days: SevenDayRouteDay[];
@@ -37,6 +39,7 @@ export type SevenDayPlanFailureReason =
 
 export type SevenDayPlanFailure = {
   ok: false;
+  schedule: DriverScheduleResult;
   reason: SevenDayPlanFailureReason;
   days: SevenDayRouteDay[];
   warnings: string[];
@@ -259,6 +262,7 @@ export function planCanonicalRouteAcrossDays(
   } catch (error) {
     return {
       ok: false,
+      schedule,
       reason: "canonical_order_mismatch",
       days: [],
       warnings: [
@@ -281,6 +285,7 @@ export function planCanonicalRouteAcrossDays(
   ) {
     return {
       ok: false,
+      schedule,
       reason: "canonical_order_mismatch",
       days,
       warnings: [
@@ -303,6 +308,7 @@ export function planCanonicalRouteAcrossDays(
   if (days.some((day) => day.day > maxDays)) {
     return {
       ok: false,
+      schedule,
       reason: "horizon_exceeded",
       days: daysWithinHorizon,
       warnings: [
@@ -322,6 +328,7 @@ export function planCanonicalRouteAcrossDays(
   ) {
     return {
       ok: false,
+      schedule,
       reason: "unschedulable",
       days,
       warnings: schedule.warnings,
@@ -332,6 +339,7 @@ export function planCanonicalRouteAcrossDays(
 
   return {
     ok: true,
+    schedule,
     status: schedule.status,
     planningAssumption: schedule.planningAssumption,
     days,

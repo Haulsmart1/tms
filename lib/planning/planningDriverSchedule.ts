@@ -3,8 +3,7 @@ import {
   ASSIMILATED_DRIVER_HOURS_LIMITS,
   type DriverHoursState,
 } from "./driverHoursState";
-import type { DriverAwareRouteResult } from "./driverAwareRoute";
-import { scheduleDriverAwareRoute } from "./driverRouteSchedule";
+import { buildDriverScheduleStopTasksFromItinerary } from "./driverAwareRoute";
 import type {
   DriverPlanningProfile,
   DriverScheduleResult,
@@ -12,12 +11,11 @@ import type {
 import type { DriverRuleProfile } from "./driverRules";
 import type { PlanningServiceStop } from "./physicalItinerary";
 import type { ComplianceRegime } from "./regime";
+import {
+  planCanonicalRouteAcrossDays,
+  type SevenDayRouteDay,
+} from "./sevenDayPlanner";
 import type { PlanJob, RouteResult } from "./types";
-
-type SuccessfulDriverAwareRoute = Extract<
-  DriverAwareRouteResult,
-  { ok: true }
->;
 
 export type PlanningDropEta = {
   dropNumber: number;
@@ -30,6 +28,7 @@ export type PlanningDropEta = {
 export type PlanningDriverSchedulePreview = {
   planningStart: Date;
   schedule: DriverScheduleResult;
+  routeDays: SevenDayRouteDay[];
   dropEtas: PlanningDropEta[];
 };
 
@@ -38,7 +37,10 @@ export type PlanningDriverScheduleFailureReason =
   | "day_base_unavailable"
   | "route_unavailable"
   | "route_leg_mismatch"
-  | "physical_route_mismatch";
+  | "physical_route_mismatch"
+  | "seven_day_horizon_exceeded"
+  | "schedule_unschedulable"
+  | "canonical_order_mismatch";
 
 export type PlanningDriverScheduleBuildResult =
   | {
@@ -234,29 +236,38 @@ export function buildPlanningDriverSchedulePreview(
     );
   }
 
-  const awareRoute: SuccessfulDriverAwareRoute = {
-    ok: true,
-    jobs: input.jobs,
-    physicalRoute: input.orderedVisits.map(
-      (visit) => visit.point
-    ),
-    orderedVisits: input.orderedVisits,
-    serviceStops: input.serviceStops,
-    firstJobId:
-      input.serviceStops[0]?.jobId ??
-      input.jobs[0]?.id ??
-      "",
-    firstTravelSeconds: input.firstTravelSeconds,
-    totalServiceSeconds:
-      input.serviceStops.reduce(
-        (total, stop) =>
-          total + stop.serviceSeconds,
-        0
-      ),
-  };
+  const taskResult =
+    buildDriverScheduleStopTasksFromItinerary(
+      input.jobs,
+      input.orderedVisits,
+      input.serviceStops
+    );
 
-  const result = scheduleDriverAwareRoute({
-    route: awareRoute,
+  if (!taskResult.ok) {
+    return {
+      ok: false,
+      reason: "physical_route_mismatch",
+    };
+  }
+
+  const initialDrivingState = input.driverHoursState
+    ? {
+        continuousDrivingSeconds:
+          input.driverHoursState.continuousDrivingSeconds,
+        dailyDrivingSeconds:
+          input.driverHoursState.dailyDrivingSeconds,
+        weeklyDrivingSeconds:
+          input.driverHoursState.currentWeekDrivingSeconds,
+        fortnightDrivingSeconds:
+          input.driverHoursState.fortnightDrivingSeconds,
+        maxWeeklyDrivingSeconds:
+          ASSIMILATED_DRIVER_HOURS_LIMITS.weeklyDrivingSeconds,
+        maxFortnightDrivingSeconds:
+          ASSIMILATED_DRIVER_HOURS_LIMITS.fortnightDrivingSeconds,
+      }
+    : undefined;
+
+  const result = planCanonicalRouteAcrossDays({
     planningProfile: input.planningProfile,
     ruleProfile:
       advisoryAssimilatedRuleProfile(input.planningDate),
@@ -264,9 +275,15 @@ export function buildPlanningDriverSchedulePreview(
     startLocationId: input.startLocationId,
     baseLocationId: null,
     activityDataAvailable:
-      input.activityDataAvailable,
-    driverHoursState:
-      input.driverHoursState,
+      input.activityDataAvailable &&
+      (input.driverHoursState?.complete ?? false),
+    initialDrivingState,
+    tasks: taskResult.tasks.map((task) => ({
+      id: task.id,
+      locationId: task.locationId,
+      serviceSeconds: task.serviceSeconds,
+      precedenceIds: task.precedenceIds,
+    })),
     travelSecondsBetween: (
       fromLocationId,
       toLocationId
@@ -284,12 +301,26 @@ export function buildPlanningDriverSchedulePreview(
   });
 
   if (!result.ok) {
-    return {
-      ok: false,
-      reason: "physical_route_mismatch",
-    };
-  }
+    switch (result.reason) {
+      case "horizon_exceeded":
+        return {
+          ok: false,
+          reason: "seven_day_horizon_exceeded",
+        };
 
+      case "unschedulable":
+        return {
+          ok: false,
+          reason: "schedule_unschedulable",
+        };
+
+      case "canonical_order_mismatch":
+        return {
+          ok: false,
+          reason: "canonical_order_mismatch",
+        };
+    }
+  }
   const serviceByTaskId = new Map<
     string,
     PlanningServiceStop
@@ -341,6 +372,7 @@ export function buildPlanningDriverSchedulePreview(
           ...dutySpanWarnings(result.schedule),
         ],
       },
+      routeDays: result.days,
       dropEtas,
     },
   };

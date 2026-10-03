@@ -370,5 +370,103 @@ describe(
         });
       }
     );
+
+    it(
+      "splits the canonical itinerary across route days without changing task order",
+      () => {
+        const value = job(
+          "job-a",
+          [
+            [51.5, -0.1],
+            [51.6, -0.2],
+            [51.7, -0.3],
+          ]
+        );
+
+        const result =
+          buildPlanningDriverSchedulePreview({
+            ...baseInput(),
+            driverHoursState: {
+              complete: true,
+              continuousDrivingSeconds: 0,
+              dailyDrivingSeconds: 8 * HOUR,
+              currentWeekDrivingSeconds: 8 * HOUR,
+              fortnightDrivingSeconds: 8 * HOUR,
+            } as unknown as DriverHoursState,
+            activityDataAvailable: true,
+            jobs: [value],
+            orderedVisits: [
+              visit("v1", 51.5, -0.1),
+              visit("v2", 51.6, -0.2),
+              visit("v3", 51.7, -0.3),
+            ],
+            serviceStops: [
+              {
+                ...service(
+                  1,
+                  1,
+                  "job-a",
+                  "job-a-1",
+                  0
+                ),
+                serviceSeconds: 600,
+              },
+              {
+                ...service(
+                  2,
+                  2,
+                  "job-a",
+                  "job-a-2",
+                  1
+                ),
+                serviceSeconds: 600,
+              },
+              {
+                ...service(
+                  3,
+                  3,
+                  "job-a",
+                  "job-a-3",
+                  2
+                ),
+                serviceSeconds: 600,
+              },
+            ],
+            firstTravelSeconds: HOUR,
+            route: route([
+              HOUR,
+              HOUR,
+            ]),
+          });
+
+        expect(result.ok).toBe(true);
+
+        if (!result.ok) return;
+
+        expect(
+          result.preview.routeDays.length
+        ).toBeGreaterThan(1);
+
+        expect(
+          result.preview.routeDays.flatMap(
+            (day) => day.taskIds
+          )
+        ).toEqual([
+          "stop:job-a-1",
+          "stop:job-a-2",
+          "stop:job-a-3",
+        ]);
+
+        expect(
+          result.preview.dropEtas.map(
+            (drop) => drop.stopId
+          )
+        ).toEqual([
+          "job-a-1",
+          "job-a-2",
+          "job-a-3",
+        ]);
+      }
+    );
   }
 );
