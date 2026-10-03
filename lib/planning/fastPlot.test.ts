@@ -1991,3 +1991,57 @@ describe("Fast Plot V5", () => {
   });
 
 });
+
+import productionFixture from "./fixtures/large-shared-terminal-regression.json";
+
+describe("production large-route geographic regression", () => {
+  it("does not strand the shared delivery hundreds of kilometres from the route tail", async () => {
+    const loader = async (origins: LatLng[], destinations: LatLng[]) =>
+      origins.map((origin) =>
+        destinations.map((destination) => {
+          const meanLat =
+            ((origin.lat + destination.lat) / 2) *
+            Math.PI /
+            180;
+          const latKm =
+            (destination.lat - origin.lat) * 111.32;
+          const lngKm =
+            (destination.lng - origin.lng) *
+            111.32 *
+            Math.cos(meanLat);
+
+          return Math.round(
+            Math.hypot(latKm, lngKm) * 60
+          );
+        })
+      );
+
+    const result =
+      await optimizeFastPlotOrderFromStart(
+        productionFixture.jobs as PlanJob[],
+        productionFixture.start,
+        loader
+      );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const route = result.orderedVisits;
+
+    const previous = route[route.length - 2].point;
+    const last = route[route.length - 1].point;
+    const toRadians = (degrees: number) =>
+      degrees * Math.PI / 180;
+    const deltaLat = toRadians(last.lat - previous.lat);
+    const deltaLng = toRadians(last.lng - previous.lng);
+    const a =
+      Math.sin(deltaLat / 2) ** 2 +
+      Math.cos(toRadians(previous.lat)) *
+        Math.cos(toRadians(last.lat)) *
+        Math.sin(deltaLng / 2) ** 2;
+    const tailJumpKm =
+      6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    expect(tailJumpKm).toBeLessThan(150);
+  }, 15_000);
+});

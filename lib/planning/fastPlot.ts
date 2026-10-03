@@ -1884,6 +1884,39 @@ function largePrecedenceAwareGeographicOrder(
     }
   }
 
+  const dominantTerminal = visits.reduce<FastPlotVisit | null>(
+    (best, candidate) =>
+      !best ||
+      Object.keys(candidate.requirements).length >
+        Object.keys(best.requirements).length
+        ? candidate
+        : best,
+    null
+  );
+
+  const dominantTerminalRequirementCount =
+    dominantTerminal
+      ? Object.keys(dominantTerminal.requirements).length
+      : 0;
+
+  const useTerminalAwareSweep =
+    dominantTerminal !== null &&
+    dominantTerminalRequirementCount > 1 &&
+    dominantTerminalRequirementCount * 2 >= counts.size;
+
+  const terminalDistance = (
+    visit: FastPlotVisit
+  ): number => {
+    if (!dominantTerminal) return 0;
+
+    const visitDelta = projectedDelta(visit.point);
+    const terminalDelta = projectedDelta(dominantTerminal.point);
+
+    return Math.hypot(
+      visitDelta.x - terminalDelta.x,
+      visitDelta.y - terminalDelta.y
+    );
+  };
   while (route.length < visits.length) {
     const current = route.at(-1) ?? null;
 
@@ -1930,9 +1963,22 @@ function largePrecedenceAwareGeographicOrder(
         candidates
           .slice()
           .sort((left, right) => {
-            const progressDifference =
-              sweepProgress(left) -
+            const leftProgress =
+              sweepProgress(left);
+            const rightProgress =
               sweepProgress(right);
+
+            const progressDifference =
+              useTerminalAwareSweep
+                ? (
+                    leftProgress -
+                    terminalDistance(left)
+                  ) -
+                  (
+                    rightProgress -
+                    terminalDistance(right)
+                  )
+                : leftProgress - rightProgress;
 
             if (progressDifference !== 0) {
               return progressDifference;
