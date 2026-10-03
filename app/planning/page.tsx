@@ -68,6 +68,7 @@ import {
   optimizeFastPlotOrderFromStart,
 } from "../../lib/planning/fastPlot";
 import { buildPlanningPhysicalItinerary } from "../../lib/planning/physicalItinerary";
+import { buildSevenDayPresentation } from "../../lib/planning/sevenDayPresentation";
 import {
   buildPlanningDriverHoursState,
   planningDriverHoursBoundaries,
@@ -3474,6 +3475,155 @@ export default function PlanningPage() {
                             )}
                           </div>
                         ) : null}
+
+                        <div className="mt-4">
+                          <div className="flex flex-wrap items-end justify-between gap-2">
+                            <div>
+                              <h3 className="text-sm font-semibold text-ink">
+                                7-day route plan
+                              </h3>
+                              <p className="mt-0.5 text-xs text-ink-3">
+                                Canonical Smart Optimize order split by driver-hours day.
+                              </p>
+                            </div>
+                            <span className="text-xs font-medium text-ink-3">
+                              {selectedDriverSchedule.routeDays.length}{" "}
+                              {selectedDriverSchedule.routeDays.length === 1
+                                ? "day"
+                                : "days"}
+                            </span>
+                          </div>
+
+                          <div
+                            className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3"
+                            data-testid="seven-day-route-plan"
+                          >
+                            {buildSevenDayPresentation(
+                              selectedDriverSchedule
+                            ).map((routeDay) => {
+                              const hours = (
+                                seconds: number
+                              ) =>
+                                `${Math.floor(seconds / 3600)}h ${Math.floor(
+                                  (seconds % 3600) / 60
+                                )}m`;
+
+                              return (
+                                <article
+                                  key={routeDay.day}
+                                  className="rounded-lg border border-line bg-surface-2 p-3"
+                                  data-testid={`route-day-${routeDay.day}`}
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div>
+                                      <h4 className="text-sm font-semibold text-ink">
+                                        Day {routeDay.day}
+                                      </h4>
+                                      <p className="mt-0.5 text-xs text-ink-3">
+                                        {routeDay.firstDropNumber !== null &&
+                                        routeDay.lastDropNumber !== null
+                                          ? routeDay.firstDropNumber ===
+                                            routeDay.lastDropNumber
+                                            ? `Drop ${routeDay.firstDropNumber}`
+                                            : `Drops ${routeDay.firstDropNumber}-${routeDay.lastDropNumber}`
+                                          : "No service drops"}
+                                      </p>
+                                    </div>
+
+                                    <span className="rounded-full border border-line px-2 py-0.5 text-[11px] font-medium text-ink-2">
+                                      {routeDay.drops.length}{" "}
+                                      {routeDay.drops.length === 1
+                                        ? "drop"
+                                        : "drops"}
+                                    </span>
+                                  </div>
+
+                                  <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                                    <div>
+                                      <dt className="text-ink-3">
+                                        Driving
+                                      </dt>
+                                      <dd className="font-medium text-ink">
+                                        {hours(
+                                          routeDay.totals
+                                            .driveSeconds
+                                        )}
+                                      </dd>
+                                    </div>
+
+                                    <div>
+                                      <dt className="text-ink-3">
+                                        Service
+                                      </dt>
+                                      <dd className="font-medium text-ink">
+                                        {hours(
+                                          routeDay.totals
+                                            .serviceSeconds
+                                        )}
+                                      </dd>
+                                    </div>
+
+                                    <div>
+                                      <dt className="text-ink-3">
+                                        Breaks
+                                      </dt>
+                                      <dd className="font-medium text-ink">
+                                        {
+                                          routeDay.totals
+                                            .breakCount
+                                        }{" "}
+                                        ·{" "}
+                                        {hours(
+                                          routeDay.totals
+                                            .breakSeconds
+                                        )}
+                                      </dd>
+                                    </div>
+
+                                    <div>
+                                      <dt className="text-ink-3">
+                                        Daily rest
+                                      </dt>
+                                      <dd className="font-medium text-ink">
+                                        {
+                                          routeDay.totals
+                                            .dailyRestCount
+                                        }{" "}
+                                        ·{" "}
+                                        {hours(
+                                          routeDay.totals
+                                            .dailyRestSeconds
+                                        )}
+                                      </dd>
+                                    </div>
+                                  </dl>
+
+                                  {routeDay.drops.length > 0 ? (
+                                    <div className="mt-3 border-t border-line pt-2">
+                                      <p className="text-[11px] font-medium uppercase tracking-wide text-ink-3">
+                                        Canonical drops
+                                      </p>
+
+                                      <div className="mt-1 flex flex-wrap gap-1">
+                                        {routeDay.drops.map(
+                                          (drop) => (
+                                            <span
+                                              key={`${routeDay.day}:${drop.dropNumber}:${drop.stopId}`}
+                                              className="rounded border border-line bg-surface px-1.5 py-0.5 text-xs font-medium text-ink"
+                                              title={`Stop ${drop.stopId}`}
+                                            >
+                                              {drop.dropNumber}
+                                            </span>
+                                          )
+                                        )}
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </article>
+                              );
+                            })}
+                          </div>
+                        </div>
 
                         <div className="mt-3 max-h-64 overflow-auto rounded-md border border-line">
                           <table className="w-full text-left text-xs">
