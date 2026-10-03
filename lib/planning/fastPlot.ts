@@ -1,4 +1,5 @@
 import type { LatLng, PlanJob } from "./types";
+import { buildGeographicMasterRoute } from "./masterRoute";
 import {
   buildDriverTravelMatrix,
   type DriverTravelMatrix,
@@ -1471,7 +1472,110 @@ function improveLargeSparseGeographicRoute(
     }
   }
 
-  return bestRoute;
+
+  /*
+   * Repair geographically premature visits near a large discontinuity.
+   *
+   * The normal large-route relocation pass only pulls later visits earlier.
+   * For each unusually large hop, inspect a bounded number of preceding
+   * visits and allow one of them to move a short distance later.
+   *
+   * Every accepted candidate must reduce complete geographic route distance
+   * and preserve physical-stop precedence.
+   */
+  const largeHopThresholdKm = 150;
+  const largeHopLookBehind = 12;
+  const largeHopLookAhead = 12;
+  const largeHopRepairPasses = 4;
+
+  for (
+    let pass = 0;
+    pass < largeHopRepairPasses;
+    pass++
+  ) {
+    const currentDistance =
+      geographicRouteDistanceKm(bestRoute);
+
+    let passRoute: FastPlotVisit[] | null = null;
+    let passDistance = currentDistance;
+
+    for (
+      let hopIndex = firstMovable;
+      hopIndex < bestRoute.length - 1;
+      hopIndex++
+    ) {
+      const hopKm = haversineKm(
+        bestRoute[hopIndex].point,
+        bestRoute[hopIndex + 1].point
+      );
+
+      if (hopKm < largeHopThresholdKm) {
+        continue;
+      }
+
+      const earliestFromIndex = Math.max(
+        firstMovable,
+        hopIndex - largeHopLookBehind
+      );
+
+      for (
+        let fromIndex = earliestFromIndex;
+        fromIndex <= hopIndex;
+        fromIndex++
+      ) {
+        const firstInsertionIndex = Math.max(
+          fromIndex + 2,
+          hopIndex
+        );
+
+        const lastInsertionIndex = Math.min(
+          bestRoute.length - 1,
+          hopIndex + largeHopLookAhead
+        );
+
+        for (
+          let insertionIndex = firstInsertionIndex;
+          insertionIndex <= lastInsertionIndex;
+          insertionIndex++
+        ) {
+          const candidate = relocateFastPlotVisit(
+            bestRoute,
+            fromIndex,
+            insertionIndex
+          );
+
+          if (
+            !routeMaintainsPhysicalPrecedence(
+              candidate,
+              counts
+            )
+          ) {
+            continue;
+          }
+
+          const candidateDistance =
+            geographicRouteDistanceKm(candidate);
+
+          if (
+            passDistance - candidateDistance <
+            FAST_PLOT_SPARSE_RELOCATION_MIN_IMPROVEMENT_KM
+          ) {
+            continue;
+          }
+
+          passRoute = candidate;
+          passDistance = candidateDistance;
+        }
+      }
+    }
+
+    if (!passRoute) {
+      break;
+    }
+
+    bestRoute = passRoute;
+  }
+return bestRoute;
 }
 function improveSparseGeographicRoute(
   route: FastPlotVisit[],
@@ -2311,87 +2415,98 @@ export async function optimizeFastPlotOrderFromStart(
     requiresPhysicalRevisit(jobs) ||
     hasPhysicalPrecedenceCycle(jobs)
   ) {
-    return { ok: false, reason: "unsupported_physical_route" };
+    return {
+      ok: false,
+      reason: "unsupported_physical_route",
+    };
   }
 
   const visits = buildFastPlotVisits(jobs);
 
   if (visits.length === 0) {
-    return { ok: false, reason: "no_routable_visits" };
-  }
-
-  const counts = jobStopCounts(jobs);
-  const first = await chooseAnchoredFirstVisit(
-    visits,
-    counts,
-    startPoint,
-    loadCosts
-  );
-
-  if (!first.ok) {
-    return first;
-  }
-
-  if (visits.length === 1) {
     return {
-      ok: true,
-      route: [first.visit.point],
-      orderedVisits: [first.visit],
-      firstTravelSeconds: first.travelSeconds,
+      ok: false,
+      reason: "no_routable_visits",
     };
   }
 
-  let orderedVisits: FastPlotVisit[] | null;
+  const masterRoute = buildGeographicMasterRoute(
+    visits,
+    { start: startPoint }
+  );
 
-  if (visits.length > FAST_PLOT_COMPLETE_MATRIX_MAX_VISITS) {
-    orderedVisits = await sparseFastPlotOrder(
-      visits,
-      counts,
-      loadCosts,
-      first.visit
-    );
-  } else {
-    const table = await loadFastPlotCostTable(
-      visits,
-      loadCosts
-    );
-
-    if (!table) {
-      return { ok: false, reason: "route_cost_unavailable" };
-    }
-
-    try {
-      orderedVisits = await beamSearchFastPlotOrder(
-        visits,
-        counts,
-        table,
-        first.visit,
-        createCooperativeYield(options.signal)
-      );
-    } catch (error) {
-      if (error instanceof FastPlotCancelledError) {
-        return { ok: false, reason: "cancelled" };
-      }
-      throw error;
-    }
+  if (!masterRoute.ok) {
+    return {
+      ok: false,
+      reason: "unsupported_physical_route",
+    };
   }
 
   if (options.signal?.aborted) {
     return { ok: false, reason: "cancelled" };
   }
 
-  if (!orderedVisits || orderedVisits.length !== visits.length) {
-    return { ok: false, reason: "route_cost_unavailable" };
+  const firstVisit = masterRoute.route[0];
+
+  if (!firstVisit) {
+    return {
+      ok: false,
+      reason: "no_routable_visits",
+    };
+  }
+
+  let loaded: number[][] | null = null;
+
+  try {
+    loaded = await loadCosts(
+      [startPoint],
+      [firstVisit.point]
+    );
+  } catch {
+    return {
+      ok: false,
+      reason: "start_cost_unavailable",
+    };
+  }
+
+  if (options.signal?.aborted) {
+    return { ok: false, reason: "cancelled" };
+  }
+
+  if (
+    !Array.isArray(loaded) ||
+    loaded.length !== 1 ||
+    !Array.isArray(loaded[0]) ||
+    loaded[0].length !== 1
+  ) {
+    return {
+      ok: false,
+      reason: "start_cost_unavailable",
+    };
+  }
+
+  const firstTravelSeconds = loaded[0][0];
+
+  if (
+    typeof firstTravelSeconds !== "number" ||
+    !Number.isFinite(firstTravelSeconds) ||
+    firstTravelSeconds < 0
+  ) {
+    return {
+      ok: false,
+      reason: "no_reachable_first_visit",
+    };
   }
 
   return {
     ok: true,
-    route: orderedVisits.map((visit) => visit.point),
-    orderedVisits,
-    firstTravelSeconds: first.travelSeconds,
+    route: masterRoute.route.map(
+      (visit) => visit.point
+    ),
+    orderedVisits: masterRoute.route,
+    firstTravelSeconds,
   };
 }
-
 export async function optimizeFastPlotOrder(
   jobs: PlanJob[],
   loadCosts: FastPlotCostLoader

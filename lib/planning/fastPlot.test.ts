@@ -872,7 +872,7 @@ describe("Fast Plot V5", () => {
     expect(order).toHaveLength(jobs.length);
   });
 
-  it("anchors Job 1 to the reachable visit with the lowest directed TomTom time", async () => {
+  it("keeps Master Route Drop 1 fixed and loads only its directed start cost", async () => {
     const jobs = [
       job("a", [
         stop("a-c", 1, "collection", 1, 0),
@@ -886,12 +886,16 @@ describe("Fast Plot V5", () => {
 
     const loader = vi.fn(async (
       origins: LatLng[],
-      destinations: LatLng[]
+      destinations: LatLng[],
     ) => origins.map((origin) =>
       destinations.map((destination) => {
-        if (origin.lat === 0 && origin.lng === 0) {
-          if (destination.lat === 1) return 100;
-          if (destination.lat === 2) return 10;
+        if (
+          origin.lat === 0 &&
+          origin.lng === 0 &&
+          destination.lat === 1 &&
+          destination.lng === 0
+        ) {
+          return 100;
         }
 
         return secondsBetween(origin, destination);
@@ -907,9 +911,15 @@ describe("Fast Plot V5", () => {
     expect(result.ok).toBe(true);
 
     if (result.ok) {
-      expect(result.route[0]).toEqual({ lat: 2, lng: 0 });
-      expect(result.firstTravelSeconds).toBe(10);
+      expect(result.route[0]).toEqual({ lat: 1, lng: 0 });
+      expect(result.firstTravelSeconds).toBe(100);
     }
+
+    expect(loader).toHaveBeenCalledTimes(1);
+    expect(loader).toHaveBeenCalledWith(
+      [{ lat: 0, lng: 0 }],
+      [{ lat: 1, lng: 0 }],
+    );
   });
 
   it("reports an unavailable van-to-first-stop cost separately", async () => {
@@ -941,7 +951,7 @@ describe("Fast Plot V5", () => {
     expect(loader).toHaveBeenCalledTimes(1);
   });
 
-  it("reports remaining route costs separately after anchoring Drop 1", async () => {
+  it("does not request remaining route costs after Master Route ordering", async () => {
     const jobs = [
       job("a", [
         stop("a-c", 1, "collection", 1, 0),
@@ -953,70 +963,13 @@ describe("Fast Plot V5", () => {
       ]),
     ];
 
-    let callNumber = 0;
     const loader = vi.fn(async (
       origins: LatLng[],
       destinations: LatLng[],
-    ) => {
-      callNumber += 1;
-
-      if (callNumber === 1) {
-        return origins.map((origin) =>
-          destinations.map((destination) =>
-            secondsBetween(origin, destination)
-          )
-        );
-      }
-
-      throw new Error("remaining route costs unavailable");
-    });
-
-    const result = await optimizeFastPlotOrderFromStart(
-      jobs,
-      { lat: 0, lng: 0 },
-      loader,
-    );
-
-    expect(result).toEqual({
-      ok: false,
-      reason: "route_cost_unavailable",
-    });
-
-    expect(loader.mock.calls.length).toBeGreaterThanOrEqual(2);
-
-    const [anchorOrigins, anchorDestinations] = loader.mock.calls[0];
-    expect(anchorOrigins).toEqual([{ lat: 0, lng: 0 }]);
-    expect(anchorDestinations).toEqual([
-      { lat: 1, lng: 0 },
-      { lat: 2, lng: 0 },
-    ]);
-  });
-
-  it("ignores individually unreachable anchored candidates", async () => {
-    const jobs = [
-      job("a", [
-        stop("a-c", 1, "collection", 1, 0),
-        stop("a-d", 2, "delivery", 4, 0),
-      ]),
-      job("b", [
-        stop("b-c", 1, "collection", 2, 0),
-        stop("b-d", 2, "delivery", 3, 0),
-      ]),
-    ];
-
-    const loader = vi.fn(async (
-      origins: LatLng[],
-      destinations: LatLng[]
     ) => origins.map((origin) =>
-      destinations.map((destination) => {
-        if (origin.lat === 0 && origin.lng === 0) {
-          return destination.lat === 1
-            ? Number.POSITIVE_INFINITY
-            : 20;
-        }
-
-        return secondsBetween(origin, destination);
-      })
+      destinations.map((destination) =>
+        secondsBetween(origin, destination)
+      )
     ));
 
     const result = await optimizeFastPlotOrderFromStart(
@@ -1026,9 +979,50 @@ describe("Fast Plot V5", () => {
     );
 
     expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.route[0]).toEqual({ lat: 2, lng: 0 });
-    }
+    expect(loader).toHaveBeenCalledTimes(1);
+    expect(loader).toHaveBeenCalledWith(
+      [{ lat: 0, lng: 0 }],
+      [{ lat: 1, lng: 0 }],
+    );
+  });
+
+  it("fails when the Master Route selected first visit is unreachable", async () => {
+    const jobs = [
+      job("a", [
+        stop("a-c", 1, "collection", 1, 0),
+        stop("a-d", 2, "delivery", 4, 0),
+      ]),
+      job("b", [
+        stop("b-c", 1, "collection", 2, 0),
+        stop("b-d", 2, "delivery", 3, 0),
+      ]),
+    ];
+
+    const loader = vi.fn(async (
+      origins: LatLng[],
+      destinations: LatLng[],
+    ) => origins.map(() =>
+      destinations.map(() =>
+        Number.POSITIVE_INFINITY
+      )
+    ));
+
+    const result = await optimizeFastPlotOrderFromStart(
+      jobs,
+      { lat: 0, lng: 0 },
+      loader,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "no_reachable_first_visit",
+    });
+
+    expect(loader).toHaveBeenCalledTimes(1);
+    expect(loader).toHaveBeenCalledWith(
+      [{ lat: 0, lng: 0 }],
+      [{ lat: 1, lng: 0 }],
+    );
   });
 
   it("fails explicitly when every anchored first visit is unreachable", async () => {
@@ -1920,7 +1914,7 @@ describe("Fast Plot V5", () => {
     expect(callNumber).toBe(1);
   });
 
-  it("rejects anchored selection when a later candidate chunk is malformed", async () => {
+  it("rejects a malformed start-to-Master-Route-first-stop response", async () => {
     const jobs = Array.from({ length: 101 }, (_, index) =>
       job(`malformed-${index}`, [
         stop(
@@ -1928,43 +1922,32 @@ describe("Fast Plot V5", () => {
           1,
           "collection",
           50 + index / 10000,
-          -4
+          -4,
         ),
         stop(
           `malformed-d-${index}`,
           2,
           "delivery",
           52 + index / 10000,
-          -4
+          -4,
         ),
       ])
     );
 
-    let callNumber = 0;
+    const loader = vi.fn(async () => null);
 
     const result = await optimizeFastPlotOrderFromStart(
       jobs,
       { lat: 49, lng: -4 },
-      async (origins, destinations) => {
-        callNumber += 1;
-
-        if (callNumber === 2) {
-          return null;
-        }
-
-        return origins.map(() =>
-          destinations.map((destination) =>
-            Math.round((destination.lat - 49) * 1000)
-          )
-        );
-      }
+      loader,
     );
 
     expect(result).toEqual({
       ok: false,
       reason: "start_cost_unavailable",
     });
-    expect(callNumber).toBe(2);
+
+    expect(loader).toHaveBeenCalledTimes(1);
   });
 
   it("reports no reachable first visit when a successful anchor chunk contains only unreachable cells", async () => {
