@@ -2674,11 +2674,14 @@ export default function PlanningPage() {
     if (
       !regime ||
       regime.status !== "single" ||
-      regime.regime !== "assimilated" ||
+      (
+        regime.regime !== "assimilated" &&
+        regime.regime !== "gb_domestic"
+      ) ||
       regime.reviewRequired
     ) {
       setDriverScheduleNotice(
-        "Driver-hours preview requires a single assimilated lane regime without classification review."
+        "Driver-hours preview requires a supported single lane regime without classification review."
       );
       return;
     }

@@ -270,6 +270,47 @@ function addDailyRest(
   };
 }
 
+function rolloverPlanningDay(
+  state: State,
+  days: DriverScheduleDay[],
+): void {
+  const nextDayStart =
+    state.currentDay.startSeconds + 24 * 60 * 60;
+
+  closeDay(state, days);
+
+  state.day += 1;
+  state.now = Math.max(state.now, nextDayStart);
+  state.continuousDriving = 0;
+  state.dailyDriving = 0;
+  state.dutyStart = state.now;
+  state.currentDay = {
+    day: state.day,
+    startSeconds: state.now,
+    drivingSeconds: 0,
+    serviceSeconds: 0,
+    breakSeconds: 0,
+    restSeconds: 0,
+    startLocationId: state.locationId,
+  };
+}
+function dailyDutyWouldExceed(
+  state: State,
+  rules: DriverRuleProfile,
+  additionalWorkingSeconds: number,
+): boolean {
+  const limit = rules.maxDailyDutySeconds ?? null;
+
+  if (limit === null) {
+    return false;
+  }
+
+  const worked =
+    state.currentDay.drivingSeconds +
+    state.currentDay.serviceSeconds;
+
+  return worked + additionalWorkingSeconds > limit;
+}
 function dutyWouldExceed(
   state: State,
   rules: DriverRuleProfile,
@@ -320,11 +361,16 @@ function planDrive(
     return null;
   }
 
-  const breakRequired = !durationFits(
-    state.continuousDriving,
-    driveSeconds,
-    rules.maxContinuousDrivingSeconds,
-  );
+  const usesContinuousDrivingBreak =
+    rules.ruleMode !== "gb_domestic_goods";
+
+  const breakRequired =
+    usesContinuousDrivingBreak &&
+    !durationFits(
+      state.continuousDriving,
+      driveSeconds,
+      rules.maxContinuousDrivingSeconds,
+    );
 
   const breakSeconds = breakRequired
     ? rules.qualifyingBreakSeconds
@@ -551,6 +597,7 @@ export function scheduleDriverRoute(
     }
 
     if (
+      input.ruleProfile.ruleMode !== "gb_domestic_goods" &&
       isNonNegativeFinite(
         initialDriving.continuousDrivingSeconds,
       ) &&
@@ -713,13 +760,24 @@ export function scheduleDriverRoute(
       task.serviceSeconds +
       returnSeconds;
 
+    const continuousLegsFitFreshDay =
+      input.ruleProfile.ruleMode === "gb_domestic_goods" ||
+      (
+        travelSeconds <=
+          input.ruleProfile.maxContinuousDrivingSeconds &&
+        returnSeconds <=
+          input.ruleProfile.maxContinuousDrivingSeconds
+      );
+
     const taskCanFitFreshDay =
-      travelSeconds <=
-        input.ruleProfile.maxContinuousDrivingSeconds &&
-      returnSeconds <=
-        input.ruleProfile.maxContinuousDrivingSeconds &&
+      continuousLegsFitFreshDay &&
       travelSeconds + returnSeconds <=
         input.ruleProfile.maxDailyDrivingSeconds &&
+      (
+        input.ruleProfile.maxDailyDutySeconds == null ||
+        taskDutySeconds <=
+          input.ruleProfile.maxDailyDutySeconds
+      ) &&
       (
         input.ruleProfile.maxDutyWindowSeconds === null ||
         taskDutySeconds <=
@@ -772,6 +830,13 @@ export function scheduleDriverRoute(
 
     const taskFitsCurrentDuty =
       drivePlan !== null &&
+      !dailyDutyWouldExceed(
+        state,
+        input.ruleProfile,
+        travelSeconds +
+          task.serviceSeconds +
+          returnSeconds,
+      ) &&
       !dutyWouldExceed(
         state,
         input.ruleProfile,
@@ -825,12 +890,18 @@ export function scheduleDriverRoute(
         );
       }
 
-      addDailyRest(
-        state,
-        events,
-        days,
-        input.ruleProfile,
-      );
+      if (
+        input.ruleProfile.ruleMode === "gb_domestic_goods"
+      ) {
+        rolloverPlanningDay(state, days);
+      } else {
+        addDailyRest(
+          state,
+          events,
+          days,
+          input.ruleProfile,
+        );
+      }
 
       if (input.planningProfile === "day") {
         state.locationId = input.baseLocationId!;
@@ -852,6 +923,11 @@ export function scheduleDriverRoute(
     );
 
     if (
+      dailyDutyWouldExceed(
+        state,
+        input.ruleProfile,
+        task.serviceSeconds + returnSeconds,
+      ) ||
       dutyWouldExceed(
         state,
         input.ruleProfile,

@@ -146,11 +146,38 @@ function advisoryAssimilatedRuleProfile(
   };
 }
 
+function advisoryGbDomesticRuleProfile(
+  planningDate: string
+): DriverRuleProfile {
+  return {
+    id: "planning-gb-domestic-goods-advisory",
+    label: "GB domestic goods planning assumptions",
+    regime: "gb_domestic",
+    ruleMode: "gb_domestic_goods",
+    effectiveFrom: planningDate,
+    verified: false,
+    sourceReference:
+      "https://www.gov.uk/drivers-hours/gb-domestic-rules",
+
+    // Legacy structural fields. gb_domestic_goods does not use these
+    // to assert an assimilated continuous-break or daily-rest rule.
+    maxContinuousDrivingSeconds: 10 * 60 * 60,
+    qualifyingBreakSeconds: 45 * 60,
+    dailyRestSeconds: 11 * 60 * 60,
+
+    maxDailyDrivingSeconds: 10 * 60 * 60,
+    maxDailyDutySeconds: 11 * 60 * 60,
+    maxDutyWindowSeconds: null,
+  };
+}
 export function buildPlanningDriverSchedulePreview(
   input: PlanningDriverScheduleInput
 ): PlanningDriverScheduleBuildResult {
   if (
-    input.regime !== "assimilated" ||
+    (
+      input.regime !== "assimilated" &&
+      input.regime !== "gb_domestic"
+    ) ||
     input.regimeReviewRequired
   ) {
     return {
@@ -250,8 +277,10 @@ export function buildPlanningDriverSchedulePreview(
     };
   }
 
-  const initialDrivingState = input.driverHoursState
-    ? {
+  const initialDrivingState =
+    input.regime === "assimilated" &&
+    input.driverHoursState
+      ? {
         continuousDrivingSeconds:
           input.driverHoursState.continuousDrivingSeconds,
         dailyDrivingSeconds:
@@ -270,11 +299,14 @@ export function buildPlanningDriverSchedulePreview(
   const result = planCanonicalRouteAcrossDays({
     planningProfile: input.planningProfile,
     ruleProfile:
-      advisoryAssimilatedRuleProfile(input.planningDate),
+      input.regime === "gb_domestic"
+        ? advisoryGbDomesticRuleProfile(input.planningDate)
+        : advisoryAssimilatedRuleProfile(input.planningDate),
     startTimeSeconds: 0,
     startLocationId: input.startLocationId,
     baseLocationId: null,
     activityDataAvailable:
+      input.regime === "assimilated" &&
       input.activityDataAvailable &&
       (input.driverHoursState?.complete ?? false),
     initialDrivingState,

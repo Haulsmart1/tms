@@ -1,9 +1,14 @@
 import type { ComplianceRegime } from "./regime";
 
+export type DriverRuleMode =
+  | "assimilated"
+  | "gb_domestic_goods";
+
 export type DriverRuleProfile = {
   id: string;
   label: string;
   regime: ComplianceRegime;
+  ruleMode?: DriverRuleMode;
   effectiveFrom: string;
   verified: boolean;
   sourceReference: string | null;
@@ -12,6 +17,7 @@ export type DriverRuleProfile = {
   maxDailyDrivingSeconds: number;
   dailyRestSeconds: number;
   maxDutyWindowSeconds: number | null;
+  maxDailyDutySeconds?: number | null;
 };
 
 export type DriverRuleValidation =
@@ -80,6 +86,15 @@ export function validateDriverRuleProfile(
     );
   }
 
+  if (
+    profile.maxDailyDutySeconds !== undefined &&
+    profile.maxDailyDutySeconds !== null &&
+    !isPositiveFinite(profile.maxDailyDutySeconds)
+  ) {
+    errors.push(
+      "maxDailyDutySeconds must be null or a positive finite number",
+    );
+  }
   if (
     isPositiveFinite(profile.maxContinuousDrivingSeconds) &&
     isPositiveFinite(profile.maxDailyDrivingSeconds) &&

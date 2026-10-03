@@ -468,5 +468,83 @@ describe(
         ]);
       }
     );
+
+    it(
+      "supports confirmed GB domestic goods scheduling without assimilated break state",
+      () => {
+        const input = baseInput();
+
+        input.regime = "gb_domestic";
+        input.firstTravelSeconds = 5 * HOUR;
+        input.route = route([HOUR]);
+
+        input.driverHoursState = {
+          complete: true,
+          continuousDrivingSeconds: 4 * HOUR,
+          dailyDrivingSeconds: 4 * HOUR,
+          currentWeekDrivingSeconds: 55 * HOUR,
+          fortnightDrivingSeconds: 89 * HOUR,
+        } as unknown as DriverHoursState;
+
+        input.activityDataAvailable = true;
+
+        const result =
+          buildPlanningDriverSchedulePreview(input);
+
+        expect(result.ok).toBe(true);
+
+        if (!result.ok) return;
+
+        expect(
+          result.preview.schedule.events.some(
+            (event) => event.kind === "break"
+          )
+        ).toBe(false);
+
+        expect(
+          result.preview.schedule.status
+        ).toBe("review_required");
+
+        expect(
+          result.preview.dropEtas.map(
+            (drop) => drop.stopId
+          )
+        ).toEqual([
+          "job-a-1",
+          "job-a-2",
+        ]);
+      }
+    );
+
+    it(
+      "keeps GB domestic review-required lanes blocked",
+      () => {
+        expect(
+          buildPlanningDriverSchedulePreview({
+            ...baseInput(),
+            regime: "gb_domestic",
+            regimeReviewRequired: true,
+          })
+        ).toEqual({
+          ok: false,
+          reason: "unsupported_regime",
+        });
+      }
+    );
+
+    it(
+      "rejects unsupported non-domestic regimes",
+      () => {
+        expect(
+          buildPlanningDriverSchedulePreview({
+            ...baseInput(),
+            regime: "aetr",
+          })
+        ).toEqual({
+          ok: false,
+          reason: "unsupported_regime",
+        });
+      }
+    );
   }
 );

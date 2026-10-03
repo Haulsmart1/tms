@@ -552,4 +552,107 @@ describe("scheduleDriverRoute", () => {
     ).toBe(true);
   });
 
+
+  describe("GB domestic daily duty", () => {
+    const domesticRules = (): DriverRuleProfile =>
+      rules({
+        regime: "gb_domestic",
+        ruleMode: "gb_domestic_goods",
+        maxContinuousDrivingSeconds: 10 * HOUR,
+        qualifyingBreakSeconds: 45 * 60,
+        maxDailyDrivingSeconds: 10 * HOUR,
+        maxDailyDutySeconds: 11 * HOUR,
+        maxDutyWindowSeconds: null,
+      });
+
+    it("does not insert an assimilated continuous-driving break", () => {
+      const result = scheduleDriverRoute(
+        input({
+          ruleProfile: domesticRules(),
+          tasks: [task("a", { serviceSeconds: 0 })],
+          travelSecondsBetween: () => 5 * HOUR,
+        }),
+      );
+
+      expect(
+        result.events.filter((event) => event.kind === "break"),
+      ).toHaveLength(0);
+    });
+
+    it("rolls over before exceeding 11 hours of actual duty", () => {
+      const result = scheduleDriverRoute(
+        input({
+          ruleProfile: domesticRules(),
+          tasks: [
+            task("a", { serviceSeconds: 6 * HOUR }),
+            task("b", { serviceSeconds: 6 * HOUR }),
+          ],
+          travelSecondsBetween: () => 0,
+        }),
+      );
+
+      expect(result.status).not.toBe("unschedulable");
+      expect(result.days.length).toBeGreaterThan(1);
+
+      for (const day of result.days) {
+        expect(
+          day.drivingSeconds + day.serviceSeconds,
+        ).toBeLessThanOrEqual(11 * HOUR);
+      }
+
+      expect(result.completedTaskIds).toEqual(["a", "b"]);
+    });
+
+    it("rejects a task that alone exceeds 11 hours of duty", () => {
+      const result = scheduleDriverRoute(
+        input({
+          ruleProfile: domesticRules(),
+          tasks: [task("a", { serviceSeconds: 12 * HOUR })],
+          travelSecondsBetween: () => 0,
+        }),
+      );
+
+      expect(result.status).toBe("unschedulable");
+      expect(result.completedTaskIds).toEqual([]);
+      expect(result.unscheduledTaskIds).toEqual(["a"]);
+    });
+  });
+
+  it("rolls GB domestic planning days without emitting statutory daily rest", () => {
+    const result = scheduleDriverRoute(
+      input({
+        ruleProfile: rules({
+          regime: "gb_domestic",
+          ruleMode: "gb_domestic_goods",
+          maxContinuousDrivingSeconds: 10 * HOUR,
+          qualifyingBreakSeconds: 45 * 60,
+          maxDailyDrivingSeconds: 10 * HOUR,
+          dailyRestSeconds: 11 * HOUR,
+          maxDutyWindowSeconds: null,
+          maxDailyDutySeconds: 11 * HOUR,
+        }),
+        tasks: [
+          task("a", { serviceSeconds: 6 * HOUR }),
+          task("b", { serviceSeconds: 6 * HOUR }),
+        ],
+        travelSecondsBetween: () => 0,
+      }),
+    );
+
+    expect(result.status).not.toBe("unschedulable");
+    expect(result.days).toHaveLength(2);
+
+    expect(
+      result.events.filter(
+        (event) => event.kind === "daily_rest",
+      )
+    ).toHaveLength(0);
+
+    expect(
+      result.days[1].startSeconds -
+        result.days[0].startSeconds
+    ).toBe(24 * HOUR);
+
+    expect(result.completedTaskIds).toEqual(["a", "b"]);
+  });
 });
