@@ -1126,6 +1126,275 @@ function forwardRelocationImprovementKm(
  * Distance screening is O(1) per candidate pair. A candidate route is only
  * allocated for an improving move, keeping very large lanes practical.
  */
+type FastPlotRegionalReentryCandidate = {
+  insertionIndex: number;
+  fromIndex: number;
+  toIndex: number;
+  score: number;
+};
+
+function relocateFastPlotRun(
+  route: FastPlotVisit[],
+  fromIndex: number,
+  toIndex: number,
+  insertionIndex: number
+): FastPlotVisit[] {
+  const moved = route.slice(fromIndex, toIndex + 1);
+  const withoutMoved = [
+    ...route.slice(0, fromIndex),
+    ...route.slice(toIndex + 1),
+  ];
+
+  return [
+    ...withoutMoved.slice(0, insertionIndex),
+    ...moved,
+    ...withoutMoved.slice(insertionIndex),
+  ];
+}
+
+function regionalReentryCandidates(
+  route: FastPlotVisit[],
+  firstMovable: number
+): FastPlotRegionalReentryCandidate[] {
+  const minIndexSeparation = 12;
+  const maxCandidates = 16;
+  const maxRunLength = 48;
+  const minimumDetourKm = 80;
+  const minimumDetourRatio = 2.5;
+
+  const cumulativeDistance = new Array<number>(route.length).fill(0);
+
+  for (let index = 1; index < route.length; index++) {
+    cumulativeDistance[index] =
+      cumulativeDistance[index - 1] +
+      haversineKm(route[index - 1].point, route[index].point);
+  }
+
+  const candidates: FastPlotRegionalReentryCandidate[] = [];
+
+  for (
+    let corridorIndex = Math.max(0, firstMovable - 1);
+    corridorIndex < route.length - minIndexSeparation;
+    corridorIndex++
+  ) {
+    for (
+      let reentryIndex = corridorIndex + minIndexSeparation;
+      reentryIndex < route.length;
+      reentryIndex++
+    ) {
+      const chordKm = haversineKm(
+        route[corridorIndex].point,
+        route[reentryIndex].point
+      );
+      const travelledKm =
+        cumulativeDistance[reentryIndex] -
+        cumulativeDistance[corridorIndex];
+      const excessKm = travelledKm - chordKm;
+
+      if (
+        excessKm < minimumDetourKm ||
+        travelledKm <
+          Math.max(chordKm, 1) * minimumDetourRatio
+      ) {
+        continue;
+      }
+
+      let runEnd = reentryIndex;
+      let corridorCursor = corridorIndex;
+
+      while (
+        runEnd + 1 < route.length &&
+        runEnd - reentryIndex + 1 < maxRunLength
+      ) {
+        const next = route[runEnd + 1];
+        let nearestEarlierKm = Number.POSITIVE_INFINITY;
+        let nearestEarlierIndex = corridorCursor;
+
+        const searchStart = Math.max(
+          firstMovable - 1,
+          corridorCursor - 8
+        );
+        const searchEnd = Math.min(
+          reentryIndex - 1,
+          corridorCursor + 16
+        );
+
+        for (
+          let earlierIndex = searchStart;
+          earlierIndex <= searchEnd;
+          earlierIndex++
+        ) {
+          const distance = haversineKm(
+            route[earlierIndex].point,
+            next.point
+          );
+
+          if (distance < nearestEarlierKm) {
+            nearestEarlierKm = distance;
+            nearestEarlierIndex = earlierIndex;
+          }
+        }
+
+        const continuationKm = haversineKm(
+          route[runEnd].point,
+          next.point
+        );
+        const departureKm = haversineKm(
+          route[reentryIndex - 1].point,
+          next.point
+        );
+
+        if (
+          nearestEarlierKm >
+          Math.max(continuationKm * 2, departureKm)
+        ) {
+          break;
+        }
+
+        corridorCursor = nearestEarlierIndex;
+        runEnd++;
+      }
+
+      if (runEnd === reentryIndex) {
+        continue;
+      }
+
+      const insertionIndex = Math.max(
+        firstMovable,
+        corridorIndex + 1
+      );
+
+      if (
+        insertionIndex >= reentryIndex ||
+        reentryIndex <= firstMovable
+      ) {
+        continue;
+      }
+
+      const beforeInsertion = route[insertionIndex - 1];
+      const displaced = route[insertionIndex];
+      const beforeRun = route[reentryIndex - 1];
+      const firstRunVisit = route[reentryIndex];
+
+      for (
+        let candidateEnd = reentryIndex + 1;
+        candidateEnd <= runEnd;
+        candidateEnd++
+      ) {
+        const lastRunVisit = route[candidateEnd];
+        const afterRun = route[candidateEnd + 1];
+
+        let beforeKm =
+          haversineKm(beforeInsertion.point, displaced.point) +
+          haversineKm(beforeRun.point, firstRunVisit.point);
+
+        let afterKm =
+          haversineKm(beforeInsertion.point, firstRunVisit.point) +
+          haversineKm(lastRunVisit.point, displaced.point);
+
+        if (afterRun) {
+          beforeKm += haversineKm(
+            lastRunVisit.point,
+            afterRun.point
+          );
+
+          afterKm += haversineKm(
+            beforeRun.point,
+            afterRun.point
+          );
+        }
+
+        const relocationSavingKm = beforeKm - afterKm;
+
+        if (
+          relocationSavingKm <
+          FAST_PLOT_SPARSE_RELOCATION_MIN_IMPROVEMENT_KM
+        ) {
+          continue;
+        }
+
+        candidates.push({
+          insertionIndex,
+          fromIndex: reentryIndex,
+          toIndex: candidateEnd,
+          score: relocationSavingKm,
+        });
+      }
+    }
+  }
+
+  candidates.sort((left, right) => {
+    if (right.score !== left.score) {
+      return right.score - left.score;
+    }
+
+    if (left.fromIndex !== right.fromIndex) {
+      return left.fromIndex - right.fromIndex;
+    }
+
+    return left.insertionIndex - right.insertionIndex;
+  });
+
+  return candidates.slice(0, maxCandidates);
+}
+
+function improveRegionalReentries(
+  route: FastPlotVisit[],
+  counts: Map<string, number>,
+  firstMovable: number
+): FastPlotVisit[] {
+  const maxPasses = 4;
+  let bestRoute = route;
+  let bestDistance = geographicRouteDistanceKm(route);
+
+  for (let pass = 0; pass < maxPasses; pass++) {
+    const candidates = regionalReentryCandidates(
+      bestRoute,
+      firstMovable
+    );
+
+    let passRoute: FastPlotVisit[] | null = null;
+    let passDistance = bestDistance;
+
+    for (const move of candidates) {
+      const candidate = relocateFastPlotRun(
+        bestRoute,
+        move.fromIndex,
+        move.toIndex,
+        move.insertionIndex
+      );
+
+      if (!routeMaintainsPhysicalPrecedence(candidate, counts)) {
+        continue;
+      }
+
+      const candidateDistance =
+        geographicRouteDistanceKm(candidate);
+
+      if (
+        bestDistance - candidateDistance <
+        FAST_PLOT_SPARSE_RELOCATION_MIN_IMPROVEMENT_KM
+      ) {
+        continue;
+      }
+
+      if (candidateDistance < passDistance) {
+        passRoute = candidate;
+        passDistance = candidateDistance;
+      }
+    }
+
+    if (!passRoute) {
+      break;
+    }
+
+    bestRoute = passRoute;
+    bestDistance = passDistance;
+  }
+
+  return bestRoute;
+}
+
 function improveLargeSparseGeographicRoute(
   route: FastPlotVisit[],
   counts: Map<string, number>,
@@ -1138,7 +1407,11 @@ function improveLargeSparseGeographicRoute(
   }
 
   const maxPasses = 4;
-  let bestRoute = route.slice();
+  let bestRoute = improveRegionalReentries(
+    route.slice(),
+    counts,
+    firstMovable
+  );
 
   for (let pass = 0; pass < maxPasses; pass++) {
     let changed = false;
