@@ -26,6 +26,7 @@ function evaluate(
     hasPlannedJobs: true,
     plannedDrivingSeconds: 2 * 60 * 60,
     driverHours: null,
+    regime: "assimilated",
     today: "2026-08-31",
     ...overrides,
   });
@@ -236,5 +237,32 @@ describe("evaluatePlanningCompliance", () => {
     expect(result.warnings).toContain(
       "Driver CPC is not marked qualified"
     );
+  });
+
+  it("does not apply assimilated driving limits to GB domestic lanes", () => {
+    const result = evaluate({
+      regime: "gb_domestic",
+      plannedDrivingSeconds: 6 * HOUR,
+      driverHours: hoursState({
+        dailyDrivingSeconds: 8 * HOUR,
+        standardDailyDrivingRemainingSeconds: 1 * HOUR,
+        weeklyDrivingRemainingSeconds: 1 * HOUR,
+        fortnightDrivingRemainingSeconds: 1 * HOUR,
+        continuousDrivingRemainingSeconds: 30 * 60,
+      }),
+    });
+
+    expect(result.dailyDrivingRemainingSeconds).toBeNull();
+    expect(result.breakDueAfterSeconds).toBeNull();
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.includes("4 h 30 m") ||
+          warning.includes("9 h limit") ||
+          warning.includes("56 h") ||
+          warning.includes("90 h") ||
+          warning.includes("45 min break")
+      )
+    ).toBe(false);
   });
 });

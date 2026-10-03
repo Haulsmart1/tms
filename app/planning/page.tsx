@@ -2841,6 +2841,14 @@ export default function PlanningPage() {
             driverId !== null
               ? driverHoursById[driverId] ?? null
               : null,
+          regime: (() => {
+            const summary = laneRegimeByVehicle.get(vehicle.id);
+
+            return summary?.status === "single" &&
+              !summary.reviewRequired
+              ? summary.regime
+              : null;
+          })(),
           today,
         })
       );
@@ -2854,6 +2862,7 @@ export default function PlanningPage() {
     routes,
     driverById,
     driverHoursById,
+    laneRegimeByVehicle,
     positionNow,
     planningTimeZone,
   ]);
@@ -3733,6 +3742,7 @@ export default function PlanningPage() {
                           hasPlannedJobs: false,
                           plannedDrivingSeconds: 0,
                           driverHours: null,
+                          regime: null,
                           today: operatorDayInTimeZone(
                             positionNow,
                             planningTimeZone

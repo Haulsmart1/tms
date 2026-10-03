@@ -167,19 +167,29 @@ export default function VehicleLane({
 
           {/* Real values from the driver's recorded hours, or plainly unknown.
               These used to read "calculated" when nothing was (PLAN-1). */}
-          <span className="text-xs text-ink-3">
-            Daily drive left{" "}
-            {compliance.dailyDrivingRemainingSeconds === null
-              ? "unknown"
-              : formatDuration(compliance.dailyDrivingRemainingSeconds)}
-          </span>
+          {regimeSummary.status === "single" &&
+          !regimeSummary.reviewRequired &&
+          regimeSummary.regime === "assimilated" ? (
+            <>
+              <span className="text-xs text-ink-3">
+                Daily drive left{" "}
+                {compliance.dailyDrivingRemainingSeconds === null
+                  ? "unknown"
+                  : formatDuration(compliance.dailyDrivingRemainingSeconds)}
+              </span>
 
-          <span className="text-xs text-ink-3">
-            Break due after{" "}
-            {compliance.breakDueAfterSeconds === null
-              ? "unknown"
-              : formatDuration(compliance.breakDueAfterSeconds)}
-          </span>
+              <span className="text-xs text-ink-3">
+                Break due after{" "}
+                {compliance.breakDueAfterSeconds === null
+                  ? "unknown"
+                  : formatDuration(compliance.breakDueAfterSeconds)}
+              </span>
+            </>
+          ) : (
+            <span className="text-xs text-ink-3">
+              Assimilated driving-limit metrics not applicable
+            </span>
+          )}
 
           <span className="text-xs text-ink-3">
             Rest and WTD not checked

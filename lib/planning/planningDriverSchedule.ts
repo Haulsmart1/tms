@@ -401,7 +401,9 @@ export function buildPlanningDriverSchedulePreview(
         ...result.schedule,
         warnings: [
           ...result.schedule.warnings,
-          ...dutySpanWarnings(result.schedule),
+          ...(input.regime === "assimilated"
+            ? dutySpanWarnings(result.schedule)
+            : []),
         ],
       },
       routeDays: result.days,

@@ -28,6 +28,14 @@ export type PlanningComplianceInput = {
    * Only a state with complete === true is used for the driving checks.
    */
   driverHours: DriverHoursState | null;
+  regime:
+    | "assimilated"
+    | "gb_domestic"
+    | "aetr"
+    | "international_light_goods"
+    | "exempt"
+    | "unknown"
+    | null;
   today: string;
 };
 
@@ -118,12 +126,16 @@ export function evaluatePlanningCompliance(
     missing.push("Planned route time unavailable");
   }
 
+  const assimilatedDrivingChecks = input.regime === "assimilated";
+
   const hours =
-    input.driver && input.driverHours?.complete === true
+    assimilatedDrivingChecks &&
+    input.driver &&
+    input.driverHours?.complete === true
       ? input.driverHours
       : null;
 
-  if (input.driver && !hours) {
+  if (assimilatedDrivingChecks && input.driver && !hours) {
     missing.push(
       input.driverHours
         ? "Driver's recorded hours are incomplete"
@@ -201,7 +213,11 @@ export function evaluatePlanningCompliance(
         )} more driving; plan it into the route`
       );
     }
-  } else if (planned !== null && planned > DRIVING_REVIEW_SECONDS) {
+  } else if (
+    assimilatedDrivingChecks &&
+    planned !== null &&
+    planned > DRIVING_REVIEW_SECONDS
+  ) {
     warnings.push(
       "Planned driving exceeds 4 h 30 m; break and regime review required"
     );
