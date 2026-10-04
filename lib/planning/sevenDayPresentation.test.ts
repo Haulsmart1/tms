@@ -71,6 +71,8 @@ function preview(): PlanningDriverSchedulePreview {
         lastTaskIndex: 2,
       },
     ],
+    horizonExceeded: false,
+    remainingTaskIds: [],
     dropEtas: [
       {
         dropNumber: 1,

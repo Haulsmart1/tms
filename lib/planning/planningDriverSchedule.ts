@@ -30,6 +30,8 @@ export type PlanningDriverSchedulePreview = {
   schedule: DriverScheduleResult;
   routeDays: SevenDayRouteDay[];
   dropEtas: PlanningDropEta[];
+  horizonExceeded: boolean;
+  remainingTaskIds: string[];
 };
 
 export type PlanningDriverScheduleFailureReason =
@@ -334,11 +336,86 @@ export function buildPlanningDriverSchedulePreview(
 
   if (!result.ok) {
     switch (result.reason) {
-      case "horizon_exceeded":
-        return {
-          ok: false,
-          reason: "seven_day_horizon_exceeded",
+      case "horizon_exceeded": {
+        const visibleDayNumbers = new Set(
+          result.days.map((day) => day.day)
+        );
+
+        const visibleSchedule: DriverScheduleResult = {
+          ...result.schedule,
+          events: result.schedule.events.filter((event) =>
+            visibleDayNumbers.has(event.day)
+          ),
+          days: result.schedule.days.filter((day) =>
+            visibleDayNumbers.has(day.day)
+          ),
+          warnings: result.warnings,
+          completedTaskIds: result.completedTaskIds,
+          unscheduledTaskIds: result.unscheduledTaskIds,
         };
+
+        const completedTaskIds = new Set(
+          result.completedTaskIds
+        );
+
+        const serviceByTaskId = new Map<
+          string,
+          PlanningServiceStop
+        >(
+          input.serviceStops.map(
+            (stop): [string, PlanningServiceStop] => [
+              `stop:${stop.stopId}`,
+              stop,
+            ]
+          )
+        );
+
+        const dropEtas: PlanningDropEta[] = [];
+
+        for (const event of visibleSchedule.events) {
+          if (
+            event.kind !== "service" ||
+            !event.taskId ||
+            !completedTaskIds.has(event.taskId)
+          ) {
+            continue;
+          }
+
+          const service = serviceByTaskId.get(event.taskId);
+
+          if (!service) continue;
+
+          dropEtas.push({
+            dropNumber: service.serviceSequenceNumber,
+            jobId: service.jobId,
+            stopId: service.stopId,
+            serviceStartSeconds: event.startSeconds,
+            serviceEndSeconds: event.endSeconds,
+          });
+        }
+
+        const schedule: DriverScheduleResult = {
+          ...visibleSchedule,
+          warnings: [
+            ...visibleSchedule.warnings,
+            ...(input.regime === "assimilated"
+              ? dutySpanWarnings(visibleSchedule)
+              : []),
+          ],
+        };
+
+        return {
+          ok: true,
+          preview: {
+            planningStart: new Date(input.planningStart),
+            schedule,
+            routeDays: result.days,
+            dropEtas,
+            horizonExceeded: true,
+            remainingTaskIds: result.unscheduledTaskIds,
+          },
+        };
+      }
 
       case "unschedulable":
         return {
@@ -408,6 +485,8 @@ export function buildPlanningDriverSchedulePreview(
       },
       routeDays: result.days,
       dropEtas,
+      horizonExceeded: false,
+      remainingTaskIds: [],
     },
   };
 }

@@ -517,6 +517,163 @@ describe(
     );
 
     it(
+      "limits a horizon-exceeded GB domestic preview to the visible seven days",
+      () => {
+        const points: Array<
+          [number, number]
+        > = [
+          [51.50, -0.10],
+          [51.51, -0.11],
+          [51.52, -0.12],
+          [51.53, -0.13],
+          [51.54, -0.14],
+          [51.55, -0.15],
+          [51.56, -0.16],
+          [51.57, -0.17],
+        ];
+
+        const value = job(
+          "job-horizon",
+          points
+        );
+
+        const result =
+          buildPlanningDriverSchedulePreview({
+            ...baseInput(),
+            regime: "gb_domestic",
+            jobs: [value],
+            orderedVisits: points.map(
+              ([lat, lng], index) =>
+                visit(
+                  `horizon-${index + 1}`,
+                  lat,
+                  lng
+                )
+            ),
+            serviceStops: points.map(
+              (_, index) =>
+                service(
+                  index + 1,
+                  index + 1,
+                  "job-horizon",
+                  `job-horizon-${index + 1}`,
+                  index
+                )
+            ),
+            firstTravelSeconds: 10 * HOUR,
+            route: route(
+              Array(7).fill(10 * HOUR)
+            ),
+            driverHoursState: null,
+            activityDataAvailable: false,
+          });
+
+        expect(result.ok).toBe(true);
+
+        if (!result.ok) return;
+
+        expect(
+          result.preview.horizonExceeded
+        ).toBe(true);
+
+        expect(
+          result.preview.routeDays
+        ).toHaveLength(7);
+
+        expect(
+          result.preview.routeDays.flatMap(
+            (day) => day.taskIds
+          )
+        ).toEqual([
+          "stop:job-horizon-1",
+          "stop:job-horizon-2",
+          "stop:job-horizon-3",
+          "stop:job-horizon-4",
+          "stop:job-horizon-5",
+          "stop:job-horizon-6",
+          "stop:job-horizon-7",
+        ]);
+
+        expect(
+          result.preview.remainingTaskIds
+        ).toEqual([
+          "stop:job-horizon-8",
+        ]);
+
+        expect(
+          result.preview.schedule.completedTaskIds
+        ).toEqual([
+          "stop:job-horizon-1",
+          "stop:job-horizon-2",
+          "stop:job-horizon-3",
+          "stop:job-horizon-4",
+          "stop:job-horizon-5",
+          "stop:job-horizon-6",
+          "stop:job-horizon-7",
+        ]);
+
+        expect(
+          result.preview.schedule.unscheduledTaskIds
+        ).toEqual([
+          "stop:job-horizon-8",
+        ]);
+
+        const visibleDays = new Set(
+          result.preview.routeDays.map(
+            (day) => day.day
+          )
+        );
+
+        expect(
+          result.preview.schedule.events.every(
+            (event) =>
+              visibleDays.has(event.day)
+          )
+        ).toBe(true);
+
+        expect(
+          result.preview.schedule.days.every(
+            (day) =>
+              visibleDays.has(day.day)
+          )
+        ).toBe(true);
+
+        expect(
+          result.preview.schedule.events.some(
+            (event) => event.day > 7
+          )
+        ).toBe(false);
+
+        expect(
+          result.preview.schedule.days.some(
+            (day) => day.day > 7
+          )
+        ).toBe(false);
+
+        expect(
+          result.preview.dropEtas.map(
+            (drop) => drop.stopId
+          )
+        ).toEqual([
+          "job-horizon-1",
+          "job-horizon-2",
+          "job-horizon-3",
+          "job-horizon-4",
+          "job-horizon-5",
+          "job-horizon-6",
+          "job-horizon-7",
+        ]);
+
+        expect(
+          result.preview.dropEtas.some(
+            (drop) =>
+              drop.stopId ===
+              "job-horizon-8"
+          )
+        ).toBe(false);
+      }
+    );
+    it(
       "keeps GB domestic review-required lanes blocked",
       () => {
         expect(

@@ -3412,10 +3412,12 @@ export default function PlanningPage() {
                       <>
                         <p className="mt-2 text-xs text-ink-3">
                           Advisory planning only. The rule profile is deliberately
-                          unverified, so this does not assert legal compliance.
-                          It places 45 min breaks and a daily rest when 9 h of
-                          driving would be passed; loading and service time never
-                          trigger a break or rest. {PLANNING_CHECKS_NOT_PERFORMED}
+                          unverified, so this does not assert legal compliance.{" "}
+                          {laneRegimeByVehicle.get(selectedVehicleId)?.regime ===
+                          "gb_domestic"
+                            ? "GB domestic planning uses the configured 10 h daily driving and 11 h daily duty assumptions. Assimilated 4 h 30 m break rules are not applied."
+                            : "Assimilated planning applies the configured driving, break and rest assumptions."}{" "}
+                          {PLANNING_CHECKS_NOT_PERFORMED}
                         </p>
 
                         {driverScheduleNotes.length > 0 ? (
@@ -3505,6 +3507,21 @@ export default function PlanningPage() {
                                 : "days"}
                             </span>
                           </div>
+
+                          {selectedDriverSchedule.horizonExceeded ? (
+                            <div
+                              className="mt-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-ink-2"
+                              data-testid="seven-day-horizon-warning"
+                            >
+                              <span className="font-semibold text-warning">
+                                7-day planning horizon reached.
+                              </span>{" "}
+                              {selectedDriverSchedule.remainingTaskIds.length} service
+                              stops remain outside the seven-day plan. Their canonical
+                              order is preserved and they are not represented as
+                              scheduled within Day 1-7.
+                            </div>
+                          ) : null}
 
                           <div
                             className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3"
