@@ -3526,6 +3526,7 @@ export default function PlanningPage() {
 
                           <SevenDayPlanEditor
                             preview={selectedDriverSchedule}
+                            jobs={selectedLaneJobs}
                             serviceStops={
                               (
                                 pendingItineraries[selectedVehicleId ?? ""] ??
