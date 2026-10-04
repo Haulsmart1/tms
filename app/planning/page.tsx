@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import SevenDayPlanEditor from "./SevenDayPlanEditor";
 import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
@@ -3523,6 +3524,15 @@ export default function PlanningPage() {
                             </div>
                           ) : null}
 
+                          <SevenDayPlanEditor
+                            preview={selectedDriverSchedule}
+                            serviceStops={
+                              (
+                                pendingItineraries[selectedVehicleId ?? ""] ??
+                                persistedItineraries[selectedVehicleId ?? ""]
+                              )?.serviceStops ?? []
+                            }
+/>
                           <div
                             className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3"
                             data-testid="seven-day-route-plan"
