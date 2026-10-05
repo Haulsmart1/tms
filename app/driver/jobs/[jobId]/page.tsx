@@ -166,7 +166,7 @@ export default function DriverJobPage({
 
   if (loading && !job) {
     return (
-      <main className="min-h-screen bg-slate-100 px-4 py-6 text-slate-950">
+      <main className="min-h-screen bg-slate-100 px-4 py-6 text-slate-950 [color-scheme:light]">
         <div className="mx-auto max-w-2xl">
           Loading job...
         </div>
@@ -176,7 +176,7 @@ export default function DriverJobPage({
 
   if (!job) {
     return (
-      <main className="min-h-screen bg-slate-100 px-4 py-6 text-slate-950">
+      <main className="min-h-screen bg-slate-100 px-4 py-6 text-slate-950 [color-scheme:light]">
         <div className="mx-auto max-w-2xl">
           <Link
             href="/driver/dashboard"
@@ -200,7 +200,7 @@ export default function DriverJobPage({
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 px-3 py-4 text-slate-950 sm:px-5 sm:py-6">
+    <main className="min-h-screen bg-slate-100 px-3 py-4 text-slate-950 [color-scheme:light] sm:px-5 sm:py-6">
       <div className="mx-auto max-w-2xl">
         <Link
           href="/driver/dashboard"
@@ -634,7 +634,7 @@ function StopCard({
                         event.target.value,
                       )
                     }
-                    className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base outline-none focus:border-blue-600"
+                    className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-950 outline-none focus:border-blue-600"
                     placeholder="Name of person receiving goods"
                   />
                 </label>
@@ -653,7 +653,7 @@ function StopCard({
                         event.target.value,
                       )
                     }
-                    className="mt-1 min-h-24 w-full rounded-xl border border-slate-300 bg-white p-3 text-base outline-none focus:border-blue-600"
+                    className="mt-1 min-h-24 w-full rounded-xl border border-slate-300 bg-white p-3 text-base text-slate-950 outline-none focus:border-blue-600"
                     placeholder="Optional delivery notes"
                   />
                 </label>

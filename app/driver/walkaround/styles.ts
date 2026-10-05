@@ -3,10 +3,14 @@
   /driver/jobs/[jobId]. These pages are deliberately NOT themeable (not in
   lib/nav/themeableRoutes.ts): a phone in a yard in daylight. Tap targets are
   at least 44px (min-h-11 / min-h-12) for gloved hands.
+
+  `[color-scheme:light]` on main and the explicit text colour on inputs both
+  matter: :root in app/tokens.css sets color-scheme: dark and Preflight is off,
+  so a form control without them draws its typed text white on this white box.
 */
 
 export const w = {
-  main: "min-h-screen bg-slate-100 px-3 py-4 text-slate-950 sm:px-5 sm:py-6",
+  main: "min-h-screen bg-slate-100 px-3 py-4 text-slate-950 [color-scheme:light] sm:px-5 sm:py-6",
   wrap: "mx-auto grid max-w-2xl gap-4",
   card: "rounded-2xl border border-slate-200 bg-white p-5 shadow-sm",
   kicker: "text-xs font-black uppercase tracking-wider text-blue-700",
@@ -15,8 +19,8 @@ export const w = {
   body: "m-0 text-sm leading-6 text-slate-700",
   muted: "m-0 text-xs text-slate-500",
   label: "text-xs font-black uppercase tracking-wide text-slate-600",
-  input: "mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base outline-none focus:border-blue-600",
-  textarea: "mt-1 min-h-24 w-full rounded-xl border border-slate-300 bg-white p-3 text-base outline-none focus:border-blue-600",
+  input: "mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-950 outline-none focus:border-blue-600",
+  textarea: "mt-1 min-h-24 w-full rounded-xl border border-slate-300 bg-white p-3 text-base text-slate-950 outline-none focus:border-blue-600",
   primary: "min-h-12 rounded-xl border-0 bg-blue-700 px-4 text-sm font-black text-white disabled:opacity-50",
   secondary: "min-h-12 rounded-xl border border-slate-300 bg-white px-4 text-sm font-black text-slate-800 disabled:opacity-50",
   link: "inline-flex min-h-12 items-center justify-center rounded-xl border-0 bg-blue-700 px-4 text-sm font-black text-white no-underline",

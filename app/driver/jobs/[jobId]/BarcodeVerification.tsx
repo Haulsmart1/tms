@@ -332,7 +332,7 @@ export default function BarcodeVerification({
               void verifyManualSerial();
             }
           }}
-          className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base outline-none focus:border-blue-600"
+          className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-950 outline-none focus:border-blue-600"
           placeholder="Scan or enter serial number"
         />
       </label>

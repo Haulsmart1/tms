@@ -150,7 +150,7 @@ export default async function QuotationSharePage({
       "GBP";
 
     return (
-      <main className="min-h-screen bg-slate-100 px-4 py-8 text-slate-900">
+      <main className="min-h-screen bg-slate-100 px-4 py-8 text-slate-900 [color-scheme:light]">
         <div className="mx-auto max-w-5xl space-y-6">
           <section className="rounded-2xl bg-white p-6 shadow-sm md:p-8">
             <div className="flex flex-wrap items-start justify-between gap-4">
@@ -396,7 +396,7 @@ export default async function QuotationSharePage({
     }
 
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
+      <main className="flex min-h-screen items-center justify-center bg-slate-100 p-6 [color-scheme:light]">
         <div className="max-w-lg rounded-2xl bg-white p-8 text-center shadow-sm">
           <h1 className="text-xl font-semibold">
             Quotation unavailable
