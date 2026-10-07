@@ -7,6 +7,7 @@ import {
   orphanedPhotoIds,
   partitionByOwner,
   pendingEvents,
+  pendingPodByStop,
   photoOutcome,
   PHOTO_UNMATCHED_AFTER,
   SIGN_IN_AGAIN_MESSAGE,
@@ -171,5 +172,43 @@ describe("withoutQrPayload", () => {
   it("returns other events unchanged", () => {
     const ended: DriverEvent = { type: "break_started", clientId: "b1", occurredAt: "2026-09-29T09:00:00Z", shiftClientId: "c1" };
     expect(withoutQrPayload(ended)).toBe(ended);
+  });
+});
+
+describe("pendingPodByStop", () => {
+  const item = (id: string, payload: DriverQueuePayload): QueueItem<DriverQueuePayload> => ({
+    id,
+    payload,
+    attempts: 0,
+    serverFailures: 0,
+    nextAttemptAt: 0,
+    lastError: null,
+  });
+  const base = { ownerId: "u1", jobId: "j1", shiftClientId: null, recordedAt: "2026-10-07T10:00:00.000Z" };
+  const blob = new Blob(["x"]);
+
+  it("groups photos, scans and the completion per stop for one job", () => {
+    const queue = [
+      item("p1", { kind: "pod_photo", ...base, clientId: "p1", stopId: "s1", blob, mimeType: "image/jpeg", filename: "a.jpg" }),
+      item("c1", { kind: "pod_scan", ownerId: "u1", clientId: "c1", jobId: "j1", stopId: "s1", jobItemId: "i1", serialNumber: "SN1", scanFormat: "manual" }),
+      item("d1", { kind: "pod_complete", ...base, clientId: "d1", stopId: "s1", recipientName: "Pat", podNotes: "" }),
+      item("p2", { kind: "pod_photo", ...base, clientId: "p2", stopId: "s2", blob, mimeType: "image/jpeg", filename: "b.jpg" }),
+      item("other", { kind: "pod_photo", ...base, jobId: "j2", clientId: "other", stopId: "s9", blob, mimeType: "image/jpeg", filename: "c.jpg" }),
+    ];
+
+    const result = pendingPodByStop(queue, "j1");
+
+    expect(result.get("s1")).toEqual({
+      photos: 1,
+      scans: [{ job_item_id: "i1", serial_number: "SN1" }],
+      completion: { recipientName: "Pat", podNotes: "", recordedAt: base.recordedAt },
+    });
+    expect(result.get("s2")).toEqual({ photos: 1, scans: [], completion: null });
+    expect(result.has("s9")).toBe(false);
+  });
+
+  it("ignores shift events and defect photos", () => {
+    const queue = [item("x", { kind: "photo", ownerId: "u1", defectClientId: "d", blob, mimeType: "image/jpeg", filename: "a.jpg" })];
+    expect(pendingPodByStop(queue, "j1").size).toBe(0);
   });
 });

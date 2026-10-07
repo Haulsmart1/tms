@@ -231,6 +231,8 @@ async function sendPhoto(item: QueueItem<QueuePayload>, payload: Extract<QueuePa
 
 async function sendItem(item: QueueItem<QueuePayload>): Promise<SyncResult> {
   if (item.payload.kind === "photo") return sendPhoto(item, item.payload);
+  // POD kinds are not enqueued by anything yet; held rather than dropped.
+  if (item.payload.kind !== "event") return { kind: "retry", error: "Waiting for an app update to send this.", status: null };
   const result = await post(EVENTS_URL, item.payload.event);
   return eventOutcome(result.status, result.error);
 }

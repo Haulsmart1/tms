@@ -6,6 +6,10 @@
   one defect photo (signed upload, then attached to its defect). Photos are
   always queued after the event that carries their defect, and the queue is
   strictly ordered, so a photo is only sent once its defect has synced.
+  Offline POD work joins the same queue as three more kinds: a POD photo
+  (signed upload, then recorded on its stop), a barcode scan and a delivery
+  completion. They are queued in the order the driver acted, so a stop's
+  photos and scans always reach the server before its completion.
 
   Every item records the signed-in user who queued it (ownerId). A phone can
   be shared: items queued by driver A are only ever sent while A is signed in,
@@ -18,7 +22,43 @@ import { classifySyncFailure, type QueueItem, type SendOutcome } from "./queue";
 
 export type DriverQueuePayload =
   | { kind: "event"; ownerId: string; event: DriverEvent }
-  | { kind: "photo"; ownerId: string; defectClientId: string; blob: Blob; mimeType: string; filename: string };
+  | { kind: "photo"; ownerId: string; defectClientId: string; blob: Blob; mimeType: string; filename: string }
+  /* Offline POD. Queued in the order the driver acted, so a stop's photos and
+     scans always reach the server before its completion. */
+  | {
+      kind: "pod_photo";
+      ownerId: string;
+      clientId: string;
+      jobId: string;
+      stopId: string;
+      shiftClientId: string | null;
+      recordedAt: string;
+      blob: Blob;
+      mimeType: string;
+      filename: string;
+    }
+  | {
+      kind: "pod_scan";
+      ownerId: string;
+      clientId: string;
+      jobId: string;
+      stopId: string;
+      /** Matched on the phone (findExpectedSerial) for the projection; the server matches again. */
+      jobItemId: string;
+      serialNumber: string;
+      scanFormat: string;
+    }
+  | {
+      kind: "pod_complete";
+      ownerId: string;
+      clientId: string;
+      jobId: string;
+      stopId: string;
+      shiftClientId: string | null;
+      recordedAt: string;
+      recipientName: string;
+      podNotes: string;
+    };
 
 /** `stop`: the session has gone (401/403). The item stays put and the queue pauses. */
 export type SyncResult = SendOutcome | { kind: "stop"; error: string };
@@ -89,6 +129,34 @@ export function orphanedPhotoIds(queue: readonly QueueItem<DriverQueuePayload>[]
 export function pendingEvents(queue: readonly QueueItem<DriverQueuePayload>[]): DriverEvent[] {
   const out: DriverEvent[] = [];
   for (const item of queue) if (item.payload.kind === "event") out.push(item.payload.event);
+  return out;
+}
+
+export type PendingPod = {
+  photos: number;
+  scans: { job_item_id: string; serial_number: string }[];
+  completion: null | { recipientName: string; podNotes: string; recordedAt: string };
+};
+
+/** Queued POD work for one job, per stop, so the job page can show it before it is sent. */
+export function pendingPodByStop(queue: readonly QueueItem<DriverQueuePayload>[], jobId: string): Map<string, PendingPod> {
+  const out = new Map<string, PendingPod>();
+  const entry = (stopId: string) => {
+    let found = out.get(stopId);
+    if (!found) {
+      found = { photos: 0, scans: [], completion: null };
+      out.set(stopId, found);
+    }
+    return found;
+  };
+  for (const { payload } of queue) {
+    if (payload.kind !== "pod_photo" && payload.kind !== "pod_scan" && payload.kind !== "pod_complete") continue;
+    if (payload.jobId !== jobId) continue;
+    const stop = entry(payload.stopId);
+    if (payload.kind === "pod_photo") stop.photos += 1;
+    else if (payload.kind === "pod_scan") stop.scans.push({ job_item_id: payload.jobItemId, serial_number: payload.serialNumber });
+    else stop.completion = { recipientName: payload.recipientName, podNotes: payload.podNotes, recordedAt: payload.recordedAt };
+  }
   return out;
 }
 
