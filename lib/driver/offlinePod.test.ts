@@ -8,7 +8,26 @@ const items = [
 
 describe("checkQueuedScan", () => {
   it("matches a known serial to its item", () => {
-    expect(checkQueuedScan({ items, verified: [], value: "SN1" })).toEqual({ ok: true, jobItemId: "i1", serialNumber: "SN1" });
+    expect(checkQueuedScan({ items, verified: [], value: "SN1" })).toEqual({ ok: true, jobItemId: "i1", serialNumber: "SN1", scanFormat: null });
+  });
+
+  it("normalizes the scan format the way the scans route does", () => {
+    expect(checkQueuedScan({ items, verified: [], value: "SN1", scanFormat: " code_128 " })).toEqual({
+      ok: true,
+      jobItemId: "i1",
+      serialNumber: "SN1",
+      scanFormat: "code_128",
+    });
+    expect(checkQueuedScan({ items, verified: [], value: "SN1", scanFormat: "" })).toMatchObject({ ok: true, scanFormat: null });
+  });
+
+  it("refuses a format the scans route would refuse", () => {
+    expect(checkQueuedScan({ items, verified: [], value: "SN1", scanFormat: "x".repeat(81) })).toEqual({
+      ok: false,
+      duplicate: false,
+      message: "Invalid barcode format.",
+    });
+    expect(checkQueuedScan({ items, verified: [], value: "SN1", scanFormat: "a\u0000b" })).toMatchObject({ ok: false, duplicate: false });
   });
 
   it("refuses an unknown serial with the server's wording", () => {

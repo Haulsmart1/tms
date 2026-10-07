@@ -447,7 +447,7 @@ export function enqueuePodPhoto(
 }
 
 /** Queue one barcode verification, already matched on the phone. */
-export function enqueuePodScan(input: PodTarget & { jobItemId: string; serialNumber: string; scanFormat: string }): Promise<void> {
+export function enqueuePodScan(input: PodTarget & { jobItemId: string; serialNumber: string; scanFormat: string | null }): Promise<void> {
   const clientId = crypto.randomUUID();
   return add(clientId, (ownerId) => ({ ...input, kind: "pod_scan", ownerId, clientId }));
 }

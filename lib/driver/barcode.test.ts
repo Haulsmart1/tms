@@ -5,6 +5,7 @@ import {
   barcodeProgress,
   expectedSerialsForItem,
   findExpectedSerial,
+  normalizeScanFormat,
   normalizeScannedSerial,
 } from "./barcode";
 
@@ -232,5 +233,27 @@ describe("driver barcode verification", () => {
       verified: 1,
       remaining: 0,
     });
+  });
+});
+
+describe("normalizeScanFormat", () => {
+  it("treats a missing or empty format as none", () => {
+    expect(normalizeScanFormat(undefined)).toEqual({ ok: true, value: null });
+    expect(normalizeScanFormat(null)).toEqual({ ok: true, value: null });
+    expect(normalizeScanFormat("")).toEqual({ ok: true, value: null });
+  });
+
+  it("trims a format", () => {
+    expect(normalizeScanFormat("  code_128 ")).toEqual({ ok: true, value: "code_128" });
+    expect(normalizeScanFormat("x".repeat(80))).toEqual({ ok: true, value: "x".repeat(80) });
+  });
+
+  it("refuses a non-string, blank, over-long or control-character format", () => {
+    const invalid = { ok: false, message: "Invalid barcode format." };
+    expect(normalizeScanFormat(7)).toEqual(invalid);
+    expect(normalizeScanFormat("   ")).toEqual(invalid);
+    expect(normalizeScanFormat("x".repeat(81))).toEqual(invalid);
+    expect(normalizeScanFormat("qr\u0007")).toEqual(invalid);
+    expect(normalizeScanFormat("qr\u007fcode")).toEqual(invalid);
   });
 });

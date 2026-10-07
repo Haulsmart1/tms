@@ -5,23 +5,33 @@
   reuse the same pure rules (lib/driver/pod.ts, completionRules.ts, barcode.ts).
 */
 
-import { findExpectedSerial, type JobItemScanLike, type SerializedJobItem } from "./barcode";
+import { findExpectedSerial, normalizeScanFormat, type JobItemScanLike, type SerializedJobItem } from "./barcode";
 import { barcodeCompletionBlock } from "./completionRules";
 import { validatePodCompletion } from "./pod";
 
 /** The scans route's wording for a serial already verified on the job. */
 export const ALREADY_VERIFIED_MESSAGE = "This item has already been verified on this job.";
 
-/** `verified`: scans the server holds plus scans already queued on this phone. */
-export function checkQueuedScan(input: { items: SerializedJobItem[]; verified: JobItemScanLike[]; value: string }):
-  | { ok: true; jobItemId: string; serialNumber: string }
+/**
+ * `verified`: scans the server holds plus scans already queued on this phone.
+ * `scanFormat` is normalized by the scans route's own rule (normalizeScanFormat).
+ */
+export function checkQueuedScan(input: {
+  items: SerializedJobItem[];
+  verified: JobItemScanLike[];
+  value: string;
+  scanFormat?: unknown;
+}):
+  | { ok: true; jobItemId: string; serialNumber: string; scanFormat: string | null }
   | { ok: false; duplicate: boolean; message: string } {
+  const format = normalizeScanFormat(input.scanFormat);
+  if (!format.ok) return { ok: false, duplicate: false, message: format.message };
   const match = findExpectedSerial(input.items, input.value);
   if (!match.ok) return { ok: false, duplicate: false, message: match.message };
   if (input.verified.some((v) => v.job_item_id === match.itemId && v.serial_number === match.serialNumber)) {
     return { ok: false, duplicate: true, message: ALREADY_VERIFIED_MESSAGE };
   }
-  return { ok: true, jobItemId: match.itemId, serialNumber: match.serialNumber };
+  return { ok: true, jobItemId: match.itemId, serialNumber: match.serialNumber, scanFormat: format.value };
 }
 
 export function checkQueuedCompletion(input: {

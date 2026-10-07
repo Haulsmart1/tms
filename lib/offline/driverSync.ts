@@ -46,7 +46,8 @@ export type DriverQueuePayload =
       /** Matched on the phone (findExpectedSerial) for the projection; the server matches again. */
       jobItemId: string;
       serialNumber: string;
-      scanFormat: string;
+      /** Normalized on the phone by normalizeScanFormat; null when the scanner gave none. */
+      scanFormat: string | null;
     }
   | {
       kind: "pod_complete";
