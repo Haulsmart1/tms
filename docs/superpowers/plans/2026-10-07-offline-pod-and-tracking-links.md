@@ -3478,5 +3478,5 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 - [ ] **Step 1:** `npm test` (expect all pass) and `npm run typecheck` (expect clean). Paste the summary lines into the handoff.
 - [ ] **Step 2:** `npm run build` (expect success; it catches server/client import mistakes typecheck misses, such as `node:crypto` reaching a client bundle through `lib/tracking/links.ts`).
-- [ ] **Step 3:** `git grep -n "—" -- $(git diff --name-only main...HEAD)` returns nothing.
+- [ ] **Step 3:** `git grep -n $'\u2014' -- $(git diff --name-only main...HEAD)` returns nothing.
 - [ ] **Step 4:** Write `docs/handoffs/2026-10-07-offline-pod-tracking-links.md`: what was built, SQL to apply (`tracking_01`, `tracking_02`, and the `document_delivery_log` constraint check), dependencies (`shifts_01..05` after S-1; stop contacts migration), manual checks never run (signed-in phone pass offline and back online; a real TomTom live ETA; a real tracking email; the public page on a phone), and the follow-ups recorded in the spec.
