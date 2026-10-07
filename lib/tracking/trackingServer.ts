@@ -13,7 +13,7 @@ import { parseRoute, routeUrl } from "../tomtom/api";
 import { etaWindow, roundToFiveMinutes, shouldRefreshEta, stopsBefore, trackingState, type EtaContext, type ItineraryStop } from "./eta";
 import type { ResolvedTrackingLink } from "./linkStore";
 import { POSITION_FRESH_MS, buildTrackingPayload, isTrackingEnded, type TrackingPayload } from "./publicPayload";
-import { buildBaselines, buildItinerary, isStopCompleted, readTrackingPosition, toLatLng } from "./viewInputs";
+import { buildBaselines, isStopCompleted, readTrackingPosition, resolveItinerary, toLatLng, usableCachedEta } from "./viewInputs";
 
 const DATE_ONLY_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
 const TOMTOM_TIMEOUT_MS = 5000;
@@ -94,6 +94,11 @@ export async function loadTrackingView(admin: SupabaseClient, link: ResolvedTrac
 
 async function loadItinerary(admin: SupabaseClient, tenantId: string, vehicleId: string | null, planningDay: string | null): Promise<ItineraryStop[] | null> {
   if (!vehicleId || !planningDay) return null;
+  const failed = (label: string, code: string | undefined) => {
+    console.warn(`[tracking] ${label} lookup failed`, code);
+    return resolveItinerary({ failed: true, visits: null, stopRows: [] });
+  };
+
   const { data: itinerary, error } = await admin
     .from("planning_route_itineraries")
     .select("id")
@@ -101,8 +106,8 @@ async function loadItinerary(admin: SupabaseClient, tenantId: string, vehicleId:
     .eq("vehicle_id", vehicleId)
     .eq("planning_date", planningDay)
     .maybeSingle();
-  if (error) console.warn("[tracking] itinerary lookup failed", error.code);
-  if (error || !itinerary) return null;
+  if (error) return failed("itinerary", error.code);
+  if (!itinerary) return resolveItinerary({ failed: false, visits: null, stopRows: [] });
 
   const { data: visits, error: visitsError } = await admin
     .from("planning_route_visit_stops")
@@ -110,20 +115,17 @@ async function loadItinerary(admin: SupabaseClient, tenantId: string, vehicleId:
     .eq("tenant_id", tenantId)
     .eq("itinerary_id", itinerary.id)
     .order("service_sequence_number");
-  if (visitsError) console.warn("[tracking] itinerary visits lookup failed", visitsError.code);
-  if (visitsError || !visits || visits.length === 0) return null;
+  if (visitsError) return failed("itinerary visits", visitsError.code);
+  if (!visits || visits.length === 0) return resolveItinerary({ failed: false, visits: [], stopRows: [] });
 
   const { data: stopRows, error: stopsError } = await admin
     .from("job_stops")
     .select("id,type,status,pod_status,delivered_at")
     .eq("tenant_id", tenantId)
     .in("id", visits.map((v) => String(v.stop_id)));
-  /* A failed stop lookup keeps the itinerary with every stop a placeholder,
-     so nothing reads as "next" rather than falling back to the looser
-     no-itinerary rule. */
-  if (stopsError) console.warn("[tracking] itinerary stops lookup failed", stopsError.code);
+  if (stopsError) return failed("itinerary stops", stopsError.code);
 
-  return buildItinerary(visits, stopsError ? [] : stopRows ?? []);
+  return resolveItinerary({ failed: false, visits, stopRows: stopRows ?? [] });
 }
 
 async function loadBaselines(admin: SupabaseClient, tenantId: string, jobIds: string[]): Promise<Record<string, string | null>> {
@@ -152,7 +154,9 @@ async function loadLatestPosition(admin: SupabaseClient, tenantId: string, vehic
   return readTrackingPosition(data, now);
 }
 
-/* A null from roundToFiveMinutes (unparseable time) reads as "no live ETA". */
+/* A null from roundToFiveMinutes (unparseable time) reads as "no live ETA".
+   A cached answer is only ever shown through usableCachedEta: recent and not
+   already in the past, otherwise the page falls back to the window. */
 async function liveEta(
   admin: SupabaseClient,
   input: { tenantId: string; stopId: string; position: Position; destination: LatLng; now: Date },
@@ -164,7 +168,7 @@ async function liveEta(
     .eq("tenant_id", input.tenantId)
     .maybeSingle();
   if (cacheError) console.warn("[tracking] ETA cache lookup failed", cacheError.code);
-  const cachedEta = cache ? roundToFiveMinutes(String(cache.eta)) : null;
+  const cachedEta = cache ? usableCachedEta({ eta: String(cache.eta), computedAt: String(cache.computed_at) }, input.now) : null;
   const cached = cache ? { computedAt: String(cache.computed_at), fromPositionAt: String(cache.from_position_at) } : null;
   if (cache && !shouldRefreshEta(cached, input.position.at, input.now)) return cachedEta;
 

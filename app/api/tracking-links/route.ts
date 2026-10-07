@@ -3,6 +3,7 @@ import { publicAppOrigin } from "../../../lib/accounts/appUrl";
 import { createApiSupabase } from "../../../lib/api/server";
 import { isUuid } from "../../../lib/auth/serverTenantAccess";
 import { authorizeOfficeTenant, officeAccessErrorResponse } from "../../../lib/jobs/officeAccess";
+import { RATE_LIMITS, checkRateLimit } from "../../../lib/rateLimit";
 import { createAdminClient } from "../../../lib/supabase/admin";
 import { TrackableStopError, TrackingUnavailableError, issueTrackingLink, loadTrackableStop } from "../../../lib/tracking/linkStore";
 
@@ -41,6 +42,12 @@ export async function POST(request: NextRequest) {
     await authorizeOfficeTenant(admin, user.id, tenantId);
 
     const stop = await loadTrackableStop(admin, tenantId, stopId);
+
+    const limit = await checkRateLimit(admin, RATE_LIMITS.trackingMintPerUser, user.id);
+    if (!limit.allowed) {
+      return NextResponse.json({ error: "Too many tracking links have been created recently. Try again later." }, { status: 429 });
+    }
+
     const { token, expiresAt } = await issueTrackingLink(admin, { stop, createdBy: user.id });
 
     return NextResponse.json({

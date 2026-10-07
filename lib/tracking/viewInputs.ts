@@ -5,8 +5,9 @@
   tested rather than buried in a Supabase loader.
 */
 
-import type { ItineraryStop } from "./eta";
+import { roundToFiveMinutes, type ItineraryStop } from "./eta";
 import { FUTURE_TOLERANCE_MINUTES, normaliseTimestamp } from "./position";
+import { POSITION_FRESH_MS } from "./publicPayload";
 
 type StopRow = { status?: unknown; pod_status?: unknown; delivered_at?: unknown };
 
@@ -44,6 +45,38 @@ export function buildItinerary(visits: readonly VisitRow[], stopRows: readonly I
         deliveredAt: typeof s.delivered_at === "string" ? s.delivered_at : null,
       };
     });
+}
+
+/*
+  The itinerary as the ETA rules should see it, from the three lookups.
+  A failed lookup is an empty, non-null itinerary: trackingState reads that as
+  "the van has a plan this stop is not in" and never returns "next", so an
+  unknown plan can never reveal the driver's position. Null (no plan, use the
+  looser single-job rule) only when every lookup succeeded and found nothing.
+*/
+export function resolveItinerary(input: {
+  failed: boolean;
+  visits: readonly VisitRow[] | null;
+  stopRows: readonly ItineraryStopRow[];
+}): ItineraryStop[] | null {
+  if (input.failed) return [];
+  if (!input.visits || input.visits.length === 0) return null;
+  return buildItinerary(input.visits, input.stopRows);
+}
+
+/*
+  A cached live ETA, rounded, when it may still be shown: computed within the
+  same 10 minutes a position stays fresh, and not already in the past.
+  Otherwise null, and the page falls back to the window.
+*/
+export function usableCachedEta(cache: { eta: string; computedAt: string } | null, now: Date): string | null {
+  if (!cache) return null;
+  const computed = Date.parse(cache.computedAt);
+  const eta = Date.parse(cache.eta);
+  if (Number.isNaN(computed) || Number.isNaN(eta)) return null;
+  if (now.getTime() - computed > POSITION_FRESH_MS) return null;
+  if (eta < now.getTime()) return null;
+  return roundToFiveMinutes(cache.eta);
 }
 
 /** delivery_eta for each job with exactly one delivery stop; null for every other job. */

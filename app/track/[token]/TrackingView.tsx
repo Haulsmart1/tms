@@ -8,6 +8,8 @@ import type { TrackingPayload } from "../../../lib/tracking/publicPayload";
 const TrackMap = dynamic(() => import("./TrackMap"), { ssr: false });
 
 const POLL_MS = 60_000;
+/* Switching back to the tab reloads, unless a load started this recently. */
+const VISIBLE_RELOAD_MIN_MS = 15_000;
 const timeFmt = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit" });
 const dayFmt = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", weekday: "long", day: "numeric", month: "long" });
 const t = (iso: string) => timeFmt.format(new Date(iso));
@@ -26,9 +28,11 @@ type Loaded =
 export default function TrackingView({ token }: { token: string }) {
   const [state, setState] = useState<Loaded>({ kind: "loading" });
   const ended = useRef(false);
+  const lastLoadStart = useRef(0);
 
   const load = useCallback(async () => {
     if (ended.current) return;
+    lastLoadStart.current = Date.now();
     try {
       const response = await fetch(`/api/public/track/${encodeURIComponent(token)}`, { cache: "no-store" });
       const body = await response.json().catch(() => ({}));
@@ -52,7 +56,9 @@ export default function TrackingView({ token }: { token: string }) {
       if (document.visibilityState === "visible") void load();
     }, POLL_MS);
     const onVisible = () => {
-      if (document.visibilityState === "visible") void load();
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastLoadStart.current < VISIBLE_RELOAD_MIN_MS) return;
+      void load();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {

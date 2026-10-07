@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildBaselines, buildItinerary, isStopCompleted, readTrackingPosition, toLatLng } from "./viewInputs";
+import { latenessMs, stopsBefore, trackingState, type EtaContext } from "./eta";
+import { buildBaselines, buildItinerary, isStopCompleted, readTrackingPosition, resolveItinerary, toLatLng, usableCachedEta } from "./viewInputs";
 
 describe("isStopCompleted", () => {
   it("is true for a completed status, a delivered or collected POD, or a recorded delivery time", () => {
@@ -112,5 +113,73 @@ describe("readTrackingPosition", () => {
     expect(readTrackingPosition({ latitude: 51.5, longitude: -0.1, recorded_at: null }, now)).toBeNull();
     expect(readTrackingPosition({ latitude: 51.5, longitude: -0.1, recorded_at: "not a time" }, now)).toBeNull();
     expect(readTrackingPosition({ latitude: null, longitude: -0.1, recorded_at: "2026-10-07T10:55:00Z" }, now)).toBeNull();
+  });
+});
+
+describe("buildItinerary numeric ordering", () => {
+  it("sorts numeric-string sequence numbers numerically", () => {
+    const visits = [
+      { stop_id: "a", job_id: "j", service_sequence_number: "10" },
+      { stop_id: "b", job_id: "j", service_sequence_number: "9" },
+    ];
+    expect(buildItinerary(visits, [])?.map((s) => s.stopId)).toEqual(["b", "a"]);
+  });
+});
+
+describe("resolveItinerary", () => {
+  const stops = [{ id: "s1", type: "delivery", status: "planned", pod_status: "pending", delivered_at: null }];
+  const visits = [{ stop_id: "s1", job_id: "j1", service_sequence_number: 1 }];
+
+  /* An unknown plan must never let a stop read as "next": [] means "the van
+     has a plan this stop is not in", which trackingState never turns into next. */
+  it("is an empty itinerary when any lookup failed", () => {
+    expect(resolveItinerary({ failed: true, visits, stopRows: stops })).toEqual([]);
+    expect(resolveItinerary({ failed: true, visits: null, stopRows: [] })).toEqual([]);
+  });
+
+  it("is null only when the lookups succeeded and there is no plan", () => {
+    expect(resolveItinerary({ failed: false, visits: null, stopRows: [] })).toBeNull();
+    expect(resolveItinerary({ failed: false, visits: [], stopRows: [] })).toBeNull();
+  });
+
+  it("builds the list when there are visits", () => {
+    expect(resolveItinerary({ failed: false, visits, stopRows: stops })).toEqual([
+      { stopId: "s1", jobId: "j1", type: "delivery", completed: false, deliveredAt: null },
+    ]);
+  });
+
+  it("an empty itinerary never yields next, stops before or lateness", () => {
+    const ctx: EtaContext = {
+      now: new Date("2026-10-07T11:00:00.000Z"),
+      stop: { id: "s1", jobId: "j1", completed: false, deliveredAt: null, plannedDate: "2026-10-07" },
+      job: { vehicleId: "v1", deliveryEta: "2026-10-07T13:00:00.000Z", deliveryStopCount: 1, incompleteStopIds: ["s1"] },
+      itinerary: [],
+      baselines: {},
+    };
+    expect(trackingState(ctx)).toBe("en_route_earlier");
+    expect(stopsBefore(ctx)).toBeNull();
+    expect(latenessMs(ctx)).toBe(0);
+  });
+});
+
+describe("usableCachedEta", () => {
+  const now = new Date("2026-10-07T11:00:00.000Z");
+
+  it("returns the rounded ETA when computed within 10 minutes and still ahead", () => {
+    expect(usableCachedEta({ eta: "2026-10-07T11:31:00Z", computedAt: "2026-10-07T10:55:00Z" }, now)).toBe("2026-10-07T11:30:00.000Z");
+  });
+
+  it("refuses a cache computed more than 10 minutes ago", () => {
+    expect(usableCachedEta({ eta: "2026-10-07T11:31:00Z", computedAt: "2026-10-07T10:49:00Z" }, now)).toBeNull();
+  });
+
+  it("refuses an ETA already in the past", () => {
+    expect(usableCachedEta({ eta: "2026-10-07T10:59:00Z", computedAt: "2026-10-07T10:58:00Z" }, now)).toBeNull();
+  });
+
+  it("refuses a missing cache or unparseable times", () => {
+    expect(usableCachedEta(null, now)).toBeNull();
+    expect(usableCachedEta({ eta: "nope", computedAt: "2026-10-07T10:58:00Z" }, now)).toBeNull();
+    expect(usableCachedEta({ eta: "2026-10-07T11:31:00Z", computedAt: "nope" }, now)).toBeNull();
   });
 });
