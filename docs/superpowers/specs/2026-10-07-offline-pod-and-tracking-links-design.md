@@ -100,7 +100,9 @@ refused because the shift has since closed.
 `job_stops.pod_flags text[] not null default '{}'` (new column). Only `pod_time_untrusted` is written in this
 change: a queued completion sets the column to `['pod_time_untrusted']` when the time was not trusted and
 `[]` when it was. When the column is missing (PostgREST answers PGRST204, Postgres 42703) the update is
-retried without it. `/jobs` shows a small "Time not trusted" tag on a stop carrying it.
+retried without it. `/jobs` shows a small "Time not trusted" tag on a stop carrying it, once `pod_flags` is added to the
+`/jobs` stop select; that select lists columns explicitly, so the column is added only after
+`tracking_02` is applied (a comment in `app/jobs/page.tsx` marks the spot).
 
 ### Driver-facing failure handling
 
@@ -143,7 +145,7 @@ Migration `docs/sql/tracking_01_links_and_eta_cache.sql`:
 - `stop_eta_cache`: `stop_id` (PK, FK cascade), `tenant_id`, `eta` timestamptz, `computed_at`,
   `from_position_at`. Same access model.
 
-Migration `docs/sql/tracking_02_pod_offline.sql`:
+Migration `docs/sql/tracking_02_pod_flags.sql`:
 
 - `job_stops.pod_flags text[] not null default '{}'`. (No `client_id` columns: photo retries are made
   idempotent by the derived storage path, and scans already are.)
