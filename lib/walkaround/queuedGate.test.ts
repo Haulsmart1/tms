@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
 import type { DriverSession } from "../driver/server";
 import { JOB_GATE_MESSAGES } from "./jobGate";
-import { queuedJobGate } from "./server";
+import { jobGateResponse, queuedJobGate } from "./server";
 
 /*
   A tiny in-memory stand-in for the service-role client: enough of the
@@ -103,6 +103,8 @@ const meta = (recordedAt: string, shiftClientId: string | null = SHIFT_CLIENT_ID
   recordedAt,
 });
 
+const GATE_UNAVAILABLE = "Walkaround checks are not available right now, so jobs cannot be completed. Ask the office.";
+
 async function errorOf(response: Response | null) {
   return response ? ((await response.json()) as { error: string }).error : null;
 }
@@ -159,11 +161,19 @@ describe("queuedJobGate", () => {
     expect(result).toEqual({ response: null, at: now.toISOString(), trusted: false });
   });
 
-  it("refuses with 409 when a lookup errors", async () => {
+  it("answers 503 when a lookup errors, so the queue retries rather than drops the item", async () => {
     const { admin } = fakeAdmin(endedShiftTables(), "shift_vehicle_periods");
     const result = await queuedJobGate(admin, session, meta("2026-10-07T08:00:00.000Z"), { now });
-    expect(result.response?.status).toBe(409);
+    expect(result.response?.status).toBe(503);
+    expect(await errorOf(result.response)).toBe(GATE_UNAVAILABLE);
     expect(result.trusted).toBe(false);
+  });
+
+  it("answers 503 when the open-shift fallback lookup errors", async () => {
+    const { admin } = fakeAdmin(endedShiftTables(), "driver_shifts");
+    const result = await queuedJobGate(admin, session, meta("2026-10-07T08:00:00.000Z", null), { now });
+    expect(result.response?.status).toBe(503);
+    expect(await errorOf(result.response)).toBe(GATE_UNAVAILABLE);
   });
 
   it("treats a time before notBefore as untrusted and judges the open-shift rule instead", async () => {
@@ -187,5 +197,20 @@ describe("queuedJobGate", () => {
       trusted: false,
     });
     expect(queried).toEqual([]);
+  });
+});
+
+describe("jobGateResponse", () => {
+  it("answers 503 when the lookup fails (fails closed, but retryable)", async () => {
+    const { admin } = fakeAdmin({}, "driver_shifts");
+    const response = await jobGateResponse(admin, session);
+    expect(response?.status).toBe(503);
+    expect(await errorOf(response)).toBe(GATE_UNAVAILABLE);
+  });
+
+  it("refuses with 409 when there is no open shift", async () => {
+    const { admin } = fakeAdmin({ driver_shifts: [] });
+    const response = await jobGateResponse(admin, session);
+    expect(response?.status).toBe(409);
   });
 });

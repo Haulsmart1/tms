@@ -190,10 +190,16 @@ export async function loadJobGateInput(admin: SupabaseClient, session: DriverSes
   };
 }
 
+/** Answered with 503 when the gate cannot be judged, so the offline queue retries it. */
+const GATE_UNAVAILABLE_MESSAGE = "Walkaround checks are not available right now, so jobs cannot be completed. Ask the office.";
+
 /**
   The job gate for stop completion and POD routes. Returns a 409 response when
   the driver may not work, or null. FAILS CLOSED: if the shift tables are
-  missing (SQL not applied yet) or a lookup fails, the driver is refused.
+  missing (SQL not applied yet) or a lookup fails, the driver is refused with
+  a 503, not a 409: the offline queue retries a 503 with backoff (and sets it
+  aside after repeated failures) instead of deleting a queued POD over a
+  database blip. Genuine gate refusals stay 409.
 */
 export async function jobGateResponse(admin: SupabaseClient, session: DriverSession): Promise<NextResponse | null> {
   if (session.portalType !== "direct_driver") return null;
@@ -202,7 +208,7 @@ export async function jobGateResponse(admin: SupabaseClient, session: DriverSess
     input = await loadJobGateInput(admin, session);
   } catch (error) {
     console.error("[walkaround] job gate lookup failed", error);
-    return NextResponse.json({ error: "Walkaround checks are not available right now, so jobs cannot be completed. Ask the office." }, { status: 409 });
+    return NextResponse.json({ error: GATE_UNAVAILABLE_MESSAGE }, { status: 503 });
   }
   const decision = jobGateDecision(input);
   return decision.ok ? null : NextResponse.json({ error: decision.message }, { status: 409 });
@@ -255,7 +261,7 @@ async function loadPeriodAt(admin: SupabaseClient, shiftId: string, at: string) 
 }
 
 export type QueuedGateResult = {
-  /** A 409 refusal, or null when the driver may proceed. */
+  /** A 409 refusal, a 503 when the gate could not be judged, or null when the driver may proceed. */
   response: NextResponse | null;
   /** The time to record: the phone's when trusted, otherwise the server's. */
   at: string;
@@ -268,7 +274,7 @@ export type QueuedGateResult = {
   time, or no shift client id: today's open-shift rule, at server time.
   `notBefore` (the job's created_at) bounds the recorded time from below for
   every driver, so a POD cannot be dated before its job existed.
-  FAILS CLOSED like jobGateResponse.
+  FAILS CLOSED like jobGateResponse: a lookup failure answers 503 (retryable).
 */
 export async function queuedJobGate(
   admin: SupabaseClient,
@@ -301,7 +307,11 @@ export async function queuedJobGate(
     }
   } catch (error) {
     console.error("[walkaround] queued job gate lookup failed", error);
-    return refuse("Walkaround checks are not available right now, so jobs cannot be completed. Ask the office.");
+    return {
+      response: NextResponse.json({ error: GATE_UNAVAILABLE_MESSAGE }, { status: 503 }),
+      at: now.toISOString(),
+      trusted: false,
+    };
   }
 
   const current = await jobGateResponse(admin, session);
