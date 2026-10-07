@@ -106,7 +106,9 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
   `customer_integrations` and `subcontractors*` are deliberately excluded because `app/api/customers/**`
   writes them through the user client. `document_delivery_log.share_reference` holds an opaque pointer
   to the share row (`lib/documents/shareReference.ts`), never the share URL: the email routes assert
-  that before inserting, because the log is readable by every member of the tenant.
+  that before inserting, because the log is readable by every member of the tenant. The assertion is an
+  allowlist, not a blocklist: only `pod_share:<sha256 hex>`, `tracking_share:<sha256 hex>` (the stored
+  token hash) and `quotation_share:<uuid>` (the link row id) pass, so a new token or URL shape fails.
 - `lib/billing/vehicleCount.ts` is the single definition of billable: a company vehicle with at least one
   active licence. What a cycle actually paid for is a separate fact, recorded per vehicle in
   `vehicle_cycle_coverage`; `lib/billing/addon.ts` charges a mid-cycle addition only when the current cycle
@@ -137,6 +139,25 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
   items; another driver's queued items are held, not deleted, until they sign in
   (`lib/offline/driverSync.ts`). Shift hours are recorded hours, not a legal calculation: tachograph data
   stays the legal record, and nothing here checks Working Time, daily or weekly rest.
+- **Driver POD saves go through the same offline queue.** Three item kinds join the shift events in one
+  strictly ordered queue (`lib/offline/driverSync.ts`, runner `app/driver/driverQueue.ts`): `pod_photo`,
+  `pod_scan` and `pod_complete`, so a shift's start check always reaches the server before a POD that
+  depends on it, and a stop's photos and scans before its completion. Photo and completion items carry
+  `shiftClientId` and the phone's `recordedAt`; scans carry neither (that route has no gate and is already
+  idempotent). The upload-url, evidence and complete routes treat a body with any of `clientId`,
+  `shiftClientId` or `recordedAt` as queued (`lib/pod/queuedMeta.ts`; a non-UUID `clientId` answers 400).
+  `acceptRecordedTime` (`lib/pod/recordedTime.ts`) trusts the phone's time only with an explicit offset,
+  at most 2 minutes ahead, at most 72 hours old, not before the job's `created_at` (the `notBefore`
+  floor) and inside the named shift; otherwise server time is used and the stop gets
+  `pod_time_untrusted`. `queuedJobGate` (`lib/walkaround/server.ts`, pure rule `jobGateDecisionAt`) judges
+  the walkaround gate at that recorded time against the `shift_vehicle_periods` row containing it; VOR is
+  re-checked only while that period is still open, because `vehicles.vor` has no history. A gate LOOKUP
+  failure answers 503 so the queue retries with backoff; a real refusal stays 409 and is final. Queued
+  photo paths are derived from `clientId` (`buildQueuedPodEvidencePath`, `.../photos/q-<clientId>-<name>`)
+  and signed WITHOUT upsert, so a recorded photo can never be swapped; a retry that finds the object or the
+  `pod_evidence` row already there skips the upload and goes straight to the idempotent record route. A
+  refused photo does not hold back its stop's queued completion (the server's evidence-count check still
+  refuses a stop with none). Opening the app with no signal is still unsupported: there is no service worker.
 - **Two billing models run side by side**, routed on `company_billing.billing_model`. Everything above
   describes **v1** (`v1_immediate`): charge in advance every 28 days, charge pro-rata the moment a vehicle
   is added, `vehicle_cycle_coverage` records what a payment bought.
@@ -161,6 +182,25 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
   4.5 MB. POD share links are random tokens stored hashed in `pod_share_links` (`lib/pod/shareLinks.ts`,
   `shareStore.ts`), revocable and re-checked on every view. The sibling `job-files` bucket is locked down only
   once `prodfix_82`/`83` are applied; until then don't assume it has the same guarantees.
+- `job_stops.pod_flags text[]` (`tracking_02`) carries `pod_time_untrusted` when a queued completion's
+  phone time was refused. The complete route retries without the column on PGRST204/42703, so a missing
+  column never blocks a delivery. `/jobs` does NOT select it yet: selecting a missing column fails the
+  whole list, so add `pod_flags` to the `job_stops` select in `app/jobs/page.tsx` (the comment there marks
+  the spot) only after `tracking_02` is applied; until then the "Time not trusted" tag cannot show.
+- **Customer tracking links** copy the POD share link design. Tokens are random `trk_` strings stored only
+  as a SHA-256 hash in `stop_tracking_links` (`lib/tracking/links.ts`, `linkStore.ts`); that table and
+  `stop_eta_cache` are server-only (RLS on, no policies, client grants revoked, `tracking_01`). Links are
+  minted, emailed and revoked only by `app/api/tracking-links/**` after `authorizeOfficeTenant` (drivers
+  refused), for an undelivered delivery stop of a non-cancelled job in that tenant; the email goes only to the stop
+  contact, an address on the job's customer or the caller. The public JSON (`/api/public/track/[token]`,
+  rate limited per IP) answers one 404 body for unknown, expired, revoked and ended links.
+  `buildTrackingPayload` in `lib/tracking/publicPayload.ts` is the ONLY builder of what leaves the server:
+  never driver, vehicle, reference, recipient, customer or other stops. State `next` is the only state
+  that reveals position, destination or a live ETA, and every doubtful case resolves to not next (stop
+  missing from the van's itinerary, no itinerary unless it is the job's single remaining stop today, and a
+  failed itinerary lookup). Position also needs a fix under 10 minutes old; the live ETA is a
+  traffic-aware TomTom route cached 2 minutes per stop in `stop_eta_cache`, falling back to the planned
+  window on any TomTom failure.
 - PDFs (invoice, quotation, POD) must use `embedUnicodeFonts()` and `pdfSafeText()` from
   `lib/printing/pdfFonts.ts`. pdf-lib's StandardFonts throw on any non-WinAnsi character (Polish, Turkish,
   emoji), which used to abort emails with a 500. The DejaVu fonts are vendored in `lib/printing/fonts/`.
@@ -169,14 +209,16 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
   and the UI says so. Never add copy that implies a check that does not run. Planning is read-only while
   "All tenants" is selected, and saves go through the atomic `prodfix_70` RPC.
 
-### One styling system, plus four deliberately excluded public pages
+### One styling system, plus five deliberately excluded public pages
 
 - **Every console page is on the design system.** The inline-styled legacy tier no longer exists; Tailwind
   Preflight stays disabled globally, which is why the `ds` reset is still required rather than optional.
 - **Deliberately NOT tokenised**, and absent from `themeableRoutes.ts` on purpose: `/pod/share/[token]`,
-  `/quotation/share/[token]`, `/driver/jobs/[jobId]` and `/driver/walkaround`, customer/driver-facing pages
-  outside the console shell with a fixed light palette. Do not "finish the job" on these without deciding a
-  delivery-receipt (or walkaround) recipient should see the operator's theme.
+  `/quotation/share/[token]`, `/track/[token]`, `/driver/jobs/[jobId]` and `/driver/walkaround`,
+  customer/driver-facing pages outside the console shell with a fixed light palette. `/track/[token]` is
+  also hidden from the console shell by `lib/nav/shouldShowShell.ts` (prefix `/track/`, with the slash,
+  because `/tracking` is a console page). Do not "finish the job" on these without deciding a
+  delivery-receipt (or walkaround, or tracking) recipient should see the operator's theme.
 - **Design-system ("ds") pages**: opt in via `className="ds font-sans bg-canvas text-ink"` on the root element.
   `ds` re-applies a scoped CSS reset; `font-sans` switches to IBM Plex. Tokens live in `app/tokens.css`, consumed
   by `app/globals.css`. Forgetting `font-sans` silently falls back to Inter; forgetting `ds` breaks borders/layout
@@ -285,6 +327,8 @@ docs/sql/                   numbered migrations, applied by hand in order in the
                              2026-09-14 review fixes plus two follow-ups; order in prodfix_00_APPLY_ORDER.md),
                              signup_01 (self-serve signup RPC), and shifts_01..05 (driver shifts and walkaround
                              check tables, triggers, RPCs and storage policies, 2026-09-29; none applied yet),
+                             tracking_01..02 (tracking links, ETA cache and job_stops.pod_flags, 2026-10-07;
+                             not applied),
                              and three timestamp-named files from 2026-09-29/30 (stop contacts, saved plans,
                              load transfers and stop windows; moved here from supabase/migrations/ because
                              they were not yet applied). `*_verify.sql`, `diag_*`, `schema_rls_dump.sql` and
