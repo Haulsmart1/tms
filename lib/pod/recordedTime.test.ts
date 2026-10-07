@@ -1,0 +1,50 @@
+import { describe, expect, it } from "vitest";
+import { acceptRecordedTime, MAX_RECORDED_AGE_MS, MAX_RECORDED_FUTURE_MS } from "./recordedTime";
+
+const now = new Date("2026-10-07T12:00:00.000Z");
+const iso = (ms: number) => new Date(ms).toISOString();
+
+describe("acceptRecordedTime", () => {
+  it("trusts a recent time with no shift (subcontractor)", () => {
+    const at = iso(now.getTime() - 60 * 60 * 1000);
+    expect(acceptRecordedTime({ recordedAt: at, serverNow: now, shift: null })).toEqual({ at, trusted: true });
+  });
+
+  it("falls back to server time for garbage", () => {
+    for (const recordedAt of [undefined, null, "", "yesterday", 42]) {
+      expect(acceptRecordedTime({ recordedAt, serverNow: now, shift: null })).toEqual({ at: now.toISOString(), trusted: false });
+    }
+  });
+
+  it("allows small future skew but refuses more", () => {
+    const ok = iso(now.getTime() + MAX_RECORDED_FUTURE_MS);
+    const bad = iso(now.getTime() + MAX_RECORDED_FUTURE_MS + 1);
+    expect(acceptRecordedTime({ recordedAt: ok, serverNow: now, shift: null }).trusted).toBe(true);
+    expect(acceptRecordedTime({ recordedAt: bad, serverNow: now, shift: null })).toEqual({ at: now.toISOString(), trusted: false });
+  });
+
+  it("refuses a time older than the maximum age", () => {
+    const ok = iso(now.getTime() - MAX_RECORDED_AGE_MS);
+    const bad = iso(now.getTime() - MAX_RECORDED_AGE_MS - 1);
+    expect(acceptRecordedTime({ recordedAt: ok, serverNow: now, shift: null }).trusted).toBe(true);
+    expect(acceptRecordedTime({ recordedAt: bad, serverNow: now, shift: null }).trusted).toBe(false);
+  });
+
+  it("requires the time to sit inside the named shift", () => {
+    const shift = { startedAt: "2026-10-07T06:00:00.000Z", endedAt: "2026-10-07T10:00:00.000Z" };
+    expect(acceptRecordedTime({ recordedAt: "2026-10-07T06:00:00.000Z", serverNow: now, shift }).trusted).toBe(true);
+    expect(acceptRecordedTime({ recordedAt: "2026-10-07T10:00:00.000Z", serverNow: now, shift }).trusted).toBe(true);
+    expect(acceptRecordedTime({ recordedAt: "2026-10-07T05:59:59.999Z", serverNow: now, shift }).trusted).toBe(false);
+    expect(acceptRecordedTime({ recordedAt: "2026-10-07T10:00:00.001Z", serverNow: now, shift }).trusted).toBe(false);
+  });
+
+  it("has no upper bound while the shift is still open", () => {
+    const shift = { startedAt: "2026-10-07T06:00:00.000Z", endedAt: null };
+    expect(acceptRecordedTime({ recordedAt: "2026-10-07T11:59:00.000Z", serverNow: now, shift }).trusted).toBe(true);
+  });
+
+  it("normalises the accepted time to ISO", () => {
+    const result = acceptRecordedTime({ recordedAt: "2026-10-07T11:00:00+01:00", serverNow: now, shift: null });
+    expect(result).toEqual({ at: "2026-10-07T10:00:00.000Z", trusted: true });
+  });
+});
