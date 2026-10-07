@@ -12,8 +12,9 @@ import {
   isWorkableJobStatus,
   jobNotWorkableMessage,
 } from "../../../../../../../../lib/jobs/jobStatus";
+import { hasInvalidClientId, parseQueuedMeta } from "../../../../../../../../lib/pod/queuedMeta";
 import { createAdminClient } from "../../../../../../../../lib/supabase/admin";
-import { jobGateResponse } from "../../../../../../../../lib/walkaround/server";
+import { jobGateResponse, queuedJobGate } from "../../../../../../../../lib/walkaround/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +24,9 @@ type RouteContext = { params: Promise<{ jobId: string; stopId: string }> };
 type CompleteBody = {
   recipient_name?: unknown;
   pod_notes?: unknown;
+  clientId?: unknown;
+  shiftClientId?: unknown;
+  recordedAt?: unknown;
 };
 
 /*
@@ -31,6 +35,10 @@ type CompleteBody = {
   - a delivered stop is never overwritten; repeating the call is a no-op,
   - every serialised item must be scanned before the final delivery,
   - the job only flips to completed while it is still open.
+  A completion from the offline queue (body carries clientId, shiftClientId,
+  recordedAt) is gated at its recorded time and, when that time is trusted,
+  delivered_at is that time; otherwise server time plus the
+  pod_time_untrusted flag.
 */
 export async function POST(request: Request, context: RouteContext) {
   try {
@@ -53,19 +61,36 @@ export async function POST(request: Request, context: RouteContext) {
     let completedAt = stop.delivered_at ?? new Date().toISOString();
 
     if (!alreadyCompleted) {
-      const gate = await jobGateResponse(admin, session);
-      if (gate) return gate;
-
-      if (!isWorkableJobStatus(job.status)) {
-        return NextResponse.json({ error: jobNotWorkableMessage(job.status) }, { status: 409 });
-      }
-
       let body: CompleteBody;
 
       try {
         body = (await request.json()) as CompleteBody;
       } catch {
         return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+      }
+
+      const meta = parseQueuedMeta(body);
+
+      if (hasInvalidClientId(body, meta)) {
+        return NextResponse.json({ error: "Invalid clientId." }, { status: 400 });
+      }
+
+      let recordedAt = new Date().toISOString();
+      let timeTrusted = true;
+
+      // A request from the offline queue is gated at the time it was recorded.
+      if (meta) {
+        const queued = await queuedJobGate(admin, session, meta);
+        if (queued.response) return queued.response;
+        recordedAt = queued.at;
+        timeTrusted = queued.trusted;
+      } else {
+        const gate = await jobGateResponse(admin, session);
+        if (gate) return gate;
+      }
+
+      if (!isWorkableJobStatus(job.status)) {
+        return NextResponse.json({ error: jobNotWorkableMessage(job.status) }, { status: 409 });
       }
 
       const [evidenceResult, stopsResult, itemsResult, scansResult] = await Promise.all([
@@ -123,23 +148,40 @@ export async function POST(request: Request, context: RouteContext) {
         return NextResponse.json({ error: barcodeBlock }, { status: 409 });
       }
 
-      completedAt = new Date().toISOString();
+      completedAt = recordedAt;
 
-      const { data: updatedStops, error: updateStopError } = await admin
-        .from("job_stops")
-        .update({
-          recipient_name: validation.recipientName,
-          pod_notes: validation.podNotes,
-          delivered_at: completedAt,
-          pod_updated_at: completedAt,
-          pod_status: "delivered",
-          status: "completed",
-        })
-        .eq("id", stopId)
-        .eq("job_id", jobId)
-        .eq("tenant_id", session.tenantId)
-        .or("pod_status.is.null,pod_status.neq.delivered")
-        .select("id");
+      const stopPatch: Record<string, unknown> = {
+        recipient_name: validation.recipientName,
+        pod_notes: validation.podNotes,
+        delivered_at: completedAt,
+        pod_updated_at: completedAt,
+        pod_status: "delivered",
+        status: "completed",
+      };
+      if (meta && !timeTrusted) stopPatch.pod_flags = ["pod_time_untrusted"];
+
+      const updateStop = (patch: Record<string, unknown>) =>
+        admin
+          .from("job_stops")
+          .update(patch)
+          .eq("id", stopId)
+          .eq("job_id", jobId)
+          .eq("tenant_id", session.tenantId)
+          .or("pod_status.is.null,pod_status.neq.delivered")
+          .select("id");
+
+      let { data: updatedStops, error: updateStopError } = await updateStop(stopPatch);
+
+      // PostgREST reports an update naming an unknown column as PGRST204 (schema
+      // cache) and Postgres itself as 42703; either means the column is missing.
+      const missingColumn = updateStopError?.code === "42703" || updateStopError?.code === "PGRST204";
+
+      if (missingColumn && "pod_flags" in stopPatch) {
+        // tracking_02 not applied yet: never block a delivery on a missing flag column.
+        console.warn("[driver/complete] job_stops.pod_flags is missing; saved without the untrusted-time flag. Apply tracking_02.");
+        const { pod_flags: _omit, ...withoutFlag } = stopPatch;
+        ({ data: updatedStops, error: updateStopError } = await updateStop(withoutFlag));
+      }
 
       if (updateStopError) throw new Error(updateStopError.message);
 

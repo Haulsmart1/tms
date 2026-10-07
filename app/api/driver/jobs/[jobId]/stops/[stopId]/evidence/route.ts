@@ -5,9 +5,10 @@ import { driverErrorResponse, requireDriverSession } from "../../../../../../../
 import { isWorkableJobStatus, jobNotWorkableMessage } from "../../../../../../../../lib/jobs/jobStatus";
 import { isPodEvidencePathFor } from "../../../../../../../../lib/pod/evidencePath";
 import { POD_PHOTO_MIME_TYPES } from "../../../../../../../../lib/pod/evidenceRules";
+import { hasInvalidClientId, parseQueuedMeta } from "../../../../../../../../lib/pod/queuedMeta";
 import { recordEvidenceRow, verifyUploadedEvidence } from "../../../../../../../../lib/pod/evidenceServer";
 import { createAdminClient } from "../../../../../../../../lib/supabase/admin";
-import { jobGateResponse } from "../../../../../../../../lib/walkaround/server";
+import { jobGateResponse, queuedJobGate } from "../../../../../../../../lib/walkaround/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,12 +29,25 @@ export async function POST(request: Request, context: RouteContext) {
       return NextResponse.json({ error: "Job stop not found." }, { status: 404 });
     }
 
-    let body: { storagePath?: unknown; originalFilename?: unknown; mimeType?: unknown };
+    let body: {
+      storagePath?: unknown;
+      originalFilename?: unknown;
+      mimeType?: unknown;
+      clientId?: unknown;
+      shiftClientId?: unknown;
+      recordedAt?: unknown;
+    };
 
     try {
       body = await request.json();
     } catch {
       return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+    }
+
+    const meta = parseQueuedMeta(body);
+
+    if (hasInvalidClientId(body, meta)) {
+      return NextResponse.json({ error: "Invalid clientId." }, { status: 400 });
     }
 
     const mimeType = typeof body.mimeType === "string" ? body.mimeType : "";
@@ -44,8 +58,14 @@ export async function POST(request: Request, context: RouteContext) {
 
     const session = await requireDriverSession({ jobId });
     const admin = createAdminClient();
-    const gate = await jobGateResponse(admin, session);
-    if (gate) return gate;
+    // A request from the offline queue is gated at the time it was recorded.
+    if (meta) {
+      const queued = await queuedJobGate(admin, session, meta);
+      if (queued.response) return queued.response;
+    } else {
+      const gate = await jobGateResponse(admin, session);
+      if (gate) return gate;
+    }
 
     const loaded = await loadDriverJobStop(admin, session, jobId, stopId);
 

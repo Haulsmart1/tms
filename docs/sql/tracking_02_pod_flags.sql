@@ -7,7 +7,8 @@
 -- see it in /jobs.
 --
 -- Deploy order: the app degrades without this column. The complete route retries its update without
--- pod_flags on 42703 and logs a warning, so a missing column never blocks a delivery.
+-- pod_flags on 42703 or PGRST204 (PostgREST's schema-cache code for an unknown column) and logs a
+-- warning, so a missing column never blocks a delivery.
 --
 -- Idempotent.
 
