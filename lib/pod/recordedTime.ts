@@ -11,6 +11,9 @@
 export const MAX_RECORDED_FUTURE_MS = 2 * 60 * 1000;
 export const MAX_RECORDED_AGE_MS = 72 * 60 * 60 * 1000;
 
+/** ISO 8601 with an explicit offset. Date.parse alone would read "2026-10-07T10:00" as server-local time. */
+const ISO_WITH_OFFSET = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
+
 export type RecordedTimeInput = {
   recordedAt: unknown;
   serverNow: Date;
@@ -22,7 +25,7 @@ export type RecordedTimeDecision = { at: string; trusted: boolean };
 
 export function acceptRecordedTime(input: RecordedTimeInput): RecordedTimeDecision {
   const fallback = { at: input.serverNow.toISOString(), trusted: false };
-  if (typeof input.recordedAt !== "string" || input.recordedAt.trim() === "") return fallback;
+  if (typeof input.recordedAt !== "string" || !ISO_WITH_OFFSET.test(input.recordedAt)) return fallback;
 
   const t = Date.parse(input.recordedAt);
   if (Number.isNaN(t)) return fallback;

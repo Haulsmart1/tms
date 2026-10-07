@@ -25,3 +25,13 @@ export function parseQueuedMeta(body: unknown): QueuedMeta | null {
     recordedAt: typeof b.recordedAt === "string" ? b.recordedAt : null,
   };
 }
+
+/**
+  True when the body tried to name a client id but it was not a UUID. Routes
+  answer 400 "Invalid clientId." for this rather than treating the request as
+  unqueued, which would lose the idempotency the id exists for.
+*/
+export function hasInvalidClientId(body: unknown, meta: QueuedMeta | null): boolean {
+  if (!body || typeof body !== "object") return false;
+  return (body as Record<string, unknown>).clientId !== undefined && (meta === null || meta.clientId === null);
+}

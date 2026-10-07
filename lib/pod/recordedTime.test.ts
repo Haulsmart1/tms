@@ -47,4 +47,20 @@ describe("acceptRecordedTime", () => {
     const result = acceptRecordedTime({ recordedAt: "2026-10-07T11:00:00+01:00", serverNow: now, shift: null });
     expect(result).toEqual({ at: "2026-10-07T10:00:00.000Z", trusted: true });
   });
+
+  it("falls back for a time with no offset or a date only", () => {
+    expect(acceptRecordedTime({ recordedAt: "2026-10-07T11:00:00", serverNow: now, shift: null }).trusted).toBe(false);
+    expect(acceptRecordedTime({ recordedAt: "2026-10-07", serverNow: now, shift: null }).trusted).toBe(false);
+  });
+
+  it("falls back when the named shift has an unparseable start", () => {
+    const shift = { startedAt: "not a date", endedAt: null };
+    expect(acceptRecordedTime({ recordedAt: "2026-10-07T11:00:00.000Z", serverNow: now, shift }).trusted).toBe(false);
+  });
+
+  it("still refuses a future time while the shift is open", () => {
+    const shift = { startedAt: "2026-10-07T06:00:00.000Z", endedAt: null };
+    const future = iso(now.getTime() + MAX_RECORDED_FUTURE_MS + 1000);
+    expect(acceptRecordedTime({ recordedAt: future, serverNow: now, shift }).trusted).toBe(false);
+  });
 });

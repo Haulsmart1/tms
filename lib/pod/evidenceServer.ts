@@ -18,18 +18,43 @@ export async function createEvidenceUploadUrl(
   folder: PodEvidenceFolder,
   filename: string | null | undefined,
   options: { clientId?: string | null } = {},
-): Promise<{ path: string; token: string }> {
-  // A queued photo gets a path derived from its client id and an upsert
-  // signature, so a retry overwrites the same object rather than adding one.
-  const path = options.clientId
-    ? buildQueuedPodEvidencePath({ ...owner, folder, clientId: options.clientId, filename })
-    : buildPodEvidencePath({ ...owner, folder, filename, timestamp: Date.now(), random: randomUUID() });
-  const { data, error } = await admin.storage
-    .from(POD_BUCKET)
-    .createSignedUploadUrl(path, options.clientId ? { upsert: true } : undefined);
-  if (error || !data?.token) {
-    throw new Error(`Unable to prepare upload: ${error?.message ?? "no token"}`);
+): Promise<{ path: string; token: string | null }> {
+  if (!options.clientId) {
+    const path = buildPodEvidencePath({ ...owner, folder, filename, timestamp: Date.now(), random: randomUUID() });
+    const { data, error } = await admin.storage.from(POD_BUCKET).createSignedUploadUrl(path);
+    if (error || !data?.token) {
+      throw new Error(`Unable to prepare upload: ${error?.message ?? "no token"}`);
+    }
+    return { path, token: data.token };
   }
+
+  // A queued photo has a path derived from its client id, so a retry after a
+  // lost answer targets the same object. There is deliberately NO upsert: an
+  // upsert token would let a recorded, verified POD photo be swapped for
+  // unchecked bytes, even after delivery. Instead a retry whose object is
+  // already stored (a row exists, or storage says it exists) gets token null
+  // and the caller skips the upload and goes straight to recording.
+  if (folder !== "photos") throw new Error("Queued evidence is photos only.");
+  const path = buildQueuedPodEvidencePath({ ...owner, folder, clientId: options.clientId, filename });
+  const { data: existing, error: lookupError } = await admin
+    .from("pod_evidence")
+    .select("id")
+    .eq("tenant_id", owner.tenantId)
+    .eq("storage_path", path)
+    .maybeSingle();
+  if (lookupError) throw new Error(`Unable to prepare upload: ${lookupError.message}`);
+  if (existing) return { path, token: null };
+
+  const { data, error } = await admin.storage.from(POD_BUCKET).createSignedUploadUrl(path);
+  if (error) {
+    const status = (error as { statusCode?: string | number; status?: string | number }).statusCode
+      ?? (error as { status?: string | number }).status;
+    if (String(status) === "409" || /already exists|duplicate/i.test(error.message)) {
+      return { path, token: null };
+    }
+    throw new Error(`Unable to prepare upload: ${error.message}`);
+  }
+  if (!data?.token) throw new Error("Unable to prepare upload: no token");
   return { path, token: data.token };
 }
 

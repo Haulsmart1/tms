@@ -12,10 +12,11 @@
   Pure, so both server routes and tests share it.
 */
 
+import { isUuid } from "../uuid";
+
 export const POD_EVIDENCE_FOLDERS = ["photos", "documents"] as const;
 export type PodEvidenceFolder = (typeof POD_EVIDENCE_FOLDERS)[number];
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_PATH_LENGTH = 1024;
 const MAX_FILENAME_LENGTH = 160;
 
@@ -26,7 +27,7 @@ export type PodEvidenceOwner = {
 };
 
 function isUuidLike(value: unknown): value is string {
-  return typeof value === "string" && UUID_RE.test(value);
+  return typeof value === "string" && isUuid(value);
 }
 
 /** Storage-safe filename: ASCII letters, digits, dot, dash, underscore. */
@@ -63,7 +64,7 @@ export function buildPodEvidencePath(input: PodEvidenceOwner & {
   same path, which recordEvidenceRow already treats as one row.
 */
 export function buildQueuedPodEvidencePath(input: PodEvidenceOwner & {
-  folder: PodEvidenceFolder;
+  folder: "photos";
   clientId: string;
   filename: string | null | undefined;
 }): string {
@@ -71,8 +72,8 @@ export function buildQueuedPodEvidencePath(input: PodEvidenceOwner & {
   if (!isUuidLike(tenantId) || !isUuidLike(jobId) || !isUuidLike(stopId) || !isUuidLike(clientId)) {
     throw new Error("POD evidence owner ids and the client id must be UUIDs.");
   }
-  if (!POD_EVIDENCE_FOLDERS.includes(folder)) {
-    throw new Error("Unknown POD evidence folder.");
+  if (folder !== "photos") {
+    throw new Error("Queued evidence is photos only.");
   }
   return `${tenantId}/${jobId}/${stopId}/${folder}/q-${clientId.toLowerCase()}-${sanitizePodFilename(input.filename)}`;
 }

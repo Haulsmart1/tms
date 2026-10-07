@@ -81,6 +81,18 @@ describe("buildQueuedPodEvidencePath", () => {
   });
 
   it("refuses a client id that is not a UUID", () => {
-    expect(() => buildQueuedPodEvidencePath({ ...owner, folder: "photos", clientId: "../x", filename: "a.jpg" })).toThrow();
+    expect(() => buildQueuedPodEvidencePath({ ...owner, folder: "photos", clientId: "../x", filename: "a.jpg" })).toThrow(/client id must be UUIDs/);
+  });
+
+  it("lowercases an uppercase client id in the path", () => {
+    const upper = clientId.replace(/4/g, "A").replace(/8/g, "B");
+    const path = buildQueuedPodEvidencePath({ ...owner, folder: "photos", clientId: upper, filename: "a.jpg" });
+    expect(path).toBe(`${owner.tenantId}/${owner.jobId}/${owner.stopId}/photos/q-${upper.toLowerCase()}-a.jpg`);
+  });
+
+  it("is photos only", () => {
+    expect(() =>
+      buildQueuedPodEvidencePath({ ...owner, folder: "documents" as never, clientId, filename: "a.pdf" }),
+    ).toThrow(/photos only/);
   });
 });
