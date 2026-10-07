@@ -8,7 +8,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { heldForOthersMessage } from "../../../lib/offline/driverSync";
+import { heldForOthersMessage, MEMORY_ONLY_MESSAGE } from "../../../lib/offline/driverSync";
 import { breakEvent, clockTime, recordedHours } from "../../../lib/shifts/driverActions";
 import { formatMinutes } from "../../../lib/shifts/hours";
 import type { DriverShiftState } from "../../../lib/walkaround/driverState";
@@ -17,7 +17,26 @@ import BlockingPanel from "./BlockingPanel";
 import EndShiftForm from "./EndShiftForm";
 import { ui } from "./shiftStyles";
 
+/* Shown whatever the shift state: a subcontractor (forbidden) can still queue PODs. */
+function MemoryOnlyBanner({ shift }: { shift: DriverShift }) {
+  if (!shift.memoryOnly || shift.pendingCount === 0) return null;
+  return (
+    <p className="m-0 mb-3 rounded-md border border-danger-border bg-danger-tint p-3 text-sm font-semibold text-danger-strong" role="alert">
+      {MEMORY_ONLY_MESSAGE}
+    </p>
+  );
+}
+
 export default function ShiftPanel({ shift }: { shift: DriverShift }) {
+  return (
+    <>
+      <MemoryOnlyBanner shift={shift} />
+      <ShiftPanelBody shift={shift} />
+    </>
+  );
+}
+
+function ShiftPanelBody({ shift }: { shift: DriverShift }) {
   const { state } = shift;
   if (shift.forbidden) return null;
 

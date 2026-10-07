@@ -18,7 +18,7 @@
   partitionByOwner). Anyone else's are held, not deleted, until they sign in.
 */
 
-import { idbDelete, idbLoadAll, idbPut, type StoredItem } from "../../lib/offline/idbStore";
+import { idbDelete, idbLoadAll, idbPut, isMemoryOnly, type StoredItem } from "../../lib/offline/idbStore";
 import {
   eventOutcome,
   orphanedPhotoIds,
@@ -49,6 +49,8 @@ export type QueueSnapshot = {
   /** Set when the session has gone: nothing is sent until the next flushDriverQueue call. */
   paused: string | null;
   sent: SentEvent[];
+  /** IndexedDB refused: queued items live only in this page and are lost if it closes. */
+  memoryOnly: boolean;
 };
 
 const EVENTS_URL = "/api/driver/shift/events";
@@ -71,7 +73,7 @@ let loading: Promise<void> | null = null;
 let chain: Promise<unknown> = Promise.resolve();
 let timer: ReturnType<typeof setTimeout> | null = null;
 const listeners = new Set<(snapshot: QueueSnapshot) => void>();
-let snapshot: QueueSnapshot = { pending: [], heldForOthers: 0, rejected: [], paused: null, sent: [] };
+let snapshot: QueueSnapshot = { pending: [], heldForOthers: 0, rejected: [], paused: null, sent: [], memoryOnly: false };
 const EMPTY_SNAPSHOT: QueueSnapshot = snapshot;
 
 function mine(): StoredItem<QueuePayload>[] {
@@ -81,7 +83,7 @@ function mine(): StoredItem<QueuePayload>[] {
 function emit(): void {
   const { mine: own, heldForOthers } = partitionByOwner(queue, currentUser);
   const visible = rejected.filter((r) => !r.ownerId || r.ownerId === currentUser);
-  snapshot = { pending: own, heldForOthers, rejected: visible, paused, sent };
+  snapshot = { pending: own, heldForOthers, rejected: visible, paused, sent, memoryOnly: isMemoryOnly() };
   for (const listener of listeners) listener(snapshot);
 }
 

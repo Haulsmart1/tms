@@ -65,6 +65,8 @@ export type DriverQueuePayload =
 export type SyncResult = SendOutcome | { kind: "stop"; error: string };
 
 export const SIGN_IN_AGAIN_MESSAGE = "Sign in again to send your checks.";
+/** Shown while items are queued and IndexedDB has refused, so they live only in the open page. */
+export const MEMORY_ONLY_MESSAGE = "This phone cannot store queued items. Keep this page open until they send.";
 export const NO_CONNECTION_MESSAGE = "No connection. It will be sent when you have signal.";
 export const PHOTO_UNMATCHED_MESSAGE = "A defect photo could not be matched to its check and was set aside. Tell the office.";
 

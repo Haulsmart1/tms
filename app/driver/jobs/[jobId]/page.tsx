@@ -18,7 +18,11 @@ import {
   readJsonSafe,
 } from "../../../../lib/pod/uploadClient";
 import { checkQueuedCompletion } from "../../../../lib/driver/offlinePod";
-import { pendingPodByStop, type PendingPod } from "../../../../lib/offline/driverSync";
+import {
+  MEMORY_ONLY_MESSAGE,
+  pendingPodByStop,
+  type PendingPod,
+} from "../../../../lib/offline/driverSync";
 import { JOB_GATE_MESSAGES } from "../../../../lib/walkaround/jobGate";
 import {
   dismissRejected,
@@ -120,8 +124,14 @@ export default function DriverJobPage({
      A refresh now keeps the job on screen and updates it in place. */
   const hasJob = useRef(false);
 
+  /* Only the latest request may update the page: reads overlap (a send, a
+     reconnect), and an older answer landing last would show stale stops. */
+  const loadSeq = useRef(0);
+
   const loadJob =
     useCallback(async () => {
+      const mine = ++loadSeq.current;
+
       if (!hasJob.current) {
         setLoading(true);
       }
@@ -137,6 +147,10 @@ export default function DriverJobPage({
 
         const body =
           await readJsonSafe(response);
+
+        if (mine !== loadSeq.current) {
+          return;
+        }
 
         if (
           !response.ok ||
@@ -155,6 +169,10 @@ export default function DriverJobPage({
         hasJob.current = true;
         setMessage("");
       } catch (error) {
+        if (mine !== loadSeq.current) {
+          return;
+        }
+
         if (!hasJob.current) {
           setJob(null);
         }
@@ -165,7 +183,9 @@ export default function DriverJobPage({
             : "Unable to load this job.",
         );
       } finally {
-        setLoading(false);
+        if (mine === loadSeq.current) {
+          setLoading(false);
+        }
       }
     }, [jobId]);
 
@@ -187,6 +207,15 @@ export default function DriverJobPage({
   const pendingByStop = useMemo(
     () => pendingPodByStop(queue.pending, jobId),
     [queue.pending, jobId],
+  );
+
+  // Scans queued for any stop of this job: they count as verified everywhere.
+  const allPendingScans = useMemo(
+    () =>
+      [...pendingByStop.values()].flatMap(
+        (p) => p.scans,
+      ),
+    [pendingByStop],
   );
 
   const jobRejections = useMemo(
@@ -296,6 +325,32 @@ export default function DriverJobPage({
           </div>
         ) : null}
 
+        {queue.memoryOnly &&
+        queue.pending.length > 0 ? (
+          <div
+            role="alert"
+            className="mt-2 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-900"
+          >
+            {MEMORY_ONLY_MESSAGE}
+          </div>
+        ) : null}
+
+        {queue.paused &&
+        queue.pending.length > 0 ? (
+          <div
+            role="alert"
+            className="mt-2 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-900"
+          >
+            {queue.paused}{" "}
+            <Link
+              href={`/login?next=${encodeURIComponent(`/driver/jobs/${jobId}`)}`}
+              className="underline"
+            >
+              Sign in
+            </Link>
+          </div>
+        ) : null}
+
         {jobRejections.map((r) => {
           const refusedStop = job.stops.find(
             (s) => s.id === r.stopId,
@@ -304,6 +359,7 @@ export default function DriverJobPage({
           return (
             <div
               key={r.id}
+              role="alert"
               className="mt-2 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-900"
             >
               Not sent, tell the office
@@ -313,7 +369,8 @@ export default function DriverJobPage({
               : {r.message}
               <button
                 type="button"
-                className="ml-2 underline"
+                aria-label={`Dismiss${refusedStop ? ` stop ${refusedStop.stop_order}` : ""}: ${r.message}`}
+                className="ml-2 min-h-11 px-2 underline"
                 onClick={() =>
                   dismissRejected(r.id)
                 }
@@ -405,6 +462,9 @@ export default function DriverJobPage({
                   }
                   allStops={job.stops}
                   allPending={pendingByStop}
+                  allPendingScans={allPendingScans}
+                  paused={queue.paused}
+                  onReload={loadJob}
                   shiftClientId={shiftClientId}
                   gateMessage={gateMessage}
                   refusedCount={
@@ -440,6 +500,9 @@ function StopCard({
   shiftClientId,
   gateMessage,
   refusedCount,
+  allPendingScans,
+  paused,
+  onReload,
 }: {
   jobId: string;
   stop: Stop;
@@ -455,6 +518,11 @@ function StopCard({
   gateMessage: string | null;
   /** Refused queue items for this stop still listed at the top of the page. */
   refusedCount: number;
+  /** Scans queued for any stop of this job. */
+  allPendingScans: { job_item_id: string; serial_number: string }[];
+  /** Set when the queue has stopped sending (session gone). */
+  paused: string | null;
+  onReload: () => Promise<void>;
 }) {
   const isCollection =
     stop.type === "collection";
@@ -500,10 +568,37 @@ function StopCard({
     }
   }, [queuedCompletion, refusedCount]);
 
-  // A fresh read of the job replaces every stop object: the server now knows.
+  // Cleared only once the server reports the stop delivered, so a stale or
+  // failed read can never reopen the form.
   useEffect(() => {
-    setHandedOff(false);
-  }, [stop]);
+    if (delivered) {
+      setHandedOff(false);
+    }
+  }, [delivered]);
+
+  // If the read after the send failed (signal dropped), read again on reconnect.
+  useEffect(() => {
+    if (!handedOff || delivered) {
+      return;
+    }
+
+    const retry = () => void onReload();
+
+    window.addEventListener("online", retry);
+
+    return () =>
+      window.removeEventListener(
+        "online",
+        retry,
+      );
+  }, [handedOff, delivered, onReload]);
+
+  // A success note is stale once the stop is delivered or something for it was refused.
+  useEffect(() => {
+    if (delivered || refusedCount > 0) {
+      setMessage("");
+    }
+  }, [delivered, refusedCount]);
 
   const waitingToSend =
     !delivered &&
@@ -602,9 +697,8 @@ function StopCard({
       });
 
       setMessage(
-        navigator.onLine
-          ? "POD photo saved. Sending now."
-          : "POD photo saved. It will send when you have signal.",
+        paused ??
+          "POD photo saved. It will send automatically.",
       );
     } catch (uploadError) {
       setError(
@@ -633,9 +727,7 @@ function StopCard({
       // counted as if they had already been sent.
       const verified = [
         ...scans,
-        ...[...allPending.values()].flatMap(
-          (p) => p.scans,
-        ),
+        ...allPendingScans,
       ];
 
       const otherOutstandingDeliveryStops =
@@ -675,9 +767,8 @@ function StopCard({
       });
 
       setMessage(
-        navigator.onLine
-          ? "Delivery saved. Sending now."
-          : "Delivery saved. It will send when you have signal.",
+        paused ??
+          "Delivery saved. It will send automatically.",
       );
     } catch (completeError) {
       setError(
@@ -769,7 +860,10 @@ function StopCard({
 
         {/* Scans are taken at delivery stops that are still open (review POD-20). */}
         {refusedCount > 0 ? (
-          <div className="mt-4 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-900">
+          <div
+            role="alert"
+            className="mt-4 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-900"
+          >
             {refusedCount === 1
               ? "1 item for this stop was not sent."
               : `${refusedCount} items for this stop were not sent.`}{" "}
@@ -783,9 +877,8 @@ function StopCard({
             stopId={stop.id}
             items={items}
             scans={scans}
-            allPendingScans={[
-              ...allPending.values(),
-            ].flatMap((p) => p.scans)}
+            allPendingScans={allPendingScans}
+            paused={paused}
           />
         ) : null}
 
@@ -822,7 +915,10 @@ function StopCard({
                 </div>
               </div>
             ) : waitingToSend ? (
-              <div className="mt-3 rounded-xl bg-amber-50 p-4 text-sm font-bold text-amber-900">
+              <div
+                role="status"
+                className="mt-3 rounded-xl bg-amber-50 p-4 text-sm font-bold text-amber-900"
+              >
                 {queuedCompletion ? (
                   <>
                     Delivered, waiting to send
@@ -832,7 +928,12 @@ function StopCard({
                     . It will send automatically when you have signal.
                   </>
                 ) : (
-                  "Delivered, sent. Updating..."
+                  <>
+                    Delivered and sent.
+                    <div className="mt-1 font-normal">
+                      Updating...
+                    </div>
+                  </>
                 )}
 
                 {pending?.completion ? (

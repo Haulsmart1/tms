@@ -2,6 +2,7 @@
 
 import {
   useMemo,
+  useRef,
   useState,
 } from "react";
 import CameraBarcodeScanner from "./CameraBarcodeScanner";
@@ -38,6 +39,7 @@ export default function BarcodeVerification({
   items,
   scans,
   allPendingScans,
+  paused,
 }: {
   jobId: string;
   stopId: string;
@@ -45,6 +47,8 @@ export default function BarcodeVerification({
   scans: JobItemScan[];
   /** Scans queued on this phone for any stop of this job, not yet sent. */
   allPendingScans: { job_item_id: string; serial_number: string }[];
+  /** Set when the queue has stopped sending (session gone). */
+  paused: string | null;
 }) {
   const serializedItems =
     useMemo(
@@ -114,6 +118,10 @@ export default function BarcodeVerification({
   const [busy, setBusy] =
     useState(false);
 
+  // State updates land after a render; two camera detections in one tick
+  // would both see busy === false. The ref closes that gap.
+  const busyRef = useRef(false);
+
   const [message, setMessage] =
     useState("");
 
@@ -152,7 +160,7 @@ export default function BarcodeVerification({
       };
     }
 
-    if (busy) {
+    if (busyRef.current) {
       return {
         ok: false,
         duplicate: false,
@@ -161,6 +169,7 @@ export default function BarcodeVerification({
       };
     }
 
+    busyRef.current = true;
     setBusy(true);
     setMessage("");
     setError("");
@@ -223,9 +232,9 @@ export default function BarcodeVerification({
         {
           ok: true,
           duplicate: false,
-          message: navigator.onLine
-            ? "Item verified."
-            : "Item verified. It will send when you have signal.",
+          message: paused
+            ? `Item verified. ${paused}`
+            : "Item verified. It will send automatically.",
         };
 
       setMessage(outcome.message);
@@ -248,6 +257,7 @@ export default function BarcodeVerification({
           errorMessage,
       };
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
