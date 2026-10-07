@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPodEvidencePath, isPodEvidencePathFor, sanitizePodFilename } from "./evidencePath";
+import { buildPodEvidencePath, buildQueuedPodEvidencePath, isPodEvidencePathFor, sanitizePodFilename } from "./evidencePath";
 
 const T = "11111111-1111-4111-8111-111111111111";
 const J = "22222222-2222-4222-8222-222222222222";
@@ -57,5 +57,30 @@ describe("isPodEvidencePathFor", () => {
 
   it("rejects when the owner ids themselves are malformed", () => {
     expect(isPodEvidencePathFor("a/b/c/photos/x.jpg", { tenantId: "a", jobId: "b", stopId: "c" })).toBe(false);
+  });
+});
+
+describe("buildQueuedPodEvidencePath", () => {
+  const owner = {
+    tenantId: "11111111-1111-4111-8111-111111111111",
+    jobId: "22222222-2222-4222-8222-222222222222",
+    stopId: "33333333-3333-4333-8333-333333333333",
+  };
+  const clientId = "44444444-4444-4444-8444-444444444444";
+
+  it("is the same path every time for the same client id", () => {
+    const a = buildQueuedPodEvidencePath({ ...owner, folder: "photos", clientId, filename: "pod 1.jpg" });
+    const b = buildQueuedPodEvidencePath({ ...owner, folder: "photos", clientId, filename: "pod 1.jpg" });
+    expect(a).toBe(b);
+    expect(a).toBe(`${owner.tenantId}/${owner.jobId}/${owner.stopId}/photos/q-${clientId}-pod_1.jpg`);
+  });
+
+  it("stays inside the evidence path rule", () => {
+    const path = buildQueuedPodEvidencePath({ ...owner, folder: "photos", clientId, filename: null });
+    expect(isPodEvidencePathFor(path, owner)).toBe(true);
+  });
+
+  it("refuses a client id that is not a UUID", () => {
+    expect(() => buildQueuedPodEvidencePath({ ...owner, folder: "photos", clientId: "../x", filename: "a.jpg" })).toThrow();
   });
 });

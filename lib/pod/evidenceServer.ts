@@ -5,7 +5,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { buildPodEvidencePath, type PodEvidenceFolder, type PodEvidenceOwner } from "./evidencePath";
+import { buildPodEvidencePath, buildQueuedPodEvidencePath, type PodEvidenceFolder, type PodEvidenceOwner } from "./evidencePath";
 import { POD_BUCKET } from "./podUrl";
 import { MAX_POD_EVIDENCE_BYTES, validateEvidenceContent, type EvidenceCheck } from "./evidenceRules";
 
@@ -17,9 +17,16 @@ export async function createEvidenceUploadUrl(
   owner: PodEvidenceOwner,
   folder: PodEvidenceFolder,
   filename: string | null | undefined,
+  options: { clientId?: string | null } = {},
 ): Promise<{ path: string; token: string }> {
-  const path = buildPodEvidencePath({ ...owner, folder, filename, timestamp: Date.now(), random: randomUUID() });
-  const { data, error } = await admin.storage.from(POD_BUCKET).createSignedUploadUrl(path);
+  // A queued photo gets a path derived from its client id and an upsert
+  // signature, so a retry overwrites the same object rather than adding one.
+  const path = options.clientId
+    ? buildQueuedPodEvidencePath({ ...owner, folder, clientId: options.clientId, filename })
+    : buildPodEvidencePath({ ...owner, folder, filename, timestamp: Date.now(), random: randomUUID() });
+  const { data, error } = await admin.storage
+    .from(POD_BUCKET)
+    .createSignedUploadUrl(path, options.clientId ? { upsert: true } : undefined);
   if (error || !data?.token) {
     throw new Error(`Unable to prepare upload: ${error?.message ?? "no token"}`);
   }

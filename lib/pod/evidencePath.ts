@@ -57,6 +57,27 @@ export function buildPodEvidencePath(input: PodEvidenceOwner & {
 }
 
 /**
+  The path for a photo sent from the driver's offline queue. Derived from the
+  item's client id instead of a timestamp and random part, so a retry after a
+  lost answer uploads to the same object (signed with upsert) and records the
+  same path, which recordEvidenceRow already treats as one row.
+*/
+export function buildQueuedPodEvidencePath(input: PodEvidenceOwner & {
+  folder: PodEvidenceFolder;
+  clientId: string;
+  filename: string | null | undefined;
+}): string {
+  const { tenantId, jobId, stopId, folder, clientId } = input;
+  if (!isUuidLike(tenantId) || !isUuidLike(jobId) || !isUuidLike(stopId) || !isUuidLike(clientId)) {
+    throw new Error("POD evidence owner ids and the client id must be UUIDs.");
+  }
+  if (!POD_EVIDENCE_FOLDERS.includes(folder)) {
+    throw new Error("Unknown POD evidence folder.");
+  }
+  return `${tenantId}/${jobId}/${stopId}/${folder}/q-${clientId.toLowerCase()}-${sanitizePodFilename(input.filename)}`;
+}
+
+/**
   True only when `path` is a well-formed evidence path owned by exactly this
   tenant, job and stop. Rejects traversal, empty segments, backslashes, and
   anything outside the two known folders.
