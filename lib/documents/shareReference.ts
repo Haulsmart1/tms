@@ -17,26 +17,17 @@ import { isUuid } from "../uuid";
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 
-// pod_ plus 43 base64url characters is the shape generatePodShareToken mints.
-const LOOKS_LIKE_POD_TOKEN = /^pod_[A-Za-z0-9_-]{43}$/;
+const HASH_REFERENCE = /^(pod_share|tracking_share):[0-9a-f]{64}$/;
 
-// trk_ plus 43 base64url characters is the shape generateTrackingToken mints.
-const LOOKS_LIKE_TRACKING_TOKEN = /^trk_[A-Za-z0-9_-]{43}$/;
-
+/* An allowlist, not a blocklist: only the shapes the builders below produce
+   may be stored, so a new token or URL format can never slip through. */
 export function assertOpaqueShareReference(reference: string | null | undefined): string | null {
   if (reference == null) return null;
-  if (
-    reference.includes("://") ||
-    reference.includes("/share/") ||
-    LOOKS_LIKE_POD_TOKEN.test(reference) ||
-    reference.includes("/track/") ||
-    LOOKS_LIKE_TRACKING_TOKEN.test(reference)
-  ) {
-    throw new Error(
-      "share_reference must be an opaque row reference, not a share URL or token",
-    );
-  }
-  return reference;
+  const quotation = /^quotation_share:(.+)$/.exec(reference);
+  if (HASH_REFERENCE.test(reference) || (quotation && isUuid(quotation[1]))) return reference;
+  throw new Error(
+    "share_reference must be an opaque row reference, not a share URL or token",
+  );
 }
 
 export function podShareReference(tokenHash: string): string {

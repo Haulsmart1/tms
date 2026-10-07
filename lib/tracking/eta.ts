@@ -34,16 +34,34 @@ function indexInItinerary(ctx: EtaContext): number {
   return ctx.itinerary ? ctx.itinerary.findIndex((s) => s.stopId === ctx.stop.id) : -1;
 }
 
+const DATE_ONLY_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
+
+/** The first 10 characters of a planned date when they form YYYY-MM-DD, else null. */
+function normalisePlannedDate(value: string | null): string | null {
+  if (!value) return null;
+  const day = value.slice(0, 10);
+  return DATE_ONLY_RE.test(day) ? day : null;
+}
+
+/*
+  "next" exposes the driver's live position, so it is never the default:
+  an itinerary that does not contain the stop can never yield it, and with no
+  itinerary only a stop planned for today can.
+*/
 export function trackingState(ctx: EtaContext): TrackingState {
   if (ctx.stop.completed) return "delivered";
-  if (ctx.stop.plannedDate && ctx.stop.plannedDate > operatorDay(ctx.now)) return "scheduled";
+  const today = operatorDay(ctx.now);
+  const planned = normalisePlannedDate(ctx.stop.plannedDate);
+  if (planned && planned > today) return "scheduled";
 
-  const index = indexInItinerary(ctx);
-  if (ctx.itinerary && index >= 0) {
+  if (ctx.itinerary) {
+    const index = indexInItinerary(ctx);
+    if (index < 0) return "en_route_earlier";
     const firstIncomplete = ctx.itinerary.findIndex((s) => !s.completed);
     return firstIncomplete === index ? "next" : "en_route_earlier";
   }
 
+  if (planned !== today) return "en_route_earlier";
   const onlyRemaining = ctx.job.incompleteStopIds.length === 1 && ctx.job.incompleteStopIds[0] === ctx.stop.id;
   return onlyRemaining && ctx.job.vehicleId ? "next" : "en_route_earlier";
 }
@@ -60,7 +78,7 @@ export function latenessMs(ctx: EtaContext): number {
   for (let i = index - 1; i >= 0; i -= 1) {
     const s = ctx.itinerary[i];
     const baseline = ctx.baselines[s.jobId];
-    if (!s.completed || !s.deliveredAt || !baseline) continue;
+    if (s.type !== "delivery" || !s.completed || !s.deliveredAt || !baseline) continue;
     const diff = Date.parse(s.deliveredAt) - Date.parse(baseline);
     if (Number.isNaN(diff)) continue;
     return Math.min(LATENESS_MAX_MS, Math.max(LATENESS_MIN_MS, diff));
@@ -84,11 +102,18 @@ export type EtaCacheRow = { computedAt: string; fromPositionAt: string };
 
 export function shouldRefreshEta(cache: EtaCacheRow | null, positionAt: string, now: Date): boolean {
   if (!cache) return true;
-  if (now.getTime() - Date.parse(cache.computedAt) > ETA_CACHE_MS) return true;
-  return Date.parse(positionAt) > Date.parse(cache.fromPositionAt);
+  const computed = Date.parse(cache.computedAt);
+  const from = Date.parse(cache.fromPositionAt);
+  const position = Date.parse(positionAt);
+  if (Number.isNaN(computed) || Number.isNaN(from) || Number.isNaN(position)) return true;
+  if (now.getTime() - computed > ETA_CACHE_MS) return true;
+  return position > from;
 }
 
-export function roundToFiveMinutes(iso: string): string {
+/** Nearest five minutes, or null when the input is not a parseable time. */
+export function roundToFiveMinutes(iso: string): string | null {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return null;
   const step = 5 * MINUTE;
-  return new Date(Math.round(Date.parse(iso) / step) * step).toISOString();
+  return new Date(Math.round(ms / step) * step).toISOString();
 }

@@ -44,9 +44,42 @@ describe("trackingState", () => {
   });
 });
 
+describe("trackingState privacy", () => {
+  it("is never next when an itinerary exists but does not contain the stop", () => {
+    const c = ctx();
+    c.itinerary = c.itinerary!.filter((s) => s.stopId !== "s3");
+    expect(trackingState(c)).toBe("en_route_earlier");
+  });
+
+  it("without an itinerary, is never next unless planned for today", () => {
+    expect(trackingState(ctx({ itinerary: null, stop: { ...ctx().stop, plannedDate: "2026-10-06" } }))).toBe("en_route_earlier");
+    expect(trackingState(ctx({ itinerary: null, stop: { ...ctx().stop, plannedDate: null } }))).toBe("en_route_earlier");
+    expect(trackingState(ctx({ itinerary: null, stop: { ...ctx().stop, plannedDate: "2026-10-07" } }))).toBe("next");
+  });
+
+  it("reads only the date part of plannedDate, and ignores malformed ones", () => {
+    expect(trackingState(ctx({ itinerary: null, stop: { ...ctx().stop, plannedDate: "2026-10-07T00:00:00+00:00" } }))).toBe("next");
+    expect(trackingState(ctx({ itinerary: null, stop: { ...ctx().stop, plannedDate: "garbage" } }))).toBe("en_route_earlier");
+  });
+
+  it("is not scheduled just after London midnight when the planned date is the London date", () => {
+    const late = new Date("2026-10-07T23:30:00.000Z"); // 00:30 on 08 Oct in London
+    const c = ctx({ now: late, itinerary: null, stop: { ...ctx().stop, plannedDate: "2026-10-08" } });
+    expect(trackingState(c)).toBe("next");
+  });
+});
+
 describe("stopsBefore", () => {
   it("counts incomplete delivery stops ahead in the itinerary", () => {
     expect(stopsBefore(ctx())).toBe(1);
+  });
+  it("excludes collection stops", () => {
+    const c = ctx();
+    c.itinerary = [
+      { stopId: "c2", jobId: "j2", type: "collection", completed: false, deliveredAt: null },
+      c.itinerary![2],
+    ];
+    expect(stopsBefore(c)).toBe(0);
   });
   it("is null without an itinerary", () => {
     expect(stopsBefore(ctx({ itinerary: null }))).toBeNull();
@@ -62,6 +95,15 @@ describe("latenessMs", () => {
     c.itinerary![0] = { ...c.itinerary![0], deliveredAt: "2026-10-07T20:00:00.000Z" };
     expect(latenessMs(c)).toBe(6 * 60 * 60 * 1000);
   });
+  it("ignores completed collection stops", () => {
+    const c = ctx();
+    c.itinerary = [
+      { stopId: "c1", jobId: "j3", type: "collection", completed: true, deliveredAt: "2026-10-07T10:30:00.000Z" },
+      c.itinerary![2],
+    ];
+    expect(latenessMs(c)).toBe(0);
+    expect(etaWindow(c)).toEqual({ from: "2026-10-07T12:30:00.000Z", to: "2026-10-07T13:30:00.000Z" });
+  });
   it("is zero with nothing to compare", () => {
     expect(latenessMs(ctx({ itinerary: null }))).toBe(0);
   });
@@ -71,6 +113,12 @@ describe("etaWindow", () => {
   it("is baseline plus lateness, plus and minus 30 minutes, rounded outward to 15 minutes", () => {
     // 13:00Z + 20m = 13:20Z; window 12:50Z to 13:50Z; rounded outward 12:45Z to 14:00Z.
     expect(etaWindow(ctx())).toEqual({ from: "2026-10-07T12:45:00.000Z", to: "2026-10-07T14:00:00.000Z" });
+  });
+  it("rounds outward when running early", () => {
+    const c = ctx();
+    c.itinerary![0] = { ...c.itinerary![0], deliveredAt: "2026-10-07T09:40:00.000Z" };
+    // 13:00Z - 20m = 12:40Z; window 12:10Z to 13:10Z; rounded outward 12:00Z to 13:15Z.
+    expect(etaWindow(c)).toEqual({ from: "2026-10-07T12:00:00.000Z", to: "2026-10-07T13:15:00.000Z" });
   });
   it("is null for a job with several delivery stops", () => {
     expect(etaWindow(ctx({ job: { ...ctx().job, deliveryStopCount: 2 } }))).toBeNull();
@@ -87,12 +135,20 @@ describe("shouldRefreshEta", () => {
     expect(shouldRefreshEta({ computedAt: "2026-10-07T10:57:59.000Z", fromPositionAt: positionAt }, positionAt, now)).toBe(true);
     expect(shouldRefreshEta({ computedAt: "2026-10-07T10:59:30.000Z", fromPositionAt: "2026-10-07T10:58:00.000Z" }, positionAt, now)).toBe(true);
   });
+  it("refreshes when a cache timestamp is unparseable", () => {
+    expect(shouldRefreshEta({ computedAt: "garbage", fromPositionAt: positionAt }, positionAt, now)).toBe(true);
+    expect(shouldRefreshEta({ computedAt: "2026-10-07T10:59:30.000Z", fromPositionAt: "garbage" }, positionAt, now)).toBe(true);
+    expect(shouldRefreshEta({ computedAt: "2026-10-07T10:59:30.000Z", fromPositionAt: positionAt }, "garbage", now)).toBe(true);
+  });
   it("reuses a fresh cache built from the same position", () => {
     expect(shouldRefreshEta({ computedAt: "2026-10-07T10:59:30.000Z", fromPositionAt: positionAt }, positionAt, now)).toBe(false);
   });
 });
 
 describe("roundToFiveMinutes", () => {
+  it("returns null for unparseable input", () => {
+    expect(roundToFiveMinutes("garbage")).toBeNull();
+  });
   it("rounds to the nearest five minutes", () => {
     expect(roundToFiveMinutes("2026-10-07T13:22:29.000Z")).toBe("2026-10-07T13:20:00.000Z");
     expect(roundToFiveMinutes("2026-10-07T13:22:31.000Z")).toBe("2026-10-07T13:25:00.000Z");

@@ -38,12 +38,34 @@ create table if not exists public.stop_tracking_links (
   constraint stop_tracking_links_expiry_after_creation check (expires_at > created_at)
 );
 
+-- A table that already existed with another shape would make create table a no-op, so fail loudly.
+do $$
+declare
+  missing text;
+begin
+  select string_agg(c, ', ') into missing
+  from unnest(array['id', 'tenant_id', 'job_id', 'stop_id', 'token_hash', 'expires_at', 'revoked_at', 'last_viewed_at', 'created_by', 'sent_to_email', 'revoked_by']) as c
+  where not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'stop_tracking_links' and column_name = c
+  );
+  if missing is not null then
+    raise exception 'stop_tracking_links exists but is missing columns: %', missing;
+  end if;
+end $$;
+
 create unique index if not exists stop_tracking_links_token_hash_uidx
   on public.stop_tracking_links (token_hash);
 
 create index if not exists stop_tracking_links_stop_idx
   on public.stop_tracking_links (tenant_id, stop_id)
   where revoked_at is null;
+
+create index if not exists stop_tracking_links_stop_id_idx
+  on public.stop_tracking_links (stop_id);
+
+create index if not exists stop_tracking_links_job_id_idx
+  on public.stop_tracking_links (job_id);
 
 create table if not exists public.stop_eta_cache (
   stop_id uuid primary key references public.job_stops(id) on delete cascade,
@@ -52,6 +74,25 @@ create table if not exists public.stop_eta_cache (
   computed_at timestamptz not null default now(),
   from_position_at timestamptz not null
 );
+
+-- A table that already existed with another shape would make create table a no-op, so fail loudly.
+do $$
+declare
+  missing text;
+begin
+  select string_agg(c, ', ') into missing
+  from unnest(array['stop_id', 'tenant_id', 'eta', 'computed_at', 'from_position_at']) as c
+  where not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'stop_eta_cache' and column_name = c
+  );
+  if missing is not null then
+    raise exception 'stop_eta_cache exists but is missing columns: %', missing;
+  end if;
+end $$;
+
+create index if not exists stop_eta_cache_tenant_id_idx
+  on public.stop_eta_cache (tenant_id);
 
 do $$
 declare
@@ -87,6 +128,31 @@ begin
 end $$;
 
 commit;
+
+-- READ THIS RESULT: what document_delivery_log.document_type is, so you know whether 'tracking_link'
+-- will be accepted. Read-only. Expect no rows with a check or enum that lacks 'tracking_link'.
+-- If a CHECK or enum is listed without it, widen it by hand before emailing a tracking link.
+select 'column type' as kind,
+       format_type(a.atttypid, a.atttypmod) as detail
+from pg_attribute a
+where a.attrelid = to_regclass('public.document_delivery_log')
+  and a.attname = 'document_type'
+  and not a.attisdropped
+union all
+select 'check constraint', pg_get_constraintdef(c.oid)
+from pg_constraint c
+where c.conrelid = to_regclass('public.document_delivery_log')
+  and c.contype = 'c'
+  and pg_get_constraintdef(c.oid) ilike '%document_type%'
+union all
+select 'enum labels', string_agg(e.enumlabel, ', ' order by e.enumsortorder)
+from pg_attribute a
+join pg_type t on t.oid = a.atttypid and t.typtype = 'e'
+join pg_enum e on e.enumtypid = t.oid
+where a.attrelid = to_regclass('public.document_delivery_log')
+  and a.attname = 'document_type'
+  and not a.attisdropped
+group by t.oid;
 
 -- VERIFY (expect for both tables: rls=true, force=true, policies=0, all client privileges false):
 -- select c.relname,

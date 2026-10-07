@@ -48,6 +48,7 @@ describe("buildTrackingPayload", () => {
   it("hides a stale position but keeps the destination", () => {
     const stale = new Date(now.getTime() - POSITION_FRESH_MS - 1).toISOString();
     const payload = buildTrackingPayload(input({ position: { lat: 1, lng: 2, at: stale } }));
+    expect(payload.etaLive).toBeNull();
     expect(payload.position).toBeNull();
     expect(payload.destination).toEqual({ lat: 52.3, lng: -1.4 });
   });
@@ -66,5 +67,6 @@ describe("isTrackingEnded", () => {
     expect(isTrackingEnded({ jobStatus: "in_progress", deliveredAt: "2026-10-06T10:59:59.000Z", now })).toBe(true);
     expect(isTrackingEnded({ jobStatus: "completed", deliveredAt: "2026-10-06T11:00:01.000Z", now })).toBe(false);
     expect(isTrackingEnded({ jobStatus: "accepted", deliveredAt: null, now })).toBe(false);
+    expect(isTrackingEnded({ jobStatus: "completed", deliveredAt: "garbage", now })).toBe(false);
   });
 });

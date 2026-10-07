@@ -8,7 +8,7 @@ import {
 
 describe("assertOpaqueShareReference", () => {
   it("passes an opaque reference through unchanged", () => {
-    expect(assertOpaqueShareReference("quotation_share:0b1c2d3e")).toBe("quotation_share:0b1c2d3e");
+    expect(assertOpaqueShareReference("quotation_share:5d7e0d1a-2b3c-4d5e-8f90-1a2b3c4d5e6f")).toBe("quotation_share:5d7e0d1a-2b3c-4d5e-8f90-1a2b3c4d5e6f");
     expect(assertOpaqueShareReference(null)).toBeNull();
     expect(assertOpaqueShareReference(undefined)).toBeNull();
   });
@@ -56,5 +56,19 @@ describe("tracking share references", () => {
   it("refuses a raw tracking token or a tracking URL", () => {
     expect(() => assertOpaqueShareReference(`trk_${"A".repeat(43)}`)).toThrow();
     expect(() => assertOpaqueShareReference("/track/abc")).toThrow();
+  });
+});
+
+describe("assertOpaqueShareReference allowlist", () => {
+  it("refuses a token embedded mid-string and any unknown shape", () => {
+    expect(() => assertOpaqueShareReference(`note ${"pod_" + "a".repeat(43)} here`)).toThrow();
+    expect(() => assertOpaqueShareReference(`tracking_share:${"a".repeat(64)}:trk_${"A".repeat(43)}`)).toThrow();
+    expect(() => assertOpaqueShareReference("something_else:abc")).toThrow();
+    expect(() => assertOpaqueShareReference("")).toThrow();
+  });
+
+  it("refuses an uppercase hash, since stored hashes are lowercase hex", () => {
+    expect(() => assertOpaqueShareReference(`pod_share:${"A".repeat(64)}`)).toThrow();
+    expect(() => trackingShareReference("A".repeat(64))).toThrow();
   });
 });

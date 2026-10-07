@@ -53,5 +53,6 @@ describe("evaluateTrackingLink", () => {
     expect(evaluateTrackingLink({ expires_at: "2026-10-08T00:00:00.000Z", revoked_at: "2026-10-07T08:00:00.000Z" }, now)).toBe(false);
     expect(evaluateTrackingLink({ expires_at: "2026-10-07T09:00:00.000Z", revoked_at: null }, now)).toBe(false);
     expect(evaluateTrackingLink(null, now)).toBe(false);
+    expect(evaluateTrackingLink({ expires_at: "garbage", revoked_at: null }, now)).toBe(false);
   });
 });

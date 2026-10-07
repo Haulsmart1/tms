@@ -261,7 +261,7 @@ them does not matter.
 
 | Order | File | Needs | Applied |
 |---|---|---|---|
-| 1 | `tracking_01_links_and_eta_cache.sql` | none. Read its WARNING output: a document_type check on `document_delivery_log` must be widened to allow `tracking_link` or emailing a link fails (before anything is sent) | no |
+| 1 | `tracking_01_links_and_eta_cache.sql` | none. Read its WARNING output and the result of the final select: a document_type check or enum on `document_delivery_log` must be widened to allow `tracking_link` or emailing a link fails (before anything is sent) | no |
 | 2 | `tracking_02_pod_flags.sql` | none | no |
 
 Offline POD for own-fleet drivers is still gated by the walkaround job gate, so it only works once

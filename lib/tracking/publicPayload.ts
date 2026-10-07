@@ -60,7 +60,7 @@ export function buildTrackingPayload(input: TrackingPayloadInput): TrackingPaylo
     operator: { name: input.operatorName },
     state: input.state,
     etaWindow: delivered || !input.etaWindow ? null : { from: input.etaWindow.from, to: input.etaWindow.to },
-    etaLive: next ? input.etaLive : null,
+    etaLive: next && position ? input.etaLive : null,
     stopsBefore: delivered ? null : input.stopsBefore,
     position,
     destination: next ? latLng(input.destination) : null,
