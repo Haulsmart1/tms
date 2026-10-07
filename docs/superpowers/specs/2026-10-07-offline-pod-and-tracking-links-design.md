@@ -155,8 +155,9 @@ the update without the flag and logs a warning, so a missing column never blocks
 ### Token and lifetime
 
 `lib/tracking/links.ts`, pure apart from `node:crypto`, mirroring `lib/pod/shareLinks.ts`: `trk_` + 32 random
-bytes base64url, format regex, SHA-256 hash. `expires_at` at creation is the end of the stop's planned date
-plus 2 days (London time), or 7 days from creation when there is no planned date. Separately, the public
+bytes base64url, format regex, SHA-256 hash. `expires_at` at creation is UTC midnight at the end of the stop's
+planned date plus 2 days (at most an hour longer than London midnight in summer), never less than 24
+hours from now, or 7 days from creation when there is no planned date. Separately, the public
 route treats a link as ended when the stop was delivered more than 24 hours ago or the job is cancelled.
 
 ### Office side
@@ -216,11 +217,14 @@ recipient name, job reference, customer name.
 
 - **Order and "next".** From `planning_route_visit_stops` for the job's vehicle and planning date, ordered by
   `service_sequence_number`. "Next" means this is the first stop in that order that is not completed.
-  `stopsBefore` is the count of incomplete delivery stops ahead of it. Without an itinerary, a stop is "next"
-  only when it is the job's single remaining incomplete stop and the job has a vehicle; `stopsBefore` is null.
+  `stopsBefore` is the count of incomplete delivery stops ahead of it. When an itinerary exists for the van
+  but this stop is not in it, the stop is never "next" (the van has other planned drops). Without any
+  itinerary, a stop is "next" only when its planned date is today (London), it is the job's single
+  remaining incomplete stop and the job has a vehicle; `stopsBefore` is null. "Next" is what reveals the
+  driver's position, so every doubtful case resolves to not next.
 - **Baseline.** `jobs.delivery_eta` when the job has exactly one delivery stop; otherwise none.
-- **Lateness.** From the most recent completed stop earlier in today's itinerary whose job has a
-  `delivery_eta` and a single delivery stop: `delivered_at - delivery_eta`, clamped to [-2h, +6h]. Zero when
+- **Lateness.** From the most recent completed DELIVERY stop earlier in today's itinerary whose job has a
+  `delivery_eta` and a single delivery stop (a collection is not comparable to a delivery ETA): `delivered_at - delivery_eta`, clamped to [-2h, +6h]. Zero when
   there is none.
 - **Window** (state `scheduled` / `en_route_earlier`): baseline + lateness, plus and minus 30 minutes, rounded
   outward to 15 minutes. No baseline: `etaWindow` null and the page says "Out for delivery today" (or
@@ -230,7 +234,8 @@ recipient name, job reference, customer name.
   minutes, or the cache was computed from an older position. The route calls TomTom routing with
   `routeUrl` / `parseRoute` from `lib/tomtom/api.ts` (van position to `job_stops.lat/lng`), with a new
   optional `{ traffic: true }` argument to `routeUrl` so the live ETA includes traffic, stores the result in `stop_eta_cache`, and the page shows the
-  arrival rounded to 5 minutes. TomTom error or missing key: fall back to the window, never an error.
+  arrival rounded to 5 minutes. The live ETA is shown only while the position itself is fresh enough to
+  show (it implies the van's distance). TomTom error or missing key: fall back to the window, never an error.
 
 Times are shown in Europe/London. Per-tenant timezone stays on the queued list.
 
