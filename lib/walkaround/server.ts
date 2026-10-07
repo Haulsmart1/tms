@@ -266,14 +266,18 @@ export type QueuedGateResult = {
   The job gate for a request from the offline queue. Trusted recorded time:
   the gate is judged at that time against the shift the item names. Untrusted
   time, or no shift client id: today's open-shift rule, at server time.
+  `notBefore` (the job's created_at) bounds the recorded time from below for
+  every driver, so a POD cannot be dated before its job existed.
   FAILS CLOSED like jobGateResponse.
 */
 export async function queuedJobGate(
   admin: SupabaseClient,
   session: DriverSession,
   meta: QueuedMeta,
-  now: Date = new Date(),
+  options: { notBefore?: string | null; now?: Date } = {},
 ): Promise<QueuedGateResult> {
+  const now = options.now ?? new Date();
+  const notBefore = options.notBefore ?? null;
   const refuse = (message: string): QueuedGateResult => ({
     response: NextResponse.json({ error: message }, { status: 409 }),
     at: now.toISOString(),
@@ -281,14 +285,14 @@ export async function queuedJobGate(
   });
 
   if (session.portalType !== "direct_driver") {
-    const time = acceptRecordedTime({ recordedAt: meta.recordedAt, serverNow: now, shift: null });
+    const time = acceptRecordedTime({ recordedAt: meta.recordedAt, serverNow: now, shift: null, notBefore });
     return { response: null, ...time };
   }
 
   try {
     if (meta.shiftClientId) {
       const { shift } = await loadGateRowsAt(admin, session, meta.shiftClientId);
-      const time = acceptRecordedTime({ recordedAt: meta.recordedAt, serverNow: now, shift });
+      const time = acceptRecordedTime({ recordedAt: meta.recordedAt, serverNow: now, shift, notBefore });
       if (shift && time.trusted) {
         const periodAt = await loadPeriodAt(admin, shift.id, time.at);
         const decision = jobGateDecisionAt({ portalType: session.portalType, shift, periodAt });

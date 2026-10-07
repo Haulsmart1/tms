@@ -80,6 +80,18 @@ export function buildQueuedPodEvidencePath(input: PodEvidenceOwner & {
 }
 
 /**
+  True only when `path` is exactly what buildQueuedPodEvidencePath returns for
+  this owner and client id (with whatever filename it carries). Lets a route
+  recognise a retry of a queued photo from the path the phone sends back.
+*/
+export function isQueuedPodEvidencePathFor(path: unknown, owner: PodEvidenceOwner, clientId: string): boolean {
+  if (typeof path !== "string" || !isPodEvidencePathFor(path, owner) || !isUuidLike(clientId)) return false;
+  const prefix = `${owner.tenantId}/${owner.jobId}/${owner.stopId}/photos/q-${clientId.toLowerCase()}-`;
+  if (!path.startsWith(prefix)) return false;
+  return buildQueuedPodEvidencePath({ ...owner, folder: "photos", clientId, filename: path.slice(prefix.length) }) === path;
+}
+
+/**
   True only when `path` is a well-formed evidence path owned by exactly this
   tenant, job and stop. Rejects traversal, empty segments, backslashes, and
   anything outside the two known folders.

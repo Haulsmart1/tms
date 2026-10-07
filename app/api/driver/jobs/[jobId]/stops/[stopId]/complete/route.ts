@@ -80,7 +80,7 @@ export async function POST(request: Request, context: RouteContext) {
 
       // A request from the offline queue is gated at the time it was recorded.
       if (meta) {
-        const queued = await queuedJobGate(admin, session, meta);
+        const queued = await queuedJobGate(admin, session, meta, { notBefore: job.created_at ?? null });
         if (queued.response) return queued.response;
         recordedAt = queued.at;
         timeTrusted = queued.trusted;
@@ -158,7 +158,9 @@ export async function POST(request: Request, context: RouteContext) {
         pod_status: "delivered",
         status: "completed",
       };
-      if (meta && !timeTrusted) stopPatch.pod_flags = ["pod_time_untrusted"];
+      // A queued completion always states its flags: empty when the recorded
+      // time was trusted, pod_time_untrusted when server time was used.
+      if (meta) stopPatch.pod_flags = timeTrusted ? [] : ["pod_time_untrusted"];
 
       const updateStop = (patch: Record<string, unknown>) =>
         admin
@@ -178,7 +180,7 @@ export async function POST(request: Request, context: RouteContext) {
 
       if (missingColumn && "pod_flags" in stopPatch) {
         // tracking_02 not applied yet: never block a delivery on a missing flag column.
-        console.warn("[driver/complete] job_stops.pod_flags is missing; saved without the untrusted-time flag. Apply tracking_02.");
+        console.warn("[driver/complete] job_stops.pod_flags is missing; saved without pod_flags. Apply tracking_02.");
         const { pod_flags: _omit, ...withoutFlag } = stopPatch;
         ({ data: updatedStops, error: updateStopError } = await updateStop(withoutFlag));
       }

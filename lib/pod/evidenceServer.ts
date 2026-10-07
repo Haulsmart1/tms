@@ -12,6 +12,18 @@ import { MAX_POD_EVIDENCE_BYTES, validateEvidenceContent, type EvidenceCheck } f
 export const POD_EVIDENCE_SELECT =
   "id,tenant_id,job_id,stop_id,evidence_type,storage_path,original_filename,mime_type,file_size_bytes,created_by,created_at";
 
+/** The pod_evidence row at exactly this storage path in this tenant, or null. Throws on a failed lookup. */
+export async function findEvidenceByPath(admin: SupabaseClient, tenantId: string, path: string) {
+  const { data, error } = await admin
+    .from("pod_evidence")
+    .select(POD_EVIDENCE_SELECT)
+    .eq("tenant_id", tenantId)
+    .eq("storage_path", path)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
 export async function createEvidenceUploadUrl(
   admin: SupabaseClient,
   owner: PodEvidenceOwner,
@@ -36,13 +48,12 @@ export async function createEvidenceUploadUrl(
   // and the caller skips the upload and goes straight to recording.
   if (folder !== "photos") throw new Error("Queued evidence is photos only.");
   const path = buildQueuedPodEvidencePath({ ...owner, folder, clientId: options.clientId, filename });
-  const { data: existing, error: lookupError } = await admin
-    .from("pod_evidence")
-    .select("id")
-    .eq("tenant_id", owner.tenantId)
-    .eq("storage_path", path)
-    .maybeSingle();
-  if (lookupError) throw new Error(`Unable to prepare upload: ${lookupError.message}`);
+  let existing: unknown;
+  try {
+    existing = await findEvidenceByPath(admin, owner.tenantId, path);
+  } catch (error) {
+    throw new Error(`Unable to prepare upload: ${error instanceof Error ? error.message : String(error)}`);
+  }
   if (existing) return { path, token: null };
 
   const { data, error } = await admin.storage.from(POD_BUCKET).createSignedUploadUrl(path);

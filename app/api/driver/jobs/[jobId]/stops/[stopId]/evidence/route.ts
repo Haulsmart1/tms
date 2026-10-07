@@ -3,10 +3,10 @@ import { isUuid } from "../../../../../../../../lib/auth/serverTenantAccess";
 import { loadDriverJobStop } from "../../../../../../../../lib/driver/jobAccess";
 import { driverErrorResponse, requireDriverSession } from "../../../../../../../../lib/driver/server";
 import { isWorkableJobStatus, jobNotWorkableMessage } from "../../../../../../../../lib/jobs/jobStatus";
-import { isPodEvidencePathFor } from "../../../../../../../../lib/pod/evidencePath";
+import { isPodEvidencePathFor, isQueuedPodEvidencePathFor } from "../../../../../../../../lib/pod/evidencePath";
 import { POD_PHOTO_MIME_TYPES } from "../../../../../../../../lib/pod/evidenceRules";
 import { hasInvalidClientId, parseQueuedMeta } from "../../../../../../../../lib/pod/queuedMeta";
-import { recordEvidenceRow, verifyUploadedEvidence } from "../../../../../../../../lib/pod/evidenceServer";
+import { findEvidenceByPath, recordEvidenceRow, verifyUploadedEvidence } from "../../../../../../../../lib/pod/evidenceServer";
 import { createAdminClient } from "../../../../../../../../lib/supabase/admin";
 import { jobGateResponse, queuedJobGate } from "../../../../../../../../lib/walkaround/server";
 
@@ -58,19 +58,30 @@ export async function POST(request: Request, context: RouteContext) {
 
     const session = await requireDriverSession({ jobId });
     const admin = createAdminClient();
-    // A request from the offline queue is gated at the time it was recorded.
-    if (meta) {
-      const queued = await queuedJobGate(admin, session, meta);
-      if (queued.response) return queued.response;
-    } else {
-      const gate = await jobGateResponse(admin, session);
-      if (gate) return gate;
-    }
+    const owner = { tenantId: session.tenantId, jobId, stopId };
+    const storagePath = typeof body.storagePath === "string" ? body.storagePath : "";
 
+    // Ownership first, so nothing below can be used to probe another job.
     const loaded = await loadDriverJobStop(admin, session, jobId, stopId);
 
     if (!loaded || loaded.stop.type !== "delivery") {
       return NextResponse.json({ error: "Delivery stop not found." }, { status: 404 });
+    }
+
+    // A retry of a queued photo whose row already exists succeeds without
+    // re-gating: the shift may have ended or the stop been delivered since.
+    if (meta?.clientId && isQueuedPodEvidencePathFor(storagePath, owner, meta.clientId)) {
+      const existing = await findEvidenceByPath(admin, session.tenantId, storagePath);
+      if (existing) return NextResponse.json({ ok: true, evidence: existing }, { status: 200 });
+    }
+
+    // A request from the offline queue is gated at the time it was recorded.
+    if (meta) {
+      const queued = await queuedJobGate(admin, session, meta, { notBefore: loaded.job.created_at ?? null });
+      if (queued.response) return queued.response;
+    } else {
+      const gate = await jobGateResponse(admin, session);
+      if (gate) return gate;
     }
 
     if (!isWorkableJobStatus(loaded.job.status)) {
@@ -83,9 +94,6 @@ export async function POST(request: Request, context: RouteContext) {
         { status: 409 },
       );
     }
-
-    const owner = { tenantId: session.tenantId, jobId, stopId };
-    const storagePath = typeof body.storagePath === "string" ? body.storagePath : "";
 
     if (!isPodEvidencePathFor(storagePath, owner) || storagePath.split("/")[3] !== "photos") {
       return NextResponse.json({ error: "Invalid upload reference." }, { status: 400 });

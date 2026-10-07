@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
-import { createEvidenceUploadUrl } from "./evidenceServer";
+import { createEvidenceUploadUrl, findEvidenceByPath } from "./evidenceServer";
 
 const owner = {
   tenantId: "11111111-1111-4111-8111-111111111111",
@@ -13,19 +13,25 @@ type Result = { data: unknown; error: unknown };
 
 /** Just enough of the admin client for createEvidenceUploadUrl: one pod_evidence lookup and one signing call. */
 function fakeAdmin(options: { lookup?: Result; sign?: Result } = {}) {
-  const calls = { signed: [] as string[], lookups: 0 };
+  const calls = { signed: [] as string[], lookups: 0, tables: [] as string[], eqs: [] as [string, unknown][] };
   const lookup = options.lookup ?? { data: null, error: null };
   const sign = options.sign ?? { data: { token: "signed-token" }, error: null };
   const query = {
     select: () => query,
-    eq: () => query,
+    eq: (column: string, value: unknown) => {
+      calls.eqs.push([column, value]);
+      return query;
+    },
     maybeSingle: async () => {
       calls.lookups += 1;
       return lookup;
     },
   };
   const admin = {
-    from: () => query,
+    from: (table: string) => {
+      calls.tables.push(table);
+      return query;
+    },
     storage: {
       from: () => ({
         createSignedUploadUrl: async (path: string) => {
@@ -55,6 +61,8 @@ describe("createEvidenceUploadUrl", () => {
     const result = await createEvidenceUploadUrl(admin, owner, "photos", "pod.jpg", { clientId });
     expect(result).toEqual({ path: `${owner.tenantId}/${owner.jobId}/${owner.stopId}/photos/q-${clientId}-pod.jpg`, token: "signed-token" });
     expect(calls.signed).toEqual([result.path]);
+    expect(calls.tables).toEqual(["pod_evidence"]);
+    expect(calls.eqs).toEqual(expect.arrayContaining([["tenant_id", owner.tenantId], ["storage_path", result.path]]));
   });
 
   it("returns token null without signing when a queued photo is already recorded", async () => {
@@ -86,5 +94,23 @@ describe("createEvidenceUploadUrl", () => {
     const { admin, calls } = fakeAdmin({ lookup: { data: null, error: { message: "relation missing" } } });
     await expect(createEvidenceUploadUrl(admin, owner, "photos", "pod.jpg", { clientId })).rejects.toThrow(/relation missing/);
     expect(calls.signed).toEqual([]);
+  });
+});
+
+describe("findEvidenceByPath", () => {
+  const path = `${owner.tenantId}/${owner.jobId}/${owner.stopId}/photos/q-${clientId}-pod.jpg`;
+
+  it("looks the row up by tenant and exact storage path", async () => {
+    const row = { id: "e1", storage_path: path };
+    const { admin, calls } = fakeAdmin({ lookup: { data: row, error: null } });
+    expect(await findEvidenceByPath(admin, owner.tenantId, path)).toEqual(row);
+    expect(calls.tables).toEqual(["pod_evidence"]);
+    expect(calls.eqs).toEqual(expect.arrayContaining([["tenant_id", owner.tenantId], ["storage_path", path]]));
+  });
+
+  it("returns null when there is no row and throws when the lookup fails", async () => {
+    expect(await findEvidenceByPath(fakeAdmin().admin, owner.tenantId, path)).toBeNull();
+    const failing = fakeAdmin({ lookup: { data: null, error: { message: "boom" } } }).admin;
+    await expect(findEvidenceByPath(failing, owner.tenantId, path)).rejects.toThrow(/boom/);
   });
 });

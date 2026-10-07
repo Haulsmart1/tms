@@ -12,6 +12,8 @@ export type DriverJob = {
   id: string;
   status: string | null;
   subcontractor_id: string | null;
+  /** When the job was created; the floor for a queued POD's recorded time. */
+  created_at: string | null;
 };
 
 export type DriverStop = {
@@ -30,7 +32,7 @@ export async function loadDriverJobStop(
 ): Promise<{ job: DriverJob; stop: DriverStop } | null> {
   let jobQuery = admin
     .from("jobs")
-    .select("id,status,subcontractor_id")
+    .select("id,status,subcontractor_id,created_at")
     .eq("id", jobId)
     .eq("tenant_id", session.tenantId)
     .eq("driver_id", session.driverId);

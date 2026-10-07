@@ -1,9 +1,10 @@
 /*
   Offline POD saves carry the time the driver acted (the phone's clock). The
   server takes that time only when it is believable: not in the future beyond
-  a small clock skew, not older than 72 hours, and inside the shift the item
-  names. Otherwise it uses its own receive time and the caller flags the stop
-  (pod_flags 'pod_time_untrusted'). Without this, every delivery made with no
+  a small clock skew, not older than 72 hours, inside the shift the item
+  names, and not before the job existed (notBefore). Otherwise it uses its
+  own receive time and the caller flags the stop (pod_flags
+  'pod_time_untrusted'). Without this, every delivery made with no
   signal would look late; with it unchecked, a wrong phone clock could
   backdate a POD. Pure.
 */
@@ -19,6 +20,12 @@ export type RecordedTimeInput = {
   serverNow: Date;
   /** The shift the item names; null for drivers who are not gated (subcontractors). */
   shift: null | { startedAt: string; endedAt: string | null };
+  /**
+    Earliest believable time, normally the job's created_at: a POD cannot
+    predate the job it belongs to. Null or absent means no such bound; an
+    unparseable value fails closed (untrusted).
+  */
+  notBefore?: string | null;
 };
 
 export type RecordedTimeDecision = { at: string; trusted: boolean };
@@ -33,6 +40,11 @@ export function acceptRecordedTime(input: RecordedTimeInput): RecordedTimeDecisi
   const now = input.serverNow.getTime();
   if (t > now + MAX_RECORDED_FUTURE_MS) return fallback;
   if (t < now - MAX_RECORDED_AGE_MS) return fallback;
+
+  if (input.notBefore !== undefined && input.notBefore !== null) {
+    const floor = Date.parse(input.notBefore);
+    if (Number.isNaN(floor) || t < floor) return fallback;
+  }
 
   if (input.shift) {
     const start = Date.parse(input.shift.startedAt);

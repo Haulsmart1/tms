@@ -58,6 +58,16 @@ describe("jobGateDecisionAt", () => {
     }
   });
 
+  it("refuses a period with no check result", () => {
+    const periodAt = { checkResult: null, open: false, vehicleVor: false };
+    expect(jobGateDecisionAt({ portalType: "direct_driver", shift, periodAt })).toEqual({ ok: false, message: JOB_GATE_MESSAGES.noCheck });
+  });
+
+  it("accepts an open period whose vehicle is not VOR", () => {
+    const periodAt = { checkResult: "pass" as const, open: true, vehicleVor: false };
+    expect(jobGateDecisionAt({ portalType: "direct_driver", shift, periodAt })).toEqual({ ok: true });
+  });
+
   it("refuses VOR on a period that is still open", () => {
     const periodAt = { checkResult: "pass" as const, open: true, vehicleVor: true };
     expect(jobGateDecisionAt({ portalType: "direct_driver", shift, periodAt })).toEqual({ ok: false, message: JOB_GATE_MESSAGES.vor });

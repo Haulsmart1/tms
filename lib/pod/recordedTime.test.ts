@@ -63,4 +63,23 @@ describe("acceptRecordedTime", () => {
     const future = iso(now.getTime() + MAX_RECORDED_FUTURE_MS + 1000);
     expect(acceptRecordedTime({ recordedAt: future, serverNow: now, shift }).trusted).toBe(false);
   });
+
+  it("refuses a time before notBefore (the job did not exist yet), boundary inclusive", () => {
+    const notBefore = "2026-10-07T10:00:00.000Z";
+    expect(acceptRecordedTime({ recordedAt: notBefore, serverNow: now, shift: null, notBefore })).toEqual({ at: notBefore, trusted: true });
+    expect(acceptRecordedTime({ recordedAt: "2026-10-07T09:59:59.999Z", serverNow: now, shift: null, notBefore })).toEqual({ at: now.toISOString(), trusted: false });
+  });
+
+  it("applies notBefore together with the shift bounds", () => {
+    const shift = { startedAt: "2026-10-07T06:00:00.000Z", endedAt: null };
+    const notBefore = "2026-10-07T10:00:00.000Z";
+    expect(acceptRecordedTime({ recordedAt: "2026-10-07T08:00:00.000Z", serverNow: now, shift, notBefore }).trusted).toBe(false);
+    expect(acceptRecordedTime({ recordedAt: "2026-10-07T11:00:00.000Z", serverNow: now, shift, notBefore }).trusted).toBe(true);
+  });
+
+  it("ignores a null notBefore and refuses when notBefore is unparseable", () => {
+    const at = "2026-10-07T11:00:00.000Z";
+    expect(acceptRecordedTime({ recordedAt: at, serverNow: now, shift: null, notBefore: null }).trusted).toBe(true);
+    expect(acceptRecordedTime({ recordedAt: at, serverNow: now, shift: null, notBefore: "garbage" }).trusted).toBe(false);
+  });
 });
