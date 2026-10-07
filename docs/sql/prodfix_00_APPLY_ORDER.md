@@ -252,3 +252,18 @@ plain `create table` for `load_transfer_batches` and `load_transfer_items`, so i
 | 1 | `20260929093000_job_stop_contacts.sql` | none | unknown |
 | 2 | `20260929123000_planning_saved_plans.sql` | rls_02 (`can_access_tenant`). Needed by the Saved Plans section on Planning | unknown |
 | 3 | `20260930150000_load_transfers_and_stop_windows.sql` | rls_02 (`can_access_tenant`). Needed by `/load-transfer` | unknown |
+
+## Offline POD and tracking links, 2026-10-07
+
+Spec: `docs/superpowers/specs/2026-10-07-offline-pod-and-tracking-links-design.md`. Both files are
+additive and the app degrades without them, so they can run before or after deploying. Order between
+them does not matter.
+
+| Order | File | Needs | Applied |
+|---|---|---|---|
+| 1 | `tracking_01_links_and_eta_cache.sql` | none. Read its WARNING output: a document_type check on `document_delivery_log` must be widened to allow `tracking_link` or emailing a link fails (before anything is sent) | no |
+| 2 | `tracking_02_pod_flags.sql` | none | no |
+
+Offline POD for own-fleet drivers is still gated by the walkaround job gate, so it only works once
+`shifts_01..05` are applied (after S-1 from the 2026-10-07 security scan is fixed). Prefilled tracking
+link recipients come from `20260929093000_job_stop_contacts.sql`.
