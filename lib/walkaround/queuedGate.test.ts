@@ -6,7 +6,7 @@ import { jobGateResponse, queuedJobGate } from "./server";
 
 /*
   A tiny in-memory stand-in for the service-role client: enough of the
-  PostgREST builder (select, eq, is, lte, order, limit, maybeSingle, await)
+  PostgREST builder (select, eq, in, is, lte, order, limit, maybeSingle, await)
   for queuedJobGate and the open-shift fallback it calls.
 */
 type Row = Record<string, unknown>;
@@ -23,6 +23,10 @@ function fakeAdmin(tables: Record<string, Row[]>, failOn: string | null = null) 
       select: () => q,
       eq: (col: string, value: unknown) => {
         rows = rows.filter((r) => r[col] === value);
+        return q;
+      },
+      in: (col: string, values: unknown[]) => {
+        rows = rows.filter((r) => values.includes(r[col]));
         return q;
       },
       is: (col: string, value: unknown) => {
@@ -79,6 +83,7 @@ const now = new Date("2026-10-07T16:00:00.000Z");
 /** An ended shift 06:00 to 15:00 with vehicle A until 10:00 and vehicle B from 10:00 until 15:00. */
 function endedShiftTables(overrides: { periods?: Row[]; vehicles?: Row[]; checks?: Row[] } = {}): Record<string, Row[]> {
   return {
+    tenants: [{ id: "t1", company_id: "c1" }],
     driver_shifts: [
       { id: "sh1", tenant_id: "t1", driver_id: "d1", client_id: SHIFT_CLIENT_ID, started_at: "2026-10-07T06:00:00.000Z", ended_at: "2026-10-07T15:00:00.000Z" },
     ],
@@ -87,12 +92,12 @@ function endedShiftTables(overrides: { periods?: Row[]; vehicles?: Row[]; checks
       { id: "pB", shift_id: "sh1", vehicle_id: "vB", walkaround_check_id: "cB", started_at: "2026-10-07T10:00:00.000Z", ended_at: "2026-10-07T15:00:00.000Z" },
     ],
     walkaround_checks: overrides.checks ?? [
-      { id: "cA", result: "pass" },
-      { id: "cB", result: "dangerous" },
+      { id: "cA", tenant_id: "t1", result: "pass" },
+      { id: "cB", tenant_id: "t1", result: "dangerous" },
     ],
     vehicles: overrides.vehicles ?? [
-      { id: "vA", vor: true },
-      { id: "vB", vor: false },
+      { id: "vA", tenant_id: "t1", vor: true },
+      { id: "vB", tenant_id: "t1", vor: false },
     ],
   };
 }
@@ -144,6 +149,41 @@ describe("queuedJobGate", () => {
     const result = await queuedJobGate(admin, session, meta("2026-10-07T08:00:00.000Z"), { now });
     expect(result.response?.status).toBe(409);
     expect(await errorOf(result.response)).toBe(JOB_GATE_MESSAGES.vor);
+  });
+
+  it("ignores a check row from another tenant (refuses as no passing check)", async () => {
+    const checks = [
+      { id: "cA", tenant_id: "t2", result: "pass" },
+      { id: "cB", tenant_id: "t1", result: "dangerous" },
+    ];
+    const { admin } = fakeAdmin(endedShiftTables({ checks }));
+    const result = await queuedJobGate(admin, session, meta("2026-10-07T08:00:00.000Z"), { now });
+    expect(result.response?.status).toBe(409);
+    expect(await errorOf(result.response)).toBe(JOB_GATE_MESSAGES.noCheck);
+  });
+
+  it("reads VOR from a legacy vehicle row keyed by the company id", async () => {
+    const tables = endedShiftTables({
+      periods: [{ id: "pA", shift_id: "sh1", vehicle_id: "vA", walkaround_check_id: "cA", started_at: "2026-10-07T06:00:00.000Z", ended_at: null }],
+      vehicles: [{ id: "vA", tenant_id: "c1", vor: true }],
+    });
+    tables.driver_shifts[0].ended_at = null;
+    const { admin } = fakeAdmin(tables);
+    const result = await queuedJobGate(admin, session, meta("2026-10-07T08:00:00.000Z"), { now });
+    expect(result.response?.status).toBe(409);
+    expect(await errorOf(result.response)).toBe(JOB_GATE_MESSAGES.vor);
+  });
+
+  it("fails closed (503) when an open period's vehicle is outside this tenant's fleet", async () => {
+    const tables = endedShiftTables({
+      periods: [{ id: "pA", shift_id: "sh1", vehicle_id: "vA", walkaround_check_id: "cA", started_at: "2026-10-07T06:00:00.000Z", ended_at: null }],
+      vehicles: [{ id: "vA", tenant_id: "t2", vor: false }],
+    });
+    tables.driver_shifts[0].ended_at = null;
+    const { admin } = fakeAdmin(tables);
+    const result = await queuedJobGate(admin, session, meta("2026-10-07T08:00:00.000Z"), { now });
+    expect(result.response?.status).toBe(503);
+    expect(await errorOf(result.response)).toBe(GATE_UNAVAILABLE);
   });
 
   it("falls back to the open-shift rule, untrusted, when the named shift is unknown", async () => {

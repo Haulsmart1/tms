@@ -232,8 +232,16 @@ async function loadGateRowsAt(
   return { shift: { id: String(data.id), startedAt: String(data.started_at), endedAt: data.ended_at ? String(data.ended_at) : null } };
 }
 
-/** The vehicle period of `shiftId` whose [started_at, ended_at) contains `at`, with its check result and (if still open) VOR. */
-async function loadPeriodAt(admin: SupabaseClient, shiftId: string, at: string) {
+/**
+  The vehicle period of `shiftId` whose [started_at, ended_at) contains `at`,
+  with its check result and (if still open) VOR. The check and vehicle
+  lookups are pinned to the session's tenant (the vehicle also by the company
+  id, which legacy rows carry in tenant_id, the same rule as the shifts_04
+  RPCs). A check from elsewhere reads as no check and refuses; an open
+  period's vehicle that is not in this fleet throws, so the gate answers 503
+  rather than reading "not VOR" from a missing row.
+*/
+async function loadPeriodAt(admin: SupabaseClient, tenantId: string, shiftId: string, at: string) {
   const { data, error } = await admin
     .from("shift_vehicle_periods")
     .select("vehicle_id,walkaround_check_id,started_at,ended_at")
@@ -248,16 +256,25 @@ async function loadPeriodAt(admin: SupabaseClient, shiftId: string, at: string) 
 
   const open = !data.ended_at;
   const [check, vehicle] = await Promise.all([
-    admin.from("walkaround_checks").select("result").eq("id", data.walkaround_check_id).maybeSingle(),
-    open ? admin.from("vehicles").select("vor").eq("id", data.vehicle_id).maybeSingle() : Promise.resolve({ data: null, error: null }),
+    admin.from("walkaround_checks").select("result").eq("id", data.walkaround_check_id).eq("tenant_id", tenantId).maybeSingle(),
+    open ? loadFleetVehicleVor(admin, tenantId, String(data.vehicle_id)) : Promise.resolve(false),
   ]);
   if (check.error) throw new Error(check.error.message);
-  if (vehicle.error) throw new Error(vehicle.error.message);
   return {
     checkResult: (check.data?.result as CheckResult | undefined) ?? null,
     open,
-    vehicleVor: (vehicle.data as { vor?: boolean } | null)?.vor === true,
+    vehicleVor: vehicle,
   };
+}
+
+async function loadFleetVehicleVor(admin: SupabaseClient, tenantId: string, vehicleId: string): Promise<boolean> {
+  const { data: tenant, error: tenantError } = await admin.from("tenants").select("company_id").eq("id", tenantId).maybeSingle();
+  if (tenantError) throw new Error(tenantError.message);
+  const keys = [...new Set([tenantId, tenant?.company_id ? String(tenant.company_id) : null].filter((v): v is string => Boolean(v)))];
+  const { data, error } = await admin.from("vehicles").select("vor").eq("id", vehicleId).in("tenant_id", keys).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("The shift's vehicle is not in this tenant's fleet.");
+  return data.vor === true;
 }
 
 export type QueuedGateResult = {
@@ -300,7 +317,7 @@ export async function queuedJobGate(
       const { shift } = await loadGateRowsAt(admin, session, meta.shiftClientId);
       const time = acceptRecordedTime({ recordedAt: meta.recordedAt, serverNow: now, shift, notBefore });
       if (shift && time.trusted) {
-        const periodAt = await loadPeriodAt(admin, shift.id, time.at);
+        const periodAt = await loadPeriodAt(admin, session.tenantId, shift.id, time.at);
         const decision = jobGateDecisionAt({ portalType: session.portalType, shift, periodAt });
         return decision.ok ? { response: null, ...time } : refuse(decision.message);
       }

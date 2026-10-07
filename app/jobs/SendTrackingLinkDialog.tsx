@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Button, { buttonClasses } from "../../components/Button";
 import Field from "../../components/Field";
+import MessageBanner from "../../components/MessageBanner";
 import Modal from "../../components/Modal";
 import { whatsappTrackingUrl } from "../../lib/tracking/whatsapp";
 
@@ -124,7 +125,8 @@ export default function SendTrackingLinkDialog({ open, onClose, tenantId, stopId
     const { ok, data } = await postJson("/api/tracking-links/email", { tenantId, stopId, to: email.trim() });
     if (attempt !== attemptRef.current) return;
     setBusy(false);
-    if (ok) setMessage(`Tracking link emailed to ${stringOrNull(data.recipient) ?? email.trim()}.`);
+    /* The email route mints its own link, so this is not the link shown above. */
+    if (ok) setMessage(`A tracking link was emailed to ${stringOrNull(data.recipient) ?? email.trim()}.`);
     else setError(routeError(data, "Unable to email the tracking link."));
   }
 
@@ -167,6 +169,8 @@ export default function SendTrackingLinkDialog({ open, onClose, tenantId, stopId
   const linkId = `tracking-link-${stopId}`;
   const emailId = `tracking-email-${stopId}`;
   const phoneId = `tracking-phone-${stopId}`;
+  const phoneHintId = `${phoneId}-hint`;
+  const showPhoneHint = !whatsappHref && Boolean(phone.trim());
 
   return (
     <Modal
@@ -203,7 +207,7 @@ export default function SendTrackingLinkDialog({ open, onClose, tenantId, stopId
                 readOnly
                 value={minted.url}
                 onFocus={(event) => event.currentTarget.select()}
-                className="h-10 w-full min-w-0 rounded-md border border-line-strong bg-surface px-3 font-mono text-xs text-ink"
+                className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 font-mono text-xs text-ink"
               />
               <div>
                 <Button variant="secondary" size="sm" onClick={() => void copy()}>
@@ -236,6 +240,10 @@ export default function SendTrackingLinkDialog({ open, onClose, tenantId, stopId
                 autoComplete="off"
                 value={phone}
                 onChange={(event) => setPhone(event.target.value)}
+                /* Field's own hint prop renders in text-ink-3, a recorded
+                   light-mode contrast failure, so the hint is rendered below
+                   in text-ink-2 and wired up here instead. */
+                aria-describedby={showPhoneHint ? phoneHintId : undefined}
               />
               <div className="flex flex-wrap items-center gap-2">
                 {whatsappHref ? (
@@ -252,53 +260,45 @@ export default function SendTrackingLinkDialog({ open, onClose, tenantId, stopId
                     Open WhatsApp
                   </Button>
                 )}
-                {!whatsappHref && phone.trim() ? (
-                  <span className="text-xs text-ink-2">Enter a full mobile number, at least 10 digits.</span>
+                {showPhoneHint ? (
+                  <span id={phoneHintId} className="text-xs text-ink-2">
+                    Enter a full mobile number, at least 10 digits.
+                  </span>
                 ) : null}
               </div>
             </div>
           </>
         ) : null}
 
-        {phase === "ready" || phase === "revoked" ? (
+        {phase !== "minting" ? (
           <div className="flex flex-wrap gap-2 border-t border-line pt-3">
-            {phase === "ready" ? (
-              <Button variant="danger" size="sm" onClick={() => void revoke()} disabled={busy}>
-                Withdraw all links for this stop
+            {phase === "failed" ? (
+              <Button variant="secondary" size="sm" onClick={mint} disabled={busy}>
+                Try again
               </Button>
-            ) : (
+            ) : null}
+            {phase === "revoked" ? (
               <Button variant="secondary" size="sm" onClick={mint} disabled={busy}>
                 Create a new link
+              </Button>
+            ) : (
+              /* Also offered when minting failed: withdrawing earlier links
+                 does not depend on a new one. */
+              <Button variant="danger" size="sm" onClick={() => void revoke()} disabled={busy}>
+                Withdraw all links for this stop
               </Button>
             )}
           </div>
         ) : null}
 
-        {phase === "failed" ? (
-          <div>
-            <Button variant="secondary" size="sm" onClick={mint} disabled={busy}>
-              Try again
-            </Button>
-          </div>
-        ) : null}
-
-        {message ? (
-          <div
-            role="status"
-            className="rounded-md border border-success-border bg-success-tint p-2.5 text-sm text-success-strong"
-          >
-            {message}
-          </div>
-        ) : null}
-
-        {error ? (
-          <div
-            role="alert"
-            className="rounded-md border border-danger-border bg-danger-tint p-2.5 text-sm text-danger-strong"
-          >
-            {error}
-          </div>
-        ) : null}
+        {/* Always mounted (MessageBanner keeps an empty live region) so the
+            message is announced when it appears. */}
+        <MessageBanner tone="success">
+          {message || null}
+        </MessageBanner>
+        <MessageBanner tone="danger">
+          {error || null}
+        </MessageBanner>
       </div>
     </Modal>
   );

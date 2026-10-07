@@ -20,6 +20,13 @@ describe("whatsappDigits", () => {
     expect(whatsappDigits("+44-7700.900.123")).toBe("447700900123");
   });
 
+  it("drops a UK trunk 0 written after the 44 country code", () => {
+    expect(whatsappDigits("+44 07700 900123")).toBe("447700900123");
+    expect(whatsappDigits("+44 (0)7700 900123")).toBe("447700900123");
+    expect(whatsappDigits("0044 07700 900123")).toBe("447700900123");
+    expect(whatsappDigits("4407700900123")).toBe("447700900123");
+  });
+
   it("keeps an international number without a prefix as given", () => {
     expect(whatsappDigits("447700900123")).toBe("447700900123");
   });
