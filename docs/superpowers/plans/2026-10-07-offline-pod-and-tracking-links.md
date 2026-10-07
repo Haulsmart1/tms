@@ -26,8 +26,8 @@
 > storage upload when `token` is null, uses `uploadToSignedUrl(..., { upsert: false })`, and treats a
 > storage error whose status is 409 or whose message matches /already exists|duplicate/i as success; in
 > every case it then calls the record route. The Task 6 routes answer 400 "Invalid clientId." when the
-> body has a `clientId` that `parseQueuedMeta` rejected. `parseQueuedMeta`/`acceptRecordedTime` require
-> an ISO time with an explicit offset (`Z` or `+hh:mm`).
+> body has a `clientId` that `parseQueuedMeta` rejected (`hasInvalidClientId`). `acceptRecordedTime`
+> requires an ISO time with an explicit offset (`Z` or `+hh:mm`); `parseQueuedMeta` passes `recordedAt` through as given.
 
 ---
 
