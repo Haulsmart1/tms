@@ -8,10 +8,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { DriverAccessError, requireDriverSession, type DriverSession } from "../driver/server";
 import { loadOperatorProfile } from "../driver/operatorTimeZone";
+import { acceptRecordedTime } from "../pod/recordedTime";
+import type { QueuedMeta } from "../pod/queuedMeta";
 import { operatorDayInTimeZone } from "../time";
 import { activeCatalogue } from "./catalogue";
 import type { DriverDefectView, DriverShiftState } from "./driverState";
-import { jobGateDecision, type JobGateInput } from "./jobGate";
+import { jobGateDecision, jobGateDecisionAt, type JobGateInput } from "./jobGate";
 import { dangerReason } from "./severity";
 import type { CatalogueItem, CheckResult, ObjectionStatus, Severity, SeveritySource } from "./types";
 
@@ -204,6 +206,102 @@ export async function jobGateResponse(admin: SupabaseClient, session: DriverSess
   }
   const decision = jobGateDecision(input);
   return decision.ok ? null : NextResponse.json({ error: decision.message }, { status: 409 });
+}
+
+/** The named shift's bounds, for jobGateDecisionAt. Null when this driver has no shift with that client id. */
+async function loadGateRowsAt(
+  admin: SupabaseClient,
+  session: DriverSession,
+  shiftClientId: string,
+): Promise<{ shift: { id: string; startedAt: string; endedAt: string | null } | null }> {
+  const { data, error } = await admin
+    .from("driver_shifts")
+    .select("id,started_at,ended_at")
+    .eq("tenant_id", session.tenantId)
+    .eq("driver_id", session.driverId)
+    .eq("client_id", shiftClientId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return { shift: null };
+  return { shift: { id: String(data.id), startedAt: String(data.started_at), endedAt: data.ended_at ? String(data.ended_at) : null } };
+}
+
+/** The vehicle period of `shiftId` whose [started_at, ended_at) contains `at`, with its check result and (if still open) VOR. */
+async function loadPeriodAt(admin: SupabaseClient, shiftId: string, at: string) {
+  const { data, error } = await admin
+    .from("shift_vehicle_periods")
+    .select("vehicle_id,walkaround_check_id,started_at,ended_at")
+    .eq("shift_id", shiftId)
+    .lte("started_at", at)
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  if (data.ended_at && Date.parse(String(data.ended_at)) <= Date.parse(at)) return null;
+
+  const open = !data.ended_at;
+  const [check, vehicle] = await Promise.all([
+    admin.from("walkaround_checks").select("result").eq("id", data.walkaround_check_id).maybeSingle(),
+    open ? admin.from("vehicles").select("vor").eq("id", data.vehicle_id).maybeSingle() : Promise.resolve({ data: null, error: null }),
+  ]);
+  if (check.error) throw new Error(check.error.message);
+  if (vehicle.error) throw new Error(vehicle.error.message);
+  return {
+    checkResult: (check.data?.result as CheckResult | undefined) ?? null,
+    open,
+    vehicleVor: (vehicle.data as { vor?: boolean } | null)?.vor === true,
+  };
+}
+
+export type QueuedGateResult = {
+  /** A 409 refusal, or null when the driver may proceed. */
+  response: NextResponse | null;
+  /** The time to record: the phone's when trusted, otherwise the server's. */
+  at: string;
+  trusted: boolean;
+};
+
+/**
+  The job gate for a request from the offline queue. Trusted recorded time:
+  the gate is judged at that time against the shift the item names. Untrusted
+  time, or no shift client id: today's open-shift rule, at server time.
+  FAILS CLOSED like jobGateResponse.
+*/
+export async function queuedJobGate(
+  admin: SupabaseClient,
+  session: DriverSession,
+  meta: QueuedMeta,
+  now: Date = new Date(),
+): Promise<QueuedGateResult> {
+  const refuse = (message: string): QueuedGateResult => ({
+    response: NextResponse.json({ error: message }, { status: 409 }),
+    at: now.toISOString(),
+    trusted: false,
+  });
+
+  if (session.portalType !== "direct_driver") {
+    const time = acceptRecordedTime({ recordedAt: meta.recordedAt, serverNow: now, shift: null });
+    return { response: null, ...time };
+  }
+
+  try {
+    if (meta.shiftClientId) {
+      const { shift } = await loadGateRowsAt(admin, session, meta.shiftClientId);
+      const time = acceptRecordedTime({ recordedAt: meta.recordedAt, serverNow: now, shift });
+      if (shift && time.trusted) {
+        const periodAt = await loadPeriodAt(admin, shift.id, time.at);
+        const decision = jobGateDecisionAt({ portalType: session.portalType, shift, periodAt });
+        return decision.ok ? { response: null, ...time } : refuse(decision.message);
+      }
+    }
+  } catch (error) {
+    console.error("[walkaround] queued job gate lookup failed", error);
+    return refuse("Walkaround checks are not available right now, so jobs cannot be completed. Ask the office.");
+  }
+
+  const current = await jobGateResponse(admin, session);
+  return { response: current, at: now.toISOString(), trusted: false };
 }
 
 type DefectRow = {
