@@ -39,6 +39,7 @@ describe("isThemeableRoute", () => {
   it("returns false for the public share pages, which keep a fixed palette", () => {
     expect(isThemeableRoute("/pod/share/some-token")).toBe(false);
     expect(isThemeableRoute("/quotation/share/some-token")).toBe(false);
+    expect(isThemeableRoute("/track/some-token")).toBe(false);
     expect(isThemeableRoute("/driver/jobs/some-job-id")).toBe(false);
   });
 
