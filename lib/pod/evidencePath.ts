@@ -60,8 +60,9 @@ export function buildPodEvidencePath(input: PodEvidenceOwner & {
 /**
   The path for a photo sent from the driver's offline queue. Derived from the
   item's client id instead of a timestamp and random part, so a retry after a
-  lost answer uploads to the same object (signed with upsert) and records the
-  same path, which recordEvidenceRow already treats as one row.
+  lost answer targets the same object and records the same path, which
+  recordEvidenceRow already treats as one row. When the object already exists
+  the retry skips the upload rather than overwriting it (no upsert).
 */
 export function buildQueuedPodEvidencePath(input: PodEvidenceOwner & {
   folder: "photos";
