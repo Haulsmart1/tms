@@ -396,6 +396,9 @@ export default function StopCard({
               title="This delivery was saved with no signal and the phone's clock could not be trusted, so the time shown is when the server received it."
             >
               Time not trusted
+              <span className="sr-only">
+                : this delivery was saved with no signal and the phone&apos;s clock could not be trusted, so the time shown is when the server received it.
+              </span>
             </span>
           ) : null}
         </div>
