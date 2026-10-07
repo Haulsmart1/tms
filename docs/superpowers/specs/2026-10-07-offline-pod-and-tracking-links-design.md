@@ -52,13 +52,14 @@ The offline queue already exists for shift events: `lib/offline/queue.ts` (pure,
 - **`shiftClientId`** is the client id of the start check of the shift that was open on the phone when the
   item was queued (the existing rule: every event in a shift is named by it). Subcontractor drivers, who are
   not gated, send `null`.
-- **Sending a photo** is the existing three steps. The record route accepts the item's `clientId`; a
-  repeated `clientId` for the same tenant answers 200 with the existing row instead of inserting again. If the
-  upload-url step is retried, a new path is issued. An object orphaned by a lost answer stays in storage
-  under the tenant's own path with no row pointing at it; it is never served, and no cleanup job is added
-  in this change (recorded as a follow-up).
-- **Scans** accept `clientId` the same way. **Complete** accepts `clientId` for symmetry but is already
-  idempotent.
+- **Sending a photo** is the existing three steps, made repeatable without a schema change. When the
+  upload-url request carries a `clientId`, the server derives the storage path from it
+  (`<tenant>/<job>/<stop>/photos/q-<clientId>-<filename>`, still inside the `isPodEvidencePathFor` rule) and
+  signs the upload with `upsert: true`. A retry after any lost answer therefore writes the same object again
+  and calls the record route with the same path, and `recordEvidenceRow` is already idempotent on
+  `storage_path`. No duplicate photo, no orphaned object.
+- **Scans** need nothing new: the scans route already answers 200 `duplicate: true` for a serial already
+  verified on the job. **Complete** is already idempotent.
 
 ### Server rules for a queued item
 
@@ -94,7 +95,9 @@ change. `/jobs` shows a small "Time not trusted" tag on a stop carrying it.
   as they are (they were sent first, so they are already saved or already refused).
 - A photo or scan refused because the stop is already delivered (the office completed it) is set aside with
   the server's message, like any refusal.
-- The driver dashboard shows "N deliveries waiting to send" when the queue holds `pod_complete` items.
+- The driver dashboard's existing queue panel (`ShiftPanel`) already counts every pending item and lists
+  refusals, so POD items appear there with no change. The job page shows its own per-stop state and any
+  refusal for its stops.
 - IndexedDB refused: memory fallback (existing) plus a banner "Keep this page open until it sends".
 - Shared phone: existing ownership rule, unchanged.
 
@@ -118,13 +121,12 @@ Migration `docs/sql/tracking_01_links_and_eta_cache.sql`:
 
 Migration `docs/sql/tracking_02_pod_offline.sql`:
 
-- `pod_evidence.client_id uuid` with a unique index on `(tenant_id, client_id) where client_id is not null`.
-- `job_item_scans.client_id uuid`, same unique index.
-- `job_stops.pod_flags text[] not null default '{}'`.
+- `job_stops.pod_flags text[] not null default '{}'`. (No `client_id` columns: photo retries are made
+  idempotent by the derived storage path, and scans already are.)
 
 Both added to `docs/sql/prodfix_00_APPLY_ORDER.md`. Both are additive: the app degrades without them (link
-creation answers "Tracking links are unavailable"; a queued item with a `clientId` is still saved, the
-`clientId` is dropped and a warning logged, so a missing column never blocks a delivery).
+creation answers "Tracking links are unavailable"; when `pod_flags` is missing, the complete route retries
+the update without the flag and logs a warning, so a missing column never blocks a delivery).
 
 ### Token and lifetime
 
@@ -135,18 +137,25 @@ route treats a link as ended when the stop was delivered more than 24 hours ago 
 
 ### Office side
 
-- Routes, all `requireTenant` with the stop's own tenant and office roles only (`lib/jobs/officeRoles.ts`):
-  - `POST /api/tracking-links` `{ stopId }`: creates a link for a delivery stop, returns `{ id, url }`.
-    The URL is built with `publicAppOrigin()`.
-  - `POST /api/tracking-links/[id]/email` `{ to }`: sends via Microsoft Graph (`lib/documents/delivery.ts`),
-    logs `document_delivery_log` with an opaque `share_reference` (`lib/documents/shareReference.ts`),
-    rate limited with `checkRateLimit`.
-  - `POST /api/tracking-links/[id]/revoke`.
-  - `GET /api/tracking-links?stopId=`: active links for a stop (for the dialog).
-- `SendTrackingLinkDialog` component, opened from a "Send tracking link" button on each delivery stop in
-  `/jobs` and in the planning job detail dialog. Prefilled from `contact_email` / `contact_phone` (empty when
-  the stop-contacts migration is unapplied). Actions: Email, WhatsApp (opens `wa.me/<digits>?text=...`), Copy
-  link, Revoke. Design-system styled.
+- Routes, shaped exactly like the POD share routes: body carries `{ tenantId, stopId }`, the caller is
+  authorized with `authorizeOfficeTenant` (profiles-based, drivers refused), every query filters by that
+  tenant, and the stop must be a delivery stop of a job in that tenant that is not cancelled.
+  - `POST /api/tracking-links`: mints a link, returns `{ url, expiresAt, contactName, contactEmail,
+    contactPhone }`. The URL is built with `publicAppOrigin()`.
+  - `POST /api/tracking-links/email` `{ tenantId, stopId, to }`: mints a link and emails it via Microsoft
+    Graph (`sendLoggedDocumentEmail`). Recipient restricted like POD email: the stop's `contact_email`, an
+    address stored on the job's customer, or the caller's own address (`checkPodRecipient`, with the stop
+    contact added to the allowed list). Rate limited per user and per tenant with the existing
+    `documentEmailPerUser` / `documentEmailPerTenant` rules. Logged with document type `tracking_link` and
+    share reference `tracking_share:<token hash>`; `assertOpaqueShareReference` learns to refuse `trk_`
+    tokens and `/track/` URLs.
+  - `POST /api/tracking-links/revoke`: revokes every live link for the stop.
+- `SendTrackingLinkDialog`, opened from a "Send tracking link" button on each delivery stop in `/jobs`
+  (`app/jobs/StopCard.tsx`) that is not yet delivered. Prefilled from `contact_email` / `contact_phone`
+  (empty when the stop-contacts migration is unapplied). Actions: Email, WhatsApp (opens
+  `wa.me/<digits>?text=...`), Copy link, Revoke all. Design-system styled. Not added to the planning job
+  dialog in this change: that dialog is itself a Modal, and nesting a second one is the focus-trap problem
+  recorded for that dialog; its "Open in Jobs" link reaches the button.
 
 ### Public page
 
@@ -163,7 +172,7 @@ that decides what leaves the server):
 
 ```
 {
-  operator: { name, logoUrl | null },
+  operator: { name },                   // loadPodBranding carrierName; no logo in this change
   state: "scheduled" | "en_route_earlier" | "next" | "delivered" ,
   etaWindow: { from, to } | null,       // ISO, shown in Europe/London
   etaLive: string | null,               // ISO, only when state = "next"
@@ -194,8 +203,9 @@ recipient name, job reference, customer name.
   "Scheduled for <date>" before the planned date).
 - **Live** (state `next`): when the vehicle's newest `telematics_positions` row is fresher than 10 minutes,
   `shouldRefreshEta(cache, position, now)` decides whether to call TomTom: no cache, cache older than 2
-  minutes, or the cache was computed from an older position. The route calls TomTom routing with the
-  existing `routeUrl` / `parseRoute` from `lib/tomtom/api.ts` (van position to stop coordinates), stores the result in `stop_eta_cache`, and the page shows the
+  minutes, or the cache was computed from an older position. The route calls TomTom routing with
+  `routeUrl` / `parseRoute` from `lib/tomtom/api.ts` (van position to `job_stops.lat/lng`), with a new
+  optional `{ traffic: true }` argument to `routeUrl` so the live ETA includes traffic, stores the result in `stop_eta_cache`, and the page shows the
   arrival rounded to 5 minutes. TomTom error or missing key: fall back to the window, never an error.
 
 Times are shown in Europe/London. Per-tenant timezone stays on the queued list.
