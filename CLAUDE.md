@@ -189,11 +189,12 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
   the spot) only after `tracking_02` is applied; until then the "Time not trusted" tag cannot show.
 - **Customer tracking links** copy the POD share link design. Tokens are random `trk_` strings stored only
   as a SHA-256 hash in `stop_tracking_links` (`lib/tracking/links.ts`, `linkStore.ts`); that table and
-  `stop_eta_cache` are server-only (RLS on, no policies, client grants revoked, `tracking_01`). Links are
-  minted, emailed and revoked only by `app/api/tracking-links/**` after `authorizeOfficeTenant` (drivers
-  refused), for an undelivered delivery stop of a non-cancelled job in that tenant; the email goes only to the stop
-  contact, an address on the job's customer or the caller. The public JSON (`/api/public/track/[token]`,
-  rate limited per IP) answers one 404 body for unknown, expired, revoked and ended links.
+  `stop_eta_cache` are server-only (RLS on, no policies, client grants revoked, `tracking_01`). Links go
+  through `app/api/tracking-links/**` only, after `authorizeOfficeTenant` (drivers refused): minted and
+  emailed for an undelivered delivery stop of a non-cancelled job, revoked for any stop in the tenant;
+  the email goes only to the stop contact, an address on the job's customer or the caller. The public JSON
+  (`/api/public/track/[token]`, rate limited per IP) answers one 404 body for unknown, expired, revoked and
+  ended links.
   `buildTrackingPayload` in `lib/tracking/publicPayload.ts` is the ONLY builder of what leaves the server:
   never driver, vehicle, reference, recipient, customer or other stops. State `next` is the only state
   that reveals position, destination or a live ETA, and every doubtful case resolves to not next (stop
