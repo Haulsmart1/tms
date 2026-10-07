@@ -64,7 +64,7 @@ export type DriverQueuePayload =
 /** `stop`: the session has gone (401/403). The item stays put and the queue pauses. */
 export type SyncResult = SendOutcome | { kind: "stop"; error: string };
 
-export const SIGN_IN_AGAIN_MESSAGE = "Sign in again to send your checks.";
+export const SIGN_IN_AGAIN_MESSAGE = "Sign in again to send your queued items.";
 /** Shown while items are queued and IndexedDB has refused, so they live only in the open page. */
 export const MEMORY_ONLY_MESSAGE = "This phone cannot store queued items. Keep this page open until they send.";
 export const NO_CONNECTION_MESSAGE = "No connection. It will be sent when you have signal.";

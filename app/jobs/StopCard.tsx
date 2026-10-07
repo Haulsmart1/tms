@@ -393,7 +393,6 @@ export default function StopCard({
           {stop.pod_flags?.includes("pod_time_untrusted") ? (
             <span
               className="ml-1.5 rounded border border-warning-border bg-warning-tint px-1 text-xs text-warning-strong"
-              title="This delivery was saved with no signal and the phone's clock could not be trusted, so the time shown is when the server received it."
             >
               Time not trusted
               <span className="sr-only">

@@ -697,8 +697,9 @@ function StopCard({
       });
 
       setMessage(
-        paused ??
-          "POD photo saved. It will send automatically.",
+        paused
+          ? `POD photo saved. ${paused}`
+          : "POD photo saved. It will send automatically.",
       );
     } catch (uploadError) {
       setError(
@@ -767,8 +768,9 @@ function StopCard({
       });
 
       setMessage(
-        paused ??
-          "Delivery saved. It will send automatically.",
+        paused
+          ? `Delivery saved. ${paused}`
+          : "Delivery saved. It will send automatically.",
       );
     } catch (completeError) {
       setError(
@@ -931,7 +933,7 @@ function StopCard({
                   <>
                     Delivered and sent.
                     <div className="mt-1 font-normal">
-                      Updating...
+                      Updating... If this does not change, reload the page.
                     </div>
                   </>
                 )}
