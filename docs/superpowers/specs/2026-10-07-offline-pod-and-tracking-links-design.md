@@ -38,7 +38,8 @@ The offline queue already exists for shift events: `lib/offline/queue.ts` (pure,
 
 - **One queue.** POD items join the same queue as shift events, as three new `DriverQueuePayload` kinds:
   - `pod_photo`: `{ ownerId, clientId, jobId, stopId, shiftClientId, recordedAt, blob, mimeType, filename }`
-  - `pod_scan`: `{ ownerId, clientId, jobId, stopId, shiftClientId, recordedAt, jobItemId, serialNumber }`
+  - `pod_scan`: `{ ownerId, clientId, jobId, stopId, jobItemId, serialNumber, scanFormat }` (no shift or time:
+    the scans route has no gate and records its own time)
   - `pod_complete`: `{ ownerId, clientId, jobId, stopId, shiftClientId, recordedAt, recipientName, podNotes }`
 
   Sharing the queue keeps strict order across kinds: a shift's start check always reaches the server before a
@@ -108,6 +109,16 @@ retried without it. `/jobs` shows a small "Time not trusted" tag on a stop carry
   as they are (they were sent first, so they are already saved or already refused).
 - A photo or scan refused because the stop is already delivered (the office completed it) is set aside with
   the server's message, like any refusal.
+- A refused photo does not hold back its stop's queued completion. Most refusal reasons also refuse the
+  completion on the server, and the server's evidence-count check means a stop can never complete with no
+  evidence. Dropping the completion would lose a real delivery's recipient and time. The job page lists
+  the refused photo against its stop so the office can follow up.
+- A gate lookup failure (database blip, shift tables missing) answers 503, not 409: the queue retries it
+  with backoff and sets it aside only after repeated server failures, so a blip never deletes a queued POD.
+  Genuine gate refusals stay 409 and are final.
+- A storage upload error is read by its HTTP status: no status (network) or 408/425/429/5xx retry; any
+  other 4xx (too large, unsupported type) is a final refusal with a message to tell the office. A
+  permanent storage error can therefore never block the queue.
 - The driver dashboard's existing queue panel (`ShiftPanel`) already counts every pending item and lists
   refusals, so POD items appear there with no change. The job page shows its own per-stop state and any
   refusal for its stops.
