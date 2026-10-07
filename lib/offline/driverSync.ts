@@ -167,6 +167,35 @@ export function podUploadErrorIsAlreadyStored(error: unknown): boolean {
   return false;
 }
 
+export const POD_PHOTO_NOT_STORABLE_MESSAGE =
+  "The photo could not be stored (it may be too large or an unsupported type). Tell the office.";
+const POD_UPLOAD_INCOMPLETE = "The photo upload did not complete.";
+
+/** The HTTP status a storage error carries: StorageApiError's numeric `status`, else a numeric-looking `statusCode`. */
+function storageErrorStatus(error: unknown): number | null {
+  if (!error || typeof error !== "object") return null;
+  const { status, statusCode } = error as { status?: unknown; statusCode?: unknown };
+  if (typeof status === "number" && Number.isInteger(status) && status > 0) return status;
+  if (typeof statusCode === "number" && Number.isInteger(statusCode) && statusCode > 0) return statusCode;
+  if (typeof statusCode === "string" && /^\d{3}$/.test(statusCode)) return Number(statusCode);
+  return null;
+}
+
+/**
+ * How the runner reads a failed POD storage upload. "already_stored": an
+ * earlier attempt landed, go on to record it. No HTTP answer: retry. 408, 425,
+ * 429 and 5xx: retry with the status, so repeated 5xx sets the item aside.
+ * Any other 4xx (401 and 403 included: the signed token was refused, not the
+ * session, and pausing would never end) is a final refusal the driver sees.
+ */
+export function podUploadErrorOutcome(error: unknown): SyncResult | "already_stored" {
+  if (podUploadErrorIsAlreadyStored(error)) return "already_stored";
+  const status = storageErrorStatus(error);
+  if (status === null) return { kind: "retry", error: POD_UPLOAD_INCOMPLETE, status: null };
+  if (status === 408 || status === 425 || status === 429 || status >= 500) return { kind: "retry", error: POD_UPLOAD_INCOMPLETE, status };
+  return { kind: "rejected", error: POD_PHOTO_NOT_STORABLE_MESSAGE };
+}
+
 export type PendingPod = {
   photos: number;
   scans: { job_item_id: string; serial_number: string }[];

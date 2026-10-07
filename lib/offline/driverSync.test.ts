@@ -10,6 +10,8 @@ import {
   parsePodUploadStart,
   pendingPodByStop,
   podUploadErrorIsAlreadyStored,
+  podUploadErrorOutcome,
+  POD_PHOTO_NOT_STORABLE_MESSAGE,
   photoOutcome,
   PHOTO_UNMATCHED_AFTER,
   SIGN_IN_AGAIN_MESSAGE,
@@ -263,5 +265,45 @@ describe("podUploadErrorIsAlreadyStored", () => {
     expect(podUploadErrorIsAlreadyStored(new TypeError("Failed to fetch"))).toBe(false);
     expect(podUploadErrorIsAlreadyStored(null)).toBe(false);
     expect(podUploadErrorIsAlreadyStored("409")).toBe(false);
+  });
+});
+
+describe("podUploadErrorOutcome", () => {
+  const apiError = (message: string, status: number, statusCode: string) =>
+    Object.assign(new Error(message), { __isStorageError: true, name: "StorageApiError", status, statusCode });
+
+  it("proceeds when the object is already stored", () => {
+    expect(podUploadErrorOutcome(apiError("The resource already exists", 400, "409"))).toBe("already_stored");
+  });
+
+  it("retries with no status when there was no HTTP answer", () => {
+    expect(podUploadErrorOutcome(new TypeError("Failed to fetch"))).toEqual({ kind: "retry", error: "The photo upload did not complete.", status: null });
+    expect(podUploadErrorOutcome(null)).toMatchObject({ kind: "retry", status: null });
+  });
+
+  it("retries 408, 425, 429 and 5xx with their status so 5xx counts toward set-aside", () => {
+    for (const status of [408, 425, 429, 500, 503]) {
+      expect(podUploadErrorOutcome(apiError("Busy", status, String(status)))).toEqual({
+        kind: "retry",
+        error: "The photo upload did not complete.",
+        status,
+      });
+    }
+  });
+
+  it("falls back to a numeric-looking statusCode", () => {
+    expect(podUploadErrorOutcome({ message: "Busy", statusCode: "502" })).toMatchObject({ kind: "retry", status: 502 });
+    expect(podUploadErrorOutcome({ message: "Too big", statusCode: "413" })).toEqual({ kind: "rejected", error: POD_PHOTO_NOT_STORABLE_MESSAGE });
+  });
+
+  it("refuses any other 4xx with a message for the driver", () => {
+    for (const status of [400, 413, 415]) {
+      expect(podUploadErrorOutcome(apiError("Nope", status, String(status)))).toEqual({ kind: "rejected", error: POD_PHOTO_NOT_STORABLE_MESSAGE });
+    }
+  });
+
+  it("refuses a 401 or 403 from storage rather than pausing: the signed token, not the session, was refused", () => {
+    expect(podUploadErrorOutcome(apiError("Unauthorized", 401, "401"))).toEqual({ kind: "rejected", error: POD_PHOTO_NOT_STORABLE_MESSAGE });
+    expect(podUploadErrorOutcome(apiError("Forbidden", 403, "403"))).toEqual({ kind: "rejected", error: POD_PHOTO_NOT_STORABLE_MESSAGE });
   });
 });

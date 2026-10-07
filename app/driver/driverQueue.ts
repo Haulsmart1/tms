@@ -25,7 +25,7 @@ import {
   partitionByOwner,
   parsePodUploadStart,
   photoOutcome,
-  podUploadErrorIsAlreadyStored,
+  podUploadErrorOutcome,
   SIGN_IN_AGAIN_MESSAGE,
   type DriverQueuePayload,
   type SyncResult,
@@ -242,8 +242,9 @@ function stopEndpoint(jobId: string, stopId: string): string {
   derive the path, and the upload never overwrites: token null (already
   stored or recorded) skips the upload, and an "already exists" answer from
   storage means an earlier attempt landed. Either way the record call follows,
-  which answers 200 for a photo it already holds. A 409 once the stop is
-  delivered is a final refusal (eventOutcome rejects it).
+  which answers 200 for a photo it already holds. Any other storage failure
+  is read by podUploadErrorOutcome (network and 5xx retry, other 4xx refuse).
+  A 409 once the stop is delivered is a final refusal (eventOutcome rejects it).
 */
 async function sendPodPhoto(payload: Extract<QueuePayload, { kind: "pod_photo" }>): Promise<SyncResult> {
   const endpoint = stopEndpoint(payload.jobId, payload.stopId);
@@ -259,15 +260,18 @@ async function sendPodPhoto(payload: Extract<QueuePayload, { kind: "pod_photo" }
   if (!upload) return { kind: "retry", error: "Unable to start the photo upload.", status: 500 };
 
   if (upload.token !== null) {
+    let failure: unknown = null;
     try {
       const { error } = await createClient()
         .storage.from(POD_BUCKET)
         .uploadToSignedUrl(upload.path, upload.token, payload.blob, { contentType: payload.mimeType, upsert: false });
-      if (error && !podUploadErrorIsAlreadyStored(error)) {
-        return { kind: "retry", error: "The photo upload did not complete.", status: null };
-      }
+      failure = error;
     } catch (error) {
-      if (!podUploadErrorIsAlreadyStored(error)) return { kind: "retry", error: "The photo upload did not complete.", status: null };
+      failure = error ?? new Error("Upload failed.");
+    }
+    if (failure) {
+      const outcome = podUploadErrorOutcome(failure);
+      if (outcome !== "already_stored") return outcome;
     }
   }
 
