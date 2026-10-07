@@ -68,17 +68,23 @@ The offline queue already exists for shift events: `lib/offline/queue.ts` (pure,
 
 ### Server rules for a queued item
 
-Applied by the evidence record, scans and complete routes whenever the body carries `recordedAt`; a body
-without it (an older page still open) behaves exactly as today.
+Applied by the upload-url, evidence record and complete routes whenever the body carries any of
+`clientId`, `shiftClientId` or `recordedAt` (`parseQueuedMeta`); a body with none of them (an older page
+still open) behaves exactly as today. A `clientId` that is present but not a UUID answers 400. The scans
+route is unchanged (scans are idempotent and that route has no walkaround gate today). A queued photo
+already recorded at its derived path short-circuits before the gate, so a retry of a saved photo is never
+refused because the shift has since closed.
 
 - **Recorded time acceptance** (`lib/pod/recordedTime.ts`, pure). `recordedAt` is accepted when it parses,
-  is not more than 2 minutes in the future of server time, is not older than 72 hours, and (for a gated
-  driver) falls inside the named shift: at or after `started_at`, and at or before `ended_at` when the shift
+  carries an explicit offset, is not more than 2 minutes in the future of server time, is not older than
+  72 hours, is not earlier than the job's `created_at` (for every driver, subcontractors included), and
+  (for a gated driver) falls inside the named shift: at or after `started_at`, and at or before `ended_at` when the shift
   has ended. Otherwise the server uses its own receive time and the stop gets the `pod_time_untrusted` flag.
   The accepted time is what lands in `delivered_at` and `pod_updated_at`.
 - **Walkaround gate judged at the recorded time** (`jobGateDecisionAt` in `lib/walkaround/jobGate.ts`, pure,
-  loaded by `loadJobGateInputAt` in `lib/walkaround/server.ts`). For a direct driver: load the shift by
-  `shiftClientId` (this driver, this tenant), refuse if it does not exist; find the `shift_vehicle_periods`
+  loaded by `queuedJobGate` in `lib/walkaround/server.ts`). For a direct driver: load the shift by
+  `shiftClientId` (this driver, this tenant); if it does not exist, fall back to today's open-shift rule at
+  server time with the time untrusted (a phone whose shift record never synced is still gated); find the `shift_vehicle_periods`
   row whose `[started_at, ended_at)` contains the accepted time; refuse with the existing messages if there
   is none or its check is not `pass`/`minor`. VOR: when that period is still open, the vehicle's current
   `vor` applies (as today); when it has closed, VOR is not re-checked, because `vehicles.vor` has no history.
@@ -91,7 +97,9 @@ without it (an older page still open) behaves exactly as today.
 ### Stop flag
 
 `job_stops.pod_flags text[] not null default '{}'` (new column). Only `pod_time_untrusted` is written in this
-change. `/jobs` shows a small "Time not trusted" tag on a stop carrying it.
+change: a queued completion sets the column to `['pod_time_untrusted']` when the time was not trusted and
+`[]` when it was. When the column is missing (PostgREST answers PGRST204, Postgres 42703) the update is
+retried without it. `/jobs` shows a small "Time not trusted" tag on a stop carrying it.
 
 ### Driver-facing failure handling
 
