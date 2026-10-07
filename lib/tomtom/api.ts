@@ -24,9 +24,10 @@ export function parseGeocode(json: any): LatLng | null {
   return { lat: pos.lat, lng: pos.lon };
 }
 
-export function routeUrl(points: LatLng[], key: string): string {
+export function routeUrl(points: LatLng[], key: string, options: { traffic?: boolean } = {}): string {
   const locations = points.map((p) => `${p.lat},${p.lng}`).join(":");
-  return `${BASE}/routing/1/calculateRoute/${locations}/json?key=${encodeURIComponent(key)}&travelMode=car&traffic=false&routeRepresentation=polyline`;
+  const traffic = options.traffic ? "true" : "false";
+  return `${BASE}/routing/1/calculateRoute/${locations}/json?key=${encodeURIComponent(key)}&travelMode=car&traffic=${traffic}&routeRepresentation=polyline`;
 }
 
 export function parseRoute(json: any): RouteResult | null {

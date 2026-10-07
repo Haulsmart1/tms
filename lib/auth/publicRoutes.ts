@@ -78,6 +78,12 @@ const PUBLIC_PATTERNS = [
      Each route checks its token against the database itself. */
   /^\/api\/public\/quotation-share\/[^/]+$/,
   /^\/api\/public\/quote-request\/[^/]+$/,
+  /* Customer tracking links. Tokens are random, stored hashed in
+     stop_tracking_links and re-checked on every poll (lib/tracking/links.ts).
+     Only the page and its one JSON route are public; /api/tracking-links
+     (mint, email, revoke) is staff-only and deliberately not matched here. */
+  /^\/track\/[^/]+$/,
+  /^\/api\/public\/track\/[^/]+$/,
 ];
 
 /* Collapses "." and ".." segments and duplicate slashes so that a crafted path

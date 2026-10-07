@@ -141,6 +141,9 @@ export default function JobsPage() {
       setJobsLoading(false);
       setHasLoaded(true);
     };
+    /* job_stops below: add pod_flags once docs/sql/tracking_02_pod_flags.sql is
+       applied. Until then the "Time not trusted" tag in StopCard cannot show.
+       Adding it earlier answers 42703 and fails the whole list. */
     const jobsQuery = () => supabase.from("jobs").select(`
         id, tenant_id, reference, status, scheduled_date, planning_date, customer_id, vehicle_id, driver_id,
         customer_price, subcontractor_id, subcontractor_cost,

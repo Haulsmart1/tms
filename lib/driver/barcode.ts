@@ -80,6 +80,31 @@ export function normalizeScannedSerial(
   };
 }
 
+/**
+ * The scanner's reported format, as the scans route stores it: missing or
+ * empty is none; otherwise trimmed, 1 to 80 characters, no control characters.
+ * The phone runs the same rule before queuing a scan (lib/driver/offlinePod.ts).
+ */
+export function normalizeScanFormat(
+  value: unknown,
+): { ok: true; value: string | null } | { ok: false; message: string } {
+  if (value === undefined || value === null || value === "") {
+    return { ok: true, value: null };
+  }
+
+  if (typeof value !== "string") {
+    return { ok: false, message: "Invalid barcode format." };
+  }
+
+  const normalized = value.trim();
+
+  if (normalized.length === 0 || normalized.length > 80 || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    return { ok: false, message: "Invalid barcode format." };
+  }
+
+  return { ok: true, value: normalized };
+}
+
 export function expectedSerialsForItem(
   item: SerializedJobItem,
 ): string[] {

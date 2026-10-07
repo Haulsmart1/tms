@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildPodEvidencePath, isPodEvidencePathFor, sanitizePodFilename } from "./evidencePath";
+import {
+  buildPodEvidencePath,
+  buildQueuedPodEvidencePath,
+  isPodEvidencePathFor,
+  isQueuedPodEvidencePathFor,
+  sanitizePodFilename,
+} from "./evidencePath";
 
 const T = "11111111-1111-4111-8111-111111111111";
 const J = "22222222-2222-4222-8222-222222222222";
@@ -57,5 +63,69 @@ describe("isPodEvidencePathFor", () => {
 
   it("rejects when the owner ids themselves are malformed", () => {
     expect(isPodEvidencePathFor("a/b/c/photos/x.jpg", { tenantId: "a", jobId: "b", stopId: "c" })).toBe(false);
+  });
+});
+
+describe("buildQueuedPodEvidencePath", () => {
+  const owner = {
+    tenantId: "11111111-1111-4111-8111-111111111111",
+    jobId: "22222222-2222-4222-8222-222222222222",
+    stopId: "33333333-3333-4333-8333-333333333333",
+  };
+  const clientId = "44444444-4444-4444-8444-444444444444";
+
+  it("is the same path every time for the same client id", () => {
+    const a = buildQueuedPodEvidencePath({ ...owner, folder: "photos", clientId, filename: "pod 1.jpg" });
+    const b = buildQueuedPodEvidencePath({ ...owner, folder: "photos", clientId, filename: "pod 1.jpg" });
+    expect(a).toBe(b);
+    expect(a).toBe(`${owner.tenantId}/${owner.jobId}/${owner.stopId}/photos/q-${clientId}-pod_1.jpg`);
+  });
+
+  it("stays inside the evidence path rule", () => {
+    const path = buildQueuedPodEvidencePath({ ...owner, folder: "photos", clientId, filename: null });
+    expect(isPodEvidencePathFor(path, owner)).toBe(true);
+  });
+
+  it("refuses a client id that is not a UUID", () => {
+    expect(() => buildQueuedPodEvidencePath({ ...owner, folder: "photos", clientId: "../x", filename: "a.jpg" })).toThrow(/client id must be UUIDs/);
+  });
+
+  it("lowercases an uppercase client id in the path", () => {
+    const upper = clientId.replace(/4/g, "A").replace(/8/g, "B");
+    const path = buildQueuedPodEvidencePath({ ...owner, folder: "photos", clientId: upper, filename: "a.jpg" });
+    expect(path).toBe(`${owner.tenantId}/${owner.jobId}/${owner.stopId}/photos/q-${upper.toLowerCase()}-a.jpg`);
+  });
+
+  it("is photos only", () => {
+    expect(() =>
+      buildQueuedPodEvidencePath({ ...owner, folder: "documents" as never, clientId, filename: "a.pdf" }),
+    ).toThrow(/photos only/);
+  });
+});
+
+describe("isQueuedPodEvidencePathFor", () => {
+  const clientId = "55555555-5555-4555-8555-555555555555";
+  const queued = (filename: string | null) => buildQueuedPodEvidencePath({ ...owner, folder: "photos", clientId, filename });
+
+  it("accepts exactly the path the server builds for this client id", () => {
+    expect(isQueuedPodEvidencePathFor(queued("pod 1.jpg"), owner, clientId)).toBe(true);
+    expect(isQueuedPodEvidencePathFor(queued(null), owner, clientId)).toBe(true);
+    expect(isQueuedPodEvidencePathFor(queued("a.jpg"), owner, clientId.toUpperCase())).toBe(true);
+  });
+
+  it("refuses another client id, another owner, or a timestamp path", () => {
+    expect(isQueuedPodEvidencePathFor(queued("a.jpg"), owner, OTHER)).toBe(false);
+    expect(isQueuedPodEvidencePathFor(queued("a.jpg"), { ...owner, stopId: OTHER }, clientId)).toBe(false);
+    const plain = buildPodEvidencePath({ ...owner, folder: "photos", filename: "a.jpg", timestamp: 1, random: "r" });
+    expect(isQueuedPodEvidencePathFor(plain, owner, clientId)).toBe(false);
+  });
+
+  it("refuses a name the server would never have built, and junk input", () => {
+    const prefix = `${T}/${J}/${S}/photos/q-${clientId}-`;
+    expect(isQueuedPodEvidencePathFor(`${prefix}a b.jpg`, owner, clientId)).toBe(false);
+    expect(isQueuedPodEvidencePathFor(`${prefix}`, owner, clientId)).toBe(false);
+    expect(isQueuedPodEvidencePathFor(`${T}/${J}/${S}/documents/q-${clientId}-a.pdf`, owner, clientId)).toBe(false);
+    expect(isQueuedPodEvidencePathFor(42, owner, clientId)).toBe(false);
+    expect(isQueuedPodEvidencePathFor(queued("a.jpg"), owner, "../x")).toBe(false);
   });
 });

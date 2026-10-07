@@ -46,6 +46,8 @@ const PUBLIC_ROUTES = [
   "/quotation/share/[token]",
   "/api/public/quotation-share/[token]",
   "/api/public/quote-request/[token]",
+  "/track/[token]",
+  "/api/public/track/[token]",
 ];
 
 /* Signed-in only. Drivers and subcontractors are ordinary Supabase auth users
@@ -102,6 +104,9 @@ const PROTECTED_ROUTES = [
   "/api/pod/share",
   "/api/pod/share/email",
   "/api/pod/share/revoke",
+  "/api/tracking-links",
+  "/api/tracking-links/email",
+  "/api/tracking-links/revoke",
   "/api/pod/evidence",
   "/api/pod/evidence/[evidenceId]",
   "/api/pod/evidence/upload-url",

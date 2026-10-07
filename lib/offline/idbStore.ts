@@ -13,15 +13,23 @@ const DB_NAME = "tms-driver-queue";
 const STORE = "items";
 const memory = new Map<string, StoredItem<unknown>>();
 let dbPromise: Promise<IDBDatabase> | null = null;
-let warned = false;
+let memoryOnly = false;
 
 export function idbAvailable(): boolean {
   return typeof window !== "undefined" && typeof indexedDB !== "undefined";
 }
 
 function fallback(error: unknown): void {
-  if (!warned) console.warn("[driver-queue] IndexedDB unavailable, queue is memory-only", error);
-  warned = true;
+  if (!memoryOnly) console.warn("[driver-queue] IndexedDB unavailable, queue is memory-only", error);
+  memoryOnly = true;
+}
+
+/**
+ * True once IndexedDB has refused a read or write: queued items then live
+ * only in this page's memory and are lost if the page is closed.
+ */
+export function isMemoryOnly(): boolean {
+  return memoryOnly;
 }
 
 function open(): Promise<IDBDatabase> {

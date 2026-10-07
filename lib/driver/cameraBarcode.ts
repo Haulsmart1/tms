@@ -12,18 +12,6 @@ export type BarcodeSubmitResult = {
   message: string;
 };
 
-type ScanResponse = {
-  ok?: boolean;
-  duplicate?: boolean;
-  message?: string;
-  error?: string;
-};
-
-export type FetchLike = (
-  input: string,
-  init?: RequestInit,
-) => Promise<Response>;
-
 export type MediaStreamLike = {
   getTracks: () => Array<{
     stop: () => void;
@@ -124,55 +112,4 @@ export function cameraAccessErrorMessage(
     "Camera scanning is unavailable on this device or browser. " +
     `You can enter the ${manualEntry} manually.`
   );
-}
-
-export async function submitBarcodeScan(
-  fetcher: FetchLike,
-  endpoint: string,
-  serialNumber: string,
-  scanFormat: string,
-): Promise<BarcodeSubmitResult> {
-  const response =
-    await fetcher(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type":
-          "application/json",
-      },
-      body: JSON.stringify({
-        serial_number:
-          serialNumber,
-        scan_format:
-          scanFormat,
-      }),
-    });
-
-  let body: ScanResponse = {};
-
-  try {
-    body =
-      (await response.json()) as ScanResponse;
-  } catch {
-    body = {};
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      body.error ||
-        "Unable to verify this item.",
-    );
-  }
-
-  const duplicate =
-    body.duplicate === true;
-
-  return {
-    ok: true,
-    duplicate,
-    message:
-      body.message ||
-      (duplicate
-        ? "Already verified on this job."
-        : "Item verified."),
-  };
 }

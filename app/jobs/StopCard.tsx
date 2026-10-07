@@ -12,6 +12,7 @@ import Button from "../../components/Button";
 import Field from "../../components/Field";
 import { createClient } from "../../lib/supabase/browser";
 import PodLink from "../components/PodLink";
+import SendTrackingLinkDialog from "./SendTrackingLinkDialog";
 import { useTenant } from "../components/TenantProvider";
 import {
   errorFromBody,
@@ -63,6 +64,8 @@ export type Stop = {
   delivered_at: string | null;
   pod_notes: string | null;
   pod_photo_url: string | null;
+  /** Set by the driver routes (tracking_02). Not selected by /jobs until that migration is applied. */
+  pod_flags?: string[] | null;
 };
 
 export type PodFormState = {
@@ -99,6 +102,7 @@ export default function StopCard({
   const [uploading, setUploading] = useState<EvidenceType | "">("");
   const [evidenceError, setEvidenceError] = useState("");
   const [evidenceMessage, setEvidenceMessage] = useState("");
+  const [trackingOpen, setTrackingOpen] = useState(false);
 
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -388,6 +392,16 @@ export default function StopCard({
           {new Date(
             stop.delivered_at
           ).toLocaleString("en-GB")}
+          {stop.pod_flags?.includes("pod_time_untrusted") ? (
+            <span
+              className="ml-1.5 rounded border border-warning-border bg-warning-tint px-1 text-xs text-warning-strong"
+            >
+              Time not trusted
+              <span className="sr-only">
+                : this delivery was saved with no signal and the phone&apos;s clock could not be trusted, so the time shown is when the server received it.
+              </span>
+            </span>
+          ) : null}
         </div>
       ) : null}
 
@@ -615,7 +629,7 @@ export default function StopCard({
             </div>
           ) : null}
 
-          <div>
+          <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               disabled={busy || !tenantMatches}
@@ -623,7 +637,29 @@ export default function StopCard({
             >
               Mark Delivered
             </Button>
+
+            {/* Same gate as the POD controls: only while this stop's own
+                tenant is the active one. The routes refuse drivers and any
+                caller outside the tenant, so this is presentation only. */}
+            {tenantMatches ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setTrackingOpen(true)}
+              >
+                Send tracking link
+              </Button>
+            ) : null}
           </div>
+
+          {tenantMatches ? (
+            <SendTrackingLinkDialog
+              open={trackingOpen}
+              onClose={() => setTrackingOpen(false)}
+              tenantId={tenantId}
+              stopId={stop.id}
+            />
+          ) : null}
         </div>
       ) : null}
     </div>

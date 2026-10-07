@@ -8,10 +8,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { DriverAccessError, requireDriverSession, type DriverSession } from "../driver/server";
 import { loadOperatorProfile } from "../driver/operatorTimeZone";
+import { acceptRecordedTime } from "../pod/recordedTime";
+import type { QueuedMeta } from "../pod/queuedMeta";
 import { operatorDayInTimeZone } from "../time";
 import { activeCatalogue } from "./catalogue";
 import type { DriverDefectView, DriverShiftState } from "./driverState";
-import { jobGateDecision, type JobGateInput } from "./jobGate";
+import { jobGateDecision, jobGateDecisionAt, type JobGateInput } from "./jobGate";
 import { dangerReason } from "./severity";
 import type { CatalogueItem, CheckResult, ObjectionStatus, Severity, SeveritySource } from "./types";
 
@@ -188,10 +190,16 @@ export async function loadJobGateInput(admin: SupabaseClient, session: DriverSes
   };
 }
 
+/** Answered with 503 when the gate cannot be judged, so the offline queue retries it. */
+const GATE_UNAVAILABLE_MESSAGE = "Walkaround checks are not available right now, so jobs cannot be completed. Ask the office.";
+
 /**
   The job gate for stop completion and POD routes. Returns a 409 response when
   the driver may not work, or null. FAILS CLOSED: if the shift tables are
-  missing (SQL not applied yet) or a lookup fails, the driver is refused.
+  missing (SQL not applied yet) or a lookup fails, the driver is refused with
+  a 503, not a 409: the offline queue retries a 503 with backoff (and sets it
+  aside after repeated failures) instead of deleting a queued POD over a
+  database blip. Genuine gate refusals stay 409.
 */
 export async function jobGateResponse(admin: SupabaseClient, session: DriverSession): Promise<NextResponse | null> {
   if (session.portalType !== "direct_driver") return null;
@@ -200,10 +208,131 @@ export async function jobGateResponse(admin: SupabaseClient, session: DriverSess
     input = await loadJobGateInput(admin, session);
   } catch (error) {
     console.error("[walkaround] job gate lookup failed", error);
-    return NextResponse.json({ error: "Walkaround checks are not available right now, so jobs cannot be completed. Ask the office." }, { status: 409 });
+    return NextResponse.json({ error: GATE_UNAVAILABLE_MESSAGE }, { status: 503 });
   }
   const decision = jobGateDecision(input);
   return decision.ok ? null : NextResponse.json({ error: decision.message }, { status: 409 });
+}
+
+/** The named shift's bounds, for jobGateDecisionAt. Null when this driver has no shift with that client id. */
+async function loadGateRowsAt(
+  admin: SupabaseClient,
+  session: DriverSession,
+  shiftClientId: string,
+): Promise<{ shift: { id: string; startedAt: string; endedAt: string | null } | null }> {
+  const { data, error } = await admin
+    .from("driver_shifts")
+    .select("id,started_at,ended_at")
+    .eq("tenant_id", session.tenantId)
+    .eq("driver_id", session.driverId)
+    .eq("client_id", shiftClientId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return { shift: null };
+  return { shift: { id: String(data.id), startedAt: String(data.started_at), endedAt: data.ended_at ? String(data.ended_at) : null } };
+}
+
+/**
+  The vehicle period of `shiftId` whose [started_at, ended_at) contains `at`,
+  with its check result and (if still open) VOR. The check and vehicle
+  lookups are pinned to the session's tenant (the vehicle also by the company
+  id, which legacy rows carry in tenant_id, the same rule as the shifts_04
+  RPCs). A check from elsewhere reads as no check and refuses; an open
+  period's vehicle that is not in this fleet throws, so the gate answers 503
+  rather than reading "not VOR" from a missing row.
+*/
+async function loadPeriodAt(admin: SupabaseClient, tenantId: string, shiftId: string, at: string) {
+  const { data, error } = await admin
+    .from("shift_vehicle_periods")
+    .select("vehicle_id,walkaround_check_id,started_at,ended_at")
+    .eq("shift_id", shiftId)
+    .lte("started_at", at)
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  if (data.ended_at && Date.parse(String(data.ended_at)) <= Date.parse(at)) return null;
+
+  const open = !data.ended_at;
+  const [check, vehicle] = await Promise.all([
+    admin.from("walkaround_checks").select("result").eq("id", data.walkaround_check_id).eq("tenant_id", tenantId).maybeSingle(),
+    open ? loadFleetVehicleVor(admin, tenantId, String(data.vehicle_id)) : Promise.resolve(false),
+  ]);
+  if (check.error) throw new Error(check.error.message);
+  return {
+    checkResult: (check.data?.result as CheckResult | undefined) ?? null,
+    open,
+    vehicleVor: vehicle,
+  };
+}
+
+async function loadFleetVehicleVor(admin: SupabaseClient, tenantId: string, vehicleId: string): Promise<boolean> {
+  const { data: tenant, error: tenantError } = await admin.from("tenants").select("company_id").eq("id", tenantId).maybeSingle();
+  if (tenantError) throw new Error(tenantError.message);
+  const keys = [...new Set([tenantId, tenant?.company_id ? String(tenant.company_id) : null].filter((v): v is string => Boolean(v)))];
+  const { data, error } = await admin.from("vehicles").select("vor").eq("id", vehicleId).in("tenant_id", keys).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("The shift's vehicle is not in this tenant's fleet.");
+  return data.vor === true;
+}
+
+export type QueuedGateResult = {
+  /** A 409 refusal, a 503 when the gate could not be judged, or null when the driver may proceed. */
+  response: NextResponse | null;
+  /** The time to record: the phone's when trusted, otherwise the server's. */
+  at: string;
+  trusted: boolean;
+};
+
+/**
+  The job gate for a request from the offline queue. Trusted recorded time:
+  the gate is judged at that time against the shift the item names. Untrusted
+  time, or no shift client id: today's open-shift rule, at server time.
+  `notBefore` (the job's created_at) bounds the recorded time from below for
+  every driver, so a POD cannot be dated before its job existed.
+  FAILS CLOSED like jobGateResponse: a lookup failure answers 503 (retryable).
+*/
+export async function queuedJobGate(
+  admin: SupabaseClient,
+  session: DriverSession,
+  meta: QueuedMeta,
+  options: { notBefore?: string | null; now?: Date } = {},
+): Promise<QueuedGateResult> {
+  const now = options.now ?? new Date();
+  const notBefore = options.notBefore ?? null;
+  const refuse = (message: string): QueuedGateResult => ({
+    response: NextResponse.json({ error: message }, { status: 409 }),
+    at: now.toISOString(),
+    trusted: false,
+  });
+
+  if (session.portalType !== "direct_driver") {
+    const time = acceptRecordedTime({ recordedAt: meta.recordedAt, serverNow: now, shift: null, notBefore });
+    return { response: null, ...time };
+  }
+
+  try {
+    if (meta.shiftClientId) {
+      const { shift } = await loadGateRowsAt(admin, session, meta.shiftClientId);
+      const time = acceptRecordedTime({ recordedAt: meta.recordedAt, serverNow: now, shift, notBefore });
+      if (shift && time.trusted) {
+        const periodAt = await loadPeriodAt(admin, session.tenantId, shift.id, time.at);
+        const decision = jobGateDecisionAt({ portalType: session.portalType, shift, periodAt });
+        return decision.ok ? { response: null, ...time } : refuse(decision.message);
+      }
+    }
+  } catch (error) {
+    console.error("[walkaround] queued job gate lookup failed", error);
+    return {
+      response: NextResponse.json({ error: GATE_UNAVAILABLE_MESSAGE }, { status: 503 }),
+      at: now.toISOString(),
+      trusted: false,
+    };
+  }
+
+  const current = await jobGateResponse(admin, session);
+  return { response: current, at: now.toISOString(), trusted: false };
 }
 
 type DefectRow = {

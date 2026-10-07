@@ -20,7 +20,8 @@
    those three steps.
 
    WHAT IS STILL NOT LISTED, and why: the two share-token pages
-   (/pod/share/[token], /quotation/share/[token]) and /driver/jobs/[jobId] are
+   (/pod/share/[token], /quotation/share/[token]), the customer tracking page
+   (/track/[token]) and /driver/jobs/[jobId] are
    customer- and driver-facing pages outside the console shell, styled with a
    fixed light palette on purpose. They are not "legacy" in the sense this file
    used to mean; do not add them without deciding that a recipient opening a

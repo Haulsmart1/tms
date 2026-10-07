@@ -36,6 +36,8 @@ export type DriverShift = {
   rejected: RejectedItem[];
   /** Set when sending has paused because the session has gone. */
   paused: string | null;
+  /** The phone cannot store queued items (IndexedDB refused): keep the page open. */
+  memoryOnly: boolean;
   reload: () => Promise<void>;
   /** Queue an event. The caller sets clientId (crypto.randomUUID()) and occurredAt. */
   submit: (event: DriverEvent) => Promise<void>;
@@ -107,6 +109,7 @@ export function useDriverShift(): DriverShift {
     heldForOthers: queue.heldForOthers,
     rejected: queue.rejected,
     paused: queue.paused,
+    memoryOnly: queue.memoryOnly,
     reload,
     submit: enqueueEvent,
     submitPhoto: enqueuePhoto,

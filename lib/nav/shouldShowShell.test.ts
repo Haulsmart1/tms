@@ -29,6 +29,16 @@ describe("shouldShowShell", () => {
     expect(shouldShowShell("/legal", "loading")).toBe(false);
   });
 
+  /* A customer tracking link is a public page with a fixed light palette.
+     A signed-in office user previewing the link they just sent must see what
+     the customer sees, not the console sidebar around it. /tracking (the
+     console page) is a different route and keeps the shell. */
+  it("hides on a /track/[token] page regardless of status, but not on /tracking", () => {
+    expect(shouldShowShell("/track/trk_abc", "ready")).toBe(false);
+    expect(shouldShowShell("/track/trk_abc", "loading")).toBe(false);
+    expect(shouldShowShell("/tracking", "ready")).toBe(true);
+  });
+
   it("hides on every /super-admin/* route regardless of status", () => {
     expect(shouldShowShell("/super-admin", "ready")).toBe(false);
     expect(shouldShowShell("/super-admin/billing", "ready")).toBe(false);

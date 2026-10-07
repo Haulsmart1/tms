@@ -36,6 +36,14 @@ export const RATE_LIMITS = {
   documentEmailPerTenant: { bucket: "doc-email:tenant", windowSeconds: 86400, max: 500 },
   invitePerUser: { bucket: "invite:user", windowSeconds: 3600, max: 30 },
   podSharePdfPerIp: { bucket: "pod-share-pdf:ip", windowSeconds: 600, max: 60 },
+  /* Public tracking page JSON (GET /api/public/track/[token]). The page polls
+     every 60 seconds, so 120 per 10 minutes per IP allows a dozen open tabs
+     behind one office NAT while capping anonymous scraping. */
+  trackingViewPerIp: { bucket: "tracking-view:ip", windowSeconds: 600, max: 120 },
+  /* Minting tracking links (POST /api/tracking-links), per signed-in user.
+     Each call stores a live link row; 120 an hour covers a busy dispatcher
+     sending one per drop and stops a loop filling the table. */
+  trackingMintPerUser: { bucket: "tracking-mint:user", windowSeconds: 3600, max: 120 },
   tomtomPerUser: { bucket: "tomtom:user", windowSeconds: 60, max: 120 },
   /* Added by review PLAN-13: counts stops that need upstream geocoding (each
      can cost several TomTom calls), not incoming requests. */

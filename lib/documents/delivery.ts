@@ -7,7 +7,8 @@ type DeliveryDocumentType =
   | "pod"
   | "statement"
   | "purchase_order"
-  | "chase_letter";
+  | "chase_letter"
+  | "tracking_link";
 
 type DeliveryAdminClient = {
   from(table: string): any;

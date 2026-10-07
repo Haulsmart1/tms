@@ -8,16 +8,31 @@ import {
   use,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
-import { createClient } from "../../../../lib/supabase/browser";
 import {
   errorFromBody,
   readJsonSafe,
-  uploadEvidenceViaSignedUrl,
 } from "../../../../lib/pod/uploadClient";
-import { flushDriverQueue } from "../../driverQueue";
+import { checkQueuedCompletion } from "../../../../lib/driver/offlinePod";
+import {
+  MEMORY_ONLY_MESSAGE,
+  pendingPodByStop,
+  type PendingPod,
+} from "../../../../lib/offline/driverSync";
+import { JOB_GATE_MESSAGES } from "../../../../lib/walkaround/jobGate";
+import {
+  dismissRejected,
+  enqueuePodComplete,
+  enqueuePodPhoto,
+  getQueueSnapshot,
+  getServerQueueSnapshot,
+  subscribe,
+} from "../../driverQueue";
+import { useDriverShift } from "../../useDriverShift";
 
 type PodEvidence = {
   id: string;
@@ -86,8 +101,6 @@ type Job = {
   stops: Stop[];
 };
 
-const POD_BUCKET = "pod-files";
-
 export default function DriverJobPage({
   params,
 }: {
@@ -111,8 +124,14 @@ export default function DriverJobPage({
      A refresh now keeps the job on screen and updates it in place. */
   const hasJob = useRef(false);
 
+  /* Only the latest request may update the page: reads overlap (a send, a
+     reconnect), and an older answer landing last would show stale stops. */
+  const loadSeq = useRef(0);
+
   const loadJob =
     useCallback(async () => {
+      const mine = ++loadSeq.current;
+
       if (!hasJob.current) {
         setLoading(true);
       }
@@ -128,6 +147,10 @@ export default function DriverJobPage({
 
         const body =
           await readJsonSafe(response);
+
+        if (mine !== loadSeq.current) {
+          return;
+        }
 
         if (
           !response.ok ||
@@ -146,6 +169,10 @@ export default function DriverJobPage({
         hasJob.current = true;
         setMessage("");
       } catch (error) {
+        if (mine !== loadSeq.current) {
+          return;
+        }
+
         if (!hasJob.current) {
           setJob(null);
         }
@@ -156,13 +183,96 @@ export default function DriverJobPage({
             : "Unable to load this job.",
         );
       } finally {
-        setLoading(false);
+        if (mine === loadSeq.current) {
+          setLoading(false);
+        }
       }
     }, [jobId]);
 
   useEffect(() => {
     void loadJob();
   }, [loadJob]);
+
+  /* Offline POD: photos, scans and completions go through the driver queue
+     (app/driver/driverQueue.ts). These hooks sit above the early returns
+     below because hooks cannot be conditional. */
+  const queue = useSyncExternalStore(
+    subscribe,
+    getQueueSnapshot,
+    getServerQueueSnapshot,
+  );
+
+  const shift = useDriverShift();
+
+  const pendingByStop = useMemo(
+    () => pendingPodByStop(queue.pending, jobId),
+    [queue.pending, jobId],
+  );
+
+  // Scans queued for any stop of this job: they count as verified everywhere.
+  const allPendingScans = useMemo(
+    () =>
+      [...pendingByStop.values()].flatMap(
+        (p) => p.scans,
+      ),
+    [pendingByStop],
+  );
+
+  const jobRejections = useMemo(
+    () => queue.rejected.filter((r) => r.jobId === jobId),
+    [queue.rejected, jobId],
+  );
+
+  const shiftClientId =
+    shift.state?.openShift?.clientId ?? null;
+
+  /* Refuse at the doorstep what the server's walkaround gate would refuse:
+     shifts apply to this driver and the phone's own view says no shift is
+     open. With no view yet (still loading, or offline with nothing known)
+     the item is queued and the server decides. */
+  const gateMessage =
+    !shift.forbidden &&
+    shift.state &&
+    !shift.state.openShift
+      ? JOB_GATE_MESSAGES.noShift
+      : null;
+
+  // Re-read the job once queued POD items for it have been sent (or refused).
+  const pendingForJob = useMemo(
+    () =>
+      [...pendingByStop.values()].reduce(
+        (n, p) => n + p.photos + p.scans.length + (p.completion ? 1 : 0),
+        0,
+      ),
+    [pendingByStop],
+  );
+
+  const lastPending = useRef(pendingForJob);
+
+  const [sendTick, setSendTick] =
+    useState(0);
+
+  useEffect(() => {
+    if (pendingForJob < lastPending.current) {
+      setSendTick((tick) => tick + 1);
+    }
+
+    lastPending.current = pendingForJob;
+  }, [pendingForJob]);
+
+  useEffect(() => {
+    if (sendTick === 0) {
+      return;
+    }
+
+    // Debounced, so a burst of sends costs one request.
+    const timer = setTimeout(
+      () => void loadJob(),
+      600,
+    );
+
+    return () => clearTimeout(timer);
+  }, [sendTick, loadJob]);
 
   if (loading && !job) {
     return (
@@ -214,6 +324,62 @@ export default function DriverJobPage({
             {message}
           </div>
         ) : null}
+
+        {queue.memoryOnly &&
+        queue.pending.length > 0 ? (
+          <div
+            role="alert"
+            className="mt-2 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-900"
+          >
+            {MEMORY_ONLY_MESSAGE}
+          </div>
+        ) : null}
+
+        {queue.paused &&
+        queue.pending.length > 0 ? (
+          <div
+            role="alert"
+            className="mt-2 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-900"
+          >
+            {queue.paused}{" "}
+            <Link
+              href={`/login?next=${encodeURIComponent(`/driver/jobs/${jobId}`)}`}
+              className="underline"
+            >
+              Sign in
+            </Link>
+          </div>
+        ) : null}
+
+        {jobRejections.map((r) => {
+          const refusedStop = job.stops.find(
+            (s) => s.id === r.stopId,
+          );
+
+          return (
+            <div
+              key={r.id}
+              role="alert"
+              className="mt-2 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-900"
+            >
+              Not sent, tell the office
+              {refusedStop
+                ? ` (stop ${refusedStop.stop_order})`
+                : ""}
+              : {r.message}
+              <button
+                type="button"
+                aria-label={`Dismiss${refusedStop ? ` stop ${refusedStop.stop_order}` : ""}: ${r.message}`}
+                className="ml-2 min-h-11 px-2 underline"
+                onClick={() =>
+                  dismissRejected(r.id)
+                }
+              >
+                Dismiss
+              </button>
+            </div>
+          );
+        })}
 
         <section className="mt-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -290,7 +456,23 @@ export default function DriverJobPage({
                   stop={stop}
                   items={job.items}
                   scans={job.scans}
-                  onChanged={loadJob}
+                  pending={
+                    pendingByStop.get(stop.id) ??
+                    null
+                  }
+                  allStops={job.stops}
+                  allPending={pendingByStop}
+                  allPendingScans={allPendingScans}
+                  paused={queue.paused}
+                  onReload={loadJob}
+                  shiftClientId={shiftClientId}
+                  gateMessage={gateMessage}
+                  refusedCount={
+                    jobRejections.filter(
+                      (r) =>
+                        r.stopId === stop.id,
+                    ).length
+                  }
                 />
               ),
             )}
@@ -312,13 +494,35 @@ function StopCard({
   stop,
   items,
   scans,
-  onChanged,
+  pending,
+  allStops,
+  allPending,
+  shiftClientId,
+  gateMessage,
+  refusedCount,
+  allPendingScans,
+  paused,
+  onReload,
 }: {
   jobId: string;
   stop: Stop;
   items: JobItem[];
   scans: JobItemScan[];
-  onChanged: () => Promise<void>;
+  /** This stop's POD items still queued on the phone. */
+  pending: PendingPod | null;
+  allStops: Stop[];
+  /** Queued POD items for every stop of this job. */
+  allPending: Map<string, PendingPod>;
+  shiftClientId: string | null;
+  /** Set when the walkaround gate would refuse a POD (no open shift). */
+  gateMessage: string | null;
+  /** Refused queue items for this stop still listed at the top of the page. */
+  refusedCount: number;
+  /** Scans queued for any stop of this job. */
+  allPendingScans: { job_item_id: string; serial_number: string }[];
+  /** Set when the queue has stopped sending (session gone). */
+  paused: string | null;
+  onReload: () => Promise<void>;
 }) {
   const isCollection =
     stop.type === "collection";
@@ -328,6 +532,80 @@ function StopCard({
 
   const delivered =
     stop.pod_status === "delivered";
+
+  const queuedCompletion =
+    Boolean(pending?.completion);
+
+  /* Once the queue has sent the completion it leaves the queue, but the job
+     is only re-read a moment later. Keep the form hidden in that gap so a
+     second tap cannot queue a completion the server would refuse. A refused
+     completion adds a refusal for this stop, and then the form comes back. */
+  const [handedOff, setHandedOff] =
+    useState(false);
+
+  const wasQueued = useRef(false);
+
+  const refusedWhileQueued =
+    useRef(refusedCount);
+
+  useEffect(() => {
+    if (queuedCompletion) {
+      wasQueued.current = true;
+      refusedWhileQueued.current =
+        refusedCount;
+      return;
+    }
+
+    if (wasQueued.current) {
+      wasQueued.current = false;
+
+      if (
+        refusedCount <=
+        refusedWhileQueued.current
+      ) {
+        setHandedOff(true);
+      }
+    }
+  }, [queuedCompletion, refusedCount]);
+
+  // Cleared only once the server reports the stop delivered, so a stale or
+  // failed read can never reopen the form.
+  useEffect(() => {
+    if (delivered) {
+      setHandedOff(false);
+    }
+  }, [delivered]);
+
+  // If the read after the send failed (signal dropped), read again on reconnect.
+  useEffect(() => {
+    if (!handedOff || delivered) {
+      return;
+    }
+
+    const retry = () => void onReload();
+
+    window.addEventListener("online", retry);
+
+    return () =>
+      window.removeEventListener(
+        "online",
+        retry,
+      );
+  }, [handedOff, delivered, onReload]);
+
+  // A success note is stale once the stop is delivered or something for it was refused.
+  useEffect(() => {
+    if (delivered || refusedCount > 0) {
+      setMessage("");
+    }
+  }, [delivered, refusedCount]);
+
+  const waitingToSend =
+    !delivered &&
+    (queuedCompletion || handedOff);
+
+  const queuedPhotos =
+    pending?.photos ?? 0;
 
   const [recipientName, setRecipientName] =
     useState(
@@ -380,9 +658,6 @@ function StopCard({
   const navigationUrl =
     `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`;
 
-  const stopEndpoint =
-    `/api/driver/jobs/${encodeURIComponent(jobId)}/stops/${encodeURIComponent(stop.id)}`;
-
   async function uploadPhoto(
     event:
       ChangeEvent<HTMLInputElement>,
@@ -396,46 +671,41 @@ function StopCard({
       return;
     }
 
+    if (gateMessage) {
+      setMessage("");
+      setError(gateMessage);
+      return;
+    }
+
     setBusy(true);
     setError("");
     setMessage("");
 
     try {
-      // Send any queued shift or walkaround check first, so a check done with
-      // no signal does not block the first delivery. If some are still
-      // queued, carry on: the server gate answers with a clear message.
-      await flushDriverQueue();
-
-      // Shrink large camera photos on the phone, then send the bytes straight
-      // to storage with a server-issued signed URL (review POD-2).
+      // Shrunk on the phone, then queued: it is sent now if there is signal,
+      // or when signal returns. Queued shift events ahead of it go first.
       const photo =
         await preparePodPhoto(file);
 
-      await uploadEvidenceViaSignedUrl({
-        fetchImpl: fetch,
-        storage:
-          createClient().storage.from(
-            POD_BUCKET,
-          ),
-        uploadUrlEndpoint:
-          `${stopEndpoint}/evidence/upload-url`,
-        recordEndpoint:
-          `${stopEndpoint}/evidence`,
-        file: photo.blob,
-        filename: photo.filename,
+      await enqueuePodPhoto({
+        jobId,
+        stopId: stop.id,
+        shiftClientId,
+        blob: photo.blob,
         mimeType: photo.mimeType,
+        filename: photo.filename,
       });
 
       setMessage(
-        "POD photo uploaded.",
+        paused
+          ? `POD photo saved. ${paused}`
+          : "POD photo saved. It will send automatically.",
       );
-
-      await onChanged();
     } catch (uploadError) {
       setError(
         uploadError instanceof Error
           ? uploadError.message
-          : "Unable to upload POD photo.",
+          : "Unable to save POD photo.",
       );
     } finally {
       setBusy(false);
@@ -443,55 +713,70 @@ function StopCard({
   }
 
   async function completeDelivery() {
+    if (gateMessage) {
+      setMessage("");
+      setError(gateMessage);
+      return;
+    }
+
     setBusy(true);
     setError("");
     setMessage("");
 
     try {
-      // Queued shift and walkaround events go first (see uploadPhoto).
-      await flushDriverQueue();
+      // The doorstep checks the server runs, with queued photos and scans
+      // counted as if they had already been sent.
+      const verified = [
+        ...scans,
+        ...allPendingScans,
+      ];
 
-      const response =
-        await fetch(
-          `${stopEndpoint}/complete`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-            body: JSON.stringify({
-              recipient_name:
-                recipientName,
-              pod_notes:
-                podNotes,
-            }),
-          },
-        );
+      const otherOutstandingDeliveryStops =
+        allStops.filter(
+          (s) =>
+            s.type === "delivery" &&
+            s.id !== stop.id &&
+            s.pod_status !== "delivered" &&
+            !allPending.get(s.id)?.completion,
+        ).length;
 
-      const body =
-        await readJsonSafe(response);
+      const check =
+        checkQueuedCompletion({
+          recipientName,
+          podNotes,
+          evidenceCount:
+            stop.evidence.length +
+            queuedPhotos,
+          legacyPhotoUrl:
+            stop.pod_photo_url,
+          items,
+          verified,
+          otherOutstandingDeliveryStops,
+        });
 
-      if (!response.ok) {
-        throw new Error(
-          errorFromBody(
-            body,
-            response.status,
-            "Unable to complete delivery.",
-          ),
-        );
+      if (!check.ok) {
+        setError(check.message);
+        return;
       }
 
-      setMessage(
-        "Delivery completed.",
-      );
+      await enqueuePodComplete({
+        jobId,
+        stopId: stop.id,
+        shiftClientId,
+        recipientName,
+        podNotes,
+      });
 
-      await onChanged();
+      setMessage(
+        paused
+          ? `Delivery saved. ${paused}`
+          : "Delivery saved. It will send automatically.",
+      );
     } catch (completeError) {
       setError(
         completeError instanceof Error
           ? completeError.message
-          : "Unable to complete delivery.",
+          : "Unable to save delivery.",
       );
     } finally {
       setBusy(false);
@@ -576,13 +861,26 @@ function StopCard({
         </div>
 
         {/* Scans are taken at delivery stops that are still open (review POD-20). */}
-        {isDelivery && !delivered ? (
+        {refusedCount > 0 ? (
+          <div
+            role="alert"
+            className="mt-4 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-900"
+          >
+            {refusedCount === 1
+              ? "1 item for this stop was not sent."
+              : `${refusedCount} items for this stop were not sent.`}{" "}
+            See the top of the page and tell the office.
+          </div>
+        ) : null}
+
+        {isDelivery && !delivered && !waitingToSend ? (
           <BarcodeVerification
             jobId={jobId}
             stopId={stop.id}
             items={items}
             scans={scans}
-            onChanged={onChanged}
+            allPendingScans={allPendingScans}
+            paused={paused}
           />
         ) : null}
 
@@ -617,6 +915,37 @@ function StopCard({
                     stop.delivered_at,
                   )}
                 </div>
+              </div>
+            ) : waitingToSend ? (
+              <div
+                role="status"
+                className="mt-3 rounded-xl bg-amber-50 p-4 text-sm font-bold text-amber-900"
+              >
+                {queuedCompletion ? (
+                  <>
+                    Delivered, waiting to send
+                    {queuedPhotos
+                      ? ` (${queuedPhotos} photo${queuedPhotos === 1 ? "" : "s"} queued)`
+                      : ""}
+                    . It will send automatically when you have signal.
+                  </>
+                ) : (
+                  <>
+                    Delivered and sent.
+                    <div className="mt-1 font-normal">
+                      Updating... If this does not change, reload the page.
+                    </div>
+                  </>
+                )}
+
+                {pending?.completion ? (
+                  <div className="mt-2 font-normal">
+                    Recipient:{" "}
+                    {pending.completion
+                      .recipientName ||
+                      "Not recorded"}
+                  </div>
+                ) : null}
               </div>
             ) : (
               <>
@@ -760,11 +1089,22 @@ function StopCard({
                 <div className="mt-2 rounded-xl bg-slate-50 p-3 text-sm">
                   Legacy POD photo recorded
                 </div>
-              ) : (
+              ) : queuedPhotos === 0 ? (
                 <div className="mt-2 text-sm text-slate-500">
                   No POD photo uploaded yet.
                 </div>
-              )}
+              ) : null}
+
+              {queuedPhotos > 0 &&
+              !waitingToSend ? (
+                <div className="mt-2 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-900">
+                  {queuedPhotos} photo
+                  {queuedPhotos === 1
+                    ? ""
+                    : "s"}{" "}
+                  waiting to send
+                </div>
+              ) : null}
             </div>
 
             {message ? (

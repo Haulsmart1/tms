@@ -7,6 +7,11 @@ import {
   orphanedPhotoIds,
   partitionByOwner,
   pendingEvents,
+  parsePodUploadStart,
+  pendingPodByStop,
+  podUploadErrorIsAlreadyStored,
+  podUploadErrorOutcome,
+  POD_PHOTO_NOT_STORABLE_MESSAGE,
   photoOutcome,
   PHOTO_UNMATCHED_AFTER,
   SIGN_IN_AGAIN_MESSAGE,
@@ -171,5 +176,134 @@ describe("withoutQrPayload", () => {
   it("returns other events unchanged", () => {
     const ended: DriverEvent = { type: "break_started", clientId: "b1", occurredAt: "2026-09-29T09:00:00Z", shiftClientId: "c1" };
     expect(withoutQrPayload(ended)).toBe(ended);
+  });
+});
+
+describe("pendingPodByStop", () => {
+  const item = (id: string, payload: DriverQueuePayload): QueueItem<DriverQueuePayload> => ({
+    id,
+    payload,
+    attempts: 0,
+    serverFailures: 0,
+    nextAttemptAt: 0,
+    lastError: null,
+  });
+  const base = { ownerId: "u1", jobId: "j1", shiftClientId: null, recordedAt: "2026-10-07T10:00:00.000Z" };
+  const blob = new Blob(["x"]);
+
+  it("groups photos, scans and the completion per stop for one job", () => {
+    const queue = [
+      item("p1", { kind: "pod_photo", ...base, clientId: "p1", stopId: "s1", blob, mimeType: "image/jpeg", filename: "a.jpg" }),
+      item("c1", { kind: "pod_scan", ownerId: "u1", clientId: "c1", jobId: "j1", stopId: "s1", jobItemId: "i1", serialNumber: "SN1", scanFormat: "manual" }),
+      item("d1", { kind: "pod_complete", ...base, clientId: "d1", stopId: "s1", recipientName: "Pat", podNotes: "" }),
+      item("p2", { kind: "pod_photo", ...base, clientId: "p2", stopId: "s2", blob, mimeType: "image/jpeg", filename: "b.jpg" }),
+      item("other", { kind: "pod_photo", ...base, jobId: "j2", clientId: "other", stopId: "s9", blob, mimeType: "image/jpeg", filename: "c.jpg" }),
+    ];
+
+    const result = pendingPodByStop(queue, "j1");
+
+    expect(result.get("s1")).toEqual({
+      photos: 1,
+      scans: [{ job_item_id: "i1", serial_number: "SN1" }],
+      completion: { recipientName: "Pat", podNotes: "", recordedAt: base.recordedAt },
+    });
+    expect(result.get("s2")).toEqual({ photos: 1, scans: [], completion: null });
+    expect(result.has("s9")).toBe(false);
+  });
+
+  it("ignores shift events and defect photos", () => {
+    const queue = [item("x", { kind: "photo", ownerId: "u1", defectClientId: "d", blob, mimeType: "image/jpeg", filename: "a.jpg" })];
+    expect(pendingPodByStop(queue, "j1").size).toBe(0);
+  });
+});
+
+describe("parsePodUploadStart", () => {
+  it("reads a path and token", () => {
+    expect(parsePodUploadStart({ ok: true, path: "t/j/s/a.jpg", token: "tok" })).toEqual({ path: "t/j/s/a.jpg", token: "tok" });
+  });
+
+  it("reads a null token as already stored", () => {
+    expect(parsePodUploadStart({ ok: true, path: "t/j/s/a.jpg", token: null })).toEqual({ path: "t/j/s/a.jpg", token: null });
+  });
+
+  it("refuses anything else so the runner retries", () => {
+    expect(parsePodUploadStart({ ok: true, path: "", token: "tok" })).toBeNull();
+    expect(parsePodUploadStart({ ok: true, token: "tok" })).toBeNull();
+    expect(parsePodUploadStart({ ok: true, path: "p" })).toBeNull();
+    expect(parsePodUploadStart({ ok: true, path: "p", token: 7 })).toBeNull();
+    expect(parsePodUploadStart(null)).toBeNull();
+    expect(parsePodUploadStart("x")).toBeNull();
+  });
+});
+
+describe("podUploadErrorIsAlreadyStored", () => {
+  /* The shape storage-js gives a StorageApiError: an HTTP status number and a statusCode string. */
+  const apiError = (message: string, status: number, statusCode: string) =>
+    Object.assign(new Error(message), { __isStorageError: true, name: "StorageApiError", status, statusCode });
+
+  it("accepts a 409 HTTP status", () => {
+    expect(podUploadErrorIsAlreadyStored(apiError("Conflict", 409, "409"))).toBe(true);
+    expect(podUploadErrorIsAlreadyStored({ status: 409 })).toBe(true);
+  });
+
+  it("accepts a \"409\" statusCode string under another HTTP status", () => {
+    expect(podUploadErrorIsAlreadyStored(apiError("Conflict", 400, "409"))).toBe(true);
+    expect(podUploadErrorIsAlreadyStored({ statusCode: "409" })).toBe(true);
+  });
+
+  it("accepts the storage service's already-exists message", () => {
+    expect(podUploadErrorIsAlreadyStored(apiError("The resource already exists", 400, "400"))).toBe(true);
+  });
+
+  it("accepts a Duplicate message or code", () => {
+    expect(podUploadErrorIsAlreadyStored(new Error("Duplicate"))).toBe(true);
+    expect(podUploadErrorIsAlreadyStored(apiError("Conflict", 400, "Duplicate"))).toBe(true);
+  });
+
+  it("refuses an unrelated error", () => {
+    expect(podUploadErrorIsAlreadyStored(apiError("Payload too large", 413, "413"))).toBe(false);
+    expect(podUploadErrorIsAlreadyStored(new TypeError("Failed to fetch"))).toBe(false);
+    expect(podUploadErrorIsAlreadyStored(null)).toBe(false);
+    expect(podUploadErrorIsAlreadyStored("409")).toBe(false);
+  });
+});
+
+describe("podUploadErrorOutcome", () => {
+  const apiError = (message: string, status: number, statusCode: string) =>
+    Object.assign(new Error(message), { __isStorageError: true, name: "StorageApiError", status, statusCode });
+
+  it("proceeds when the object is already stored", () => {
+    expect(podUploadErrorOutcome(apiError("The resource already exists", 400, "409"))).toBe("already_stored");
+  });
+
+  it("retries with no status when there was no HTTP answer", () => {
+    expect(podUploadErrorOutcome(new TypeError("Failed to fetch"))).toEqual({ kind: "retry", error: "The photo upload did not complete.", status: null });
+    expect(podUploadErrorOutcome(null)).toMatchObject({ kind: "retry", status: null });
+  });
+
+  it("retries 408, 425, 429 and 5xx with their status so 5xx counts toward set-aside", () => {
+    for (const status of [408, 425, 429, 500, 503]) {
+      expect(podUploadErrorOutcome(apiError("Busy", status, String(status)))).toEqual({
+        kind: "retry",
+        error: "The photo upload did not complete.",
+        status,
+      });
+    }
+  });
+
+  it("falls back to a numeric-looking statusCode", () => {
+    expect(podUploadErrorOutcome({ message: "Busy", statusCode: "502" })).toMatchObject({ kind: "retry", status: 502 });
+    expect(podUploadErrorOutcome({ message: "Too big", statusCode: "413" })).toEqual({ kind: "rejected", error: POD_PHOTO_NOT_STORABLE_MESSAGE });
+  });
+
+  it("refuses any other 4xx with a message for the driver", () => {
+    for (const status of [400, 413, 415]) {
+      expect(podUploadErrorOutcome(apiError("Nope", status, String(status)))).toEqual({ kind: "rejected", error: POD_PHOTO_NOT_STORABLE_MESSAGE });
+    }
+  });
+
+  it("refuses a 401 or 403 from storage rather than pausing: the signed token, not the session, was refused", () => {
+    expect(podUploadErrorOutcome(apiError("Unauthorized", 401, "401"))).toEqual({ kind: "rejected", error: POD_PHOTO_NOT_STORABLE_MESSAGE });
+    expect(podUploadErrorOutcome(apiError("Forbidden", 403, "403"))).toEqual({ kind: "rejected", error: POD_PHOTO_NOT_STORABLE_MESSAGE });
   });
 });

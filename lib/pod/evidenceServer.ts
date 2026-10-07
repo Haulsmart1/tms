@@ -5,24 +5,67 @@
 
 import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { buildPodEvidencePath, type PodEvidenceFolder, type PodEvidenceOwner } from "./evidencePath";
+import { buildPodEvidencePath, buildQueuedPodEvidencePath, type PodEvidenceFolder, type PodEvidenceOwner } from "./evidencePath";
 import { POD_BUCKET } from "./podUrl";
 import { MAX_POD_EVIDENCE_BYTES, validateEvidenceContent, type EvidenceCheck } from "./evidenceRules";
 
 export const POD_EVIDENCE_SELECT =
   "id,tenant_id,job_id,stop_id,evidence_type,storage_path,original_filename,mime_type,file_size_bytes,created_by,created_at";
 
+/** The pod_evidence row at exactly this storage path in this tenant, or null. Throws on a failed lookup. */
+export async function findEvidenceByPath(admin: SupabaseClient, tenantId: string, path: string) {
+  const { data, error } = await admin
+    .from("pod_evidence")
+    .select(POD_EVIDENCE_SELECT)
+    .eq("tenant_id", tenantId)
+    .eq("storage_path", path)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
 export async function createEvidenceUploadUrl(
   admin: SupabaseClient,
   owner: PodEvidenceOwner,
   folder: PodEvidenceFolder,
   filename: string | null | undefined,
-): Promise<{ path: string; token: string }> {
-  const path = buildPodEvidencePath({ ...owner, folder, filename, timestamp: Date.now(), random: randomUUID() });
-  const { data, error } = await admin.storage.from(POD_BUCKET).createSignedUploadUrl(path);
-  if (error || !data?.token) {
-    throw new Error(`Unable to prepare upload: ${error?.message ?? "no token"}`);
+  options: { clientId?: string | null } = {},
+): Promise<{ path: string; token: string | null }> {
+  if (!options.clientId) {
+    const path = buildPodEvidencePath({ ...owner, folder, filename, timestamp: Date.now(), random: randomUUID() });
+    const { data, error } = await admin.storage.from(POD_BUCKET).createSignedUploadUrl(path);
+    if (error || !data?.token) {
+      throw new Error(`Unable to prepare upload: ${error?.message ?? "no token"}`);
+    }
+    return { path, token: data.token };
   }
+
+  // A queued photo has a path derived from its client id, so a retry after a
+  // lost answer targets the same object. There is deliberately NO upsert: an
+  // upsert token would let a recorded, verified POD photo be swapped for
+  // unchecked bytes, even after delivery. Instead a retry whose object is
+  // already stored (a row exists, or storage says it exists) gets token null
+  // and the caller skips the upload and goes straight to recording.
+  if (folder !== "photos") throw new Error("Queued evidence is photos only.");
+  const path = buildQueuedPodEvidencePath({ ...owner, folder, clientId: options.clientId, filename });
+  let existing: unknown;
+  try {
+    existing = await findEvidenceByPath(admin, owner.tenantId, path);
+  } catch (error) {
+    throw new Error(`Unable to prepare upload: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (existing) return { path, token: null };
+
+  const { data, error } = await admin.storage.from(POD_BUCKET).createSignedUploadUrl(path);
+  if (error) {
+    const status = (error as { statusCode?: string | number; status?: string | number }).statusCode
+      ?? (error as { status?: string | number }).status;
+    if (String(status) === "409" || /already exists|duplicate/i.test(error.message)) {
+      return { path, token: null };
+    }
+    throw new Error(`Unable to prepare upload: ${error.message}`);
+  }
+  if (!data?.token) throw new Error("Unable to prepare upload: no token");
   return { path, token: data.token };
 }
 

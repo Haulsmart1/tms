@@ -2,14 +2,16 @@
 
 import {
   useMemo,
+  useRef,
   useState,
 } from "react";
 import CameraBarcodeScanner from "./CameraBarcodeScanner";
 import {
-  submitBarcodeScan,
   type BarcodeSubmitResult,
   type CameraScanFormat,
 } from "../../../../lib/driver/cameraBarcode";
+import { checkQueuedScan } from "../../../../lib/driver/offlinePod";
+import { enqueuePodScan } from "../../driverQueue";
 
 type JobItem = {
   id: string;
@@ -36,13 +38,17 @@ export default function BarcodeVerification({
   stopId,
   items,
   scans,
-  onChanged,
+  allPendingScans,
+  paused,
 }: {
   jobId: string;
   stopId: string;
   items: JobItem[];
   scans: JobItemScan[];
-  onChanged: () => Promise<void>;
+  /** Scans queued on this phone for any stop of this job, not yet sent. */
+  allPendingScans: { job_item_id: string; serial_number: string }[];
+  /** Set when the queue has stopped sending (session gone). */
+  paused: string | null;
 }) {
   const serializedItems =
     useMemo(
@@ -77,12 +83,12 @@ export default function BarcodeVerification({
     useMemo(
       () =>
         new Set(
-          scans.map(
+          [...scans, ...allPendingScans].map(
             (scan) =>
               `${scan.job_item_id}\u0000${scan.serial_number}`,
           ),
         ),
-      [scans],
+      [scans, allPendingScans],
     );
 
   const expectedCount =
@@ -112,6 +118,10 @@ export default function BarcodeVerification({
   const [busy, setBusy] =
     useState(false);
 
+  // State updates land after a render; two camera detections in one tick
+  // would both see busy === false. The ref closes that gap.
+  const busyRef = useRef(false);
+
   const [message, setMessage] =
     useState("");
 
@@ -121,10 +131,6 @@ export default function BarcodeVerification({
   if (expectedCount === 0) {
     return null;
   }
-
-  const endpoint =
-    `/api/driver/jobs/${encodeURIComponent(jobId)}` +
-    `/stops/${encodeURIComponent(stopId)}/scans`;
 
   async function submitSerial(
     value: string,
@@ -154,7 +160,7 @@ export default function BarcodeVerification({
       };
     }
 
-    if (busy) {
+    if (busyRef.current) {
       return {
         ok: false,
         duplicate: false,
@@ -163,18 +169,24 @@ export default function BarcodeVerification({
       };
     }
 
+    busyRef.current = true;
     setBusy(true);
     setMessage("");
     setError("");
 
     try {
-      const outcome =
-        await submitBarcodeScan(
-          fetch,
-          endpoint,
-          submittedValue,
+      // Matched on the phone by the scans route's own rules, then queued:
+      // it is sent now if there is signal, or when signal returns.
+      const check =
+        checkQueuedScan({
+          items,
+          verified: [
+            ...scans,
+            ...allPendingScans,
+          ],
+          value: submittedValue,
           scanFormat,
-        );
+        });
 
       if (
         scanFormat ===
@@ -183,11 +195,49 @@ export default function BarcodeVerification({
         setSerial("");
       }
 
-      setMessage(
-        outcome.message,
-      );
+      if (
+        !check.ok &&
+        check.duplicate
+      ) {
+        // Same answer the server gives a repeat scan: ok, but a duplicate.
+        setMessage(check.message);
 
-      await onChanged();
+        return {
+          ok: true,
+          duplicate: true,
+          message: check.message,
+        };
+      }
+
+      if (!check.ok) {
+        setError(check.message);
+
+        return {
+          ok: false,
+          duplicate: false,
+          message: check.message,
+        };
+      }
+
+      await enqueuePodScan({
+        jobId,
+        stopId,
+        jobItemId: check.jobItemId,
+        serialNumber:
+          check.serialNumber,
+        scanFormat: check.scanFormat,
+      });
+
+      const outcome: BarcodeSubmitResult =
+        {
+          ok: true,
+          duplicate: false,
+          message: paused
+            ? `Item verified. ${paused}`
+            : "Item verified. It will send automatically.",
+        };
+
+      setMessage(outcome.message);
 
       return outcome;
     } catch (scanError) {
@@ -207,6 +257,7 @@ export default function BarcodeVerification({
           errorMessage,
       };
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
@@ -351,7 +402,7 @@ export default function BarcodeVerification({
       </button>
 
       <p className="mt-2 text-xs text-slate-500">
-        Camera and manual entry use the same server-side job, assignment, serial and duplicate checks.
+        Camera and manual entry are checked on this phone, then again by the server when sent.
       </p>
 
       {message ? (

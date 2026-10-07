@@ -12,10 +12,11 @@
   Pure, so both server routes and tests share it.
 */
 
+import { isUuid } from "../uuid";
+
 export const POD_EVIDENCE_FOLDERS = ["photos", "documents"] as const;
 export type PodEvidenceFolder = (typeof POD_EVIDENCE_FOLDERS)[number];
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_PATH_LENGTH = 1024;
 const MAX_FILENAME_LENGTH = 160;
 
@@ -26,7 +27,7 @@ export type PodEvidenceOwner = {
 };
 
 function isUuidLike(value: unknown): value is string {
-  return typeof value === "string" && UUID_RE.test(value);
+  return typeof value === "string" && isUuid(value);
 }
 
 /** Storage-safe filename: ASCII letters, digits, dot, dash, underscore. */
@@ -54,6 +55,40 @@ export function buildPodEvidencePath(input: PodEvidenceOwner & {
   const random = input.random.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 64);
   if (!random) throw new Error("A random path component is required.");
   return `${tenantId}/${jobId}/${stopId}/${folder}/${Math.trunc(input.timestamp)}-${random}-${sanitizePodFilename(input.filename)}`;
+}
+
+/**
+  The path for a photo sent from the driver's offline queue. Derived from the
+  item's client id instead of a timestamp and random part, so a retry after a
+  lost answer targets the same object and records the same path, which
+  recordEvidenceRow already treats as one row. When the object already exists
+  the retry skips the upload rather than overwriting it (no upsert).
+*/
+export function buildQueuedPodEvidencePath(input: PodEvidenceOwner & {
+  folder: "photos";
+  clientId: string;
+  filename: string | null | undefined;
+}): string {
+  const { tenantId, jobId, stopId, folder, clientId } = input;
+  if (!isUuidLike(tenantId) || !isUuidLike(jobId) || !isUuidLike(stopId) || !isUuidLike(clientId)) {
+    throw new Error("POD evidence owner ids and the client id must be UUIDs.");
+  }
+  if (folder !== "photos") {
+    throw new Error("Queued evidence is photos only.");
+  }
+  return `${tenantId}/${jobId}/${stopId}/${folder}/q-${clientId.toLowerCase()}-${sanitizePodFilename(input.filename)}`;
+}
+
+/**
+  True only when `path` is exactly what buildQueuedPodEvidencePath returns for
+  this owner and client id (with whatever filename it carries). Lets a route
+  recognise a retry of a queued photo from the path the phone sends back.
+*/
+export function isQueuedPodEvidencePathFor(path: unknown, owner: PodEvidenceOwner, clientId: string): boolean {
+  if (typeof path !== "string" || !isPodEvidencePathFor(path, owner) || !isUuidLike(clientId)) return false;
+  const prefix = `${owner.tenantId}/${owner.jobId}/${owner.stopId}/photos/q-${clientId.toLowerCase()}-`;
+  if (!path.startsWith(prefix)) return false;
+  return buildQueuedPodEvidencePath({ ...owner, folder: "photos", clientId, filename: path.slice(prefix.length) }) === path;
 }
 
 /**

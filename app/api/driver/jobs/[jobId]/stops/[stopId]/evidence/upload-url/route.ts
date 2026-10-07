@@ -4,9 +4,11 @@ import { loadDriverJobStop } from "../../../../../../../../../lib/driver/jobAcce
 import { driverErrorResponse, requireDriverSession } from "../../../../../../../../../lib/driver/server";
 import { isWorkableJobStatus, jobNotWorkableMessage } from "../../../../../../../../../lib/jobs/jobStatus";
 import { validateEvidenceMetadata } from "../../../../../../../../../lib/pod/evidenceRules";
-import { createEvidenceUploadUrl } from "../../../../../../../../../lib/pod/evidenceServer";
+import { buildQueuedPodEvidencePath } from "../../../../../../../../../lib/pod/evidencePath";
+import { createEvidenceUploadUrl, findEvidenceByPath } from "../../../../../../../../../lib/pod/evidenceServer";
+import { hasInvalidClientId, parseQueuedMeta } from "../../../../../../../../../lib/pod/queuedMeta";
 import { createAdminClient } from "../../../../../../../../../lib/supabase/admin";
-import { jobGateResponse } from "../../../../../../../../../lib/walkaround/server";
+import { jobGateResponse, queuedJobGate } from "../../../../../../../../../lib/walkaround/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +18,10 @@ type RouteContext = { params: Promise<{ jobId: string; stopId: string }> };
 /*
   Step 1 of a driver POD photo upload (review POD-2): authorize the driver for
   this job and stop, check the declared type and size, and hand back a signed
-  upload token for a path the server chose.
+  upload token for a path the server chose. A photo from the offline queue
+  (body carries clientId) gets a path derived from that id, and token null
+  when that object is already stored: the phone then skips the upload and
+  goes straight to the record route.
 */
 export async function POST(request: Request, context: RouteContext) {
   try {
@@ -26,12 +31,25 @@ export async function POST(request: Request, context: RouteContext) {
       return NextResponse.json({ error: "Job stop not found." }, { status: 404 });
     }
 
-    let body: { filename?: unknown; mimeType?: unknown; size?: unknown };
+    let body: {
+      filename?: unknown;
+      mimeType?: unknown;
+      size?: unknown;
+      clientId?: unknown;
+      shiftClientId?: unknown;
+      recordedAt?: unknown;
+    };
 
     try {
       body = await request.json();
     } catch {
       return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+    }
+
+    const meta = parseQueuedMeta(body);
+
+    if (hasInvalidClientId(body, meta)) {
+      return NextResponse.json({ error: "Invalid clientId." }, { status: 400 });
     }
 
     const validation = validateEvidenceMetadata({ evidenceType: "photo", mimeType: body.mimeType, size: body.size });
@@ -42,13 +60,32 @@ export async function POST(request: Request, context: RouteContext) {
 
     const session = await requireDriverSession({ jobId });
     const admin = createAdminClient();
-    const gate = await jobGateResponse(admin, session);
-    if (gate) return gate;
+    const owner = { tenantId: session.tenantId, jobId, stopId };
+    const filename = typeof body.filename === "string" ? body.filename : null;
 
+    // Ownership first, so nothing below can be used to probe another job.
     const loaded = await loadDriverJobStop(admin, session, jobId, stopId);
 
     if (!loaded || loaded.stop.type !== "delivery") {
       return NextResponse.json({ error: "Delivery stop not found." }, { status: 404 });
+    }
+
+    // A retry of a queued photo that is already recorded succeeds without
+    // re-gating: the shift may have ended or the stop been delivered since.
+    if (meta?.clientId) {
+      const path = buildQueuedPodEvidencePath({ ...owner, folder: "photos", clientId: meta.clientId, filename });
+      if (await findEvidenceByPath(admin, session.tenantId, path)) {
+        return NextResponse.json({ ok: true, path, token: null });
+      }
+    }
+
+    // A request from the offline queue is gated at the time it was recorded.
+    if (meta) {
+      const queued = await queuedJobGate(admin, session, meta, { notBefore: loaded.job.created_at ?? null });
+      if (queued.response) return queued.response;
+    } else {
+      const gate = await jobGateResponse(admin, session);
+      if (gate) return gate;
     }
 
     if (!isWorkableJobStatus(loaded.job.status)) {
@@ -62,12 +99,7 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
 
-    const upload = await createEvidenceUploadUrl(
-      admin,
-      { tenantId: session.tenantId, jobId, stopId },
-      "photos",
-      typeof body.filename === "string" ? body.filename : null,
-    );
+    const upload = await createEvidenceUploadUrl(admin, owner, "photos", filename, { clientId: meta?.clientId ?? null });
 
     return NextResponse.json({ ok: true, path: upload.path, token: upload.token });
   } catch (error) {

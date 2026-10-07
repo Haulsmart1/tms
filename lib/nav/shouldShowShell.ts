@@ -20,6 +20,9 @@ export function shouldShowShell(pathname: string, status: TenantStatus): boolean
     // sidebar wrapped around it. lib/legal/routes.ts imports no document text,
     // so this costs the client shell a list of eleven strings.
     isLegalPath(pathname) ||
+    // Customer tracking links (/track/[token]): a public page with a fixed
+    // light palette. The trailing slash matters: /tracking is a console page.
+    pathname.startsWith("/track/") ||
     pathname.startsWith("/super-admin")
   ) {
     return false;
