@@ -150,18 +150,24 @@ export async function resolveTrackingToken(admin: SupabaseClient, rawToken: stri
   return { linkId: String(data.id), tenantId: String(data.tenant_id), jobId: String(data.job_id), stopId: String(data.stop_id) };
 }
 
-/* Withdraw one link by its stored hash, e.g. one minted for an email that then failed to send. */
-export async function revokeTrackingLinkByHash(
+/*
+  Record who a link was emailed to, once the send has succeeded. Best effort:
+  the email is already out, so a failure here only logs and never throws.
+*/
+export async function recordTrackingLinkSent(
   admin: SupabaseClient,
-  input: { tenantId: string; tokenHash: string; revokedBy: string; now?: Date },
+  input: { tenantId: string; tokenHash: string; sentToEmail: string },
 ): Promise<void> {
-  const { error } = await admin
-    .from(TABLE)
-    .update({ revoked_at: (input.now ?? new Date()).toISOString(), revoked_by: input.revokedBy })
-    .eq("tenant_id", input.tenantId)
-    .eq("token_hash", input.tokenHash)
-    .is("revoked_at", null);
-  if (error) throw new Error(error.message);
+  try {
+    const { error } = await admin
+      .from(TABLE)
+      .update({ sent_to_email: input.sentToEmail })
+      .eq("tenant_id", input.tenantId)
+      .eq("token_hash", input.tokenHash);
+    if (error) console.warn("[tracking] unable to record link recipient", error.code);
+  } catch (error) {
+    console.warn("[tracking] unable to record link recipient", error instanceof Error ? error.message : error);
+  }
 }
 
 export async function revokeTrackingLinks(

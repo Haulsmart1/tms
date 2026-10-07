@@ -10,7 +10,7 @@ import { loadPodBranding } from "../../../../lib/pod/brandingServer";
 import { checkPodRecipient, normalizeEmail } from "../../../../lib/pod/emailRecipients";
 import { RATE_LIMITS, checkRateLimit } from "../../../../lib/rateLimit";
 import { createAdminClient } from "../../../../lib/supabase/admin";
-import { TrackableStopError, TrackingUnavailableError, issueTrackingLink, loadTrackableStop, revokeTrackingLinkByHash } from "../../../../lib/tracking/linkStore";
+import { TrackableStopError, TrackingUnavailableError, issueTrackingLink, loadTrackableStop, recordTrackingLinkSent } from "../../../../lib/tracking/linkStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
     }
 
     const recipient = recipientCheck.recipient;
-    const { token, tokenHash } = await issueTrackingLink(admin, { stop, createdBy: user.id, sentToEmail: recipient });
+    const { token, tokenHash } = await issueTrackingLink(admin, { stop, createdBy: user.id });
     const url = `${publicAppOrigin(request.url)}/track/${encodeURIComponent(token)}`;
 
     const branding = await loadPodBranding(admin, tenantId);
@@ -120,31 +120,25 @@ export async function POST(request: NextRequest) {
       footerText: branding.footerText ?? `Thank you for choosing ${carrierName}.`,
     });
 
-    /* Minted before sending so the log can point at it. If the send fails,
-       withdraw it: an unsent link should not stay live. Best effort. */
-    let delivery: Awaited<ReturnType<typeof sendLoggedDocumentEmail>>;
-    try {
-      delivery = await sendLoggedDocumentEmail({
-        admin,
-        tenantId,
-        documentType: "tracking_link",
-        documentId: stop.stopId,
-        recipient,
-        subject,
-        text,
-        html,
-        shareReference: trackingShareReference(tokenHash),
-        initiatedBy: user.id,
-        metadata: { jobId: stop.jobId, stopId: stop.stopId },
-      });
-    } catch (sendError) {
-      try {
-        await revokeTrackingLinkByHash(admin, { tenantId, tokenHash, revokedBy: user.id });
-      } catch (revokeError) {
-        console.error("[tracking] unable to revoke unsent link", revokeError instanceof Error ? revokeError.message : revokeError);
-      }
-      throw sendError;
-    }
+    /* Minted before sending so the log can point at it. If the send fails the
+       link stays live but unsent: its token never left the server, which is
+       better than revoking a link that may have reached the inbox. The
+       recipient is recorded on the row only after the send succeeds. */
+    const delivery = await sendLoggedDocumentEmail({
+      admin,
+      tenantId,
+      documentType: "tracking_link",
+      documentId: stop.stopId,
+      recipient,
+      subject,
+      text,
+      html,
+      shareReference: trackingShareReference(tokenHash),
+      initiatedBy: user.id,
+      metadata: { jobId: stop.jobId, stopId: stop.stopId },
+    });
+
+    await recordTrackingLinkSent(admin, { tenantId, tokenHash, sentToEmail: recipient });
 
     return NextResponse.json({ ok: true, recipient, deliveryLogId: delivery.deliveryLogId });
   } catch (error) {
