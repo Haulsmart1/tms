@@ -35,6 +35,12 @@ describe("routeUrl", () => {
       "https://api.tomtom.com/routing/1/calculateRoute/53.8,-1.55:53.96,-1.08/json?key=KEY&travelMode=car&traffic=false&routeRepresentation=polyline"
     );
   });
+
+  it("asks for traffic only when told to", () => {
+    const points = [{ lat: 1, lng: 2 }, { lat: 3, lng: 4 }];
+    expect(routeUrl(points, "k")).toContain("traffic=false");
+    expect(routeUrl(points, "k", { traffic: true })).toContain("traffic=true");
+  });
 });
 
 describe("parseRoute", () => {
