@@ -132,6 +132,41 @@ export function pendingEvents(queue: readonly QueueItem<DriverQueuePayload>[]): 
   return out;
 }
 
+/**
+ * The POD upload-url answer. `token: null` means the object is already
+ * stored (or recorded): skip the storage upload and go straight to the record
+ * call. Anything malformed is null, so the runner retries.
+ */
+export function parsePodUploadStart(json: unknown): { path: string; token: string | null } | null {
+  if (!json || typeof json !== "object") return null;
+  const { path, token } = json as Record<string, unknown>;
+  if (typeof path !== "string" || path.length === 0) return null;
+  if (token !== null && typeof token !== "string") return null;
+  return { path, token };
+}
+
+/*
+  A queued POD photo is uploaded without upsert, to a path derived from its
+  client id. A retry after an upload that landed but whose answer was lost
+  finds the object already there: that is success, so the runner goes on to
+  record it. storage-js reports it as a StorageApiError carrying the HTTP
+  `status` (a number) and the service's `statusCode` (a string, "409" even
+  when the HTTP status is 400), with the message "The resource already exists"
+  or an error code "Duplicate".
+*/
+const ALREADY_STORED = /already exists|duplicate/i;
+
+export function podUploadErrorIsAlreadyStored(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const e = error as { status?: unknown; statusCode?: unknown; message?: unknown; error?: unknown };
+  if (e.status === 409 || e.status === "409") return true;
+  if (e.statusCode === 409 || e.statusCode === "409") return true;
+  for (const text of [e.message, e.statusCode, e.error]) {
+    if (typeof text === "string" && ALREADY_STORED.test(text)) return true;
+  }
+  return false;
+}
+
 export type PendingPod = {
   photos: number;
   scans: { job_item_id: string; serial_number: string }[];

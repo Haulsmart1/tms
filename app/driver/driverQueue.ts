@@ -1,7 +1,8 @@
 "use client";
 /*
   The driver's offline queue: shift and walkaround events plus defect photos,
-  sent strictly in order to the server. State rules live in lib/offline/queue.ts
+  and offline POD photos, barcode scans and delivery completions, sent
+  strictly in order to the server. State rules live in lib/offline/queue.ts
   and how each answer is read lives in lib/offline/driverSync.ts; this module
   does the fetching, storage (lib/offline/idbStore.ts) and scheduling.
 
@@ -22,7 +23,9 @@ import {
   eventOutcome,
   orphanedPhotoIds,
   partitionByOwner,
+  parsePodUploadStart,
   photoOutcome,
+  podUploadErrorIsAlreadyStored,
   SIGN_IN_AGAIN_MESSAGE,
   type DriverQueuePayload,
   type SyncResult,
@@ -34,7 +37,7 @@ import type { DriverEvent } from "../../lib/shifts/events";
 import { createClient } from "../../lib/supabase/browser";
 
 export type QueuePayload = DriverQueuePayload;
-export type RejectedItem = { id: string; message: string; ownerId?: string };
+export type RejectedItem = { id: string; message: string; ownerId?: string; jobId?: string; stopId?: string };
 /** Events the server accepted in this tab, so the page can keep showing them until it re-reads the server state. */
 export type SentEvent = { event: DriverEvent; sentAt: number };
 export type QueueSnapshot = {
@@ -52,6 +55,7 @@ const EVENTS_URL = "/api/driver/shift/events";
 const PHOTO_UPLOAD_URL = "/api/driver/walkaround/photos/upload-url";
 const PHOTO_RECORD_URL = "/api/driver/walkaround/photos";
 const PHOTO_BUCKET = "walkaround-photos";
+const POD_BUCKET = "pod-files";
 const REJECTED_KEY = "tms-driver-queue-rejected";
 const LAST_USER_KEY = "tms-driver-queue-user";
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -229,12 +233,88 @@ async function sendPhoto(item: QueueItem<QueuePayload>, payload: Extract<QueuePa
   return photoOutcome(record.status, record.error, item.attempts);
 }
 
-async function sendItem(item: QueueItem<QueuePayload>): Promise<SyncResult> {
-  if (item.payload.kind === "photo") return sendPhoto(item, item.payload);
-  // POD kinds are not enqueued by anything yet; held rather than dropped.
-  if (item.payload.kind !== "event") return { kind: "retry", error: "Waiting for an app update to send this.", status: null };
-  const result = await post(EVENTS_URL, item.payload.event);
+function stopEndpoint(jobId: string, stopId: string): string {
+  return `/api/driver/jobs/${encodeURIComponent(jobId)}/stops/${encodeURIComponent(stopId)}`;
+}
+
+/*
+  Same three steps as lib/pod/uploadClient.ts. The client id makes the server
+  derive the path, and the upload never overwrites: token null (already
+  stored or recorded) skips the upload, and an "already exists" answer from
+  storage means an earlier attempt landed. Either way the record call follows,
+  which answers 200 for a photo it already holds. A 409 once the stop is
+  delivered is a final refusal (eventOutcome rejects it).
+*/
+async function sendPodPhoto(payload: Extract<QueuePayload, { kind: "pod_photo" }>): Promise<SyncResult> {
+  const endpoint = stopEndpoint(payload.jobId, payload.stopId);
+  const meta = { clientId: payload.clientId, shiftClientId: payload.shiftClientId, recordedAt: payload.recordedAt };
+  const start = await post(`${endpoint}/evidence/upload-url`, {
+    ...meta,
+    mimeType: payload.mimeType,
+    size: payload.blob.size,
+    filename: payload.filename,
+  });
+  if (start.status !== 200) return eventOutcome(start.status, start.error);
+  const upload = parsePodUploadStart(start.json);
+  if (!upload) return { kind: "retry", error: "Unable to start the photo upload.", status: 500 };
+
+  if (upload.token !== null) {
+    try {
+      const { error } = await createClient()
+        .storage.from(POD_BUCKET)
+        .uploadToSignedUrl(upload.path, upload.token, payload.blob, { contentType: payload.mimeType, upsert: false });
+      if (error && !podUploadErrorIsAlreadyStored(error)) {
+        return { kind: "retry", error: "The photo upload did not complete.", status: null };
+      }
+    } catch (error) {
+      if (!podUploadErrorIsAlreadyStored(error)) return { kind: "retry", error: "The photo upload did not complete.", status: null };
+    }
+  }
+
+  const record = await post(`${endpoint}/evidence`, {
+    ...meta,
+    storagePath: upload.path,
+    originalFilename: payload.filename,
+    mimeType: payload.mimeType,
+  });
+  return eventOutcome(record.status, record.error);
+}
+
+async function sendPodScan(payload: Extract<QueuePayload, { kind: "pod_scan" }>): Promise<SyncResult> {
+  const result = await post(`${stopEndpoint(payload.jobId, payload.stopId)}/scans`, {
+    serial_number: payload.serialNumber,
+    scan_format: payload.scanFormat,
+  });
   return eventOutcome(result.status, result.error);
+}
+
+async function sendPodComplete(payload: Extract<QueuePayload, { kind: "pod_complete" }>): Promise<SyncResult> {
+  const result = await post(`${stopEndpoint(payload.jobId, payload.stopId)}/complete`, {
+    clientId: payload.clientId,
+    shiftClientId: payload.shiftClientId,
+    recordedAt: payload.recordedAt,
+    recipient_name: payload.recipientName,
+    pod_notes: payload.podNotes,
+  });
+  return eventOutcome(result.status, result.error);
+}
+
+async function sendItem(item: QueueItem<QueuePayload>): Promise<SyncResult> {
+  const payload = item.payload;
+  switch (payload.kind) {
+    case "photo":
+      return sendPhoto(item, payload);
+    case "pod_photo":
+      return sendPodPhoto(payload);
+    case "pod_scan":
+      return sendPodScan(payload);
+    case "pod_complete":
+      return sendPodComplete(payload);
+    case "event": {
+      const result = await post(EVENTS_URL, payload.event);
+      return eventOutcome(result.status, result.error);
+    }
+  }
 }
 
 function schedule(): void {
@@ -302,7 +382,8 @@ async function flushOnce(force: boolean): Promise<void> {
         next = next.filter((i) => !orphans.has(i.id));
         for (const id of orphans) await idbDelete(id);
       }
-      rejected = [...rejected, { id: head.id, message, ownerId: head.payload.ownerId }];
+      const pod = "stopId" in head.payload ? { jobId: head.payload.jobId, stopId: head.payload.stopId } : {};
+      rejected = [...rejected, { id: head.id, message, ownerId: head.payload.ownerId, ...pod }];
       saveRejected();
     }
     queue = next;
@@ -348,6 +429,32 @@ export function enqueueEvent(event: DriverEvent): Promise<void> {
 /** Queue one defect photo. It is sent after the event carrying its defect. */
 export function enqueuePhoto(defectClientId: string, blob: Blob, mimeType: string, filename: string): Promise<void> {
   return add(crypto.randomUUID(), (ownerId) => ({ kind: "photo", ownerId, defectClientId, blob, mimeType, filename }));
+}
+
+type PodTarget = { jobId: string; stopId: string };
+
+/** Queue one POD photo. Resolves once it is stored, not once it is sent. */
+export function enqueuePodPhoto(
+  input: PodTarget & { shiftClientId: string | null; blob: Blob; mimeType: string; filename: string },
+): Promise<void> {
+  const clientId = crypto.randomUUID();
+  const recordedAt = new Date().toISOString();
+  return add(clientId, (ownerId) => ({ kind: "pod_photo", ownerId, clientId, recordedAt, ...input }));
+}
+
+/** Queue one barcode verification, already matched on the phone. */
+export function enqueuePodScan(input: PodTarget & { jobItemId: string; serialNumber: string; scanFormat: string }): Promise<void> {
+  const clientId = crypto.randomUUID();
+  return add(clientId, (ownerId) => ({ kind: "pod_scan", ownerId, clientId, ...input }));
+}
+
+/** Queue a delivery completion. It is sent after the stop's queued photos and scans. */
+export function enqueuePodComplete(
+  input: PodTarget & { shiftClientId: string | null; recipientName: string; podNotes: string },
+): Promise<void> {
+  const clientId = crypto.randomUUID();
+  const recordedAt = new Date().toISOString();
+  return add(clientId, (ownerId) => ({ kind: "pod_complete", ownerId, clientId, recordedAt, ...input }));
 }
 
 /** Try to send everything now, ignoring any backoff. `remaining` counts only the signed-in user's items. */
