@@ -443,13 +443,13 @@ export function enqueuePodPhoto(
 ): Promise<void> {
   const clientId = crypto.randomUUID();
   const recordedAt = new Date().toISOString();
-  return add(clientId, (ownerId) => ({ kind: "pod_photo", ownerId, clientId, recordedAt, ...input }));
+  return add(clientId, (ownerId) => ({ ...input, kind: "pod_photo", ownerId, clientId, recordedAt }));
 }
 
 /** Queue one barcode verification, already matched on the phone. */
 export function enqueuePodScan(input: PodTarget & { jobItemId: string; serialNumber: string; scanFormat: string }): Promise<void> {
   const clientId = crypto.randomUUID();
-  return add(clientId, (ownerId) => ({ kind: "pod_scan", ownerId, clientId, ...input }));
+  return add(clientId, (ownerId) => ({ ...input, kind: "pod_scan", ownerId, clientId }));
 }
 
 /** Queue a delivery completion. It is sent after the stop's queued photos and scans. */
@@ -458,7 +458,7 @@ export function enqueuePodComplete(
 ): Promise<void> {
   const clientId = crypto.randomUUID();
   const recordedAt = new Date().toISOString();
-  return add(clientId, (ownerId) => ({ kind: "pod_complete", ownerId, clientId, recordedAt, ...input }));
+  return add(clientId, (ownerId) => ({ ...input, kind: "pod_complete", ownerId, clientId, recordedAt }));
 }
 
 /** Try to send everything now, ignoring any backoff. `remaining` counts only the signed-in user's items. */
