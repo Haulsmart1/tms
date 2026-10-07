@@ -54,10 +54,15 @@ The offline queue already exists for shift events: `lib/offline/queue.ts` (pure,
   not gated, send `null`.
 - **Sending a photo** is the existing three steps, made repeatable without a schema change. When the
   upload-url request carries a `clientId`, the server derives the storage path from it
-  (`<tenant>/<job>/<stop>/photos/q-<clientId>-<filename>`, still inside the `isPodEvidencePathFor` rule) and
-  signs the upload with `upsert: true`. A retry after any lost answer therefore writes the same object again
-  and calls the record route with the same path, and `recordEvidenceRow` is already idempotent on
-  `storage_path`. No duplicate photo, no orphaned object.
+  (`<tenant>/<job>/<stop>/photos/q-<clientId>-<filename>`, still inside the `isPodEvidencePathFor` rule).
+  The upload is signed WITHOUT upsert, so an object can never be replaced once the record route has checked
+  it (an upsert token would let a recorded POD photo be swapped for unchecked bytes, even after delivery).
+  A retry after a lost answer finds the object already there: the upload-url route answers `token: null`
+  when a `pod_evidence` row already holds that path or storage reports the object exists, and the queue
+  runner treats a storage "already exists" answer the same way. Either way it goes straight to the record
+  route, which verifies whatever object is stored, and `recordEvidenceRow` is idempotent on
+  `storage_path`. No duplicate photo, no orphaned object, no overwrite. A `clientId` that is present but
+  not a UUID is refused with 400 rather than silently falling back to a random path.
 - **Scans** need nothing new: the scans route already answers 200 `duplicate: true` for a serial already
   verified on the job. **Complete** is already idempotent.
 

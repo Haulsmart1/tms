@@ -18,6 +18,17 @@
 - Do not apply SQL. Migrations are written to `docs/sql/` and applied by hand later.
 - Imports in `app/` use relative paths (no `@/` alias), matching the surrounding files.
 
+
+> **Amendment after the Group 1 review (2026-10-07), overrides any code below that disagrees:** queued
+> photo uploads are signed WITHOUT upsert. `createEvidenceUploadUrl(..., { clientId })` returns
+> `{ path, token: string | null }`: `token: null` when a `pod_evidence` row already has that `storage_path`
+> or when `createSignedUploadUrl` reports the object already exists. The queue runner (Task 9) skips the
+> storage upload when `token` is null, uses `uploadToSignedUrl(..., { upsert: false })`, and treats a
+> storage error whose status is 409 or whose message matches /already exists|duplicate/i as success; in
+> every case it then calls the record route. The Task 6 routes answer 400 "Invalid clientId." when the
+> body has a `clientId` that `parseQueuedMeta` rejected. `parseQueuedMeta`/`acceptRecordedTime` require
+> an ISO time with an explicit offset (`Z` or `+hh:mm`).
+
 ---
 
 ## File structure
