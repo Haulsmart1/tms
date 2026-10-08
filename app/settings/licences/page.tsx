@@ -38,6 +38,9 @@ type VehicleLicenceRow = {
     tenant_id: string;
     vehicle_id: string;
     licence_type: string;
+    billing_mode?: "paid" | "internal";
+    internal_reason?: string | null;
+    internal_authorised_at?: string | null;
     issue_date: string | null;
     expiry_date: string | null;
     active: boolean | null;
@@ -65,6 +68,8 @@ function licenceAddedMessage(
        which one it was. */
     if (!payload.charged || payload.grossPence == null) {
         switch (payload.reason) {
+            case "internal_vehicle":
+                return "Licence added. Free internal vehicle — no billing charge.";
             case "period_billing":
                 return `${base} Nothing is charged now: this vehicle is billed for its days when the current billing period closes.`;
             case "already_billable":
@@ -213,6 +218,9 @@ export default function VehicleLicencesPage() {
           tenant_id,
           vehicle_id,
           licence_type,
+          billing_mode,
+          internal_reason,
+          internal_authorised_at,
           issue_date,
           expiry_date,
           active,

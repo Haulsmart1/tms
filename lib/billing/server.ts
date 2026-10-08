@@ -96,7 +96,7 @@ export async function fetchBillableVehicles(
   }
 
   const licencesRes = await admin
-    .from("vehicle_licences")
+    .from("billable_vehicle_licences")
     .select("vehicle_id, active")
     .eq("active", true)
     .in("vehicle_id", vehicleIds);

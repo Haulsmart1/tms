@@ -200,7 +200,7 @@ export function platformBillableVehicleCount(
   licences: readonly LicenceRow[],
 ): number {
   const activeVehicleIds = new Set(
-    licences.filter((licence) => licence.active).map((licence) => licence.vehicle_id),
+    licences.filter((licence) => licence.active && licence.billing_mode !== "internal").map((licence) => licence.vehicle_id),
   );
 
   return vehicles.filter((vehicle) => vehicle.tenant_id != null && activeVehicleIds.has(vehicle.id))

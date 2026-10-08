@@ -97,7 +97,7 @@ export default function BillingPage() {
     for (const ids of chunk(vehicles.map((vehicle) => vehicle.id), IDS_PER_REQUEST)) {
       const page = await fetchAllRows((from, to) =>
         supabase
-          .from("vehicle_licences")
+          .from("billable_vehicle_licences")
           .select("id, vehicle_id, active")
           .eq("active", true)
           .in("vehicle_id", ids)

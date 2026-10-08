@@ -200,7 +200,7 @@ export const PATCH = withSuperAdmin(
       // reimplemented, because counting licence rows would overstate.
       const licencesResult = vehicleIds.length > 0
         ? await admin
-            .from("vehicle_licences")
+            .from("billable_vehicle_licences")
             .select("vehicle_id, active")
             .eq("active", true)
             .in("vehicle_id", vehicleIds)

@@ -12,6 +12,7 @@ A multi-tenant Transport Management System (TMS) for UK and EU road-haulage oper
 - **Drivers and partners:** a mobile driver web app (today's jobs, camera barcode scanning, photo POD, stop completion, background GPS), a subcontractor portal, and invitations for both.
 - **Commercial:** manage customers and subcontractors, take quote requests from a haulier's own website, send quotations customers accept online, raise and track invoices, statements, chase letters and purchase orders, sync invoices to Xero, and see business KPIs (revenue, margins, driver and customer leaderboards).
 - **Fleet and compliance:** manage vehicles, drivers, trailers and assets, record maintenance and vehicle-off-road (VOR) status, track vehicle licences, and view tachograph / working-time activity.
+- **Internal vehicles:** a platform super admin can grant an auditable free internal TMS licence. It remains operationally licensed, but is excluded from both billing models. Paid licence history cannot be converted or mixed with internal history. The licence card shows the authorisation and its billing classification.
 - **Telematics and tracking:** view latest GPS positions and speed from the company telematics feed.
 - **Administration:** company profile and settings, user invites, per-page permissions, and a super-admin console for companies, users, billing and lead requests.
 - **Growth:** a public marketing landing page with a lead-capture form that notifies the team.

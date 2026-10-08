@@ -456,7 +456,7 @@ export default function SuperAdminCompanyDetailPage() {
 
     const [licencesResult, usersResult] = await Promise.all([
       vehicleIds.length > 0
-        ? supabase.from("vehicle_licences").select("vehicle_id, active").eq("active", true).in("vehicle_id", vehicleIds)
+        ? supabase.from("billable_vehicle_licences").select("vehicle_id, active").eq("active", true).in("vehicle_id", vehicleIds)
         : Promise.resolve({ data: [] as LicenceRow[], error: null }),
       supabase.from("profiles").select("id", { count: "exact", head: true }).eq("tenant_id", tenant.id),
     ]);

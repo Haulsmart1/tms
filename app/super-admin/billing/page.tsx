@@ -79,7 +79,7 @@ export default function SuperAdminBillingPage() {
             // vehicles has no company_id column; selecting one fails the whole
             // page with Postgres 42703. Ownership comes from tenant_id.
             supabase.from("vehicles").select("id, tenant_id, registration"),
-            supabase.from("vehicle_licences").select("id, tenant_id, vehicle_id, active"),
+            supabase.from("billable_vehicle_licences").select("id, tenant_id, vehicle_id, active"),
             supabase.from("invoices").select("*").order("created_at", { ascending: false }),
             supabase
                 .from("company_billing")

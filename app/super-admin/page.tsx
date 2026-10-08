@@ -116,7 +116,7 @@ export default function SuperAdminPage() {
           .eq("status", "active"),
         // No company_id on vehicles; selecting one fails with 42703.
         supabase.from("vehicles").select("id, tenant_id"),
-        supabase.from("vehicle_licences").select("vehicle_id, active"),
+        supabase.from("billable_vehicle_licences").select("vehicle_id, active"),
         supabase.from("profiles").select("id", { count: "exact", head: true }),
         // roles!inner, not the usual roles(name) embed: the !inner join is what
         // lets .eq("roles.name", ...) filter the OUTER query, turning this into

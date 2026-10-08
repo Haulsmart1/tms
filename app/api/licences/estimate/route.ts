@@ -11,6 +11,7 @@
 // request that cannot change state should not look like one.
 
 import { NextRequest, NextResponse } from "next/server";
+import { loadInternalLicence } from "../../../../lib/billing/internalLicence";
 import { z } from "zod";
 import { errorResponse } from "../../../../lib/accounts/server";
 import {
@@ -73,6 +74,10 @@ export async function GET(request: NextRequest) {
         { error: "That vehicle does not belong to your company." },
         { status: 403 }
       );
+    }
+
+    if (await loadInternalLicence(admin, parsed.data)) {
+      return NextResponse.json({ ok: true, quote: { model: "v1_immediate", kind: "free", reason: "internal_vehicle" } });
     }
 
     const todayISO = londonDateISO(new Date());

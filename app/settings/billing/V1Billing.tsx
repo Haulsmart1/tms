@@ -238,7 +238,7 @@ export default function V1Billing() {
            an operational view, and the charge spans every tenant under the
            company. RLS scopes it to the admin's company. See the
            count-divergence follow-up in the spec before "fixing" this. */
-        supabase.from("vehicle_licences").select("vehicle_id").eq("active", true),
+        supabase.from("billable_vehicle_licences").select("vehicle_id").eq("active", true),
       ]);
       const firstError =
         billingRes.error ?? chargesRes.error ?? addonRes.error ?? licencesRes.error;

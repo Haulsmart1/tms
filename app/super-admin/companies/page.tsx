@@ -110,7 +110,7 @@ export default function SuperAdminCompaniesPage() {
       // request with Postgres 42703. A vehicle reaches its company through
       // tenant_id only.
       supabase.from("vehicles").select("id, tenant_id"),
-      supabase.from("vehicle_licences").select("vehicle_id, active"),
+      supabase.from("billable_vehicle_licences").select("vehicle_id, active"),
       /* company_id as well as tenant_id: nothing in the repo writes
          profiles.company_id, so a row carrying one was seeded by hand and is
          plausibly the account holder. Selecting only tenant_id would

@@ -83,7 +83,9 @@ export default function LicenceCard({ licence, loading = false, canManage = true
                 />
                 <Cell label="Issue Date" loading={loading} mono value={licence.issue_date || "-"} />
                 <Cell label="Expiry Date" loading={loading} mono value={licence.expiry_date || "-"} />
-                <Cell label="Billing Status" loading={loading} value={licence.active ? "Active" : "Inactive"} />
+                <Cell label="Licence status" loading={loading} value={licence.active ? "Active" : "Inactive"} />
+                <Cell label="Billing" loading={loading} value={licence.billing_mode === "internal" ? "Free internal vehicle" : "Standard"} />
+                {licence.billing_mode === "internal" && <Cell label="Authorisation" value={licence.internal_reason || "Internal use"} />}
                 <Cell label="Notes" loading={loading} value={licence.notes || "-"} />
             </div>
 
@@ -106,12 +108,14 @@ export default function LicenceCard({ licence, loading = false, canManage = true
 
                 <Button
                     variant="danger"
-                    disabled={loading || !canManage || licence.active === true}
+                    disabled={loading || !canManage || licence.active === true || licence.billing_mode === "internal"}
                     title={
                         loading
                             ? undefined
                             : !canManage
                               ? CANNOT_DELETE_TITLE
+                              : licence.billing_mode === "internal"
+                                ? "Internal authorisation is retained for audit. Deactivate instead."
                               : licence.active === true
                                 ? CANNOT_DELETE_ACTIVE_TITLE
                                 : undefined

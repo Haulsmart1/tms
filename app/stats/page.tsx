@@ -98,6 +98,7 @@ type Customer = {
 };
 
 type VehicleLicence = {
+  billing_mode?: string | null;
   id: string;
   vehicle_id: string | null;
   active: boolean | null;
@@ -482,6 +483,7 @@ export default function StatsPage() {
                 id,
                 vehicle_id,
                 active,
+                billing_mode,
                 expiry_date
               `)
               .eq("active", true)
@@ -1021,6 +1023,7 @@ export default function StatsPage() {
       licences: scopedLicences.map((licence) => ({
         vehicle_id: licence.vehicle_id as string,
         active: licence.active,
+        billing_mode: licence.billing_mode,
       })),
     });
 

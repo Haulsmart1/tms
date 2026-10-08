@@ -12,6 +12,7 @@ import type { InvoiceVehicle } from "./invoice";
 import { MAX_ATTEMPTS } from "./schedule";
 
 export type PeriodLicence = {
+  billingMode?: string | null;
   vehicleId: string;
   tenantId: string;
   vrnNormalised: string;
@@ -80,7 +81,7 @@ export function collectPeriodVehicles(args: {
 
   const byVehicle = new Map<string, PeriodLicence[]>();
   for (const licence of args.licences) {
-    if (!overlapsPeriod(licence, bounds)) continue;
+    if (licence.billingMode === "internal" || !overlapsPeriod(licence, bounds)) continue;
     const existing = byVehicle.get(licence.vehicleId);
     if (existing) existing.push(licence);
     else byVehicle.set(licence.vehicleId, [licence]);
@@ -168,7 +169,7 @@ export function highWaterMark(args: {
   const events: Event[] = [];
 
   for (const licence of args.licences) {
-    if (!overlapsPeriod(licence, bounds)) continue;
+    if (licence.billingMode === "internal" || !overlapsPeriod(licence, bounds)) continue;
 
     // Clamped, so a licence carried in from an earlier period counts from the
     // first day of this one rather than sorting before every other event and

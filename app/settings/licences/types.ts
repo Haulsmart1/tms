@@ -26,6 +26,9 @@ export type VehicleLicence = {
     tenant_id: string;
     vehicle_id: string;
     licence_type: string;
+    billing_mode?: "paid" | "internal";
+    internal_reason?: string | null;
+    internal_authorised_at?: string | null;
     issue_date: string | null;
     expiry_date: string | null;
     active: boolean | null;

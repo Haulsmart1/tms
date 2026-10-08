@@ -12,6 +12,7 @@
 // bypassed from devtools.
 
 import { NextRequest, NextResponse } from "next/server";
+import { loadInternalLicence, writeInternalLicence } from "../../../../lib/billing/internalLicence";
 import { z } from "zod";
 import { errorResponse } from "../../../../lib/accounts/server";
 import {
@@ -249,6 +250,17 @@ export async function POST(request: NextRequest) {
         { error: "That vehicle belongs to a different tenant." },
         { status: 403 }
       );
+    }
+
+    // Internal authorisation is checked after ownership, before any billing
+    // resolver, charge provider, period opener or deletion can execute.
+    const internalLicence = await loadInternalLicence(admin, vehicleId);
+    if (internalLicence) {
+      if (body.action === "delete") {
+        return NextResponse.json({ error: "Internal licence authorisation is retained for audit. Deactivate instead." }, { status: 409 });
+      }
+      await writeInternalLicence(admin, internalLicence, body);
+      return NextResponse.json({ ok: true, charged: false, reason: "internal_vehicle" });
     }
 
     // DELETE is only available for a licence that was NEVER activated. Under

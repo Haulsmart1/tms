@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 15024)
+Total output lines: 1866
+
 // Supabase calls for period billing. Every decision is delegated to the pure
 // modules (period, close, invoice, activation, cancellation, periodPayment);
 // this file only loads rows, writes rows, and sequences the payment call.
@@ -152,7 +155,7 @@ async function fetchCompanyLicences(
     "id, vehicle_id, tenant_id, vrn_normalised, activated_at, deactivated_at, grace_until";
 
   const byTenant = await admin
-    .from("vehicle_licences")
+    .from("billable_vehicle_licences")
     .select(select)
     .in("tenant_id", scope);
   if (byTenant.error) throw new Error(byTenant.error.message);
@@ -160,7 +163,7 @@ async function fetchCompanyLicences(
   const byVehicle =
     vehicleIds.length > 0
       ? await admin
-          .from("vehicle_licences")
+          .from("billable_vehicle_licences")
           .select(select)
           .in("vehicle_id", vehicleIds)
       : { data: [], error: null };
@@ -918,11 +921,7 @@ async function collectPeriod(
   if (payment.status === "failed") {
     const retryOn = nextRetryOn(period.period_end, args.attempt);
 
-    const marked = await admin
-      .from("billing_periods")
-      .update({
-        status: "failed",
-        attempt_count: args.attempt,
+    const marked = await adm…24 tokens truncated…nt: args.attempt,
         retry_on: retryOn,
         collecting_since: null,
       })
@@ -1406,7 +1405,7 @@ export async function computeGraceUntil(
   if (args.vehicleIds.length === 0) return null;
 
   const priorRes = await admin
-    .from("vehicle_licences")
+    .from("billable_vehicle_licences")
     .select("id")
     .in("vehicle_id", args.vehicleIds as string[])
     .eq("vrn_normalised", args.vrnNormalised)

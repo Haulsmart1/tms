@@ -4,7 +4,8 @@
 // Semantics mirror app/super-admin/billing/page.tsx: a vehicle is the
 // company's when its tenant belongs to the company, or when its tenant_id
 // equals the company id directly (rows written before tenants existed).
-// Billable = has at least one active licence.
+// Billable = has at least one active paid licence. Internal licences permit
+// operations but never contribute to billable usage.
 //
 // There is no vehicles.company_id column in the schema, so nothing here may
 // look for one: doing so made both callers select a column that does not
@@ -18,6 +19,7 @@ export type VehicleRow = {
 export type LicenceRow = {
   vehicle_id: string;
   active: boolean | null;
+  billing_mode?: string | null;
 };
 
 export function billableVehicleIds(args: {
@@ -40,7 +42,7 @@ export function billableVehicleIds(args: {
 
   return new Set(
     args.licences
-      .filter((l) => l.active && companyVehicleIds.has(l.vehicle_id))
+      .filter((l) => l.active && l.billing_mode !== "internal" && companyVehicleIds.has(l.vehicle_id))
       .map((l) => l.vehicle_id)
   );
 }

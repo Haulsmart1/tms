@@ -315,3 +315,20 @@ Findings: `docs/superpowers/reviews/2026-10-08-security-scan.md`. Do N-1 in the 
 | 1 | `prodfix_96_security_scan_2026_10_08.sql` | everything marked applied above. B-1/H-5 revokes, N-2 subcontractor link tables read-only, C-4 identity-only `handle_new_user` plus the fixed `provision_tenant_user` and `create_company_with_admin`, `tracking_link` in the delivery-log CHECK, `roles` grants, `pg_temp` on every definer function, S-14/B-5/S-9 grants and saved-plan policies, shifts_03 licence gate re-run, S-10 load-transfer destination licence and VOR gate (LTR01). Re-running signup_01 or prodfix_20 afterwards reinstalls the broken RPC bodies: do not. | no |
 | 2 | `shifts_06_rectification_and_pod_guards.sql` | prodfix_96. S-1 WLK06 rectification guard, `rectified_by`, re-VOR on reopen, WLK02 open-defect backstop, N-3 POD01 completion-column guard, N-12 stop tenant binding, S-16 SHF08 driver-in-tenant assertion. | no |
 | 3 | `prodfix_97_past_due_gate_and_user_removal.sql` | prodfix_96, and the code that adds `app/api/subcontractors/**` writes (deploy first, or the subcontractors page cannot save). H-3 LIC03 gate after 7 days past_due (`company_billing.past_due_since`), `remove_company_user` deletes the profile (PRF01 if still referenced), M-4 subcontractor tables read-only from the browser. | no |
+
+## Free internal vehicle licences (prodfix_99)
+
+Apply `prodfix_99_internal_vehicle_licences.sql` before the matching code. It
+adds immutable paid/internal classification and authorisation metadata, an
+RLS-preserving billable-only view, and a service-only grant RPC. Existing
+licences remain paid. No billing rows, invoices or subscriptions are changed.
+
+Only after the matching application version is live, grant through
+`POST /api/super-admin/vehicles/[id]/internal-licence` with a reason, or the
+same `grant_internal_vehicle_licence` RPC through an authorised server.
+The RPC refuses vehicles with paid history and is idempotent for active
+internal licences. Company admins cannot grant exemptions.
+
+Before rolling application code back, deactivate the internal licences created
+by that release. Retain their audit rows and the additive schema. Old code
+counts every active licence and must never run with an active internal one.
