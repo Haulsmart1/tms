@@ -92,8 +92,8 @@ function endedShiftTables(overrides: { periods?: Row[]; vehicles?: Row[]; checks
       { id: "pB", shift_id: "sh1", vehicle_id: "vB", walkaround_check_id: "cB", started_at: "2026-10-07T10:00:00.000Z", ended_at: "2026-10-07T15:00:00.000Z" },
     ],
     walkaround_checks: overrides.checks ?? [
-      { id: "cA", tenant_id: "t1", result: "pass" },
-      { id: "cB", tenant_id: "t1", result: "dangerous" },
+      { id: "cA", tenant_id: "t1", result: "pass", performed_at: "2026-10-07T05:50:00.000Z" },
+      { id: "cB", tenant_id: "t1", result: "dangerous", performed_at: "2026-10-07T09:55:00.000Z" },
     ],
     vehicles: overrides.vehicles ?? [
       { id: "vA", tenant_id: "t1", vor: true },
@@ -151,9 +151,23 @@ describe("queuedJobGate", () => {
     expect(await errorOf(result.response)).toBe(JOB_GATE_MESSAGES.vor);
   });
 
+  it("refuses (S-2) when the period's check was done more than 24 hours before the recorded time", async () => {
+    const tables = endedShiftTables({
+      periods: [{ id: "pA", shift_id: "sh1", vehicle_id: "vA", walkaround_check_id: "cA", started_at: "2026-10-06T05:00:00.000Z", ended_at: null }],
+      checks: [{ id: "cA", tenant_id: "t1", result: "pass", performed_at: "2026-10-06T04:55:00.000Z" }],
+      vehicles: [{ id: "vA", tenant_id: "t1", vor: false }],
+    });
+    tables.driver_shifts[0].started_at = "2026-10-06T05:00:00.000Z";
+    tables.driver_shifts[0].ended_at = null;
+    const { admin } = fakeAdmin(tables);
+    const result = await queuedJobGate(admin, session, meta("2026-10-07T08:00:00.000Z"), { now });
+    expect(result.response?.status).toBe(409);
+    expect(await errorOf(result.response)).toBe(JOB_GATE_MESSAGES.checkExpired);
+  });
+
   it("ignores a check row from another tenant (refuses as no passing check)", async () => {
     const checks = [
-      { id: "cA", tenant_id: "t2", result: "pass" },
+      { id: "cA", tenant_id: "t2", result: "pass", performed_at: "2026-10-07T05:50:00.000Z" },
       { id: "cB", tenant_id: "t1", result: "dangerous" },
     ];
     const { admin } = fakeAdmin(endedShiftTables({ checks }));

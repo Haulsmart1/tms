@@ -102,6 +102,31 @@ const EMPTY_VEHICLE_FORM = {
   notes: "",
 };
 
+/* Finding M-4: every subcontractor, employee and vehicle write goes through
+   app/api/subcontractors/**, which checks the caller, forces the tenant and
+   allowlists the columns. x-tenant-id is the record's own tenant, never the
+   selector. Answers the server's error text, or null on success. */
+async function sendSubcontractorWrite(
+  url: string,
+  method: "POST" | "PATCH",
+  tenantId: string,
+  body: Record<string, unknown>,
+  fallback: string
+): Promise<string | null> {
+  try {
+    const response = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json", "x-tenant-id": tenantId },
+      body: JSON.stringify(body),
+    });
+    if (response.ok) return null;
+    const result = await response.json().catch(() => null);
+    return typeof result?.error === "string" && result.error ? result.error : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export default function SubcontractorsPage() {
   const supabase = useMemo(() => createClient(), []);
   const tenant = useTenant();
@@ -327,8 +352,16 @@ export default function SubcontractorsPage() {
       return;
     }
 
-    if (!editingId && !tenant.writeTenantId) {
-      setMessage("Pick a specific tenant before creating a subcontractor.");
+    const recordTenantId = editingId
+      ? subcontractors.find((item) => item.id === editingId)?.tenant_id ?? null
+      : tenant.writeTenantId;
+
+    if (!recordTenantId) {
+      setMessage(
+        editingId
+          ? "This subcontractor is no longer loaded. Refresh and try again."
+          : "Pick a specific tenant before creating a subcontractor."
+      );
       return;
     }
 
@@ -384,28 +417,20 @@ export default function SubcontractorsPage() {
       location: form.location.trim() || null,
       notes: form.notes.trim() || null,
       active: form.active,
-      updated_at: new Date().toISOString(),
     };
 
-    let error: { message?: string } | null = null;
-
-    if (editingId) {
-      const result = await tenant.filterByTenant(
-        supabase.from("subcontractors").update(payload).eq("id", editingId)
-      );
-      error = result.error;
-    } else {
-      const result = await supabase.from("subcontractors").insert([
-        {
-          ...payload,
-          tenant_id: tenant.writeTenantId,
-        },
-      ]);
-      error = result.error;
-    }
+    const error = await sendSubcontractorWrite(
+      editingId
+        ? `/api/subcontractors/${encodeURIComponent(editingId)}`
+        : "/api/subcontractors",
+      editingId ? "PATCH" : "POST",
+      recordTenantId,
+      payload,
+      "Unable to save subcontractor."
+    );
 
     if (error) {
-      setMessage(error.message || "Unable to save subcontractor.");
+      setMessage(error);
       setSaving(false);
       return;
     }
@@ -435,15 +460,14 @@ export default function SubcontractorsPage() {
       return;
     }
 
-    if (!tenant.writeTenantId) {
-      setMessage("Pick a specific tenant before creating an employee.");
+    if (!selectedSubcontractor) {
+      setMessage("This subcontractor is no longer loaded. Refresh and try again.");
       return;
     }
 
     setEmployeeSaving(true);
 
     const payload = {
-      subcontractor_id: selectedSubcontractorId,
       full_name: employeeForm.full_name.trim(),
       email: employeeForm.email.trim() || null,
       phone: employeeForm.phone.trim() || null,
@@ -455,31 +479,21 @@ export default function SubcontractorsPage() {
       active: employeeForm.active,
       owner: employeeForm.owner,
       notes: employeeForm.notes.trim() || null,
-      updated_at: new Date().toISOString(),
     };
 
-    let error: { message?: string } | null = null;
-
-    if (editingEmployeeId) {
-      const result = await tenant.filterByTenant(
-        supabase
-          .from("subcontractor_employees")
-          .update(payload)
-          .eq("id", editingEmployeeId)
-      );
-      error = result.error;
-    } else {
-      const result = await supabase.from("subcontractor_employees").insert([
-        {
-          ...payload,
-          tenant_id: tenant.writeTenantId,
-        },
-      ]);
-      error = result.error;
-    }
+    const employeesUrl = `/api/subcontractors/${encodeURIComponent(selectedSubcontractor.id)}/employees`;
+    const error = await sendSubcontractorWrite(
+      editingEmployeeId
+        ? `${employeesUrl}/${encodeURIComponent(editingEmployeeId)}`
+        : employeesUrl,
+      editingEmployeeId ? "PATCH" : "POST",
+      selectedSubcontractor.tenant_id,
+      payload,
+      "Unable to save employee."
+    );
 
     if (error) {
-      setMessage(error.message || "Unable to save employee.");
+      setMessage(error);
       setEmployeeSaving(false);
       return;
     }
@@ -509,15 +523,14 @@ export default function SubcontractorsPage() {
       return;
     }
 
-    if (!tenant.writeTenantId) {
-      setMessage("Pick a specific tenant before creating a vehicle.");
+    if (!selectedSubcontractor) {
+      setMessage("This subcontractor is no longer loaded. Refresh and try again.");
       return;
     }
 
     setVehicleSaving(true);
 
     const payload = {
-      subcontractor_id: selectedSubcontractorId,
       registration: vehicleForm.registration.trim().toUpperCase(),
       vehicle_type: vehicleForm.vehicle_type.trim() || null,
       make: vehicleForm.make.trim() || null,
@@ -528,31 +541,21 @@ export default function SubcontractorsPage() {
       vor: vehicleForm.vor,
       active: vehicleForm.active,
       notes: vehicleForm.notes.trim() || null,
-      updated_at: new Date().toISOString(),
     };
 
-    let error: { message?: string } | null = null;
-
-    if (editingVehicleId) {
-      const result = await tenant.filterByTenant(
-        supabase
-          .from("subcontractor_vehicles")
-          .update(payload)
-          .eq("id", editingVehicleId)
-      );
-      error = result.error;
-    } else {
-      const result = await supabase.from("subcontractor_vehicles").insert([
-        {
-          ...payload,
-          tenant_id: tenant.writeTenantId,
-        },
-      ]);
-      error = result.error;
-    }
+    const vehiclesUrl = `/api/subcontractors/${encodeURIComponent(selectedSubcontractor.id)}/vehicles`;
+    const error = await sendSubcontractorWrite(
+      editingVehicleId
+        ? `${vehiclesUrl}/${encodeURIComponent(editingVehicleId)}`
+        : vehiclesUrl,
+      editingVehicleId ? "PATCH" : "POST",
+      selectedSubcontractor.tenant_id,
+      payload,
+      "Unable to save vehicle."
+    );
 
     if (error) {
-      setMessage(error.message || "Unable to save vehicle.");
+      setMessage(error);
       setVehicleSaving(false);
       return;
     }

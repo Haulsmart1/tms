@@ -1,5 +1,10 @@
 -- signup_01_create_company_with_admin.sql
 --
+-- SUPERSEDED IN PART (2026-10-08): prodfix_96 STEP 3 replaces create_company_with_admin. The
+-- body below inserts a bare profile (id only), which fails on the live NOT NULL
+-- profiles.tenant_id. Do not re-run this file after prodfix_96; re-run prodfix_96 instead.
+--
+--
 -- Self-serve signup: create a company, its first tenant, its company profile and
 -- its founding admin in ONE transaction. Called only by POST /api/signup on the
 -- service role, after the route has created the auth user and before it sends

@@ -396,7 +396,13 @@ function LoadTransferPageContent() {
   }
 
   async function confirmTransfer() {
-    if (!canConfirm) {
+    const transferTenantId =
+      tenant.activeTenantId;
+
+    if (
+      !canConfirm
+      || !transferTenantId
+    ) {
       return;
     }
 
@@ -412,9 +418,13 @@ function LoadTransferPageContent() {
           "/api/load-transfers",
           {
             method: "POST",
+            // requireTenant answers 400 to an admin with no
+            // header, so name the tenant the vehicles came from.
             headers: {
               "Content-Type":
                 "application/json",
+              "x-tenant-id":
+                transferTenantId,
             },
             body: JSON.stringify({
               sourceVehicleId,

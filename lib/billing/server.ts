@@ -4,8 +4,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { SquareError } from "square";
 import { createAdminClient, createUserClient } from "../accounts/server";
-import { ACCOUNTS_ADMIN_ROLES, isRoleAuthorized } from "../accounts/authz";
-import { extractRoleName } from "../roles";
+import { loadCallerProfile, loadTenantRef } from "../auth/serverTenantAccess";
+import { hasValidHome, roleTier } from "../auth/tenantAccess";
 import { getSquare, getSquareLocationId } from "../payments/square";
 import { reconcilePaymentByReference } from "../payments/squareLookup";
 import {
@@ -37,23 +37,19 @@ export async function requireCompanyAdmin() {
 
   const admin = createAdminClient();
 
-  const { data: profile, error: profileError } = await admin
-    .from("profiles")
-    .select("company_id, roles(name)")
-    .eq("id", user.id)
-    .maybeSingle();
+  /* The same rule RLS applies (N-14): roles.name compared exactly through
+     roleTier (no trim or lowercase), and the home-coherence check from
+     get_tenant_context(), so a profile whose company_id disagrees with its
+     home tenant's company is refused rather than billed for that company. */
+  const caller = await loadCallerProfile(admin, user.id);
+  const homeTenant = await loadTenantRef(admin, caller.homeTenantId);
+  const tier = roleTier(caller.roleName);
 
-  if (profileError) {
-    throw new Error(profileError.message);
-  }
-
-  const role = extractRoleName(profile?.roles);
-
-  if (!profile?.company_id || !isRoleAuthorized(role, ACCOUNTS_ADMIN_ROLES)) {
+  if (!caller.companyId || tier === "staff" || !hasValidHome(caller, homeTenant)) {
     throw new Error("FORBIDDEN");
   }
 
-  return { admin, user, companyId: profile.company_id as string, role };
+  return { admin, user, companyId: caller.companyId, role: caller.roleName };
 }
 
 export async function fetchBillableVehicles(

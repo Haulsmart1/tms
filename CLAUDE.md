@@ -62,7 +62,7 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
 
 - **RLS in Postgres is the actual isolation boundary**, not client-side filtering. SECURITY DEFINER helpers
   (`can_access_tenant`, `can_manage_tenant`) fail closed. Migrations live in `docs/sql/` as `rls_01`..`rls_12`,
-  then `prodfix_01`..`prodfix_95` (01 to 93 from the 2026-09-14 review, 94 and 95 later follow-ups; numbered,
+  then `prodfix_01`..`prodfix_96` (01 to 93 from the 2026-09-14 review, 94 to 96 later follow-ups; numbered,
   applied by hand in the Supabase SQL editor; there is no automated migration runner).
   `docs/sql/prodfix_00_APPLY_ORDER.md` is the order and records what was applied; most of the series is
   still unapplied, so several server-side checks refuse in prod until it is. `rls_09_verify.sql` is the
@@ -102,9 +102,11 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
   `app/api/accounts/**` (service role, after `requireTenantAccess`) and, for the two platform-wide status
   flips, `PATCH /api/super-admin/invoices/[id]` (`lib/superAdmin/invoiceStatus.ts` is the closed list).
   `prodfix_95` makes the database agree: it revokes client DML on those tables and leaves one
-  `tenant_read` SELECT policy, so a browser insert or update fails once it is applied. `customers`,
-  `customer_integrations` and `subcontractors*` are deliberately excluded because `app/api/customers/**`
-  writes them through the user client. `document_delivery_log.share_reference` holds an opaque pointer
+  `tenant_read` SELECT policy, so a browser insert or update fails once it is applied. `customers` and
+  `customer_integrations` are deliberately excluded because `app/api/customers/**` writes them through
+  the user client. The subcontractor tables are written only by `app/api/subcontractors/**` and the
+  invite routes (service role); `prodfix_96`/`97` make them read-only from the browser, and
+  `lib/subcontractors/browserWrites.test.ts` fails if a browser write comes back. `document_delivery_log.share_reference` holds an opaque pointer
   to the share row (`lib/documents/shareReference.ts`), never the share URL: the email routes assert
   that before inserting, because the log is readable by every member of the tenant. The assertion is an
   allowlist, not a blocklist: only `pod_share:<sha256 hex>`, `tracking_share:<sha256 hex>` (the stored
@@ -182,11 +184,12 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
   4.5 MB. POD share links are random tokens stored hashed in `pod_share_links` (`lib/pod/shareLinks.ts`,
   `shareStore.ts`), revocable and re-checked on every view. The sibling `job-files` bucket is locked down only
   once `prodfix_82`/`83` are applied; until then don't assume it has the same guarantees.
-- `job_stops.pod_flags text[]` (`tracking_02`) carries `pod_time_untrusted` when a queued completion's
-  phone time was refused. The complete route retries without the column on PGRST204/42703, so a missing
-  column never blocks a delivery. `/jobs` does NOT select it yet: selecting a missing column fails the
-  whole list, so add `pod_flags` to the `job_stops` select in `app/jobs/page.tsx` (the comment there marks
-  the spot) only after `tracking_02` is applied; until then the "Time not trusted" tag cannot show.
+- `job_stops.pod_flags text[]` (`tracking_02`, applied 2026-10-08) carries `pod_time_untrusted` when a
+  queued completion's phone time was refused, and `pod_late_sync` when a trusted phone time reached the
+  server more than 15 minutes later (`podTimeFlags` in `lib/pod/recordedTime.ts`), so a backdated POD is
+  always visible. The complete route retries without the column on PGRST204/42703. `/jobs` selects it and
+  StopCard shows "Time not trusted" and "Synced late". Once `shifts_06` is applied, only office callers
+  (`pod_caller_is_office`, POD01) may change a stop's completion columns from the browser.
 - **Customer tracking links** copy the POD share link design. Tokens are random `trk_` strings stored only
   as a SHA-256 hash in `stop_tracking_links` (`lib/tracking/links.ts`, `linkStore.ts`); that table and
   `stop_eta_cache` are server-only (RLS on, no policies, client grants revoked, `tracking_01`). Links go
@@ -324,9 +327,9 @@ lib/rateLimit.ts            durable rate limits (RATE_LIMITS rules, checkRateLim
 lib/printing/pdfFonts.ts    Unicode fonts and text sanitising for every generated PDF
 docs/sql/                   numbered migrations, applied by hand in order in the Supabase SQL editor:
                              rls_01..rls_12 (tenancy, storage, job-files lockdown), billing_01..billing_07
-                             (v1 platform billing, then v2 period billing), prodfix_01..prodfix_95 (the
+                             (v1 platform billing, then v2 period billing), prodfix_01..prodfix_96 (the
                              2026-09-14 review fixes plus two follow-ups; order in prodfix_00_APPLY_ORDER.md),
-                             signup_01 (self-serve signup RPC), and shifts_01..05 (driver shifts and walkaround
+                             signup_01 (self-serve signup RPC), and shifts_01..06 (driver shifts and walkaround
                              check tables, triggers, RPCs and storage policies, 2026-09-29; none applied yet),
                              tracking_01..02 (tracking links, ETA cache and job_stops.pod_flags, 2026-10-07;
                              not applied),

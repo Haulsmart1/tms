@@ -10,6 +10,10 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import type { LatLng } from "../planning/types";
 import { createAdminClient } from "../supabase/admin";
+import { loadCallerProfile } from "../auth/serverTenantAccess";
+import { roleTier } from "../auth/tenantAccess";
+import { hasActiveDriverLink } from "../jobs/officeAccess";
+import { isOfficeCaller } from "../jobs/officeRoles";
 import { checkRateLimit, RATE_LIMITS, type RateLimitRule } from "../rateLimit";
 
 /** Cookie-backed, RLS-scoped Supabase client for the calling user.
@@ -57,13 +61,28 @@ export type Operator = { userId: string; companyId: string | null };
    returns null for could not read a single job_stops row anyway. The
    memberships lookup that app/api/settings/users/invite/route.ts performs was
    the alternative, but it needs the service-role key and a tenant id the
-   TomTom endpoints never receive. */
+   TomTom endpoints never receive.
+
+   A company id is still not enough on its own: a console Driver role, or a
+   staff profile with an active driver link, has one too (H-2). Those callers
+   are refused by the same office rule the POD and manifest routes use. */
 export async function requireOperator(client: TomTomClient): Promise<Operator | null> {
   const { data: { user } } = await client.auth.getUser();
   if (!user) return null;
   const { data, error } = await client.rpc("get_my_company_id");
   if (error) throw new Error(error.message);
-  return { userId: user.id, companyId: typeof data === "string" && data ? data : null };
+  const companyId = typeof data === "string" && data ? data : null;
+  if (!companyId) return { userId: user.id, companyId: null };
+
+  const admin = createAdminClient();
+  const caller = await loadCallerProfile(admin, user.id);
+  const tier = roleTier(caller.roleName);
+  const office = isOfficeCaller({
+    tier,
+    roleName: caller.roleName,
+    hasActiveDriverLink: tier === "staff" ? await hasActiveDriverLink(admin, user.id) : false,
+  });
+  return { userId: user.id, companyId: office ? companyId : null };
 }
 
 /* DURABLE RATE LIMIT (review PLAN-25), shared across serverless instances via

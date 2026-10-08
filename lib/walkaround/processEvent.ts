@@ -18,7 +18,7 @@ import { loadOperatorProfile } from "../driver/operatorTimeZone";
 import { operatorDayInTimeZone } from "../time";
 import { hashQrToken } from "./qrTokenServer";
 import { parseQrPayload, registrationsMatch } from "./qrToken";
-import { toSnapshot } from "./catalogue";
+import { missingChecklistItems, toSnapshot } from "./catalogue";
 import { checkResult, resolveDefect, type ResolvedDefect } from "./severity";
 import { vorReasonForDefects } from "./vor";
 import {
@@ -39,6 +39,7 @@ export type ProcessResult = { status: number; body: Record<string, unknown> };
 const refuse = (status: number, error: string): ProcessResult => ({ status, body: { error } });
 
 export const SHIFT_NOT_FOUND = "That shift was not found. Ask the office.";
+export const CHECKLIST_INCOMPLETE = "The checklist has changed. Reload and complete every item.";
 
 function rpcDefects(resolved: readonly ResolvedDefect[]) {
   return resolved.map((d) => ({
@@ -83,26 +84,47 @@ function lastRecorded(rows: OpenShiftRows): string | null {
   shift_ended with new defects also writes an end_of_shift check under the same
   clientId; driver_shifts.end_client_id is written in the same transaction.
 */
+/*
+  Every key also selects the row's driver (shift_breaks carries none, so it is
+  read through its shift): the unique constraint is per tenant, so a clientId
+  saved by ANOTHER driver must not answer "duplicate" (security scan S-7).
+*/
 const IDEMPOTENCY_KEY: Record<DriverEvent["type"], { table: string; column: string; select: string }> = {
-  check_submitted: { table: "walkaround_checks", column: "client_id", select: "id,shift_id,result" },
-  break_started: { table: "shift_breaks", column: "client_id", select: "id" },
-  break_ended: { table: "shift_breaks", column: "end_client_id", select: "id" },
-  shift_ended: { table: "driver_shifts", column: "end_client_id", select: "id" },
-  objection_raised: { table: "defect_objections", column: "client_id", select: "id,status" },
+  check_submitted: { table: "walkaround_checks", column: "client_id", select: "id,shift_id,result,driver_id" },
+  break_started: { table: "shift_breaks", column: "client_id", select: "id,driver_shifts!inner(driver_id)" },
+  break_ended: { table: "shift_breaks", column: "end_client_id", select: "id,driver_shifts!inner(driver_id)" },
+  shift_ended: { table: "driver_shifts", column: "end_client_id", select: "id,driver_id" },
+  objection_raised: { table: "defect_objections", column: "client_id", select: "id,status,driver_id" },
 };
 
-/** 200 duplicate when this event's clientId was already saved, else null. Runs before any business check. */
-export async function findDuplicate(admin: SupabaseClient, tenantId: string, event: DriverEvent): Promise<ProcessResult | null> {
+/** Refusal for a clientId another driver in the tenant already used. Says nothing about that row. */
+export const CLIENT_ID_IN_USE = "This item could not be saved. Reload and try again.";
+
+/** The driver a saved row belongs to: its own driver_id, or its shift's (an embed may come back as an object or an array). */
+export function duplicateRowDriver(row: Record<string, unknown>): string | null {
+  if (typeof row.driver_id === "string") return row.driver_id;
+  const shift = Array.isArray(row.driver_shifts) ? row.driver_shifts[0] : row.driver_shifts;
+  const id = (shift as { driver_id?: unknown } | null | undefined)?.driver_id;
+  return typeof id === "string" ? id : null;
+}
+
+/**
+  200 duplicate when THIS driver already saved this event's clientId, 409 when
+  a different driver (or an unreadable owner) holds it, else null. Runs before
+  any business check.
+*/
+export async function findDuplicate(admin: SupabaseClient, session: Pick<DriverSession, "tenantId" | "driverId">, event: DriverEvent): Promise<ProcessResult | null> {
   const key = IDEMPOTENCY_KEY[event.type];
   const { data, error } = await admin
     .from(key.table)
     .select(key.select)
-    .eq("tenant_id", tenantId)
+    .eq("tenant_id", session.tenantId)
     .eq(key.column, event.clientId)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) return null;
   const row = data as unknown as Record<string, unknown>;
+  if (duplicateRowDriver(row) !== session.driverId) return refuse(409, CLIENT_ID_IN_USE);
   if (event.type === "check_submitted") {
     return { status: 200, body: { ok: true, duplicate: true, check_id: row.id, shift_id: row.shift_id ?? null, result: row.result } };
   }
@@ -156,6 +178,10 @@ async function processCheck(admin: SupabaseClient, session: DriverSession, event
     const item = catalogue.get(id);
     if (!item || item.retiredAt !== null) return refuse(409, "The checklist has changed. Reload the check and try again.");
     shown.push(item);
+  }
+  // And it must cover every active item that applies to the vehicle (S-5).
+  if (missingChecklistItems(catalogueRows, companyId, event.checklistItemIds).length > 0) {
+    return refuse(409, CHECKLIST_INCOMPLETE);
   }
 
   const resolved = resolveAll(event.defects, catalogue);
@@ -250,7 +276,24 @@ async function processShiftEvent(admin: SupabaseClient, session: DriverSession, 
   return { status: 200, body: { ok: true, ...(data as Record<string, unknown>) } };
 }
 
-async function processObjection(admin: SupabaseClient, session: DriverSession, event: Extract<DriverEvent, { type: "objection_raised" }>): Promise<ProcessResult> {
+/*
+  The time stored as raised_at. The phone's time is run through the same
+  occurrenceCheck as every other event (security scan S-8: a 2099 date used to
+  be stored as given and always sorted as the latest objection); a time it
+  refuses is replaced by the server's receive time rather than failing the
+  objection, which the driver may need to get back on the road.
+*/
+export function objectionRaisedAt(occurredAt: string, receivedAt: Date): string {
+  const timing = occurrenceCheck({ occurredAt, receivedAt, previousOccurredAt: null });
+  return timing.ok ? new Date(occurredAt).toISOString() : receivedAt.toISOString();
+}
+
+async function processObjection(
+  admin: SupabaseClient,
+  session: DriverSession,
+  event: Extract<DriverEvent, { type: "objection_raised" }>,
+  receivedAt: Date,
+): Promise<ProcessResult> {
   // The defect must be on one of THIS driver's checks and be dangerous.
   const { data: defect, error } = await admin
     .from("walkaround_defects")
@@ -266,13 +309,13 @@ async function processObjection(admin: SupabaseClient, session: DriverSession, e
 
   const { data: inserted, error: insertError } = await admin
     .from("defect_objections")
-    .insert({ tenant_id: session.tenantId, defect_id: defect.id, driver_id: session.driverId, client_id: event.clientId, reason: event.reason, raised_at: event.occurredAt })
+    .insert({ tenant_id: session.tenantId, defect_id: defect.id, driver_id: session.driverId, client_id: event.clientId, reason: event.reason, raised_at: objectionRaisedAt(event.occurredAt, receivedAt) })
     .select("id")
     .single();
   if (insertError) {
     if (insertError.code === "23505") {
       // A concurrent retry of this same event won the insert: still a duplicate, not a refusal.
-      const again = await findDuplicate(admin, session.tenantId, event);
+      const again = await findDuplicate(admin, session, event);
       if (again) return again;
       return refuse(409, "An objection to this defect is already waiting for a decision.");
     }
@@ -282,9 +325,9 @@ async function processObjection(admin: SupabaseClient, session: DriverSession, e
 }
 
 export async function processDriverEvent(admin: SupabaseClient, session: DriverSession, event: DriverEvent, receivedAt: Date): Promise<ProcessResult> {
-  const duplicate = await findDuplicate(admin, session.tenantId, event);
+  const duplicate = await findDuplicate(admin, session, event);
   if (duplicate) return duplicate;
   if (event.type === "check_submitted") return processCheck(admin, session, event, receivedAt);
-  if (event.type === "objection_raised") return processObjection(admin, session, event);
+  if (event.type === "objection_raised") return processObjection(admin, session, event, receivedAt);
   return processShiftEvent(admin, session, event, receivedAt);
 }

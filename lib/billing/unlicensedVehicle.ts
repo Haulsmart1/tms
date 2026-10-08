@@ -19,18 +19,29 @@
 //   hint     company_billing_cancelled
 //   message  "Vehicle <registration> cannot be assigned to new work because
 //            this company's subscription is cancelled."
-// Both refusals go through the helpers below, so every page that already
-// handles LIC01 shows the right sentence for LIC02 without changes.
+// And (prodfix_97, review H-3) a company that has been past_due for longer
+// than its grace period (company_billing.past_due_since, 7 days by default):
+//   errcode  LIC03
+//   hint     company_billing_past_due
+//   message  "Vehicle <registration> cannot be assigned to new work because
+//            this company's payment is more than <n> days overdue. Update the
+//            card on the Billing page."
+// Every refusal goes through the helpers below, so every page that already
+// handles LIC01 shows the right sentence for LIC02 and LIC03 without changes.
 
 export const UNLICENSED_VEHICLE_ERRCODE = "LIC01";
 export const UNLICENSED_VEHICLE_HINT = "vehicle_unlicensed";
 export const CANCELLED_COMPANY_ERRCODE = "LIC02";
 export const CANCELLED_COMPANY_HINT = "company_billing_cancelled";
+export const PAST_DUE_COMPANY_ERRCODE = "LIC03";
+export const PAST_DUE_COMPANY_HINT = "company_billing_past_due";
 
 const FALLBACK_MESSAGE =
   "This vehicle has no active licence. Activate it on the Licences page before assigning it.";
 const CANCELLED_FALLBACK_MESSAGE =
   "This vehicle cannot be assigned to new work because this company's subscription is cancelled.";
+const PAST_DUE_FALLBACK_MESSAGE =
+  "This vehicle cannot be assigned to new work because this company's payment is overdue. Update the card on the Billing page.";
 
 // Matches the sentence the trigger raises, so an RPC caller that rethrows only
 // `error.message` (for example `new Error(\`save failed: ${error.message}\`)`)
@@ -40,6 +51,8 @@ const SENTENCE =
   /Vehicle .{1,80}? has no active licence\. Activate it on the Licences page before assigning it\./;
 const CANCELLED_SENTENCE =
   /Vehicle .{1,80}? cannot be assigned to new work because this company's subscription is cancelled\./;
+const PAST_DUE_SENTENCE =
+  /Vehicle .{1,80}? cannot be assigned to new work because this company's payment is more than \d{1,3} days overdue\. Update the card on the Billing page\./;
 
 type ErrorLike = {
   code?: unknown;
@@ -58,10 +71,17 @@ function isCancelledCompanyError(e: ErrorLike): boolean {
   return typeof e.message === "string" && CANCELLED_SENTENCE.test(e.message);
 }
 
+function isPastDueCompanyError(e: ErrorLike): boolean {
+  if (e.code === PAST_DUE_COMPANY_ERRCODE) return true;
+  if (e.hint === PAST_DUE_COMPANY_HINT) return true;
+  return typeof e.message === "string" && PAST_DUE_SENTENCE.test(e.message);
+}
+
 export function isUnlicensedVehicleError(error: unknown): boolean {
   const e = asErrorLike(error);
   if (!e) return false;
   if (isCancelledCompanyError(e)) return true;
+  if (isPastDueCompanyError(e)) return true;
   if (e.code === UNLICENSED_VEHICLE_ERRCODE) return true;
   if (e.hint === UNLICENSED_VEHICLE_HINT) return true;
   return typeof e.message === "string" && SENTENCE.test(e.message);
@@ -78,6 +98,10 @@ export function unlicensedVehicleMessage(error: unknown): string {
   if (e && isCancelledCompanyError(e)) {
     const match = typeof e.message === "string" ? e.message.match(CANCELLED_SENTENCE) : null;
     return match ? match[0] : CANCELLED_FALLBACK_MESSAGE;
+  }
+  if (e && isPastDueCompanyError(e)) {
+    const match = typeof e.message === "string" ? e.message.match(PAST_DUE_SENTENCE) : null;
+    return match ? match[0] : PAST_DUE_FALLBACK_MESSAGE;
   }
   if (e && isUnlicensedVehicleError(error) && typeof e.message === "string") {
     const match = e.message.match(SENTENCE);

@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ApiError, requireTenant } from "../../../../lib/api/server";
+import { ApiError, apiDbError, requireTenant } from "../../../../lib/api/server";
 import { TenantAccessError, isUuid } from "../../../../lib/auth/serverTenantAccess";
 import {
   canDeleteJobStatus,
   hasOperationalJobRecords,
   hasProtectedJobLinks,
 } from "../../../../lib/jobs/deletePolicy";
+import {
+  isUnlicensedVehicleError,
+  unlicensedVehicleMessage,
+} from "../../../../lib/billing/unlicensedVehicle";
 import { authorizeOfficeTenant } from "../../../../lib/jobs/officeAccess";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 
@@ -45,7 +49,8 @@ export async function DELETE(
       .maybeSingle();
 
     if (jobError) {
-      throw new ApiError(400, jobError.message);
+      // apiDbError logs the raw text and answers generic copy (review L-9).
+      throw apiDbError(jobError, "Unable to load the job.");
     }
 
     if (!job) {
@@ -148,7 +153,13 @@ export async function DELETE(
         );
       }
 
-      throw new ApiError(400, deleteError.message);
+      // A trigger refusal keeps its user sentence (prodfix_30); anything
+      // else is logged and answered with generic copy (review L-9).
+      if (isUnlicensedVehicleError(deleteError)) {
+        throw new ApiError(409, unlicensedVehicleMessage(deleteError));
+      }
+
+      throw apiDbError(deleteError, "Unable to delete the job.");
     }
 
     if (!deletedJob) {

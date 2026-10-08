@@ -12,9 +12,11 @@ import {
 } from "./userAdmin";
 
 describe("parseInvitableRole", () => {
-  it("accepts only admin, staff and driver", () => {
+  it("accepts only admin and staff", () => {
     expect(parseInvitableRole(" Admin ")).toBe("admin");
-    expect(parseInvitableRole("driver")).toBe("driver");
+    // H-2: a console Driver was a full staff principal. Drivers are
+    // onboarded through driver portal invites instead.
+    expect(parseInvitableRole("driver")).toBeNull();
     expect(parseInvitableRole("super_admin")).toBeNull();
     expect(parseInvitableRole("")).toBeNull();
     expect(parseInvitableRole(undefined)).toBeNull();
@@ -56,6 +58,12 @@ describe("userAdminErrorResponse", () => {
     expect(userAdminErrorResponse({ code: "P0001", message: "not_in_company" }).status).toBe(404);
   });
 
+  it("explains a removal refused because the profile is still referenced (prodfix_97)", () => {
+    const outcome = userAdminErrorResponse({ code: "PRF01", message: "profile_still_referenced" });
+    expect(outcome.status).toBe(409);
+    expect(String(outcome.body.error)).toMatch(/still has records/);
+  });
+
   it("never echoes raw database text", () => {
     const result = userAdminErrorResponse({ code: "23505", message: 'duplicate key value violates "profiles_pkey"' });
     expect(result.status).toBe(500);
@@ -89,7 +97,7 @@ describe("checkRoleEdit", () => {
 
   it("allows an admin to change a staff member", () => {
     expect(
-      checkRoleEdit({ callerId: caller, callerTier: "admin", target: { userId: "t", roleName: "staff" }, newRole: "driver" }),
+      checkRoleEdit({ callerId: caller, callerTier: "admin", target: { userId: "t", roleName: "staff" }, newRole: "admin" }),
     ).toBeNull();
   });
 });

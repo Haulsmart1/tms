@@ -203,13 +203,10 @@ export async function POST(request: NextRequest) {
 
       const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
         redirectTo,
-        data: {
-          portal: "subcontractor",
-          subcontractor_id: targetEmployee.subcontractor_id,
-          tenant_id: targetEmployee.tenant_id,
-          employee_id: targetEmployee.id,
-          role,
-        },
+        // Display fields only. handle_new_user turns a tenant_id, company_id
+        // or role_id in user metadata into a tenant profile, so ids never go
+        // here (C-4): the subcontractor_users row written below is the link.
+        data: { portal: "subcontractor" },
       });
 
       if (inviteError) {

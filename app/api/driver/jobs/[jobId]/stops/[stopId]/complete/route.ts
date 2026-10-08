@@ -13,6 +13,7 @@ import {
   jobNotWorkableMessage,
 } from "../../../../../../../../lib/jobs/jobStatus";
 import { hasInvalidClientId, parseQueuedMeta } from "../../../../../../../../lib/pod/queuedMeta";
+import { podTimeFlags } from "../../../../../../../../lib/pod/recordedTime";
 import { createAdminClient } from "../../../../../../../../lib/supabase/admin";
 import { jobGateResponse, queuedJobGate } from "../../../../../../../../lib/walkaround/server";
 
@@ -38,7 +39,9 @@ type CompleteBody = {
   A completion from the offline queue (body carries clientId, shiftClientId,
   recordedAt) is gated at its recorded time and, when that time is trusted,
   delivered_at is that time; otherwise server time plus the
-  pod_time_untrusted flag.
+  pod_time_untrusted flag. A trusted time more than 15 minutes before the
+  server received it is kept and flagged pod_late_sync, so a backdated POD is
+  always visible to the office (lib/pod/recordedTime.ts podTimeFlags).
 */
 export async function POST(request: Request, context: RouteContext) {
   try {
@@ -75,12 +78,13 @@ export async function POST(request: Request, context: RouteContext) {
         return NextResponse.json({ error: "Invalid clientId." }, { status: 400 });
       }
 
-      let recordedAt = new Date().toISOString();
+      const receivedAt = new Date();
+      let recordedAt = receivedAt.toISOString();
       let timeTrusted = true;
 
       // A request from the offline queue is gated at the time it was recorded.
       if (meta) {
-        const queued = await queuedJobGate(admin, session, meta, { notBefore: job.created_at ?? null });
+        const queued = await queuedJobGate(admin, session, meta, { notBefore: job.created_at ?? null, now: receivedAt });
         if (queued.response) return queued.response;
         recordedAt = queued.at;
         timeTrusted = queued.trusted;
@@ -158,9 +162,9 @@ export async function POST(request: Request, context: RouteContext) {
         pod_status: "delivered",
         status: "completed",
       };
-      // A queued completion always states its flags: empty when the recorded
-      // time was trusted, pod_time_untrusted when server time was used.
-      if (meta) stopPatch.pod_flags = timeTrusted ? [] : ["pod_time_untrusted"];
+      // A queued completion always states its flags: pod_time_untrusted when
+      // server time was used, pod_late_sync when a trusted time is old, else none.
+      if (meta) stopPatch.pod_flags = podTimeFlags({ at: recordedAt, trusted: timeTrusted, serverNow: receivedAt });
 
       const updateStop = (patch: Record<string, unknown>) =>
         admin

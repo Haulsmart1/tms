@@ -18,7 +18,13 @@ describe("occurrenceCheck", () => {
 
   it("flags events older than 72 hours and events before the previous one", () => {
     expect(occurrenceCheck({ occurredAt: "2026-09-26T11:00:00Z", receivedAt, previousOccurredAt: null })).toEqual({ ok: true, flags: ["late_sync"] });
-    expect(occurrenceCheck({ occurredAt: "2026-09-29T10:00:00Z", receivedAt, previousOccurredAt: "2026-09-29T11:00:00Z" })).toEqual({ ok: true, flags: ["out_of_order"] });
+    expect(occurrenceCheck({ occurredAt: "2026-09-29T11:50:00Z", receivedAt, previousOccurredAt: "2026-09-29T11:55:00Z" })).toEqual({ ok: true, flags: ["out_of_order"] });
+  });
+
+  it("flags an event sent more than 15 minutes after it was recorded as delayed (S-6)", () => {
+    expect(occurrenceCheck({ occurredAt: "2026-09-29T11:45:00Z", receivedAt, previousOccurredAt: null })).toEqual({ ok: true, flags: [] });
+    expect(occurrenceCheck({ occurredAt: "2026-09-29T11:44:00Z", receivedAt, previousOccurredAt: null })).toEqual({ ok: true, flags: ["delayed_sync"] });
+    expect(occurrenceCheck({ occurredAt: "2026-09-29T08:30:00Z", receivedAt, previousOccurredAt: "2026-09-29T09:00:00Z" })).toEqual({ ok: true, flags: ["delayed_sync", "out_of_order"] });
   });
 
   it("refuses an unparseable time", () => {

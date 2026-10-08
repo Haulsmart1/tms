@@ -1,3 +1,6 @@
+// Build-time guard (N-13): Next resolves "server-only" at the compiler level,
+// so a client import of the service-role client fails the build, not at runtime.
+import "server-only";
 import { createClient } from "@supabase/supabase-js";
 
 /**

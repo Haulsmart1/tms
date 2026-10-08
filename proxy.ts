@@ -121,8 +121,10 @@ export const config = {
   /* Everything except static assets. Each matched request costs one auth
      validation, so letting /_next/static or an image through would add a
      round trip per asset for no benefit. The final alternation skips anything
-     with a file extension (favicon.ico, icon.svg, /public/* files). */
+     with a file extension (favicon.ico, icon.svg, /public/* files), but
+     never under /api/ (N-8): a route handler reached as /api/x/<id>.json
+     still runs the gate. */
   matcher: [
-    "/((?!_next/static|_next/image|.*\\.[^/]+$).*)",
+    "/((?!_next/static|_next/image|(?!api/).*\\.[^/]+$).*)",
   ],
 };

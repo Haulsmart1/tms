@@ -54,14 +54,23 @@ describe("quotationShareState", () => {
 
 describe("public error mapping", () => {
   it("passes known share errors through and hides everything else", () => {
-    expect(publicShareError(new QuotationShareError("revoked", 410))).toEqual({
-      message: SHARE_MESSAGES.revoked,
-      status: 410,
+    expect(publicShareError(new QuotationShareError("invalid", 404))).toEqual({
+      message: SHARE_MESSAGES.invalid,
+      status: 404,
     });
     expect(publicShareError(new Error("QUOTATION_SHARE_SECRET must be configured with at least 32 characters."))).toEqual({
       message: SHARE_MESSAGES.generic,
       status: 500,
     });
+  });
+
+  it("has one refusal for an unknown, revoked or expired link (N-17)", () => {
+    // Distinct codes let a token holder tell a revoked link from an expired
+    // or unknown one; every link refusal is the same 404 and message.
+    expect(Object.keys(SHARE_MESSAGES)).not.toContain("revoked");
+    expect(Object.keys(SHARE_MESSAGES)).not.toContain("linkExpired");
+    expect(publicRpcErrorMessage("This quotation link has been revoked.")).toBe(SHARE_MESSAGES.invalid);
+    expect(publicRpcErrorMessage("This quotation link has expired.")).toBe(SHARE_MESSAGES.invalid);
   });
 
   it("shows RPC business messages verbatim and replaces database detail", () => {

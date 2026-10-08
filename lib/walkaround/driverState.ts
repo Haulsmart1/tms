@@ -42,6 +42,8 @@ export type DriverShiftState = {
       registration: string;
       startOdometer: number;
       checkResult: CheckResult;
+      /** When the covering check was done; the job gate refuses once it is too old. */
+      checkPerformedAt: string | null;
     };
   };
   /** The latest check that took a vehicle off the road and has not been superseded. */

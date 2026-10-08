@@ -57,3 +57,26 @@ export function acceptRecordedTime(input: RecordedTimeInput): RecordedTimeDecisi
 
   return { at: new Date(t).toISOString(), trusted: true };
 }
+
+/*
+  A trusted recorded time is kept, but a POD that reaches the server long
+  after it says it happened is marked for the office (security scan N-4,
+  N-5): an honest offline sync and a hand-built backdated request look the
+  same, so neither is refused, and both are made visible. 15 minutes clears
+  a normal queue retry and a short signal gap.
+*/
+export const LATE_SYNC_THRESHOLD_MS = 15 * 60 * 1000;
+
+export type PodTimeFlag = "pod_time_untrusted" | "pod_late_sync";
+
+/**
+  The job_stops.pod_flags a queued completion carries: pod_time_untrusted
+  when server time replaced the phone's, pod_late_sync when a trusted time is
+  more than LATE_SYNC_THRESHOLD_MS before the server received it, else none.
+*/
+export function podTimeFlags(input: { at: string; trusted: boolean; serverNow: Date }): PodTimeFlag[] {
+  if (!input.trusted) return ["pod_time_untrusted"];
+  const t = Date.parse(input.at);
+  if (Number.isNaN(t)) return ["pod_time_untrusted"];
+  return input.serverNow.getTime() - t > LATE_SYNC_THRESHOLD_MS ? ["pod_late_sync"] : [];
+}

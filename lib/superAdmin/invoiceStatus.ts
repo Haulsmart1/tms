@@ -4,6 +4,8 @@
    platform-wide button. Kept as a closed list on purpose: widening it is a
    product decision, not a typo fix. */
 
+import { CREDITABLE_INVOICE_STATUSES } from "../accounts/invoiceStatus";
+
 export const SUPER_ADMIN_INVOICE_STATUSES = ["paid", "pending"] as const;
 export type SuperAdminInvoiceStatus = (typeof SUPER_ADMIN_INVOICE_STATUSES)[number];
 
@@ -20,4 +22,20 @@ export function parseSuperAdminInvoiceStatus(body: unknown): ParsedInvoiceStatus
     return { ok: false, error: "Status must be one of: paid, pending." };
   }
   return { ok: true, status: raw as SuperAdminInvoiceStatus };
+}
+
+/* Statuses an invoice may be flipped FROM (review S-13). The route adds this
+   as an `.in("status", ...)` condition on the update, so the check and the
+   write are one statement and a concurrent void cannot slip between them.
+
+   Only an issued, live invoice qualifies: the statuses a credit note may be
+   raised against (lib/accounts/invoiceStatus.ts), plus the legacy "pending"
+   this page writes. Draft and awaiting_pod have not been issued, and void,
+   credited and cancelled are final: the accounts state machine never leaves
+   them, so neither does this button. The target itself is excluded so a
+   repeat click answers 409 rather than rewriting an audit row. */
+const SUPER_ADMIN_FLIPPABLE_STATUSES: readonly string[] = [...CREDITABLE_INVOICE_STATUSES, "pending"];
+
+export function superAdminAllowedFromStatuses(target: SuperAdminInvoiceStatus): string[] {
+  return SUPER_ADMIN_FLIPPABLE_STATUSES.filter((status) => status !== target);
 }

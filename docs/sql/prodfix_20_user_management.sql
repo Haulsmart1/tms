@@ -1,5 +1,12 @@
 -- prodfix_20_user_management.sql
 --
+-- SUPERSEDED IN PART (2026-10-08): prodfix_96 STEP 3 replaces provision_tenant_user. The body
+-- below inserts a bare profile (id only), which fails on the live NOT NULL profiles.tenant_id
+-- once handle_new_user no longer creates profiles. Do not re-run this file after prodfix_96.
+-- remove_company_user below also sets profiles.tenant_id = null, which the live NOT NULL
+-- refuses (23502); not fixed yet.
+--
+--
 -- Server-side user provisioning for /settings/users, keyed on profiles (the
 -- single source of truth RLS and get_tenant_context() use), with memberships
 -- still written for compatibility only.

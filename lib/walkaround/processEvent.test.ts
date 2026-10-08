@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
 import type { DriverSession } from "../driver/server";
 import type { DriverEvent } from "../shifts/events";
-import { processDriverEvent, SHIFT_NOT_FOUND } from "./processEvent";
+import { CLIENT_ID_IN_USE, duplicateRowDriver, objectionRaisedAt, processDriverEvent, SHIFT_NOT_FOUND } from "./processEvent";
 
 /*
   A minimal stand-in for the service-role client: every query is an equality
@@ -63,7 +63,7 @@ const check: DriverEvent = {
 describe("processDriverEvent idempotency", () => {
   it("answers a repeated check as a duplicate before any business check (even with the vehicle now VOR)", async () => {
     const { admin, calls } = fakeAdmin({
-      walkaround_checks: [{ id: "k1", tenant_id: "t1", client_id: uuid(1), shift_id: "s1", result: "pass" }],
+      walkaround_checks: [{ id: "k1", tenant_id: "t1", driver_id: "d1", client_id: uuid(1), shift_id: "s1", result: "pass" }],
       vehicles: [{ id: uuid(2), tenant_id: "t1", registration: "AB12 CDE", vor: true }],
     });
     const r = await processDriverEvent(admin, session, check, at);
@@ -73,9 +73,9 @@ describe("processDriverEvent idempotency", () => {
 
   it("answers repeated break, end and objection events from their own key columns", async () => {
     const { admin, calls } = fakeAdmin({
-      shift_breaks: [{ tenant_id: "t1", client_id: uuid(5), end_client_id: uuid(6), id: "b1" }],
-      driver_shifts: [{ tenant_id: "t1", end_client_id: uuid(7), id: "s1" }],
-      defect_objections: [{ tenant_id: "t1", client_id: uuid(8), id: "o1", status: "pending" }],
+      shift_breaks: [{ tenant_id: "t1", client_id: uuid(5), end_client_id: uuid(6), id: "b1", driver_shifts: { driver_id: "d1" } }],
+      driver_shifts: [{ tenant_id: "t1", driver_id: "d1", end_client_id: uuid(7), id: "s1" }],
+      defect_objections: [{ tenant_id: "t1", driver_id: "d1", client_id: uuid(8), id: "o1", status: "pending" }],
     });
     const base = { shiftClientId: uuid(1), occurredAt: "2026-09-29T11:30:00Z" };
     expect((await processDriverEvent(admin, session, { ...base, type: "break_started", clientId: uuid(5) }, at)).body).toEqual({ ok: true, duplicate: true });
@@ -85,6 +85,44 @@ describe("processDriverEvent idempotency", () => {
       (await processDriverEvent(admin, session, { type: "objection_raised", clientId: uuid(8), occurredAt: base.occurredAt, defectClientId: uuid(4), reason: "It was fine" }, at)).body,
     ).toEqual({ ok: true, duplicate: true, objectionId: "o1", status: "pending" });
     expect(calls).toEqual(["shift_breaks", "shift_breaks", "driver_shifts", "defect_objections"]);
+  });
+});
+
+describe("processDriverEvent idempotency is per driver (S-7)", () => {
+  it("answers 409, leaking nothing, when another driver in the tenant saved that clientId", async () => {
+    const { admin, calls } = fakeAdmin({
+      walkaround_checks: [{ id: "k1", tenant_id: "t1", driver_id: "d2", client_id: uuid(1), shift_id: "s1", result: "dangerous" }],
+    });
+    const r = await processDriverEvent(admin, session, check, at);
+    expect(r).toEqual({ status: 409, body: { error: CLIENT_ID_IN_USE } });
+    expect(JSON.stringify(r.body)).not.toContain("k1");
+    expect(calls.some((c) => c.startsWith("rpc:"))).toBe(false);
+  });
+
+  it("refuses another driver's break clientId, read through its shift", async () => {
+    const { admin } = fakeAdmin({
+      shift_breaks: [{ tenant_id: "t1", client_id: uuid(5), id: "b1", driver_shifts: [{ driver_id: "d2" }] }],
+    });
+    const r = await processDriverEvent(admin, session, { type: "break_started", clientId: uuid(5), shiftClientId: uuid(1), occurredAt: "2026-09-29T11:30:00Z" }, at);
+    expect(r).toEqual({ status: 409, body: { error: CLIENT_ID_IN_USE } });
+  });
+
+  it("reads the owning driver from the row or its shift embed, null when absent", () => {
+    expect(duplicateRowDriver({ driver_id: "d1" })).toBe("d1");
+    expect(duplicateRowDriver({ driver_shifts: { driver_id: "d3" } })).toBe("d3");
+    expect(duplicateRowDriver({ driver_shifts: [{ driver_id: "d4" }] })).toBe("d4");
+    expect(duplicateRowDriver({ id: "x" })).toBeNull();
+  });
+});
+
+describe("objectionRaisedAt (S-8)", () => {
+  it("keeps a believable phone time", () => {
+    expect(objectionRaisedAt("2026-09-29T11:30:00Z", at)).toBe("2026-09-29T11:30:00.000Z");
+  });
+
+  it("uses the server's receive time for a future or unreadable time", () => {
+    expect(objectionRaisedAt("2099-01-01T00:00:00Z", at)).toBe(at.toISOString());
+    expect(objectionRaisedAt("yesterday", at)).toBe(at.toISOString());
   });
 });
 

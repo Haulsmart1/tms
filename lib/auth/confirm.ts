@@ -10,11 +10,19 @@ export function safeAuthNextPath(
     const resolved = new URL(raw, origin);
 
     if (resolved.origin === origin) {
-      return (
+      const path =
         resolved.pathname +
         resolved.search +
-        resolved.hash
-      );
+        resolved.hash;
+
+      /* Dot segments can normalise to a protocol-relative path
+         ("/.//evil.com" becomes "//evil.com"), which a later
+         new URL(path, origin) resolves to another host (M-1). */
+      if (path.startsWith("//") || path.startsWith("/\\")) {
+        return "/dashboard";
+      }
+
+      return path;
     }
   } catch {
     // Fall through to the normal dashboard.

@@ -161,8 +161,15 @@ export default function UserCard({
               className="h-10 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
             >
               <option value="staff">Staff</option>
-              <option value="driver">Driver</option>
               <option value="admin">Admin</option>
+              {/* A legacy console Driver keeps a truthful label until an
+                  admin moves them to Staff or Admin; it cannot be chosen.
+                  Drivers belong on the driver portal (H-2). */}
+              {edit.role === "driver" ? (
+                <option value="driver" disabled>
+                  Driver (no longer available)
+                </option>
+              ) : null}
             </select>
           </label>
 

@@ -81,3 +81,22 @@ describe("unlicensedVehicleMessage", () => {
     );
   });
 });
+
+describe("past-due-beyond-grace refusal (LIC03, prodfix_97)", () => {
+  const sentence =
+    "Vehicle AB12 CDE cannot be assigned to new work because this company's payment is more than 7 days overdue. Update the card on the Billing page.";
+
+  it("is recognised by code, hint or sentence", () => {
+    expect(isUnlicensedVehicleError({ code: "LIC03" })).toBe(true);
+    expect(isUnlicensedVehicleError({ hint: "company_billing_past_due" })).toBe(true);
+    expect(isUnlicensedVehicleError(new Error(`save failed: ${sentence}`))).toBe(true);
+  });
+
+  it("returns the database sentence", () => {
+    expect(unlicensedVehicleMessage({ code: "LIC03", message: sentence })).toBe(sentence);
+  });
+
+  it("falls back to overdue copy when only the code survived", () => {
+    expect(unlicensedVehicleMessage({ code: "LIC03", message: "" })).toMatch(/payment is overdue/);
+  });
+});

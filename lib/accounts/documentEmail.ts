@@ -11,7 +11,7 @@
 */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { checkRateLimit, RATE_LIMITS } from "../rateLimit";
+import { documentEmailAllowed } from "../documents/emailLimits";
 import { AccountsHttpError } from "./errors";
 import { resolveDocumentRecipient } from "./recipients";
 
@@ -59,12 +59,7 @@ export async function authorizeDocumentRecipient(input: {
 }
 
 export async function enforceDocumentEmailLimits(admin: SupabaseClient, userId: string, tenantId: string): Promise<void> {
-  const [perUser, perTenant] = await Promise.all([
-    checkRateLimit(admin, RATE_LIMITS.documentEmailPerUser, userId),
-    checkRateLimit(admin, RATE_LIMITS.documentEmailPerTenant, tenantId),
-  ]);
-
-  if (!perUser.allowed || !perTenant.allowed) {
+  if (!(await documentEmailAllowed(admin, userId, tenantId))) {
     throw new AccountsHttpError(
       429,
       "Too many documents have been emailed recently. Please wait before sending more.",

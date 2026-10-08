@@ -15,7 +15,10 @@
 import type { RoleTier } from "../auth/tenantAccess";
 import { SUPER_ADMIN_ROLE } from "../roles";
 
-export const INVITABLE_ROLES = ["admin", "staff", "driver"] as const;
+/* No "driver": a console Driver profile passes can_access_tenant like any
+   staff member (H-2). Drivers are onboarded through driver portal invites
+   (/settings/portal-invites), which write driver_users and no profile. */
+export const INVITABLE_ROLES = ["admin", "staff"] as const;
 export type InvitableRole = (typeof INVITABLE_ROLES)[number];
 
 export function parseInvitableRole(raw: unknown): InvitableRole | null {
@@ -82,6 +85,14 @@ export function userAdminErrorResponse(error: { code?: string | null; message?: 
       return { status: 403, body: { error: "Only a platform super admin can change a super admin." } };
     case "invalid_role":
       return { status: 400, body: { error: "Invalid role." } };
+    case "profile_still_referenced":
+      return {
+        status: 409,
+        body: {
+          error:
+            "This user still has records in this company (for example tachograph or daily driver summaries), so the account cannot be removed. Change their role to staff instead.",
+        },
+      };
     case "role_missing":
     case "role_ambiguous":
       return {

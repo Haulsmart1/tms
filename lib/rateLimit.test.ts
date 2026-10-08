@@ -24,3 +24,11 @@ describe("RATE_LIMITS for self-serve signup", () => {
     expect(new Set(buckets).size).toBe(buckets.length);
   });
 });
+
+describe("RATE_LIMITS for driver GPS (N-9)", () => {
+  it("allows the tracker's full offline backlog plus normal sending in one window", () => {
+    expect(RATE_LIMITS.driverLocation).toEqual({ bucket: "driver-location:user", windowSeconds: 600, max: 120 });
+    // One fix per 15 s for ten minutes (40) plus a 40-fix backlog stays inside the limit.
+    expect(600 / 15 + 40).toBeLessThanOrEqual(RATE_LIMITS.driverLocation.max);
+  });
+});

@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "crypto";
+import { createHash, timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
@@ -85,15 +85,14 @@ function createAdminClient() {
   });
 }
 
+/* Hash both sides first, as lib/billing/cronAuth.ts does: the buffers are
+   then always the same length, so there is no early return that would leak
+   the secret's length (N-15). */
 function secureStringEquals(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
+  const leftHash = createHash("sha256").update(left).digest();
+  const rightHash = createHash("sha256").update(right).digest();
 
-  if (leftBuffer.length !== rightBuffer.length) {
-    return false;
-  }
-
-  return timingSafeEqual(leftBuffer, rightBuffer);
+  return timingSafeEqual(leftHash, rightHash);
 }
 
 function authenticateCambridge(request: NextRequest): boolean {

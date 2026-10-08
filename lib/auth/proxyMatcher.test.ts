@@ -31,6 +31,16 @@ describe("proxy.ts matcher", () => {
     },
   );
 
+  /* N-8: the dotted-last-segment skip is for static files only. Under /api/
+     every path runs the gate, so a handler reached as /api/x/<id>.json is
+     never left to authenticate itself alone. */
+  it.each(["/api/jobs/abc.json", "/api/x/a.b", "/api/accounts/invoices/1.pdf"])(
+    "runs the gate on dotted API path %s",
+    (path) => {
+      expect(re.test(path)).toBe(true);
+    },
+  );
+
   it.each(["/_next/static/chunk.js", "/_next/image", "/favicon.ico", "/logo.png"])("skips %s", (path) => {
     expect(re.test(path)).toBe(false);
   });

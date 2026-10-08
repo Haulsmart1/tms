@@ -64,7 +64,7 @@ export type Stop = {
   delivered_at: string | null;
   pod_notes: string | null;
   pod_photo_url: string | null;
-  /** Set by the driver routes (tracking_02). Not selected by /jobs until that migration is applied. */
+  /** Set by the driver routes (tracking_02): pod_time_untrusted, pod_late_sync. */
   pod_flags?: string[] | null;
 };
 
@@ -399,6 +399,16 @@ export default function StopCard({
               Time not trusted
               <span className="sr-only">
                 : this delivery was saved with no signal and the phone&apos;s clock could not be trusted, so the time shown is when the server received it.
+              </span>
+            </span>
+          ) : null}
+          {stop.pod_flags?.includes("pod_late_sync") ? (
+            <span
+              className="ml-1.5 rounded border border-warning-border bg-warning-tint px-1 text-xs text-warning-strong"
+            >
+              Synced late
+              <span className="sr-only">
+                : the phone saved this delivery offline and it reached the server more than 15 minutes later, so the time shown is the phone&apos;s.
               </span>
             </span>
           ) : null}

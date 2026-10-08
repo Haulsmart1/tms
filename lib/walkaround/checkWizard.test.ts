@@ -87,7 +87,7 @@ const onShift = (withVehicle: boolean): DriverShiftState["openShift"] => ({
   startedAt: "2026-09-29T05:00:00Z",
   onBreak: false,
   breaks: [],
-  currentVehicle: withVehicle ? { vehicleId: V1, registration: "AB12 CDE", startOdometer: 1000, checkResult: "pass" } : null,
+  currentVehicle: withVehicle ? { vehicleId: V1, registration: "AB12 CDE", startOdometer: 1000, checkResult: "pass", checkPerformedAt: "2026-09-29T04:55:00Z" } : null,
 });
 
 describe("phaseFromParam", () => {

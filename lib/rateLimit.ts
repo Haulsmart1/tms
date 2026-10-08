@@ -34,6 +34,10 @@ export const RATE_LIMITS = {
   quoteSharePerIp: { bucket: "quote-share:ip", windowSeconds: 600, max: 60 },
   documentEmailPerUser: { bucket: "doc-email:user", windowSeconds: 3600, max: 60 },
   documentEmailPerTenant: { bucket: "doc-email:tenant", windowSeconds: 86400, max: 500 },
+  /* N-10: a company with no card on file (a fresh self-serve signup) could
+     otherwise send 500 branded customer emails a day to addresses its own
+     staff typed in. 20 a day covers a trial; adding a card lifts it. */
+  documentEmailPerUnverifiedTenant: { bucket: "doc-email:unverified-tenant", windowSeconds: 86400, max: 20 },
   invitePerUser: { bucket: "invite:user", windowSeconds: 3600, max: 30 },
   podSharePdfPerIp: { bucket: "pod-share-pdf:ip", windowSeconds: 600, max: 60 },
   /* Public tracking page JSON (GET /api/public/track/[token]). The page polls
@@ -56,6 +60,12 @@ export const RATE_LIMITS = {
      URL, then record), so 120 requests is 60 photos in ten minutes: a
      backlog of offline photos replays without tripping it, a loop does. */
   driverWalkaroundPhoto: { bucket: "driver-walkaround-photo:user", windowSeconds: 600, max: 120 },
+  /* Driver phone GPS (POST /api/driver/location), per signed-in user. The
+     phone sends at most one fix every 15 seconds (40 per ten minutes) and
+     holds at most 40 while offline, so 120 lets a reconnect flush its backlog
+     while stopping a script flooding telematics_positions (scan N-9). The
+     tracker retries a 429 with backoff. */
+  driverLocation: { bucket: "driver-location:user", windowSeconds: 600, max: 120 },
 } as const satisfies Record<string, RateLimitRule>;
 
 const MISSING_FUNCTION_CODES = new Set(["42883", "PGRST202"]);

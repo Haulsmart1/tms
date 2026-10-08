@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeCatalogue, groupByItem, toSnapshot, validateCompanyItem } from "./catalogue";
+import { activeCatalogue, groupByItem, missingChecklistItems, requiredChecklistItems, toSnapshot, validateCompanyItem } from "./catalogue";
 import type { CatalogueItem } from "./types";
 
 function item(over: Partial<CatalogueItem>): CatalogueItem {
@@ -29,6 +29,34 @@ describe("activeCatalogue", () => {
       item({ id: "r", companyId: "co-1", code: "co.old.y", retiredAt: "2026-09-01T00:00:00Z" }),
     ];
     expect(activeCatalogue(rows, "co-1").map((r) => r.id)).toEqual(["b1", "b2", "c1"]);
+  });
+});
+
+describe("checklist coverage (S-5)", () => {
+  const rows = [
+    item({ id: "v1", code: "lights.out", appliesTo: "vehicle" }),
+    item({ id: "b1", code: "brakes.air_leak", appliesTo: "both" }),
+    item({ id: "t1", code: "trailer.coupling", appliesTo: "trailer" }),
+    item({ id: "c1", companyId: "co-1", code: "co.tail_lift.leak", appliesTo: "vehicle" }),
+    item({ id: "x", companyId: "co-2", code: "co.crane.x", appliesTo: "vehicle" }),
+    item({ id: "r", code: "old.row", appliesTo: "vehicle", retiredAt: "2026-09-01T00:00:00Z" }),
+  ];
+
+  it("requires every active vehicle and both row of the baseline and this company, not trailer-only rows", () => {
+    expect(requiredChecklistItems(rows, "co-1").map((i) => i.id).sort()).toEqual(["b1", "c1", "v1"]);
+  });
+
+  it("accepts a full checklist, with or without trailer rows", () => {
+    expect(missingChecklistItems(rows, "co-1", ["v1", "b1", "c1"])).toEqual([]);
+    expect(missingChecklistItems(rows, "co-1", ["v1", "b1", "c1", "t1"])).toEqual([]);
+  });
+
+  it("names what a one-item checklist left out", () => {
+    expect(missingChecklistItems(rows, "co-1", ["b1"]).map((i) => i.id).sort()).toEqual(["c1", "v1"]);
+  });
+
+  it("does not let another company's or a retired row stand in for a required one", () => {
+    expect(missingChecklistItems(rows, "co-1", ["x", "r", "b1", "c1"]).map((i) => i.id)).toEqual(["v1"]);
   });
 });
 

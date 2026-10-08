@@ -1,6 +1,9 @@
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  /* Next resolves `import "server-only"` at the compiler level; vitest needs
+     the same no-op so server modules (lib/supabase/admin.ts) still load. */
+  resolve: { alias: { "server-only": "next/dist/compiled/server-only/empty.js" } },
   test: {
     environment: "node",
     include: ["lib/**/*.test.ts"],
