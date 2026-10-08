@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 15024)
-Total output lines: 1866
-
 // Supabase calls for period billing. Every decision is delegated to the pure
 // modules (period, close, invoice, activation, cancellation, periodPayment);
 // this file only loads rows, writes rows, and sequences the payment call.
@@ -921,7 +918,11 @@ async function collectPeriod(
   if (payment.status === "failed") {
     const retryOn = nextRetryOn(period.period_end, args.attempt);
 
-    const marked = await adm…24 tokens truncated…nt: args.attempt,
+    const marked = await admin
+      .from("billing_periods")
+      .update({
+        status: "failed",
+        attempt_count: args.attempt,
         retry_on: retryOn,
         collecting_since: null,
       })
