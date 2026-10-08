@@ -293,6 +293,19 @@ Offline POD for own-fleet drivers is still gated by the walkaround job gate, so 
 `shifts_01..05` are applied (after S-1 from the 2026-10-07 security scan is fixed). Prefilled tracking
 link recipients come from `20260929093000_job_stop_contacts.sql`.
 
+## Planning date persistence, 2026-10-08
+
+`prodfix_98_planning_date_save.sql` adds the date-aware overload of
+`save_planning_assignments`. Apply after prodfix_70 and
+`20260901041500_jobs_planning_date.sql`, before releasing the date-aware
+Planning client. Status: **applied to TMS production on 2026-10-08**, migration `bob_planning_date_save_20261008`.
+The original two-argument function remains available for older clients.
+The new client refuses saving if the overload is unavailable; it never falls
+back to an assignment-only write that would silently leave the date behind.
+This does not backfill old routes or publish named snapshots. Existing work
+must be reviewed and applied on its intended planning day; a saved snapshot
+retains its original day and must not silently become today's work.
+
 ## Next: 2026-10-08 security scan (apply in this order)
 
 Findings: `docs/superpowers/reviews/2026-10-08-security-scan.md`. Do N-1 in the dashboard first (see Live state).

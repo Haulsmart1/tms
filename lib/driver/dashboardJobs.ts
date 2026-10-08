@@ -1,12 +1,14 @@
 export type DriverJobDateFields = {
   job_date: string | null;
   scheduled_date: string | null;
+  planning_date: string | null;
 };
 
 export function getDriverJobOperationalDate(
   job: DriverJobDateFields
 ): string | null {
-  return job.scheduled_date ?? job.job_date;
+  // Planning can move a job without changing its original scheduled date.
+  return job.planning_date ?? job.scheduled_date ?? job.job_date;
 }
 
 export function isDriverJobForDate(

@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const JOB_SELECT =
-  "id,reference,customer_reference,status,job_date,scheduled_date,priority,notes,pod_status,vehicle_id,route_order,completed_at";
+  "id,reference,customer_reference,status,job_date,scheduled_date,planning_date,priority,notes,pod_status,vehicle_id,route_order,completed_at";
 
 /*
   Driver dashboard data. "Today" is the operator's calendar day in the
@@ -41,7 +41,10 @@ export async function GET() {
       .select(JOB_SELECT)
       .eq("tenant_id", session.tenantId)
       .eq("driver_id", session.driverId)
-      .or(`scheduled_date.eq.${today},and(scheduled_date.is.null,job_date.eq.${today})`)
+      // An explicit planning date supersedes both source dates.
+      .or(`planning_date.eq.${today},and(planning_date.is.null,scheduled_date.eq.${today}),and(planning_date.is.null,scheduled_date.is.null,job_date.eq.${today})`)
+      .order("route_order", { ascending: true, nullsFirst: false })
+      .order("reference", { ascending: true })
       .limit(500);
 
     if (session.subcontractorId) {

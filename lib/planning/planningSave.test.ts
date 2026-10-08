@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { createClient } from "@supabase/supabase-js";
 import {
   buildPlanningSavePlan,
+  savePlanningAssignments,
   classifyPlanningSaveError,
   PLANNING_ASSIGNMENT_BLOCKED_MESSAGE,
   PLANNING_SAVE_ERROR_MESSAGES,
@@ -91,4 +93,26 @@ describe("PLANNING_ASSIGNMENT_BLOCKED_MESSAGE", () => {
     expect(PLANNING_ASSIGNMENT_BLOCKED_MESSAGE).toContain("Active tenant");
     expect(PLANNING_ASSIGNMENT_BLOCKED_MESSAGE).toContain("sidebar");
   });
+});
+
+describe("date-aware save concurrency", () => {
+  it("carries both last-seen dates alongside the assignment and route order", () => {
+    const original = job({ planning_date: null, scheduled_date: "2026-10-04" });
+    const result = buildPlanningSavePlan([{ id: "job-1", vehicle_id: "ht21-eor", driver_id: "bob", route_order: 1, planning_date: "2026-10-08" }], new Map([[original.id, original]]), "tenant-a");
+    expect(result).toMatchObject({ ok: true, rows: [{ planning_date: "2026-10-08", expected_planning_date: null, expected_scheduled_date: "2026-10-04", expected_driver_id: "driver-a" }] });
+  });
+});
+
+it("refuses an unavailable date-aware RPC without falling back to an assignment-only save", async () => {
+  const calls: Record<string, unknown>[] = [];
+  const client = createClient("https://save-test.invalid", "test-key", {
+    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+    global: { fetch: async (_input, init) => {
+      calls.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ code: "PGRST202", message: "Date-aware function missing" }), { status: 404, headers: { "Content-Type": "application/json" } });
+    } },
+  });
+  const result = await savePlanningAssignments(client, { ok: true, tenantId: "tenant-a", rows: [] }, "2026-10-08");
+  expect(classifyPlanningSaveError(result.error!)).toBe("rpc_missing");
+  expect(calls).toEqual([{ p_tenant_id: "tenant-a", p_updates: [], p_planning_date: "2026-10-08" }]);
 });

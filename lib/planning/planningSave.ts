@@ -16,6 +16,7 @@
 */
 
 import { isUnlicensedVehicleError, unlicensedVehicleMessage } from "../billing/unlicensedVehicle";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { JobUpdate } from "./saveDiff";
 
 export type PlanningSaveJobFacts = {
@@ -24,6 +25,8 @@ export type PlanningSaveJobFacts = {
   vehicle_id: string | null;
   driver_id: string | null;
   route_order: number | null;
+  planning_date?: string | null;
+  scheduled_date?: string | null;
 };
 
 export type PlanningSaveRow = {
@@ -34,6 +37,9 @@ export type PlanningSaveRow = {
   expected_vehicle_id: string | null;
   expected_driver_id: string | null;
   expected_route_order: number | null;
+  planning_date?: string | null;
+  expected_planning_date?: string | null;
+  expected_scheduled_date?: string | null;
 };
 
 export type PlanningSavePlan =
@@ -87,6 +93,11 @@ export function buildPlanningSavePlan(
       expected_vehicle_id: job.vehicle_id,
       expected_driver_id: job.driver_id,
       expected_route_order: job.route_order,
+      ...("planning_date" in update ? {
+        planning_date: update.planning_date,
+        expected_planning_date: job.planning_date ?? null,
+        expected_scheduled_date: job.scheduled_date ?? null,
+      } : {}),
     });
   }
 
@@ -122,7 +133,7 @@ export const PLANNING_SAVE_ERROR_MESSAGES: Record<PlanningSaveErrorKind, string>
   conflict:
     "Someone else saved changes to these jobs after this board loaded. Nothing was saved. Reload the board to see the latest plan, then make your change again.",
   rpc_missing:
-    "Saving is unavailable until the planning save update (docs/sql/prodfix_70_planning_save.sql) is installed. Nothing was saved; your changes are kept in this browser.",
+    "Saving is unavailable until the planning save update is installed. Nothing was saved; your changes are kept in this browser.",
   unlicensed_vehicle: unlicensedVehicleMessage(null),
   failed: "The plan could not be saved. Nothing was saved; your changes are kept in this browser.",
 };
@@ -137,4 +148,17 @@ export function planningSaveErrorMessage(
     return `${unlicensedVehicleMessage(error)} Nothing was saved; your changes are kept in this browser.`;
   }
   return PLANNING_SAVE_ERROR_MESSAGES[kind];
+}
+/** Date and assignment use the same RPC transaction. An older database must
+ * refuse this call; an assignment-only fallback would lose the route again. */
+export function savePlanningAssignments(
+  client: Pick<SupabaseClient, "rpc">,
+  plan: Extract<PlanningSavePlan, { ok: true }>,
+  planningDate: string,
+) {
+  return client.rpc("save_planning_assignments", {
+    p_tenant_id: plan.tenantId,
+    p_updates: plan.rows,
+    p_planning_date: planningDate,
+  });
 }

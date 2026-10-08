@@ -13,6 +13,7 @@ import JobDetailDialog from "./JobDetailDialog";
 import { draftAssignment } from "../../lib/planning/jobDetail";
 import { stopsNeedingGeocode } from "../../lib/planning/geocoding";
 import { computeSaveDiff, type LanePlan } from "../../lib/planning/saveDiff";
+import { loadPlanningBoardJobs, savedPlanBoardReady } from "../../lib/planning/boardJobs";
 import {
   createSavedPlanSnapshot,
   savedPlanSnapshotToPendingItineraries,
@@ -39,6 +40,7 @@ import {
 } from "../../lib/planning/draftCache";
 import {
   buildPlanningSavePlan,
+  savePlanningAssignments,
   classifyPlanningSaveError,
   PLANNING_ASSIGNMENT_BLOCKED_MESSAGE,
   PLANNING_SAVE_BLOCKED_MESSAGES,
@@ -336,8 +338,8 @@ export default function PlanningPage() {
     [vehicles, laneOrders, laneDrivers]
   );
   const pendingUpdates = useMemo(
-    () => computeSaveDiff(jobs, lanePlans, unassigned.map((j) => j.id)),
-    [jobs, lanePlans, unassigned]
+    () => computeSaveDiff(jobs, lanePlans, unassigned.map((j) => j.id), date),
+    [jobs, lanePlans, unassigned, date]
   );
   const pendingUpdatesJson = useMemo(() => JSON.stringify(pendingUpdates), [pendingUpdates]);
   /* Dirty means "differs from what the load itself produced", not "non-empty".
@@ -400,29 +402,15 @@ export default function PlanningPage() {
         : tenant.tenants.map((option) => option.id)
     );
 
-    const jobsQuery = supabase
-      .from("jobs")
-      .select(`
-        id, tenant_id, reference, status, scheduled_date, planning_date,
-        collection_eta, delivery_eta, acceptance_note, accepted_at, accepted_by,
-        vehicle_id, driver_id, subcontractor_id, route_order,
-        journey_scope, origin_country_code, destination_country_code,
-        compliance_regime_override, compliance_override_reason,
-        customers ( name ),
-        job_stops (id, stop_order, type, address_line, city, postcode, lat, lng, booked_from, booked_to),
-        job_items (
-          id, sku, description, quantity, serial_numbers,
-          external_reference, notes
-        )
-      `)
-      .or(
-        `planning_date.eq.${date},and(planning_date.is.null,scheduled_date.eq.${date})`
-      );
-
     const resolvedTimeZone = await timeZonePromise;
-    const { data: jobsData, error: jobsError } = await tenant
-      .filterByTenant(jobsQuery)
-      .order("created_at", { ascending: true });
+    const savedPlan = pendingSavedPlanOpen.current;
+    const { data: jobsData, error: jobsError } = await loadPlanningBoardJobs(supabase, {
+      tenantIds: tenant.activeTenantId ? [tenant.activeTenantId] : tenant.tenants.map((option) => option.id),
+      planningDate: date,
+      savedJobIds: savedPlan?.tenantId === planningTenantId && savedPlan.planningDate === date
+        ? savedPlan.snapshot.lanes.flatMap((lane) => lane.jobIds)
+        : [],
+    });
     const { data: vehicleData, error: vehicleError } = await tenant
       .filterByTenant(
         supabase.from("vehicles").select(`
@@ -457,9 +445,9 @@ export default function PlanningPage() {
       .order("name", { ascending: true });
 
     if (isCancelled()) return;
-    if (jobsError) { setMessage(`Jobs load error: ${jobsError.message}`); setLoading(false); return; }
-    if (vehicleError) { setMessage(`Vehicles load error: ${vehicleError.message}`); setLoading(false); return; }
-    if (driverError) { setMessage(`Drivers load error: ${driverError.message}`); setLoading(false); return; }
+    if (jobsError) { pendingSavedPlanOpen.current = null; setMessage(`Jobs load error: ${jobsError.message}`); setLoading(false); return; }
+    if (vehicleError) { pendingSavedPlanOpen.current = null; setMessage(`Vehicles load error: ${vehicleError.message}`); setLoading(false); return; }
+    if (driverError) { pendingSavedPlanOpen.current = null; setMessage(`Drivers load error: ${driverError.message}`); setLoading(false); return; }
 
     const loadedTimeZone = resolvedTimeZone.timeZone;
     const loadNotices: string[] = [];
@@ -478,6 +466,8 @@ export default function PlanningPage() {
       driver_id: row.driver_id,
       subcontractor_id: row.subcontractor_id,
       route_order: row.route_order,
+      planning_date: row.planning_date,
+      scheduled_date: row.scheduled_date,
       journey_scope: row.journey_scope,
       origin_country_code: row.origin_country_code,
       destination_country_code: row.destination_country_code,
@@ -561,7 +551,7 @@ export default function PlanningPage() {
     const initialUnassignedIds = loaded
       .filter((j) => !j.subcontractor_id && !laneAssignedIds.has(j.id))
       .map((j) => j.id);
-    const initialDiff = computeSaveDiff(loaded, initialLanePlans, initialUnassignedIds);
+    const initialDiff = computeSaveDiff(loaded, initialLanePlans, initialUnassignedIds, date);
 
     /* The pool's disclosure for jobs displaced by a retired vehicle: the
        unassignment already rides the baseline diff above, so it is only
@@ -1423,7 +1413,7 @@ export default function PlanningPage() {
   }
 
   async function persistPlan(mode: "manual" | "auto"): Promise<boolean> {
-    if (saveInFlight.current || (!dirty && !hasCanonicalWork)) return false;
+    if (saveInFlight.current || (!dirty && !hasCanonicalWork && !stagedSavedPlan)) return false;
 
     const updates = pendingUpdates.map((update) => ({ ...update }));
     const snapshotJson = pendingUpdatesJson;
@@ -1469,13 +1459,7 @@ export default function PlanningPage() {
       /* One atomic call. Every job carries the assignment this tab last saw;
          the RPC refuses the whole save if any job changed since (PLAN-11). */
       if (savePlanResult.rows.length > 0) {
-        const { error } = await supabase.rpc(
-          "save_planning_assignments",
-          {
-            p_tenant_id: activeTenantId,
-            p_updates: savePlanResult.rows,
-          }
-        );
+        const { error } = await savePlanningAssignments(supabase, savePlanResult, date);
 
         if (error) {
           failureKind = classifyPlanningSaveError(error);
@@ -1616,6 +1600,7 @@ export default function PlanningPage() {
                 vehicle_id: saved.vehicle_id,
                 driver_id: saved.driver_id,
                 route_order: saved.route_order,
+                planning_date: saved.planning_date,
               }
             : job;
         })
@@ -1917,14 +1902,17 @@ export default function PlanningPage() {
         id
       );
 
+      pendingSavedPlanOpen.current = loaded;
+      setStagedSavedPlan(null);
       if (loaded.planningDate !== date) {
-        pendingSavedPlanOpen.current = loaded;
-        setStagedSavedPlan(null);
         setDate(loaded.planningDate);
         return;
       }
 
-      stageLoadedSavedPlan(loaded);
+      // Reload the snapshot's jobs even when their operational dates moved.
+      // The loading effect stages the plan only after that read completes.
+      const seq = ++loadSeq.current;
+      await loadData(() => loadSeq.current !== seq);
     } catch (error) {
       pendingSavedPlanOpen.current = null;
       setMessage(
@@ -2194,7 +2182,14 @@ export default function PlanningPage() {
   useEffect(() => {
     const pending = pendingSavedPlanOpen.current;
 
-    if (loading || !pending || pending.planningDate !== date) {
+    if (!pending || !savedPlanBoardReady({
+      loading,
+      loadedScope: loadedPlanningScope.current,
+      requestedScope: planningDraftStorageKey(planningTenantId ?? "", date),
+      tenantId: planningTenantId,
+      planningDate: date,
+      savedPlan: pending,
+    })) {
       return;
     }
 
@@ -2203,7 +2198,7 @@ export default function PlanningPage() {
 
     // Uses the freshly loaded board for the Saved Plan's date.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, date]);
+  }, [loading, date, planningTenantId]);
 
   function restoreRecoveryDraft() {
     if (!recoveryDraft || planningReadOnly()) return;

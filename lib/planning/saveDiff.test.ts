@@ -62,3 +62,32 @@ describe("computeSaveDiff", () => {
     ]);
   });
 });
+
+describe("operational date persistence", () => {
+  it("emits a date-only update for an already assigned HT21 EOR lane", () => {
+    const original = [job({ id: "a", vehicle_id: "ht21-eor", driver_id: "bob", route_order: 1, planning_date: "2026-10-04" })];
+    const lanes = [{ vehicleId: "ht21-eor", driverId: "bob", jobIds: ["a"] }];
+    expect(computeSaveDiff(original, lanes, [], "2026-10-08")).toEqual([
+      { id: "a", vehicle_id: "ht21-eor", driver_id: "bob", route_order: 1, planning_date: "2026-10-08" },
+    ]);
+  });
+
+  it("preserves snapshot job order and Bob's assignment for a 25-job route", () => {
+    const original = Array.from({ length: 25 }, (_, i) => job({ id: `job-${i + 1}`, scheduled_date: "2026-10-04" }));
+    const ids = original.map((row) => row.id).reverse();
+    const updates = computeSaveDiff(original, [{ vehicleId: "ht21-eor", driverId: "bob", jobIds: ids }], [], "2026-10-08");
+    expect(updates).toHaveLength(25);
+    expect([...updates].sort((a, b) => a.route_order! - b.route_order!).map((row) => row.id)).toEqual(ids);
+    expect(updates.every((row) => row.planning_date === "2026-10-08" && row.driver_id === "bob" && row.vehicle_id === "ht21-eor")).toBe(true);
+  });
+
+  it("does not create another date-only write after the plan has landed", () => {
+    expect(computeSaveDiff([job({ id: "a", vehicle_id: "v1", driver_id: "d1", route_order: 1, planning_date: "2026-10-08" })], [{ vehicleId: "v1", driverId: "d1", jobIds: ["a"] }], [], "2026-10-08")).toEqual([]);
+  });
+
+  it("unassigns a job without changing its operational date", () => {
+    expect(computeSaveDiff([job({ id: "a", vehicle_id: "v1", driver_id: "d1", route_order: 1, planning_date: "2026-10-04" })], [], ["a"], "2026-10-08")).toEqual([
+      { id: "a", vehicle_id: null, driver_id: null, route_order: null, planning_date: "2026-10-04" },
+    ]);
+  });
+});

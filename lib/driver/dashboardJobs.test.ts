@@ -10,6 +10,7 @@ describe("getDriverJobOperationalDate", () => {
       getDriverJobOperationalDate({
         job_date: "2026-08-28",
         scheduled_date: "2026-08-30",
+        planning_date: null,
       })
     ).toBe("2026-08-30");
   });
@@ -19,6 +20,7 @@ describe("getDriverJobOperationalDate", () => {
       getDriverJobOperationalDate({
         job_date: "2026-08-30",
         scheduled_date: null,
+        planning_date: null,
       })
     ).toBe("2026-08-30");
   });
@@ -28,6 +30,7 @@ describe("getDriverJobOperationalDate", () => {
       getDriverJobOperationalDate({
         job_date: null,
         scheduled_date: null,
+        planning_date: null,
       })
     ).toBeNull();
   });
@@ -40,6 +43,7 @@ describe("isDriverJobForDate", () => {
         {
           job_date: "2026-08-28",
           scheduled_date: "2026-08-30",
+          planning_date: null,
         },
         "2026-08-30"
       )
@@ -52,6 +56,7 @@ describe("isDriverJobForDate", () => {
         {
           job_date: "2026-08-30",
           scheduled_date: null,
+          planning_date: null,
         },
         "2026-08-30"
       )
@@ -64,9 +69,47 @@ describe("isDriverJobForDate", () => {
         {
           job_date: "2026-08-28",
           scheduled_date: "2026-08-29",
+          planning_date: null,
         },
         "2026-08-30"
       )
     ).toBe(false);
+  });
+});
+
+// Planning dates override source dates in both directions.
+describe("planning date precedence", () => {
+  const today = "2026-10-08";
+
+  it("includes Bob's planned jobs even when both source dates are older", () => {
+    expect(isDriverJobForDate({
+      planning_date: today,
+      scheduled_date: "2026-10-04",
+      job_date: "2026-08-26",
+    }, today)).toBe(true);
+  });
+
+  it("excludes Kent-style work moved off its original scheduled day", () => {
+    expect(isDriverJobForDate({
+      planning_date: "2026-10-09",
+      scheduled_date: today,
+      job_date: today,
+    }, today)).toBe(false);
+  });
+
+  it("does not fall back to job_date when an explicit plan is on another day", () => {
+    expect(isDriverJobForDate({
+      planning_date: "2026-10-07",
+      scheduled_date: null,
+      job_date: today,
+    }, today)).toBe(false);
+  });
+
+  it("uses the planning date for historical job labels too", () => {
+    expect(getDriverJobOperationalDate({
+      planning_date: "2026-10-06",
+      scheduled_date: "2026-10-04",
+      job_date: "2026-08-26",
+    })).toBe("2026-10-06");
   });
 });

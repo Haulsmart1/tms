@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import Skeleton from "../../../components/Skeleton";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { isDriverJobForDate } from "../../../lib/driver/dashboardJobs";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { getDriverJobOperationalDate, isDriverJobForDate } from "../../../lib/driver/dashboardJobs";
 import { gateForState } from "../../../lib/shifts/driverActions";
 import { operatorDay } from "../../../lib/time";
 import { useDriverShift } from "../useDriverShift";
@@ -33,6 +33,7 @@ type Job = {
   status: string | null;
   job_date: string | null;
   scheduled_date: string | null;
+  planning_date: string | null;
   priority: string | null;
   notes: string | null;
   pod_status: string | null;
@@ -57,6 +58,8 @@ export default function DriverDashboardPage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const shift = useDriverShift();
+  const loadSeq = useRef(0);
+  const hasDashboard = useRef(false);
 
   // Jobs stay locked until the walkaround gate would pass. The server
   // enforces the same rule on every stop save; this only saves a wasted
@@ -66,7 +69,8 @@ export default function DriverDashboardPage() {
   const lockedMessage = gate && !gate.ok ? gate.message : null;
 
   const loadDashboard = useCallback(async () => {
-    setLoading(true);
+    const request = ++loadSeq.current;
+    if (!hasDashboard.current) setLoading(true);
 
     try {
       const response = await fetch("/api/driver/me", {
@@ -77,24 +81,48 @@ export default function DriverDashboardPage() {
         error?: string;
       };
 
+      if (request !== loadSeq.current) return;
+
       if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          hasDashboard.current = false;
+          setData(null);
+        }
         throw new Error(body.error || "Unable to load driver dashboard.");
       }
 
+      hasDashboard.current = true;
       setData(body);
       setMessage("");
     } catch (error) {
-      setData(null);
+      if (request !== loadSeq.current) return;
+      if (!hasDashboard.current) setData(null);
       setMessage(
         error instanceof Error ? error.message : "Unable to load driver dashboard."
       );
     } finally {
-      setLoading(false);
+      if (request === loadSeq.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void loadDashboard();
+    // Office-applied assignments must replace the phone's old queue. All of
+    // these are fresh reads; offline POD items never supply job assignments.
+    const refresh = () => {
+      if (document.visibilityState === "visible") void loadDashboard();
+    };
+    window.addEventListener("online", refresh);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    const timer = window.setInterval(refresh, 60_000);
+    return () => {
+      ++loadSeq.current;
+      window.clearInterval(timer);
+      window.removeEventListener("online", refresh);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
   }, [loadDashboard]);
 
   const todaysJobs = useMemo(() => {
@@ -192,6 +220,8 @@ export default function DriverDashboardPage() {
             </p>
           </div>
         </header>
+
+        {message ? <p role="alert" className={styles.locked}>{message} Showing the last loaded assignments.</p> : null}
 
         <ShiftPanel shift={shift} />
 
@@ -301,10 +331,7 @@ export default function DriverDashboardPage() {
                   </div>
 
                   <p className={styles.muted}>
-                    {formatDate(
-                      job.job_date ||
-                        job.scheduled_date,
-                    )}
+                    {formatDate(getDriverJobOperationalDate(job))}
                   </p>
 
                   {lockedMessage ? null : (

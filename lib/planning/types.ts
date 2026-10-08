@@ -41,6 +41,8 @@ export type PlanJob = {
   driver_id: string | null;
   subcontractor_id: string | null;
   route_order: number | null;
+  planning_date?: string | null;
+  scheduled_date?: string | null;
   customer_name: string | null;
 
   /** Compliance classification facts. The Planning loader always supplies

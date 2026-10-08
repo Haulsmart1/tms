@@ -12,6 +12,7 @@ export type JobUpdate = {
   vehicle_id: string | null;
   driver_id: string | null;
   route_order: number | null;
+  planning_date?: string | null;
 };
 
 /* What Save actually writes: one update per job whose assignment changed,
@@ -26,7 +27,8 @@ export type JobUpdate = {
 export function computeSaveDiff(
   original: PlanJob[],
   lanes: LanePlan[],
-  unassignedJobIds: string[]
+  unassignedJobIds: string[],
+  planningDate?: string
 ): JobUpdate[] {
   const target = new Map<string, JobUpdate>();
   for (const lane of lanes) {
@@ -36,6 +38,7 @@ export function computeSaveDiff(
         vehicle_id: lane.vehicleId,
         driver_id: lane.driverId,
         route_order: index + 1,
+        ...(planningDate === undefined ? {} : { planning_date: planningDate }),
       });
     });
   }
@@ -47,10 +50,15 @@ export function computeSaveDiff(
   for (const job of original) {
     const t = target.get(job.id);
     if (!t) continue;
+    // Unassignment preserves the operational day; only a lane schedules work.
+    if (planningDate !== undefined && !("planning_date" in t)) {
+      t.planning_date = job.planning_date ?? null;
+    }
     if (
       t.vehicle_id !== job.vehicle_id ||
       t.driver_id !== job.driver_id ||
-      t.route_order !== job.route_order
+      t.route_order !== job.route_order ||
+      (planningDate !== undefined && t.planning_date !== (job.planning_date ?? null))
     ) {
       updates.push(t);
     }
