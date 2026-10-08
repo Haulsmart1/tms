@@ -34,6 +34,10 @@ export const RATE_LIMITS = {
   quoteSharePerIp: { bucket: "quote-share:ip", windowSeconds: 600, max: 60 },
   documentEmailPerUser: { bucket: "doc-email:user", windowSeconds: 3600, max: 60 },
   documentEmailPerTenant: { bucket: "doc-email:tenant", windowSeconds: 86400, max: 500 },
+  /* N-10: a company with no card on file (a fresh self-serve signup) could
+     otherwise send 500 branded customer emails a day to addresses its own
+     staff typed in. 20 a day covers a trial; adding a card lifts it. */
+  documentEmailPerUnverifiedTenant: { bucket: "doc-email:unverified-tenant", windowSeconds: 86400, max: 20 },
   invitePerUser: { bucket: "invite:user", windowSeconds: 3600, max: 30 },
   podSharePdfPerIp: { bucket: "pod-share-pdf:ip", windowSeconds: 600, max: 60 },
   /* Public tracking page JSON (GET /api/public/track/[token]). The page polls

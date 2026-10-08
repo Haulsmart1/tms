@@ -58,6 +58,12 @@ describe("userAdminErrorResponse", () => {
     expect(userAdminErrorResponse({ code: "P0001", message: "not_in_company" }).status).toBe(404);
   });
 
+  it("explains a removal refused because the profile is still referenced (prodfix_97)", () => {
+    const outcome = userAdminErrorResponse({ code: "PRF01", message: "profile_still_referenced" });
+    expect(outcome.status).toBe(409);
+    expect(String(outcome.body.error)).toMatch(/still has records/);
+  });
+
   it("never echoes raw database text", () => {
     const result = userAdminErrorResponse({ code: "23505", message: 'duplicate key value violates "profiles_pkey"' });
     expect(result.status).toBe(500);

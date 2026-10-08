@@ -102,9 +102,11 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
   `app/api/accounts/**` (service role, after `requireTenantAccess`) and, for the two platform-wide status
   flips, `PATCH /api/super-admin/invoices/[id]` (`lib/superAdmin/invoiceStatus.ts` is the closed list).
   `prodfix_95` makes the database agree: it revokes client DML on those tables and leaves one
-  `tenant_read` SELECT policy, so a browser insert or update fails once it is applied. `customers`,
-  `customer_integrations` and `subcontractors*` are deliberately excluded because `app/api/customers/**`
-  writes them through the user client. `document_delivery_log.share_reference` holds an opaque pointer
+  `tenant_read` SELECT policy, so a browser insert or update fails once it is applied. `customers` and
+  `customer_integrations` are deliberately excluded because `app/api/customers/**` writes them through
+  the user client. The subcontractor tables are written only by `app/api/subcontractors/**` and the
+  invite routes (service role); `prodfix_96`/`97` make them read-only from the browser, and
+  `lib/subcontractors/browserWrites.test.ts` fails if a browser write comes back. `document_delivery_log.share_reference` holds an opaque pointer
   to the share row (`lib/documents/shareReference.ts`), never the share URL: the email routes assert
   that before inserting, because the log is readable by every member of the tenant. The assertion is an
   allowlist, not a blocklist: only `pod_share:<sha256 hex>`, `tracking_share:<sha256 hex>` (the stored

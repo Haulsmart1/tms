@@ -8,7 +8,7 @@ import { trackingShareReference } from "../../../../lib/documents/shareReference
 import { authorizeOfficeTenant, officeAccessErrorResponse } from "../../../../lib/jobs/officeAccess";
 import { loadPodBranding } from "../../../../lib/pod/brandingServer";
 import { checkPodRecipient, normalizeEmail } from "../../../../lib/pod/emailRecipients";
-import { RATE_LIMITS, checkRateLimit } from "../../../../lib/rateLimit";
+import { documentEmailAllowed } from "../../../../lib/documents/emailLimits";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { TrackableStopError, TrackingUnavailableError, issueTrackingLink, loadTrackableStop, recordTrackingLinkSent } from "../../../../lib/tracking/linkStore";
 
@@ -77,11 +77,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: RECIPIENT_MESSAGES[recipientCheck.status] }, { status: recipientCheck.status });
     }
 
-    const [perUser, perTenant] = await Promise.all([
-      checkRateLimit(admin, RATE_LIMITS.documentEmailPerUser, user.id),
-      checkRateLimit(admin, RATE_LIMITS.documentEmailPerTenant, tenantId),
-    ]);
-    if (!perUser.allowed || !perTenant.allowed) {
+    if (!(await documentEmailAllowed(admin, user.id, tenantId))) {
       return NextResponse.json({ error: "Too many document emails have been sent recently. Try again later." }, { status: 429 });
     }
 
