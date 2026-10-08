@@ -32,6 +32,21 @@ describe("safeAuthNextPath", () => {
     ).toBe("/dashboard");
   });
 
+  it.each([
+    "/.//evil.com",
+    "/..//evil.com",
+    "/x/../.././/evil.com",
+    "/./\\evil.com",
+    "//evil.com",
+    "/\\evil.com",
+  ])("rejects %s, which normalises to a protocol-relative path", (raw) => {
+    expect(safeAuthNextPath(raw, origin)).toBe("/dashboard");
+  });
+
+  it("keeps a normal path that only contains dot segments", () => {
+    expect(safeAuthNextPath("/x/../jobs", origin)).toBe("/jobs");
+  });
+
   it("rejects malformed input safely", () => {
     expect(
       safeAuthNextPath(

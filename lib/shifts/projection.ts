@@ -62,7 +62,7 @@ export function projectDriverState(server: DriverShiftState, pending: readonly D
         };
         continue;
       }
-      const currentVehicle = { vehicleId: event.vehicleId, registration: registration(event.vehicleId), startOdometer: event.odometer, checkResult: result };
+      const currentVehicle = { vehicleId: event.vehicleId, registration: registration(event.vehicleId), startOdometer: event.odometer, checkResult: result, checkPerformedAt: event.occurredAt };
       state = {
         ...state,
         blockingCheck: null,

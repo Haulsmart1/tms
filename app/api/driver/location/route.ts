@@ -5,13 +5,18 @@ import {
   requireDriverSession,
 } from "../../../../lib/driver/server";
 import { parseDriverLocation } from "../../../../lib/driver/location";
+import { checkRateLimit, RATE_LIMITS } from "../../../../lib/rateLimit";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 
 export async function POST(request: NextRequest) {
   try {
     const session = await requireDriverSession();
-    const location = parseDriverLocation(await request.json());
     const admin = createAdminClient();
+    const limit = await checkRateLimit(admin, RATE_LIMITS.driverLocation, session.userId);
+    if (!limit.allowed) {
+      return NextResponse.json({ error: "Too many location updates. Try again shortly." }, { status: 429 });
+    }
+    const location = parseDriverLocation(await request.json());
 
     const { data: assignments, error: assignmentError } =
       await admin

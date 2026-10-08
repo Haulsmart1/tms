@@ -38,7 +38,7 @@ const onShift: DriverShiftState = {
     startedAt: "2026-09-29T04:48:00Z",
     onBreak: false,
     breaks: [{ startedAt: "2026-09-29T07:00:00Z", endedAt: "2026-09-29T07:30:00Z" }],
-    currentVehicle: { vehicleId: "v1", registration: "AB12 CDE", startOdometer: 1000, checkResult: "pass" },
+    currentVehicle: { vehicleId: "v1", registration: "AB12 CDE", startOdometer: 1000, checkResult: "pass", checkPerformedAt: "2026-09-29T04:50:00Z" },
   },
 };
 
@@ -131,15 +131,21 @@ describe("objectionEvent", () => {
 });
 
 describe("gateForState", () => {
+  const gateNow = new Date("2026-09-29T12:00:00Z");
+
   it("follows the job gate", () => {
-    expect(gateForState(base)).toEqual({ ok: false, message: JOB_GATE_MESSAGES.noShift });
-    expect(gateForState(onShift)).toEqual({ ok: true });
-    expect(gateForState({ ...onShift, openShift: { ...onShift.openShift!, currentVehicle: null } })).toEqual({ ok: false, message: JOB_GATE_MESSAGES.noVehicle });
+    expect(gateForState(base, gateNow)).toEqual({ ok: false, message: JOB_GATE_MESSAGES.noShift });
+    expect(gateForState(onShift, gateNow)).toEqual({ ok: true });
+    expect(gateForState({ ...onShift, openShift: { ...onShift.openShift!, currentVehicle: null } }, gateNow)).toEqual({ ok: false, message: JOB_GATE_MESSAGES.noVehicle });
   });
 
   it("locks jobs when the office has since taken the vehicle off the road", () => {
     const vor = { ...onShift, vehicles: [{ id: "v1", registration: "AB12 CDE", vor: true }] };
-    expect(gateForState(vor)).toEqual({ ok: false, message: JOB_GATE_MESSAGES.vor });
+    expect(gateForState(vor, gateNow)).toEqual({ ok: false, message: JOB_GATE_MESSAGES.vor });
+  });
+
+  it("locks jobs once the check is more than 24 hours old", () => {
+    expect(gateForState(onShift, new Date("2026-09-30T05:00:00Z"))).toEqual({ ok: false, message: JOB_GATE_MESSAGES.checkExpired });
   });
 });
 

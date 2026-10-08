@@ -3,6 +3,7 @@ import { createApiSupabase } from "../../../../../../lib/api/server";
 import { isUuid } from "../../../../../../lib/auth/serverTenantAccess";
 import { authorizeOfficeTenant, officeAccessErrorResponse } from "../../../../../../lib/jobs/officeAccess";
 import { createAdminClient } from "../../../../../../lib/supabase/admin";
+import { isCheckPhotoPath } from "../../../../../../lib/walkaround/photoPaths";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,6 +51,12 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     for (const defect of defects ?? []) {
       const paths = (defect.photo_paths as string[] | null) ?? [];
       for (const path of paths) {
+        // Only sign objects in this check's own folder: a path pointing anywhere
+        // else in the bucket is skipped, never signed (security scan N-11).
+        if (!isCheckPhotoPath(path, String(check.tenant_id), String(check.id), String(defect.client_id))) {
+          console.warn("[walkaround] skipped a defect photo path outside its check folder", defect.id);
+          continue;
+        }
         const { data: signed, error: signError } = await admin.storage
           .from("walkaround-photos")
           .createSignedUrl(path, SIGNED_URL_SECONDS);

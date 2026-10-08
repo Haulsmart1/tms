@@ -241,6 +241,38 @@ export function partitionByOwner<I extends QueueItem<{ ownerId?: string | null }
   return { mine, heldForOthers: queue.length - mine.length };
 }
 
+/**
+ * One read of the browser's Supabase session. `failed` means it could not be
+ * read (an expired access token with no signal fails its refresh): that is
+ * not the same as nobody being signed in.
+ */
+export type SessionRead = { userId: string | null; failed: boolean };
+
+/**
+ * Whose items the queue shows and sends. A session that reads cleanly as
+ * signed out is nobody, never the last user remembered on the phone (scan
+ * N-7, S-19). Only a FAILED read falls back to the remembered user, so a
+ * driver with no signal still sees and can add to their own queue; the
+ * remembered user is forgotten on sign-out, and sending still needs the real
+ * session cookie (the server answers 401 and the queue pauses).
+ */
+export function resolveQueueUser(read: SessionRead, remembered: string | null): string | null {
+  if (read.userId) return read.userId;
+  return read.failed ? remembered : null;
+}
+
+/**
+ * Before each request of an item: is the signed-in user still the item's
+ * owner? "changed" (someone else, or nobody, is signed in now) aborts the
+ * item without recording any outcome, so a sign-in switch halfway through a
+ * multi-step photo never sends the rest under the new session. "unknown"
+ * (the session could not be read) retries later with backoff.
+ */
+export function ownerCheck(ownerId: string | null | undefined, read: SessionRead): "same" | "changed" | "unknown" {
+  if (read.failed) return "unknown";
+  return read.userId !== null && read.userId === ownerId ? "same" : "changed";
+}
+
 export function heldForOthersMessage(count: number): string | null {
   if (count <= 0) return null;
   return count === 1

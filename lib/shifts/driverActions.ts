@@ -76,7 +76,7 @@ export function objectionEvent(
 }
 
 /** The same rule the stop routes enforce, fed from what the phone shows. */
-export function gateForState(state: DriverShiftState): { ok: true } | { ok: false; message: string } {
+export function gateForState(state: DriverShiftState, now: Date = new Date()): { ok: true } | { ok: false; message: string } {
   const shift = state.openShift;
   const vehicle = shift?.currentVehicle ?? null;
   return jobGateDecision({
@@ -87,12 +87,13 @@ export function gateForState(state: DriverShiftState): { ok: true } | { ok: fals
             ? {
                 vehicleId: vehicle.vehicleId,
                 checkResult: vehicle.checkResult,
+                checkPerformedAt: vehicle.checkPerformedAt,
                 vehicleVor: state.vehicles.some((v) => v.id === vehicle.vehicleId && v.vor),
               }
             : null,
         }
       : null,
-  });
+  }, now);
 }
 
 /** Where "Check a different vehicle" and "Swap vehicle" lead. */

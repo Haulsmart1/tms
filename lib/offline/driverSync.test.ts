@@ -5,7 +5,9 @@ import {
   eventOutcome,
   heldForOthersMessage,
   orphanedPhotoIds,
+  ownerCheck,
   partitionByOwner,
+  resolveQueueUser,
   pendingEvents,
   parsePodUploadStart,
   pendingPodByStop,
@@ -305,5 +307,36 @@ describe("podUploadErrorOutcome", () => {
   it("refuses a 401 or 403 from storage rather than pausing: the signed token, not the session, was refused", () => {
     expect(podUploadErrorOutcome(apiError("Unauthorized", 401, "401"))).toEqual({ kind: "rejected", error: POD_PHOTO_NOT_STORABLE_MESSAGE });
     expect(podUploadErrorOutcome(apiError("Forbidden", 403, "403"))).toEqual({ kind: "rejected", error: POD_PHOTO_NOT_STORABLE_MESSAGE });
+  });
+});
+
+describe("resolveQueueUser (N-7, S-19)", () => {
+  it("uses the session's user when there is one", () => {
+    expect(resolveQueueUser({ userId: "a", failed: false }, "b")).toBe("a");
+  });
+
+  it("is nobody when the session reads cleanly as signed out, whoever was remembered", () => {
+    expect(resolveQueueUser({ userId: null, failed: false }, "b")).toBeNull();
+  });
+
+  it("falls back to the remembered user only when the session could not be read", () => {
+    expect(resolveQueueUser({ userId: null, failed: true }, "b")).toBe("b");
+    expect(resolveQueueUser({ userId: null, failed: true }, null)).toBeNull();
+  });
+});
+
+describe("ownerCheck (N-7, S-19)", () => {
+  it("lets the owner's own item continue", () => {
+    expect(ownerCheck("a", { userId: "a", failed: false })).toBe("same");
+  });
+
+  it("aborts when someone else or nobody is signed in now", () => {
+    expect(ownerCheck("a", { userId: "b", failed: false })).toBe("changed");
+    expect(ownerCheck("a", { userId: null, failed: false })).toBe("changed");
+    expect(ownerCheck(undefined, { userId: "a", failed: false })).toBe("changed");
+  });
+
+  it("is unknown when the session could not be read", () => {
+    expect(ownerCheck("a", { userId: "a", failed: true })).toBe("unknown");
   });
 });

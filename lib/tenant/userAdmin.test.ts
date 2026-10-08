@@ -12,9 +12,11 @@ import {
 } from "./userAdmin";
 
 describe("parseInvitableRole", () => {
-  it("accepts only admin, staff and driver", () => {
+  it("accepts only admin and staff", () => {
     expect(parseInvitableRole(" Admin ")).toBe("admin");
-    expect(parseInvitableRole("driver")).toBe("driver");
+    // H-2: a console Driver was a full staff principal. Drivers are
+    // onboarded through driver portal invites instead.
+    expect(parseInvitableRole("driver")).toBeNull();
     expect(parseInvitableRole("super_admin")).toBeNull();
     expect(parseInvitableRole("")).toBeNull();
     expect(parseInvitableRole(undefined)).toBeNull();
@@ -89,7 +91,7 @@ describe("checkRoleEdit", () => {
 
   it("allows an admin to change a staff member", () => {
     expect(
-      checkRoleEdit({ callerId: caller, callerTier: "admin", target: { userId: "t", roleName: "staff" }, newRole: "driver" }),
+      checkRoleEdit({ callerId: caller, callerTier: "admin", target: { userId: "t", roleName: "staff" }, newRole: "admin" }),
     ).toBeNull();
   });
 });

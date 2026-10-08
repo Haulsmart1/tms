@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { acceptRecordedTime, MAX_RECORDED_AGE_MS, MAX_RECORDED_FUTURE_MS } from "./recordedTime";
+import { acceptRecordedTime, MAX_RECORDED_AGE_MS, MAX_RECORDED_FUTURE_MS, LATE_SYNC_THRESHOLD_MS, podTimeFlags } from "./recordedTime";
 
 const now = new Date("2026-10-07T12:00:00.000Z");
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -81,5 +81,31 @@ describe("acceptRecordedTime", () => {
     const at = "2026-10-07T11:00:00.000Z";
     expect(acceptRecordedTime({ recordedAt: at, serverNow: now, shift: null, notBefore: null }).trusted).toBe(true);
     expect(acceptRecordedTime({ recordedAt: at, serverNow: now, shift: null, notBefore: "garbage" }).trusted).toBe(false);
+  });
+});
+
+describe("podTimeFlags (N-4, N-5)", () => {
+  const serverNow = new Date("2026-10-07T12:00:00.000Z");
+
+  it("is 15 minutes", () => {
+    expect(LATE_SYNC_THRESHOLD_MS).toBe(15 * 60 * 1000);
+  });
+
+  it("flags untrusted time", () => {
+    expect(podTimeFlags({ at: serverNow.toISOString(), trusted: false, serverNow })).toEqual(["pod_time_untrusted"]);
+  });
+
+  it("carries no flag for a trusted time up to 15 minutes old", () => {
+    expect(podTimeFlags({ at: "2026-10-07T11:45:00.000Z", trusted: true, serverNow })).toEqual([]);
+    expect(podTimeFlags({ at: "2026-10-07T11:59:30.000Z", trusted: true, serverNow })).toEqual([]);
+  });
+
+  it("keeps an older trusted time but flags it as a late sync", () => {
+    expect(podTimeFlags({ at: "2026-10-07T11:44:59.000Z", trusted: true, serverNow })).toEqual(["pod_late_sync"]);
+    expect(podTimeFlags({ at: "2026-10-05T12:30:00.000Z", trusted: true, serverNow })).toEqual(["pod_late_sync"]);
+  });
+
+  it("treats an unreadable trusted time as untrusted", () => {
+    expect(podTimeFlags({ at: "nope", trusted: true, serverNow })).toEqual(["pod_time_untrusted"]);
   });
 });

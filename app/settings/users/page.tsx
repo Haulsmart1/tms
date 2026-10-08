@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useTenant } from "../../components/TenantProvider";
@@ -322,7 +323,6 @@ export default function UsersPage() {
                   onChange={(event) => setRole(event.target.value)}
                 >
                   <option value="staff">Staff</option>
-                  <option value="driver">Driver</option>
                   <option value="admin">Admin</option>
                 </Select>
 
@@ -332,6 +332,16 @@ export default function UsersPage() {
                   </Button>
                 </div>
               </div>
+
+              {/* H-2: a console Driver role was a full staff principal.
+                  Drivers get the driver portal instead. */}
+              <p className="mt-3 text-sm text-ink-2">
+                Inviting a driver? Send a{" "}
+                <Link href="/settings/portal-invites" className="font-medium text-ink underline">
+                  driver portal invite
+                </Link>{" "}
+                instead. Console users are office staff or admins.
+              </p>
             </form>
           ) : null}
 

@@ -46,9 +46,9 @@ export function quotationShareState(input: {
 }
 
 export const SHARE_MESSAGES = {
+  /* The only link refusal (N-17): unknown, revoked and expired links all
+     answer 404 with this message, so a token holder cannot tell them apart. */
   invalid: "This quotation link is invalid or has expired.",
-  revoked: "This quotation link has been revoked.",
-  linkExpired: "This quotation link has expired.",
   cancelled: "This quotation has been withdrawn. Please contact the sender for an updated quotation.",
   expired: "This quotation has passed its validity date. Please contact the sender for an updated quotation.",
   unavailable: "This quotation is no longer available. Please contact the sender.",
@@ -100,8 +100,6 @@ const SAFE_RPC_MESSAGES = new Set<string>([
   "Your email address is required.",
   "Company name is required.",
   "Position is required.",
-  "This quotation link has been revoked.",
-  "This quotation link has expired.",
   "This quotation has already been accepted.",
   "This quotation has already been declined.",
   "Every required Terms & Conditions clause must be acknowledged.",
@@ -113,7 +111,15 @@ const SAFE_RPC_MESSAGES = new Set<string>([
   SHARE_MESSAGES.changed,
 ]);
 
+/* The RPCs still raise these two when a link is revoked or expires between
+   loading and deciding. They fold into the one link refusal (N-17). */
+const RPC_LINK_REFUSALS = new Set<string>([
+  "This quotation link has been revoked.",
+  "This quotation link has expired.",
+]);
+
 export function publicRpcErrorMessage(message: unknown): string {
   const text = typeof message === "string" ? message.trim() : "";
+  if (RPC_LINK_REFUSALS.has(text)) return SHARE_MESSAGES.invalid;
   return SAFE_RPC_MESSAGES.has(text) ? text : SHARE_MESSAGES.genericDecision;
 }

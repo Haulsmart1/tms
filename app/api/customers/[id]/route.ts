@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ApiError, apiDbError, requireTenant } from "../../../../lib/api/server";
-import { isUuid } from "../../../../lib/auth/serverTenantAccess";
+import { isUuid, TenantAccessError } from "../../../../lib/auth/serverTenantAccess";
+import { authorizeOfficeTenant } from "../../../../lib/jobs/officeAccess";
+import { createAdminClient } from "../../../../lib/supabase/admin";
 import { validateWebhookUrl } from "../../../../lib/validation/webhookUrl";
 
 const allowedFields = new Set([
@@ -155,7 +157,8 @@ export async function PATCH(
 ) {
   try {
     const { id } = await context.params;
-    const { supabase, tenantId, tier } = await requireTenant(request);
+    const { supabase, tenantId, tier, user } = await requireTenant(request);
+    await requireOfficeCustomerWriter(user.id, tenantId);
 
     if (!isUuid(id)) {
       throw new ApiError(404, "Customer not found");
@@ -256,7 +259,8 @@ export async function DELETE(
 ) {
   try {
     const { id } = await context.params;
-    const { supabase, tenantId } = await requireTenant(request);
+    const { supabase, tenantId, user } = await requireTenant(request);
+    await requireOfficeCustomerWriter(user.id, tenantId);
 
     if (!isUuid(id)) {
       throw new ApiError(404, "Customer not found");
@@ -275,6 +279,20 @@ export async function DELETE(
     return NextResponse.json({ ok: true });
   } catch (error) {
     return handleApiError(error);
+  }
+}
+
+/* Drivers (a driver role, or an active driver link) never create, change or
+   delete customers: credit limit, VAT rate and the accounting link are office
+   data (H-2). Same rule as the other office routes. */
+async function requireOfficeCustomerWriter(userId: string, tenantId: string) {
+  try {
+    await authorizeOfficeTenant(createAdminClient(), userId, tenantId);
+  } catch (error) {
+    if (error instanceof TenantAccessError && error.status === 403) {
+      throw new ApiError(403, "Only office staff can change customers");
+    }
+    throw new ApiError(500, "Unable to verify tenant access");
   }
 }
 

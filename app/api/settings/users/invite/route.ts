@@ -134,7 +134,9 @@ export async function POST(request: NextRequest) {
     const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
       // Invite links land on the scanner-safe confirm page (AUTH-6).
       redirectTo: `${getSiteUrl()}/auth/confirm?next=${encodeURIComponent("/dashboard")}`,
-      data: { tenant_id: tenantId, role, invited_by: user.id },
+      // No ids in user metadata: handle_new_user would turn them into a
+      // profile (C-4). provision_tenant_user below writes tenant, company
+      // and role atomically.
     });
 
     if (inviteError || !inviteData.user?.id) {

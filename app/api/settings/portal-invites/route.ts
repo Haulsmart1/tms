@@ -158,6 +158,9 @@ async function resolveInvitee(
   const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
     // Invite links land on the scanner-safe confirm page (AUTH-6).
     redirectTo: `${siteUrl()}/auth/confirm?next=${encodeURIComponent(next)}`,
+    // Display fields only. handle_new_user turns a tenant_id, company_id or
+    // role_id in user metadata into a tenant profile, so ids never go here
+    // (C-4): the driver_users / subcontractor_users rows carry the link.
     data: inviteMetadata,
   });
 
@@ -300,7 +303,7 @@ export async function POST(request: NextRequest) {
         admin,
         email,
         tenant.companyId,
-        { portal: "driver", tenant_id: tenantId, driver_id: driver.id, invited_by: inviter.id },
+        { portal: "driver" },
         next,
       );
       createdUserId = invitee.createdUserId;
@@ -394,14 +397,7 @@ export async function POST(request: NextRequest) {
         admin,
         email,
         tenant.companyId,
-        {
-          portal: "subcontractor",
-          tenant_id: tenantId,
-          subcontractor_id: employee.subcontractor_id,
-          employee_id: employee.id,
-          role,
-          invited_by: inviter.id,
-        },
+        { portal: "subcontractor" },
         next,
       );
       createdUserId = invitee.createdUserId;

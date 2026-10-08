@@ -16,6 +16,8 @@ import {
 import { chunk } from "../../../lib/jobs/fetchPages";
 import { isWorkableJobStatus } from "../../../lib/jobs/jobStatus";
 import { authorizeOfficeTenant } from "../../../lib/jobs/officeAccess";
+import { loadTransferRpcError } from "../../../lib/loadTransfers/rpcError";
+import { serialOverlapLiteral } from "../../../lib/loadTransfers/serialFilter";
 import { createAdminClient } from "../../../lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -33,34 +35,23 @@ function mapTransferRpcError(
   error: {
     code?: string;
     message?: string;
+    hint?: string;
   },
 ): ApiError {
-  const message =
-    error.message
-    || "Unable to transfer load.";
+  const result =
+    loadTransferRpcError(error);
 
-  if (error.code === "22023") {
-    return new ApiError(400, message);
+  if (result.log) {
+    console.error(
+      "Load transfer RPC error",
+      error.code,
+      error.message,
+    );
   }
-
-  if (
-    error.code === "23503"
-    || error.code === "23505"
-    || error.code === "23514"
-    || error.code === "40001"
-  ) {
-    return new ApiError(409, message);
-  }
-
-  console.error(
-    "Load transfer RPC error",
-    error.code,
-    error.message,
-  );
 
   return new ApiError(
-    500,
-    "Unable to transfer load.",
+    result.status,
+    result.message,
   );
 }
 
@@ -144,9 +135,11 @@ export async function POST(
           "id,job_id,serial_numbers",
         )
         .eq("tenant_id", tenantId)
+        // A quoted literal, not the array: postgrest-js
+        // would join the values unquoted (review S-11).
         .overlaps(
           "serial_numbers",
-          scannedChunk,
+          serialOverlapLiteral(scannedChunk),
         );
 
       if (error) {

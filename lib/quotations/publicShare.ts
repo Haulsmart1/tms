@@ -32,7 +32,8 @@ export type QuotationTermsClause = {
   Loads a shared quotation for the public page and the accept/decline route.
 
   Errors (INV-18): a QuotationShareError carries a message the anonymous
-  visitor may see (invalid, revoked or expired link). Anything else is an
+  visitor may see (one "invalid" refusal for an unknown, revoked or expired
+  link). Anything else is an
   internal failure and is thrown as a plain Error, which callers turn into a
   generic message through publicShareError, logging the detail server side.
 
@@ -120,10 +121,11 @@ export async function loadQuotationShare(
     );
   }
 
+  // Revoked and expired links answer exactly as an unknown one (N-17).
   if (share.revoked_at) {
     throw new QuotationShareError(
-      "revoked",
-      410
+      "invalid",
+      404
     );
   }
 
@@ -135,8 +137,8 @@ export async function loadQuotationShare(
     expiresAt <= Date.now()
   ) {
     throw new QuotationShareError(
-      "linkExpired",
-      410
+      "invalid",
+      404
     );
   }
 

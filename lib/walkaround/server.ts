@@ -102,7 +102,15 @@ export async function loadAssignedVehicleId(admin: SupabaseClient, session: Driv
 export type OpenShiftRows = {
   shift: { id: string; clientId: string; startedAt: string; endedAt: string | null; flags: string[] } | null;
   breaks: { startedAt: string; endedAt: string | null }[];
-  period: { id: string; vehicleId: string; startOdometer: number; checkResult: CheckResult | null; vehicleVor: boolean } | null;
+  period: {
+    id: string;
+    vehicleId: string;
+    startOdometer: number;
+    checkResult: CheckResult | null;
+    /** The covering check's performed_at, for the job gate's age limit. */
+    checkPerformedAt: string | null;
+    vehicleVor: boolean;
+  } | null;
 };
 
 const SHIFT_SELECT = "id,client_id,started_at,ended_at,flags";
@@ -127,7 +135,7 @@ async function shiftDetail(admin: SupabaseClient, shift: Record<string, unknown>
   if (periodResult.data) {
     const p = periodResult.data;
     const [checkResult, vehicleResult] = await Promise.all([
-      admin.from("walkaround_checks").select("result").eq("id", p.walkaround_check_id).maybeSingle(),
+      admin.from("walkaround_checks").select("result,performed_at").eq("id", p.walkaround_check_id).maybeSingle(),
       admin.from("vehicles").select("vor").eq("id", p.vehicle_id).maybeSingle(),
     ]);
     if (checkResult.error) throw new Error(checkResult.error.message);
@@ -137,6 +145,7 @@ async function shiftDetail(admin: SupabaseClient, shift: Record<string, unknown>
       vehicleId: String(p.vehicle_id),
       startOdometer: Number(p.start_odometer),
       checkResult: (checkResult.data?.result as CheckResult | undefined) ?? null,
+      checkPerformedAt: checkResult.data?.performed_at ? String(checkResult.data.performed_at) : null,
       vehicleVor: vehicleResult.data?.vor === true,
     };
   }
@@ -185,7 +194,16 @@ export async function loadJobGateInput(admin: SupabaseClient, session: DriverSes
   return {
     portalType: session.portalType,
     openShift: open.shift
-      ? { currentPeriod: open.period ? { vehicleId: open.period.vehicleId, checkResult: open.period.checkResult, vehicleVor: open.period.vehicleVor } : null }
+      ? {
+          currentPeriod: open.period
+            ? {
+                vehicleId: open.period.vehicleId,
+                checkResult: open.period.checkResult,
+                checkPerformedAt: open.period.checkPerformedAt,
+                vehicleVor: open.period.vehicleVor,
+              }
+            : null,
+        }
       : null,
   };
 }
@@ -201,7 +219,7 @@ const GATE_UNAVAILABLE_MESSAGE = "Walkaround checks are not available right now,
   aside after repeated failures) instead of deleting a queued POD over a
   database blip. Genuine gate refusals stay 409.
 */
-export async function jobGateResponse(admin: SupabaseClient, session: DriverSession): Promise<NextResponse | null> {
+export async function jobGateResponse(admin: SupabaseClient, session: DriverSession, now: Date = new Date()): Promise<NextResponse | null> {
   if (session.portalType !== "direct_driver") return null;
   let input: JobGateInput;
   try {
@@ -210,7 +228,7 @@ export async function jobGateResponse(admin: SupabaseClient, session: DriverSess
     console.error("[walkaround] job gate lookup failed", error);
     return NextResponse.json({ error: GATE_UNAVAILABLE_MESSAGE }, { status: 503 });
   }
-  const decision = jobGateDecision(input);
+  const decision = jobGateDecision(input, now);
   return decision.ok ? null : NextResponse.json({ error: decision.message }, { status: 409 });
 }
 
@@ -256,12 +274,13 @@ async function loadPeriodAt(admin: SupabaseClient, tenantId: string, shiftId: st
 
   const open = !data.ended_at;
   const [check, vehicle] = await Promise.all([
-    admin.from("walkaround_checks").select("result").eq("id", data.walkaround_check_id).eq("tenant_id", tenantId).maybeSingle(),
+    admin.from("walkaround_checks").select("result,performed_at").eq("id", data.walkaround_check_id).eq("tenant_id", tenantId).maybeSingle(),
     open ? loadFleetVehicleVor(admin, tenantId, String(data.vehicle_id)) : Promise.resolve(false),
   ]);
   if (check.error) throw new Error(check.error.message);
   return {
     checkResult: (check.data?.result as CheckResult | undefined) ?? null,
+    checkPerformedAt: check.data?.performed_at ? String(check.data.performed_at) : null,
     open,
     vehicleVor: vehicle,
   };
@@ -318,7 +337,7 @@ export async function queuedJobGate(
       const time = acceptRecordedTime({ recordedAt: meta.recordedAt, serverNow: now, shift, notBefore });
       if (shift && time.trusted) {
         const periodAt = await loadPeriodAt(admin, session.tenantId, shift.id, time.at);
-        const decision = jobGateDecisionAt({ portalType: session.portalType, shift, periodAt });
+        const decision = jobGateDecisionAt({ portalType: session.portalType, at: time.at, shift, periodAt });
         return decision.ok ? { response: null, ...time } : refuse(decision.message);
       }
     }
@@ -331,7 +350,7 @@ export async function queuedJobGate(
     };
   }
 
-  const current = await jobGateResponse(admin, session);
+  const current = await jobGateResponse(admin, session, now);
   return { response: current, at: now.toISOString(), trusted: false };
 }
 
@@ -443,7 +462,13 @@ export async function loadDriverShiftState(admin: SupabaseClient, session: Drive
           onBreak: open.breaks.some((b) => b.endedAt === null),
           breaks: open.breaks,
           currentVehicle: open.period && open.period.checkResult && open.period.checkResult !== "dangerous"
-            ? { vehicleId: open.period.vehicleId, registration: registration(open.period.vehicleId), startOdometer: open.period.startOdometer, checkResult: open.period.checkResult }
+            ? {
+                vehicleId: open.period.vehicleId,
+                registration: registration(open.period.vehicleId),
+                startOdometer: open.period.startOdometer,
+                checkResult: open.period.checkResult,
+                checkPerformedAt: open.period.checkPerformedAt,
+              }
             : null,
         }
       : null,
@@ -454,7 +479,7 @@ export async function loadDriverShiftState(admin: SupabaseClient, session: Drive
 
 /** Business refusals raised by the shifts_04 RPCs (and prodfix_30's licence gate): 409 with the database's sentence. */
 export const KNOWN_RPC_REFUSALS: readonly string[] = [
-  "SHF01", "SHF02", "SHF03", "SHF04", "SHF05", "SHF06", "SHF07", "WLK02", "WLK04", "LIC01", "LIC02",
+  "SHF01", "SHF02", "SHF03", "SHF04", "SHF05", "SHF06", "SHF07", "SHF08", "WLK02", "WLK04", "LIC01", "LIC02",
 ];
 
 /** Map an RPC error to an HTTP answer. Known business refusals are 409 with the database's sentence. */

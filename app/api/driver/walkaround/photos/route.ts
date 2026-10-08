@@ -3,7 +3,14 @@ import { isUuid } from "../../../../../lib/auth/serverTenantAccess";
 import { driverErrorResponse } from "../../../../../lib/driver/server";
 import { checkRateLimit, RATE_LIMITS } from "../../../../../lib/rateLimit";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
-import { PHOTO_RACE_MESSAGE, photoAppendDecision, postgresTextArray } from "../../../../../lib/walkaround/photoPaths";
+import {
+  isCheckPhotoPath,
+  PHOTO_RACE_MESSAGE,
+  photoAppendDecision,
+  postgresTextArray,
+  validateWalkaroundPhotoBytes,
+  walkaroundPhotoMimeType,
+} from "../../../../../lib/walkaround/photoPaths";
 import { requireDirectDriver } from "../../../../../lib/walkaround/server";
 
 export const runtime = "nodejs";
@@ -12,8 +19,9 @@ export const dynamic = "force-dynamic";
 /*
   Step 2 of a walkaround defect photo upload: the photo is already in storage
   via the signed upload URL. Re-authorize, confirm the path this driver's
-  defect owns, confirm the object exists, then record it on the defect.
-  Idempotent on a repeated path.
+  defect owns, confirm the object exists, check its real size and leading
+  bytes against the photo type its path names (an object that fails is
+  removed), then record it on the defect. Idempotent on a repeated path.
 
   The five-photo cap is checked again here: several upload URLs can be issued
   before any photo is recorded. The append is a guarded update that only
@@ -60,7 +68,7 @@ export async function POST(request: Request) {
 
     const path = typeof body.path === "string" ? body.path : "";
     const prefix = `${session.tenantId}/${defect.check_id}/${defectClientId}/`;
-    if (!path.startsWith(prefix) || path.includes("..")) {
+    if (!isCheckPhotoPath(path, session.tenantId, String(defect.check_id), defectClientId)) {
       return NextResponse.json({ error: "Invalid upload reference." }, { status: 400 });
     }
 
@@ -76,6 +84,16 @@ export async function POST(request: Request) {
     if (listError) throw new Error(listError.message);
     if (!listed?.some((f) => f.name === filename)) {
       return NextResponse.json({ error: "The photo did not finish uploading." }, { status: 409 });
+    }
+
+    // The type the client declared is only what the bucket saw: check the bytes.
+    const { data: blob, error: downloadError } = await admin.storage.from("walkaround-photos").download(path);
+    if (downloadError || !blob) throw new Error(`Unable to read the uploaded photo: ${downloadError?.message ?? "no data"}`);
+    const content = validateWalkaroundPhotoBytes(new Uint8Array(await blob.arrayBuffer()), walkaroundPhotoMimeType(path));
+    if (!content.ok) {
+      const { error: removeError } = await admin.storage.from("walkaround-photos").remove([path]);
+      if (removeError) console.error("[walkaround] invalid photo was not removed", path, removeError.message);
+      return NextResponse.json({ error: content.message }, { status: content.status });
     }
 
     let current = (defect.photo_paths as string[] | null) ?? [];

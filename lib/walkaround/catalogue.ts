@@ -33,6 +33,27 @@ export function activeCatalogue(items: readonly CatalogueItem[], companyId: stri
     );
 }
 
+/*
+  The active rows a vehicle check must cover: every non-retired baseline and
+  company row that applies to the vehicle ("vehicle" or "both"). Trailer-only
+  rows are shown only when the driver says they are pulling a trailer, so
+  they are optional. Security scan S-5: without this, a one-item checklist
+  with no defects recorded a pass and opened the job gate.
+*/
+export function requiredChecklistItems(items: readonly CatalogueItem[], companyId: string): CatalogueItem[] {
+  return activeCatalogue(items, companyId).filter((i) => i.appliesTo !== "trailer");
+}
+
+/** The required rows the submitted checklist did not cover; empty when it covers them all. */
+export function missingChecklistItems(
+  items: readonly CatalogueItem[],
+  companyId: string,
+  submittedIds: readonly string[],
+): CatalogueItem[] {
+  const submitted = new Set(submittedIds);
+  return requiredChecklistItems(items, companyId).filter((i) => !submitted.has(i.id));
+}
+
 /** Consecutive rows with the same category form one checklist item. */
 export function groupByItem(items: readonly CatalogueItem[]): ItemGroup[] {
   const groups: ItemGroup[] = [];

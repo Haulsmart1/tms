@@ -16,17 +16,24 @@
   Phones are shared. Each item records the Supabase user who queued it, and
   only the signed-in user's own items are sent (lib/offline/driverSync.ts,
   partitionByOwner). Anyone else's are held, not deleted, until they sign in.
+  Signing out clears the current user at once, and the owner is re-checked
+  before every request of an item, so a sign-in switch halfway through a
+  multi-step photo upload never sends the rest under the new session.
 */
 
 import { idbDelete, idbLoadAll, idbPut, isMemoryOnly, type StoredItem } from "../../lib/offline/idbStore";
 import {
   eventOutcome,
   orphanedPhotoIds,
+  ownerCheck,
   partitionByOwner,
   parsePodUploadStart,
   photoOutcome,
   podUploadErrorOutcome,
+  NO_CONNECTION_MESSAGE,
+  resolveQueueUser,
   SIGN_IN_AGAIN_MESSAGE,
+  type SessionRead,
   type DriverQueuePayload,
   type SyncResult,
   withoutQrPayload,
@@ -103,6 +110,14 @@ function rememberUser(id: string): void {
   }
 }
 
+function forgetUser(): void {
+  try {
+    window.localStorage.removeItem(LAST_USER_KEY);
+  } catch {
+    // Storage blocked: nothing was remembered either.
+  }
+}
+
 function setCurrentUser(id: string | null): void {
   if (id === currentUser) return;
   currentUser = id;
@@ -112,24 +127,43 @@ function setCurrentUser(id: string | null): void {
   emit();
 }
 
+/* One session read. An error (or a throw) is a failed read, not a sign-out. */
+async function readSession(): Promise<SessionRead> {
+  try {
+    const { data, error } = await createClient().auth.getSession();
+    const userId = data.session?.user.id ?? null;
+    return { userId, failed: !userId && Boolean(error) };
+  } catch {
+    return { userId: null, failed: true };
+  }
+}
+
 /*
-  Who is signed in. getSession reads local storage, but with an expired access
-  token and no signal it answers null (the refresh needs the network), so fall
-  back to the last user this phone saw signed in: offline, the driver still
-  sees their own queued work. Sending needs the real session cookie anyway;
-  without one the server answers 401 and the queue pauses.
+  Who is signed in. With an expired access token and no signal, getSession
+  fails its refresh: only then does the queue fall back to the last user this
+  phone saw signed in, so offline the driver still sees their own queued
+  work. A session that reads cleanly as signed out is nobody, and the
+  remembered user is forgotten (lib/offline/driverSync.ts resolveQueueUser).
+  Sending needs the real session cookie anyway; without one the server
+  answers 401 and the queue pauses.
 */
 async function refreshUser(): Promise<string | null> {
-  let id: string | null = null;
-  try {
-    const { data } = await createClient().auth.getSession();
-    id = data.session?.user.id ?? null;
-  } catch {
-    id = null;
-  }
-  if (id) rememberUser(id);
-  setCurrentUser(id ?? readRememberedUser());
+  const read = await readSession();
+  if (read.userId) rememberUser(read.userId);
+  else if (!read.failed) forgetUser();
+  setCurrentUser(resolveQueueUser(read, readRememberedUser()));
   return currentUser;
+}
+
+/** Aborts an item whose owner is no longer the signed-in user (see ownerCheck). */
+type SendResult = SyncResult | { kind: "owner_changed" };
+
+/** Null when `ownerId` is still signed in; otherwise what to do instead of the next request. */
+async function guardOwner(ownerId: string | undefined): Promise<SendResult | null> {
+  const check = ownerCheck(ownerId, await readSession());
+  if (check === "same") return null;
+  if (check === "unknown") return { kind: "retry", error: NO_CONNECTION_MESSAGE, status: null };
+  return { kind: "owner_changed" };
 }
 
 function readRejected(): RejectedItem[] {
@@ -151,8 +185,15 @@ function saveRejected(): void {
 
 function installWindowHooks(): void {
   try {
-    createClient().auth.onAuthStateChange((_event, session) => {
+    createClient().auth.onAuthStateChange((event, session) => {
       const id = session?.user.id ?? null;
+      if (event === "SIGNED_OUT") {
+        // Nothing more is sent for the user who left, and their id is not
+        // remembered for the next person to pick the phone up.
+        forgetUser();
+        setTimeout(() => setCurrentUser(null), 0);
+        return;
+      }
       if (!id) return;
       rememberUser(id);
       // Deferred: calling back into supabase-js inside this callback can deadlock.
@@ -216,12 +257,16 @@ async function post(url: string, body: unknown): Promise<{ status: number | null
 }
 
 /* Mirrors lib/pod/uploadClient.ts, but keeps each step's HTTP status so the queue can classify it. */
-async function sendPhoto(item: QueueItem<QueuePayload>, payload: Extract<QueuePayload, { kind: "photo" }>): Promise<SyncResult> {
+async function sendPhoto(item: QueueItem<QueuePayload>, payload: Extract<QueuePayload, { kind: "photo" }>): Promise<SendResult> {
+  const before = await guardOwner(payload.ownerId);
+  if (before) return before;
   const start = await post(PHOTO_UPLOAD_URL, { defectClientId: payload.defectClientId, mimeType: payload.mimeType, size: payload.blob.size });
   if (start.status !== 200) return photoOutcome(start.status, start.error, item.attempts);
   const { path, token } = start.json;
   if (typeof path !== "string" || typeof token !== "string") return { kind: "retry", error: "Unable to start the photo upload.", status: 500 };
 
+  const beforeUpload = await guardOwner(payload.ownerId);
+  if (beforeUpload) return beforeUpload;
   try {
     const { error } = await createClient()
       .storage.from(PHOTO_BUCKET)
@@ -231,6 +276,8 @@ async function sendPhoto(item: QueueItem<QueuePayload>, payload: Extract<QueuePa
     return { kind: "retry", error: "The photo upload did not complete.", status: null };
   }
 
+  const beforeRecord = await guardOwner(payload.ownerId);
+  if (beforeRecord) return beforeRecord;
   const record = await post(PHOTO_RECORD_URL, { defectClientId: payload.defectClientId, path });
   return photoOutcome(record.status, record.error, item.attempts);
 }
@@ -248,8 +295,10 @@ function stopEndpoint(jobId: string, stopId: string): string {
   is read by podUploadErrorOutcome (network and 5xx retry, other 4xx refuse).
   A 409 once the stop is delivered is a final refusal (eventOutcome rejects it).
 */
-async function sendPodPhoto(payload: Extract<QueuePayload, { kind: "pod_photo" }>): Promise<SyncResult> {
+async function sendPodPhoto(payload: Extract<QueuePayload, { kind: "pod_photo" }>): Promise<SendResult> {
   const endpoint = stopEndpoint(payload.jobId, payload.stopId);
+  const before = await guardOwner(payload.ownerId);
+  if (before) return before;
   const meta = { clientId: payload.clientId, shiftClientId: payload.shiftClientId, recordedAt: payload.recordedAt };
   const start = await post(`${endpoint}/evidence/upload-url`, {
     ...meta,
@@ -262,6 +311,8 @@ async function sendPodPhoto(payload: Extract<QueuePayload, { kind: "pod_photo" }
   if (!upload) return { kind: "retry", error: "Unable to start the photo upload.", status: 500 };
 
   if (upload.token !== null) {
+    const beforeUpload = await guardOwner(payload.ownerId);
+    if (beforeUpload) return beforeUpload;
     let failure: unknown = null;
     try {
       const { error } = await createClient()
@@ -277,6 +328,8 @@ async function sendPodPhoto(payload: Extract<QueuePayload, { kind: "pod_photo" }
     }
   }
 
+  const beforeRecord = await guardOwner(payload.ownerId);
+  if (beforeRecord) return beforeRecord;
   const record = await post(`${endpoint}/evidence`, {
     ...meta,
     storagePath: upload.path,
@@ -305,8 +358,13 @@ async function sendPodComplete(payload: Extract<QueuePayload, { kind: "pod_compl
   return eventOutcome(result.status, result.error);
 }
 
-async function sendItem(item: QueueItem<QueuePayload>): Promise<SyncResult> {
+async function sendItem(item: QueueItem<QueuePayload>): Promise<SendResult> {
   const payload = item.payload;
+  // Single-request kinds are checked here; the photo kinds check before each of their steps.
+  if (payload.kind !== "photo" && payload.kind !== "pod_photo") {
+    const before = await guardOwner(payload.ownerId);
+    if (before) return before;
+  }
   switch (payload.kind) {
     case "photo":
       return sendPhoto(item, payload);
@@ -367,6 +425,12 @@ async function flushOnce(force: boolean): Promise<void> {
     const head = nextDue(mine(), Date.now());
     if (!head) break;
     const outcome = await sendItem(head);
+    if (outcome.kind === "owner_changed") {
+      // Someone else (or nobody) is signed in now: leave the item untouched
+      // for its owner, re-read who is signed in, and start again for them.
+      await refreshUser();
+      break;
+    }
     if (outcome.kind === "stop") {
       paused = outcome.error;
       emit();

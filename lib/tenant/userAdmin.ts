@@ -15,7 +15,10 @@
 import type { RoleTier } from "../auth/tenantAccess";
 import { SUPER_ADMIN_ROLE } from "../roles";
 
-export const INVITABLE_ROLES = ["admin", "staff", "driver"] as const;
+/* No "driver": a console Driver profile passes can_access_tenant like any
+   staff member (H-2). Drivers are onboarded through driver portal invites
+   (/settings/portal-invites), which write driver_users and no profile. */
+export const INVITABLE_ROLES = ["admin", "staff"] as const;
 export type InvitableRole = (typeof INVITABLE_ROLES)[number];
 
 export function parseInvitableRole(raw: unknown): InvitableRole | null {

@@ -4,20 +4,15 @@ import { isUuid } from "../../../../../../lib/auth/serverTenantAccess";
 import { driverErrorResponse } from "../../../../../../lib/driver/server";
 import { checkRateLimit, RATE_LIMITS } from "../../../../../../lib/rateLimit";
 import { createAdminClient } from "../../../../../../lib/supabase/admin";
-import { MAX_PHOTOS_PER_DEFECT } from "../../../../../../lib/walkaround/photoPaths";
+import {
+  MAX_PHOTOS_PER_DEFECT,
+  MAX_WALKAROUND_PHOTO_BYTES,
+  WALKAROUND_PHOTO_EXTENSIONS,
+} from "../../../../../../lib/walkaround/photoPaths";
 import { requireDirectDriver } from "../../../../../../lib/walkaround/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const MAX_PHOTO_BYTES = 10485760;
-
-const PHOTO_EXTENSIONS: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-  "image/heic": "heic",
-};
 
 /*
   Step 1 of a walkaround defect photo upload: authorize the driver, check the
@@ -37,13 +32,13 @@ export async function POST(request: Request) {
     }
 
     const mimeType = typeof body.mimeType === "string" ? body.mimeType : "";
-    const ext = PHOTO_EXTENSIONS[mimeType];
+    const ext = WALKAROUND_PHOTO_EXTENSIONS[mimeType];
     if (!ext) {
       return NextResponse.json({ error: "Use a JPEG, PNG, WebP or HEIC photo." }, { status: 400 });
     }
 
     const size = typeof body.size === "number" ? body.size : NaN;
-    if (!Number.isFinite(size) || size < 1 || size > MAX_PHOTO_BYTES) {
+    if (!Number.isFinite(size) || size < 1 || size > MAX_WALKAROUND_PHOTO_BYTES) {
       return NextResponse.json({ error: "The photo size is invalid." }, { status: 400 });
     }
 

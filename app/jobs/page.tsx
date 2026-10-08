@@ -141,9 +141,8 @@ export default function JobsPage() {
       setJobsLoading(false);
       setHasLoaded(true);
     };
-    /* job_stops below: add pod_flags once docs/sql/tracking_02_pod_flags.sql is
-       applied. Until then the "Time not trusted" tag in StopCard cannot show.
-       Adding it earlier answers 42703 and fails the whole list. */
+    /* job_stops below selects pod_flags (tracking_02, applied 2026-10-08) for the
+       "Time not trusted" and "Synced late" tags in StopCard. */
     const jobsQuery = () => supabase.from("jobs").select(`
         id, tenant_id, reference, status, scheduled_date, planning_date, customer_id, vehicle_id, driver_id,
         customer_price, subcontractor_id, subcontractor_cost,
@@ -152,7 +151,7 @@ export default function JobsPage() {
         accepted_at, accepted_by, collection_eta, delivery_eta, acceptance_note,
         customers ( name, contact_name, phone, mobile, email, accounts_email, operations_email, address_line_1, address_line_2, city, county_region, postcode, country_code ), vehicles ( registration ), drivers ( name ),
         subcontractors ( name, vehicle_reg, driver_name ),
-        job_stops ( id, stop_order, type, address_line, city, postcode, contact_name, contact_phone, contact_email, status, pod_status, recipient_name, delivered_at, collected_at, pod_notes, pod_photo_url ),
+        job_stops ( id, stop_order, type, address_line, city, postcode, contact_name, contact_phone, contact_email, status, pod_status, recipient_name, delivered_at, collected_at, pod_notes, pod_photo_url, pod_flags ),
         job_items ( id, sku, description, quantity, serial_numbers, external_reference, notes )
       `, { count: "exact" });
 

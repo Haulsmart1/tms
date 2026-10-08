@@ -56,6 +56,12 @@ export const RATE_LIMITS = {
      URL, then record), so 120 requests is 60 photos in ten minutes: a
      backlog of offline photos replays without tripping it, a loop does. */
   driverWalkaroundPhoto: { bucket: "driver-walkaround-photo:user", windowSeconds: 600, max: 120 },
+  /* Driver phone GPS (POST /api/driver/location), per signed-in user. The
+     phone sends at most one fix every 15 seconds (40 per ten minutes) and
+     holds at most 40 while offline, so 120 lets a reconnect flush its backlog
+     while stopping a script flooding telematics_positions (scan N-9). The
+     tracker retries a 429 with backoff. */
+  driverLocation: { bucket: "driver-location:user", windowSeconds: 600, max: 120 },
 } as const satisfies Record<string, RateLimitRule>;
 
 const MISSING_FUNCTION_CODES = new Set(["42883", "PGRST202"]);

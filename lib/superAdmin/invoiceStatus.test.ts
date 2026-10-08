@@ -1,5 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { parseSuperAdminInvoiceStatus } from "./invoiceStatus";
+import { parseSuperAdminInvoiceStatus, superAdminAllowedFromStatuses } from "./invoiceStatus";
+
+describe("superAdminAllowedFromStatuses", () => {
+  it("marks an issued, unpaid invoice paid", () => {
+    const from = superAdminAllowedFromStatuses("paid");
+    for (const status of ["approved", "sent", "part_paid", "partially_paid", "overdue", "pending"]) {
+      expect(from).toContain(status);
+    }
+    expect(from).not.toContain("paid");
+  });
+
+  it("moves a paid invoice back to pending", () => {
+    const from = superAdminAllowedFromStatuses("pending");
+    expect(from).toContain("paid");
+    expect(from).not.toContain("pending");
+  });
+
+  it("never flips out of void, credited, cancelled or an unissued draft", () => {
+    for (const target of ["paid", "pending"] as const) {
+      const from = superAdminAllowedFromStatuses(target);
+      for (const status of ["void", "credited", "cancelled", "draft", "awaiting_pod"]) {
+        expect(from).not.toContain(status);
+      }
+    }
+  });
+});
 
 describe("parseSuperAdminInvoiceStatus", () => {
   it("accepts the two statuses the super-admin page offers", () => {

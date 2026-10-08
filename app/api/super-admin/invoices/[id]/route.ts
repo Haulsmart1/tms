@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { withSuperAdmin, logSuperAdminEdit } from "../../../../../lib/superAdmin/guard";
 import { recordSuperAdminAudit } from "../../../../../lib/superAdmin/audit";
-import { parseSuperAdminInvoiceStatus } from "../../../../../lib/superAdmin/invoiceStatus";
+import { parseSuperAdminInvoiceStatus, superAdminAllowedFromStatuses } from "../../../../../lib/superAdmin/invoiceStatus";
 import { isUuid } from "../../../../../lib/uuid";
 
 export const runtime = "nodejs";
@@ -19,7 +19,9 @@ export const dynamic = "force-dynamic";
 
    The status list is closed (lib/superAdmin/invoiceStatus.ts). Void, credited
    and the rest belong to the accounts state machine and are not reachable
-   from a platform-wide button. */
+   from a platform-wide button, and the update only applies from a status in
+   superAdminAllowedFromStatuses, so it never moves an invoice out of void or
+   credited either. */
 
 export const PATCH = withSuperAdmin(
   async (actorId: string, request: NextRequest, context: { params: Promise<{ id: string }> }) => {
@@ -66,14 +68,35 @@ export const PATCH = withSuperAdmin(
       return NextResponse.json({ error: "No such invoice." }, { status: 404 });
     }
 
-    const { error: updateError } = await admin
+    // Review S-13: the flip is conditional on the current status, so void,
+    // credited and unissued invoices are never moved, even by a request that
+    // races a status change made after the lookup above.
+    const allowedFrom = superAdminAllowedFromStatuses(parsed.status);
+    if (!allowedFrom.includes(String(existing.status ?? ""))) {
+      return NextResponse.json(
+        {
+          error: `An invoice that is ${existing.status ?? "unknown"} cannot be marked ${parsed.status} here.`,
+        },
+        { status: 409 },
+      );
+    }
+
+    const { data: updated, error: updateError } = await admin
       .from("invoices")
       .update({ status: parsed.status })
-      .eq("id", invoiceId);
+      .eq("id", invoiceId)
+      .in("status", allowedFrom)
+      .select("id");
 
     if (updateError) {
       console.error("super-admin invoice status: update failed", updateError.code);
       return NextResponse.json({ error: "Unable to update this invoice." }, { status: 500 });
+    }
+    if (!updated || updated.length === 0) {
+      return NextResponse.json(
+        { error: "This invoice changed status in the meantime. Reload and try again." },
+        { status: 409 },
+      );
     }
 
     logSuperAdminEdit({

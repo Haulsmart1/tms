@@ -8,6 +8,7 @@ const FLAG_LABELS: Record<string, string> = {
   open_over_16h: "Open over 16h",
   odometer_decrease: "Odometer went down",
   late_sync: "Synced late",
+  delayed_sync: "Sent over 15 minutes after it was recorded",
   out_of_order: "Arrived out of order",
   after_office_end: "Recorded after the office ended the shift",
   late_break_skipped: "A late break was not recorded",
