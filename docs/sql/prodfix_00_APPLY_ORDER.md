@@ -1,10 +1,34 @@
 # prodfix SQL: apply order for the 2026-09-14 production-readiness fixes
 
 Every `docs/sql/prodfix_*.sql` file comes from the review in
-`docs/superpowers/reviews/2026-09-14-production-readiness-review.md`. None of them has been applied.
-They were written without access to the live database, so each one checks its preconditions and
+`docs/superpowers/reviews/2026-09-14-production-readiness-review.md`. Most of them are now applied:
+see "Live state, 2026-10-08" below for exactly which, and "Next: 2026-10-08 security scan" at the
+end for what to apply now. They were written without access to the live database, so each one checks its preconditions and
 either changes nothing or raises and rolls back. Apply them by hand in the Supabase SQL editor, in
 the order below, and run the verify query at the bottom of each file before moving on.
+
+## Live state, 2026-10-08
+
+Verified against the live project on 2026-10-08 (security scan of that date).
+
+- **Applied on 2026-10-08:** prodfix_72, 73, 84, 85, 86, 87, 88, 90, 91, 92, 93, 94, 95; signup_01;
+  tracking_01; tracking_02; `20260929093000_job_stop_contacts.sql`; and the prodfix_61 VALIDATE
+  statement.
+- **Applied before 2026-10-08:** prodfix_01, 10, 20, 30, 31, 32, 33, 40, 41, 42, 43, 44, 50, 60, 61
+  (NOT VALID part), 70, 71, 82; rls_11; shifts_01, 02, 03, 04; `20260929123000_planning_saved_plans.sql`;
+  `20260930150000_load_transfers_and_stop_windows.sql`.
+- **NOT applied:**
+  - `shifts_05_storage.sql` and `prodfix_83_storage_restrictive_policies.sql`: postgres does not own
+    `storage.objects`, so both must be created by hand in the dashboard (Storage, Policies). The
+    walkaround-photos bucket currently has four dashboard-made PERMISSIVE policies that let anyone
+    read and write it (finding N-1, CRITICAL): delete them and create the shifts_05 policies.
+  - The shifts_03 re-run failed, so `shift_vehicle_periods` has no `gate_vehicle_licensed` trigger.
+    prodfix_96 STEP 8 repeats that block.
+- **Known broken live, fixed by prodfix_96:** signup_01 and prodfix_20 `provision_tenant_user` insert
+  a bare profile into the NOT NULL `profiles.tenant_id`, so self-serve signup and inviting a brand
+  new address both fail once `handle_new_user` stops creating profiles.
+- **Known broken live, NOT fixed yet:** prodfix_20 `remove_company_user` sets `profiles.tenant_id`
+  to null, which the NOT NULL refuses.
 
 ## When to apply: SQL first, then deploy
 
@@ -233,11 +257,12 @@ a photo and see it recorded on the check.
 
 | Order | File | Needs | Applied |
 |---|---|---|---|
-| 1 | `shifts_01_tables.sql` | rls_02 | no |
-| 2 | `shifts_02_catalogue_seed.sql` | shifts_01 | no |
-| 3 | `shifts_03_triggers.sql` | shifts_02; re-run after prodfix_30 if that is applied later. Confirm the server role name first (billing_03 pre-flight): the QR hash guard exempts `postgres`, `supabase_admin`, `service_role` | no |
-| 4 | `shifts_04_rpcs.sql` | shifts_03 | no |
-| 5 | `shifts_05_storage.sql` | none. Creates restrictive storage policies: if it raises 42501, create them in the dashboard as its header says | no |
+| 1 | `shifts_01_tables.sql` | rls_02 | yes |
+| 2 | `shifts_02_catalogue_seed.sql` | shifts_01 | yes |
+| 3 | `shifts_03_triggers.sql` | shifts_02; re-run after prodfix_30 if that is applied later. Confirm the server role name first (billing_03 pre-flight): the QR hash guard exempts `postgres`, `supabase_admin`, `service_role` | yes, but the 2026-10-08 re-run failed: `shift_vehicle_periods` is not licence-gated (prodfix_96 STEP 8) |
+| 4 | `shifts_04_rpcs.sql` | shifts_03 | yes |
+| 5 | `shifts_05_storage.sql` | none. Creates restrictive storage policies: if it raises 42501, create them in the dashboard as its header says | **no**: dashboard only (postgres does not own `storage.objects`). See N-1 above |
+| 6 | `shifts_06_rectification_and_pod_guards.sql` | shifts_04, prodfix_96 | no |
 | check | `shifts_verify.sql` | all of the above | |
 
 ## Stop contacts, saved plans and load transfers, 2026-09-29/30
@@ -249,9 +274,9 @@ plain `create table` for `load_transfer_batches` and `load_transfer_items`, so i
 
 | Order | File | Needs | Applied |
 |---|---|---|---|
-| 1 | `20260929093000_job_stop_contacts.sql` | none | unknown |
-| 2 | `20260929123000_planning_saved_plans.sql` | rls_02 (`can_access_tenant`). Needed by the Saved Plans section on Planning | unknown |
-| 3 | `20260930150000_load_transfers_and_stop_windows.sql` | rls_02 (`can_access_tenant`). Needed by `/load-transfer` | unknown |
+| 1 | `20260929093000_job_stop_contacts.sql` | none | yes (2026-10-08) |
+| 2 | `20260929123000_planning_saved_plans.sql` | rls_02 (`can_access_tenant`). Needed by the Saved Plans section on Planning | yes; prodfix_96 STEP 7c replaces its update and delete policies |
+| 3 | `20260930150000_load_transfers_and_stop_windows.sql` | rls_02 (`can_access_tenant`). Needed by `/load-transfer` | yes |
 
 ## Offline POD and tracking links, 2026-10-07
 
@@ -261,9 +286,18 @@ them does not matter.
 
 | Order | File | Needs | Applied |
 |---|---|---|---|
-| 1 | `tracking_01_links_and_eta_cache.sql` | none. Read its WARNING output and the result of the final select: a document_type check or enum on `document_delivery_log` must be widened to allow `tracking_link` or emailing a link fails (before anything is sent) | no |
-| 2 | `tracking_02_pod_flags.sql` | none | no |
+| 1 | `tracking_01_links_and_eta_cache.sql` | none. Read its WARNING output and the result of the final select: a document_type check or enum on `document_delivery_log` must be widened to allow `tracking_link` or emailing a link fails (before anything is sent) | yes (2026-10-08). The live CHECK still lacks `tracking_link`: prodfix_96 STEP 4 widens it |
+| 2 | `tracking_02_pod_flags.sql` | none | yes (2026-10-08) |
 
 Offline POD for own-fleet drivers is still gated by the walkaround job gate, so it only works once
 `shifts_01..05` are applied (after S-1 from the 2026-10-07 security scan is fixed). Prefilled tracking
 link recipients come from `20260929093000_job_stop_contacts.sql`.
+
+## Next: 2026-10-08 security scan (apply in this order)
+
+Findings: `docs/superpowers/reviews/2026-10-08-security-scan.md`. Do N-1 in the dashboard first (see Live state).
+
+| Order | File | Needs | Applied |
+|---|---|---|---|
+| 1 | `prodfix_96_security_scan_2026_10_08.sql` | everything marked applied above. B-1/H-5 revokes, N-2 subcontractor link tables read-only, C-4 identity-only `handle_new_user` plus the fixed `provision_tenant_user` and `create_company_with_admin`, `tracking_link` in the delivery-log CHECK, `roles` grants, `pg_temp` on every definer function, S-14/B-5/S-9 grants and saved-plan policies, shifts_03 licence gate re-run. Re-running signup_01 or prodfix_20 afterwards reinstalls the broken RPC bodies: do not. | no |
+| 2 | `shifts_06_rectification_and_pod_guards.sql` | prodfix_96. S-1 WLK06 rectification guard, `rectified_by`, re-VOR on reopen, WLK02 open-defect backstop, N-3 POD01 completion-column guard, N-12 stop tenant binding, S-16 SHF08 driver-in-tenant assertion. | no |

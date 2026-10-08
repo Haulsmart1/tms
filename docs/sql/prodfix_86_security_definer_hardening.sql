@@ -89,12 +89,15 @@ begin
       ('unassign_vehicle',                         'authenticated'),
       ('create_load_manifest',                     'service'),
       ('record_load_manifest_event',               'service'),
-      ('next_invoice_number',                      'service_checked'),
+      -- next_invoice_number, recalculate_invoice_totals and convert_quotation_to_job are plain
+      -- 'service' since prodfix_96 (finding B-1/H-5): the service_checked fallback kept
+      -- authenticated EXECUTE on them live, and a re-run of this file must not reopen that.
+      ('next_invoice_number',                      'service'),
       ('next_credit_note_number',                  'service_checked'),
       ('next_quotation_number',                    'service_checked'),
-      ('recalculate_invoice_totals',               'service_checked'),
+      ('recalculate_invoice_totals',               'service'),
       ('recalculate_quotation_totals',             'service_checked'),
-      ('convert_quotation_to_job',                 'service_checked'),
+      ('convert_quotation_to_job',                 'service'),
       ('snapshot_quotation_terms_on_share_insert', 'trigger'),
       ('handle_new_user',                          'trigger'),
       ('guard_profiles_tenant_company_match',      'trigger'),
