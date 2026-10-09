@@ -4,6 +4,7 @@ import {
   createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode,
 } from "react";
 import { isAuthRetryableFetchError } from "@supabase/supabase-js";
+import { observeDriverAuth } from "../driver/driverIdentity";
 import { createClient } from "../../lib/supabase/browser";
 import {
   parseTenantContext, pickInitialActiveTenant, computeWriteTenantId, tenantStorageKey,
@@ -202,6 +203,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void resolve("blocking");
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      observeDriverAuth(event, session?.user.id ?? null);
       const mode = decideResolveMode({
         event,
         hasReadyContext: hasReadyRef.current,

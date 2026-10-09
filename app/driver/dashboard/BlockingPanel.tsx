@@ -6,7 +6,7 @@
   recorded, object to it, or call the transport manager.
 */
 
-import Link from "next/link";
+
 import { useState } from "react";
 import { OBJECTION_MAX, objectionEvent, walkaroundHref } from "../../../lib/shifts/driverActions";
 import type { DriverDefectView, DriverShiftState } from "../../../lib/walkaround/driverState";
@@ -43,9 +43,9 @@ export default function BlockingPanel({ state, blocking, shift }: { state: Drive
         ) : (
           <p className="m-0 text-sm text-ink">Your company has not set an on-call number. Contact the office.</p>
         )}
-        <Link className={ui.secondary} href={walkaroundHref(state)}>
+        <a className={ui.secondary} href={walkaroundHref(state)}>
           Check a different vehicle
-        </Link>
+        </a>
       </div>
     </section>
   );

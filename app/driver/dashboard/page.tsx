@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { loadDriverData, prepareAssignedJobs, snapshotMessage, useDriverIdentity } from "../driverIdentity";
 import Skeleton from "../../../components/Skeleton";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getDriverJobOperationalDate, isDriverJobForDate } from "../../../lib/driver/dashboardJobs";
@@ -58,6 +58,7 @@ export default function DriverDashboardPage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const shift = useDriverShift();
+  const owner = useDriverIdentity();
   const loadSeq = useRef(0);
   const hasDashboard = useRef(false);
 
@@ -72,30 +73,21 @@ export default function DriverDashboardPage() {
     const request = ++loadSeq.current;
     if (!hasDashboard.current) setLoading(true);
 
+    if (!owner) { setLoading(false); return; }
     try {
-      const response = await fetch("/api/driver/me", {
-        cache: "no-store",
-      });
+      const result = await loadDriverData<DriverResponse>(owner, "/api/driver/me");
 
-      const body = (await response.json()) as DriverResponse & {
-        error?: string;
-      };
+      const body = result.data;
 
       if (request !== loadSeq.current) return;
-
-      if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          hasDashboard.current = false;
-          setData(null);
-        }
-        throw new Error(body.error || "Unable to load driver dashboard.");
-      }
 
       hasDashboard.current = true;
-      setData(body);
-      setMessage("");
+      setData(result.cached ? { ...body, today: operatorDay(new Date()), todayJobs: undefined } : body);
+      setMessage(snapshotMessage(result));
+      if (!result.cached) void prepareAssignedJobs(owner, body.jobs);
     } catch (error) {
       if (request !== loadSeq.current) return;
+      if ((error as { status?: number }).status) { hasDashboard.current = false; setData(null); }
       if (!hasDashboard.current) setData(null);
       setMessage(
         error instanceof Error ? error.message : "Unable to load driver dashboard."
@@ -103,9 +95,11 @@ export default function DriverDashboardPage() {
     } finally {
       if (request === loadSeq.current) setLoading(false);
     }
-  }, []);
+  }, [owner]);
 
   useEffect(() => {
+    hasDashboard.current = false;
+    setData(null);
     void loadDashboard();
     // Office-applied assignments must replace the phone's old queue. All of
     // these are fresh reads; offline POD items never supply job assignments.
@@ -353,9 +347,9 @@ export default function DriverDashboardPage() {
 function JobLink({ jobId, locked, children }: { jobId: string; locked: boolean; children: ReactNode }) {
   if (locked) return <div className={styles.jobLink}>{children}</div>;
   return (
-    <Link href={`/driver/jobs/${jobId}`} className={styles.jobLink}>
+    <a href={`/driver/jobs/${jobId}`} className={styles.jobLink}>
       {children}
-    </Link>
+    </a>
   );
 }
 

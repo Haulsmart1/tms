@@ -22,6 +22,7 @@
 */
 
 import { idbDelete, idbLoadAll, idbPut, isMemoryOnly, type StoredItem } from "../../lib/offline/idbStore";
+import { reflectAcceptedShift } from "../../lib/offline/snapshotStore";
 import {
   eventOutcome,
   orphanedPhotoIds,
@@ -443,6 +444,9 @@ async function flushOnce(force: boolean): Promise<void> {
     let next = result.queue as StoredItem<QueuePayload>[];
     if (outcome.kind === "sent" && head.payload.kind === "event") {
       sent = [...sent, { event: withoutQrPayload(head.payload.event), sentAt: now }].slice(-50);
+      if (head.payload.ownerId) {
+        await reflectAcceptedShift(head.payload.ownerId, withoutQrPayload(head.payload.event), now).catch(() => {});
+      }
     }
     if (result.rejected) {
       let message = result.rejected.lastError ?? "The server refused this.";

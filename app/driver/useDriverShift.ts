@@ -6,9 +6,10 @@
   with no signal.
 */
 
+import { loadDriverData, snapshotMessage, useDriverIdentity } from "./driverIdentity";
+import { unreflectedEvents } from "../../lib/offline/driverCache";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { pendingEvents } from "../../lib/offline/driverSync";
-import { errorFromBody, readJsonSafe } from "../../lib/pod/uploadClient";
 import type { DriverEvent } from "../../lib/shifts/events";
 import { projectDriverState } from "../../lib/shifts/projection";
 import type { DriverShiftState } from "../../lib/walkaround/driverState";
@@ -48,8 +49,9 @@ export type DriverShift = {
 const RELOAD_AFTER_SEND_MS = 600;
 
 export function useDriverShift(): DriverShift {
+  const owner = useDriverIdentity();
   const queue = useSyncExternalStore(subscribe, getQueueSnapshot, getServerQueueSnapshot);
-  const [server, setServer] = useState<{ state: DriverShiftState; requestedAt: number } | null>(null);
+  const [server, setServer] = useState<{ state: DriverShiftState; requestedAt: number; reflectedEventIds?: string[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [forbidden, setForbidden] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,29 +60,33 @@ export function useDriverShift(): DriverShift {
   const reload = useCallback(async () => {
     const mine = ++loadSeq.current;
     const requestedAt = Date.now();
+    if (!owner) { setLoading(false); return; }
     try {
-      const response = await fetch("/api/driver/shift", { cache: "no-store" });
-      const body = await readJsonSafe(response);
+      const result = await loadDriverData<DriverShiftState>(owner, "/api/driver/shift");
       if (mine !== loadSeq.current) return;
-      if (response.status === 403) {
-        setForbidden(true);
-        setError(null);
-      } else if (!response.ok) {
-        setError(errorFromBody(body, response.status, "Unable to load your shift."));
-      } else {
-        setForbidden(false);
-        setServer({ state: body as unknown as DriverShiftState, requestedAt });
-        setError(null);
+      setForbidden(false);
+      setServer({ state: result.data, requestedAt: result.cached ? result.reflectedAt ?? result.savedAt : requestedAt,
+        reflectedEventIds: result.reflectedEventIds });
+      setError(snapshotMessage(result) || null);
+    } catch (error) {
+      if (mine === loadSeq.current && (error as { status?: number }).status) {
+        setServer(null);
+        setForbidden((error as { status?: number }).status === 403);
       }
-    } catch {
-      if (mine === loadSeq.current) setError("No connection. Showing what this phone already knows.");
+      if (mine === loadSeq.current) setError((error as { status?: number }).status === 403 ? null : error instanceof Error ? error.message : "Unable to load your shift.");
     } finally {
       if (mine === loadSeq.current) setLoading(false);
     }
-  }, []);
+  }, [owner]);
 
   useEffect(() => {
+    setServer(null);
+    setForbidden(false);
     void reload();
+    const refresh = () => { if (document.visibilityState === "visible") void reload(); };
+    window.addEventListener("online", refresh);
+    window.addEventListener("focus", refresh);
+    return () => { ++loadSeq.current; window.removeEventListener("online", refresh); window.removeEventListener("focus", refresh); };
   }, [reload]);
 
   // Re-read the server once events have been accepted (debounced, so a burst
@@ -97,7 +103,7 @@ export function useDriverShift(): DriverShift {
     // Events accepted after that server read began are not in it yet; keep
     // showing them, then everything still queued.
     const accepted = queue.sent.filter((s) => s.sentAt >= server.requestedAt).map((s) => s.event);
-    return projectDriverState(server.state, [...accepted, ...pendingEvents(queue.pending)]);
+    return projectDriverState(server.state, unreflectedEvents([...accepted, ...pendingEvents(queue.pending)], server.reflectedEventIds));
   }, [server, queue]);
 
   return {

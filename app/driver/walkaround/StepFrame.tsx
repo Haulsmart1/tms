@@ -1,7 +1,7 @@
 "use client";
 /* One screen of the walkaround check (Back, heading, body, bottom action), plus its small shared pieces. */
 
-import Link from "next/link";
+
 import type { ReactNode } from "react";
 import { w } from "./styles";
 
@@ -62,9 +62,9 @@ export function Notice({ text, retry = null }: { text: string; retry?: (() => vo
             Try again
           </button>
         ) : null}
-        <Link className={w.link} href="/driver/dashboard">
+        <a className={w.link} href="/driver/dashboard">
           Back to the dashboard
-        </Link>
+        </a>
       </div>
     </section>
   );
