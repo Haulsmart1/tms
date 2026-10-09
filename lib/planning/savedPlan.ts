@@ -1,3 +1,4 @@
+import { parseSevenDayEditorDrafts, type SevenDayPlanEditorDraft } from "./sevenDayPlanEditor";
 import type {
   PendingPlanningItinerary,
   PersistedPlanningItinerary,
@@ -42,6 +43,7 @@ export type SavedPlanSnapshot = {
   planningDate: string;
   lanes: SavedPlanLaneSnapshot[];
   canonicalItineraries: SavedPlanCanonicalSnapshot[];
+  editorDrafts?: Record<string, SevenDayPlanEditorDraft>;
 };
 
 export type SavedPlanRow = {
@@ -224,7 +226,9 @@ export function parseSavedPlanSnapshot(
     return null;
   }
 
-  return value as SavedPlanSnapshot;
+  const editorDrafts = parseSevenDayEditorDrafts(value.editorDrafts);
+  if (!editorDrafts || Object.keys(editorDrafts).some((id) => !vehicleIds.includes(id))) return null;
+  return { ...value, ...(value.editorDrafts === undefined ? {} : { editorDrafts }) } as SavedPlanSnapshot;
 }
 
 function canonicalToSnapshot(
@@ -261,6 +265,7 @@ function canonicalToSnapshot(
 export function createSavedPlanSnapshot(input: {
   planningDate: string;
   lanes: SavedPlanLaneSnapshot[];
+  editorDrafts?: Record<string, SevenDayPlanEditorDraft>;
   pendingItineraries: Record<string, PendingPlanningItinerary>;
   persistedItineraries: Record<string, PersistedPlanningItinerary>;
 }): SavedPlanSnapshot {
@@ -280,6 +285,7 @@ export function createSavedPlanSnapshot(input: {
   const snapshot: SavedPlanSnapshot = {
     version: SAVED_PLAN_SNAPSHOT_VERSION,
     planningDate: input.planningDate,
+    ...(input.editorDrafts ? { editorDrafts: input.editorDrafts } : {}),
     lanes: input.lanes.map((lane) => ({
       vehicleId: lane.vehicleId,
       driverId: lane.driverId,
