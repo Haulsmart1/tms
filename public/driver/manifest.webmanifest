@@ -1,0 +1,15 @@
+{
+  "id": "/driver/",
+  "name": "TMS Wizzard Driver",
+  "short_name": "TMS Driver",
+  "description": "Driver routes, walkarounds and proof of delivery",
+  "start_url": "/driver/dashboard",
+  "scope": "/driver/",
+  "display": "standalone",
+  "background_color": "#0F1626",
+  "theme_color": "#0F1626",
+  "icons": [
+    { "src": "/driver/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/driver/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

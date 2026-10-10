@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { loadDriverData, snapshotMessage, useDriverIdentity } from "../../driverIdentity";
 import BarcodeVerification from "./BarcodeVerification";
 import { preparePodPhoto } from "./downscaleImage";
 import {
@@ -13,10 +14,6 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import {
-  errorFromBody,
-  readJsonSafe,
-} from "../../../../lib/pod/uploadClient";
 import { checkQueuedCompletion } from "../../../../lib/driver/offlinePod";
 import {
   MEMORY_ONLY_MESSAGE,
@@ -107,6 +104,7 @@ export default function DriverJobPage({
   params: Promise<{ jobId: string }>;
 }) {
   const { jobId } = use(params);
+  const owner = useDriverIdentity();
 
   const [job, setJob] =
     useState<Job | null>(null);
@@ -136,43 +134,27 @@ export default function DriverJobPage({
         setLoading(true);
       }
 
+      if (!owner) { setLoading(false); return; }
       try {
-        const response =
-          await fetch(
-            `/api/driver/jobs/${encodeURIComponent(jobId)}`,
-            {
-              cache: "no-store",
-            },
-          );
-
-        const body =
-          await readJsonSafe(response);
+        const result =
+          await loadDriverData<{ job: Job }>(owner, `/api/driver/jobs/${encodeURIComponent(jobId)}`);
+        const body = result.data;
 
         if (mine !== loadSeq.current) {
           return;
         }
 
-        if (
-          !response.ok ||
-          !body.job
-        ) {
-          throw new Error(
-            errorFromBody(
-              body,
-              response.status,
-              "Unable to load this job.",
-            ),
-          );
-        }
+        if (!body.job) throw new Error("Unable to load this job.");
 
         setJob(body.job as Job);
         hasJob.current = true;
-        setMessage("");
+        setMessage(snapshotMessage(result));
       } catch (error) {
         if (mine !== loadSeq.current) {
           return;
         }
 
+        if ((error as { status?: number }).status) { hasJob.current = false; setJob(null); }
         if (!hasJob.current) {
           setJob(null);
         }
@@ -187,10 +169,16 @@ export default function DriverJobPage({
           setLoading(false);
         }
       }
-    }, [jobId]);
+    }, [jobId, owner]);
 
   useEffect(() => {
+    hasJob.current = false;
+    setJob(null);
     void loadJob();
+    const refresh = () => { if (document.visibilityState === "visible") void loadJob(); };
+    window.addEventListener("online", refresh);
+    window.addEventListener("focus", refresh);
+    return () => { ++loadSeq.current; window.removeEventListener("online", refresh); window.removeEventListener("focus", refresh); };
   }, [loadJob]);
 
   /* Offline POD: photos, scans and completions go through the driver queue
@@ -288,12 +276,12 @@ export default function DriverJobPage({
     return (
       <main className="min-h-screen bg-slate-100 px-4 py-6 text-slate-950 [color-scheme:light]">
         <div className="mx-auto max-w-2xl">
-          <Link
+          <a
             href="/driver/dashboard"
             className="text-sm font-bold text-blue-700"
           >
             ← Back to jobs
-          </Link>
+          </a>
 
           <div className="mt-4 rounded-2xl border border-red-200 bg-white p-5 shadow-sm">
             <h1 className="text-xl font-black">
@@ -312,12 +300,12 @@ export default function DriverJobPage({
   return (
     <main className="min-h-screen bg-slate-100 px-3 py-4 text-slate-950 [color-scheme:light] sm:px-5 sm:py-6">
       <div className="mx-auto max-w-2xl">
-        <Link
+        <a
           href="/driver/dashboard"
           className="inline-flex min-h-11 items-center text-sm font-black text-blue-700"
         >
           ← Today's jobs
-        </Link>
+        </a>
 
         {message ? (
           <div className="mt-2 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-900">

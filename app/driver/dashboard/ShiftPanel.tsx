@@ -6,7 +6,7 @@
   RECORDED hours, never a legal hours check.
 */
 
-import Link from "next/link";
+
 import { useEffect, useState } from "react";
 import { heldForOthersMessage, MEMORY_ONLY_MESSAGE } from "../../../lib/offline/driverSync";
 import { breakEvent, clockTime, recordedHours } from "../../../lib/shifts/driverActions";
@@ -86,9 +86,9 @@ function SyncStrip({ shift }: { shift: DriverShift }) {
       {shift.paused ? (
         <p className="m-0">
           {shift.paused}{" "}
-          <Link className="font-semibold text-primary-deep" href="/login?next=/driver/dashboard">
+          <a className="font-semibold text-primary-deep" href="/login?next=/driver/dashboard">
             Sign in
-          </Link>
+          </a>
         </p>
       ) : null}
       {shift.error && online ? <p className="m-0">{shift.error}</p> : null}
@@ -113,9 +113,9 @@ function NoShift({ state }: { state: DriverShiftState }) {
         {state.assignedVehicle ? `Assigned today: ${state.assignedVehicle.registration}` : "No vehicle assigned today"}
       </p>
       <p className={`${ui.muted} mt-1`}>Start your shift with a walkaround check. Today&apos;s jobs unlock once the check passes (or passes with minor defects) and has synced.</p>
-      <Link className={`${ui.primary} mt-4 w-full`} href="/driver/walkaround?phase=start">
+      <a className={`${ui.primary} mt-4 w-full`} href="/driver/walkaround?phase=start">
         Start shift
-      </Link>
+      </a>
     </section>
   );
 }
@@ -187,9 +187,9 @@ function OnShift({ state, shift }: { state: DriverShiftState; shift: DriverShift
           <button type="button" className={ui.secondary} onClick={() => void toggleBreak()}>
             {open.onBreak ? "End break" : "Start break"}
           </button>
-          <Link className={ui.secondary} href="/driver/walkaround?phase=swap">
+          <a className={ui.secondary} href="/driver/walkaround?phase=swap">
             Swap vehicle
-          </Link>
+          </a>
           <button type="button" className={`${ui.primary} col-span-2`} onClick={() => setEnding(true)}>
             End shift
           </button>

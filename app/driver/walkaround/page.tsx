@@ -10,7 +10,7 @@
   lib/nav/themeableRoutes.ts.
 */
 
-import Link from "next/link";
+
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { SIGN_IN_AGAIN_MESSAGE } from "../../../lib/offline/driverSync";
@@ -177,9 +177,9 @@ function Wizard() {
   if (step === "vehicle") {
     return (
       <>
-        <Link className={w.back} href="/driver/dashboard">
+        <a className={w.back} href="/driver/dashboard">
           &larr; Dashboard
-        </Link>
+        </a>
         <StepFrame
           kicker={kicker}
           title="Which vehicle?"

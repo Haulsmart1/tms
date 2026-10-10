@@ -5,7 +5,7 @@
   defect, why it is dangerous, and Object / Call / Check a different vehicle.
 */
 
-import Link from "next/link";
+
 import type { WizardPhase } from "../../../lib/walkaround/checkWizard";
 import type { CheckResult } from "../../../lib/walkaround/types";
 import { w } from "./styles";
@@ -33,9 +33,9 @@ export default function ResultStep({
         <p className={w.muted}>Sent to the office.</p>
       )}
       {photoError ? <p className={w.error}>Some photos could not be saved on this phone. Tell the office.</p> : null}
-      <Link className={w.link} href="/driver/dashboard">
+      <a className={w.link} href="/driver/dashboard">
         Today&apos;s jobs
-      </Link>
+      </a>
     </>
   );
 }
