@@ -1,3 +1,4 @@
+import { parseSevenDayEditorDrafts, type SevenDayPlanEditorDraft } from "./sevenDayPlanEditor";
 /* Version 2 adds `baseline` (review PLAN-11). A version 1 draft carries no
    record of the server plan it was made against, so it cannot be shown to be
    safe to restore and is ignored. */
@@ -26,6 +27,7 @@ export type PlanningDraft = {
    * overwrite someone else's newer plan.
    */
   baseline: Record<string, PlanningDraftAssignment>;
+  editorDrafts?: Record<string, SevenDayPlanEditorDraft>;
 };
 
 type AssignmentFacts = {
@@ -202,7 +204,11 @@ export function parsePlanningDraft(
     baseline[jobId] = [assignment[0], assignment[1], assignment[2]];
   }
 
+  const editorDrafts = parseSevenDayEditorDrafts(value.editorDrafts);
+  if (!editorDrafts || Object.keys(editorDrafts).some((id) => !context.validVehicleIds.has(id))) return null;
+
   return {
+    ...(value.editorDrafts === undefined ? {} : { editorDrafts }),
     version: PLANNING_DRAFT_VERSION,
     tenantId: context.tenantId,
     date: context.date,
@@ -220,6 +226,7 @@ export function planningDraftMatchesPlan(
   laneDrivers: Record<string, string | null>,
   vehicleIds: string[]
 ): boolean {
+  if (Object.values(draft.editorDrafts ?? {}).some((value) => value.edited)) return false;
   const orderedVehicleIds = [...vehicleIds].sort();
 
   for (const vehicleId of orderedVehicleIds) {

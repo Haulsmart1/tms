@@ -1,5 +1,7 @@
 "use client";
 
+import SevenDayPlanEditor from "./SevenDayPlanEditor";
+import type { SevenDayPlanEditorDraft } from "../../lib/planning/sevenDayPlanEditor";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
@@ -251,6 +253,7 @@ export default function PlanningPage() {
   const [savedPlansLoading, setSavedPlansLoading] = useState(false);
   const [savedPlanBusy, setSavedPlanBusy] = useState(false);
   const [savedPlanName, setSavedPlanName] = useState("");
+  const [editorDrafts, setEditorDrafts] = useState<Record<string, SevenDayPlanEditorDraft>>({});
   const [stagedSavedPlan, setStagedSavedPlan] =
     useState<LoadedSavedPlan | null>(null);
   const pendingSavedPlanOpen = useRef<LoadedSavedPlan | null>(null);
@@ -709,6 +712,7 @@ export default function PlanningPage() {
     setBulkVehicleId("");
     setVehicles(vehicleList);
     setDrivers(driverData ?? []);
+    setEditorDrafts({});
     setLaneOrders(orders);
     setLaneDrivers(laneDriverInit);
     setPersistedItineraries(loadedPersistedItineraries);
@@ -1621,7 +1625,7 @@ export default function PlanningPage() {
       if (!newerEditsExist) {
         if (activeTenantId && typeof window !== "undefined") {
           try {
-            window.localStorage.removeItem(
+            if (!Object.values(editorDrafts).some((draft) => draft.edited)) window.localStorage.removeItem(
               planningDraftStorageKey(activeTenantId, date)
             );
           } catch {
@@ -1673,6 +1677,7 @@ export default function PlanningPage() {
   function currentSavedPlanSnapshot() {
     return createSavedPlanSnapshot({
       planningDate: date,
+      editorDrafts,
       lanes: lanePlans.map((lane) => ({
         vehicleId: lane.vehicleId,
         driverId: lane.driverId,
@@ -1808,6 +1813,7 @@ export default function PlanningPage() {
     setDriverConflicts(new Set());
     setRecoveryDraft(null);
     setStagedSavedPlan(loaded);
+    setEditorDrafts(loaded.snapshot.editorDrafts ?? {});
     setSaveStatus("pending");
 
     setSelectedVehicleId(
@@ -2090,7 +2096,7 @@ export default function PlanningPage() {
       loading ||
       recoveryDraft ||
       stagedSavedPlan ||
-      !hasUnsavedWork
+      (!hasUnsavedWork && !Object.values(editorDrafts).some((draft) => draft.edited))
     ) {
       return;
     }
@@ -2112,6 +2118,7 @@ export default function PlanningPage() {
       selectedVehicleId,
       updatedAt: Date.now(),
       baseline: draftBaseline,
+      editorDrafts,
     });
 
     try {
@@ -2123,6 +2130,8 @@ export default function PlanningPage() {
       setSaveStatus("local-only");
       return;
     }
+
+    if (!hasUnsavedWork) return;
 
     /* A refused save waits for the planner to reload; retrying cannot help. */
     if (saveConflict) {
@@ -2174,6 +2183,7 @@ export default function PlanningPage() {
     saveConflict,
     saveRound,
     draftBaselineKey,
+    editorDrafts,
     laneOrders,
     laneDrivers,
     selectedVehicleId,
@@ -2203,17 +2213,24 @@ export default function PlanningPage() {
   function restoreRecoveryDraft() {
     if (!recoveryDraft || planningReadOnly()) return;
 
-    invalidateCanonicalVehicles(Object.keys(recoveryDraft.laneOrders));
+    // Allocation-only recovery must retain the route it describes. A changed
+    // lane order or driver still invalidates its canonical itinerary.
+    const changedVehicles = Object.keys(recoveryDraft.laneOrders).filter((vehicleId) =>
+      JSON.stringify(recoveryDraft.laneOrders[vehicleId]) !== JSON.stringify(laneOrders[vehicleId] ?? []) ||
+      (recoveryDraft.laneDrivers[vehicleId] ?? null) !== (laneDrivers[vehicleId] ?? null)
+    );
+    invalidateCanonicalVehicles(changedVehicles);
+    setEditorDrafts(recoveryDraft.editorDrafts ?? {});
     setLaneOrders(recoveryDraft.laneOrders);
     setLaneDrivers(recoveryDraft.laneDrivers);
     setSelectedVehicleId(recoveryDraft.selectedVehicleId);
     setBulkVehicleId(recoveryDraft.selectedVehicleId ?? "");
-    setRoutes({});
+    if (changedVehicles.length) setRoutes({});
     setDriverConflicts(new Set());
     setRecoveryDraft(null);
     setSaveStatus("pending");
     setMessage(
-      "Recovered the local planning draft. Autosave will persist it."
+      "Recovered the local planning draft. Assignment changes use autosave; manual day allocations remain drafts until scheduling review."
     );
   }
 
@@ -3467,6 +3484,27 @@ export default function PlanningPage() {
                           </div>
                         ) : null}
 
+                        <SevenDayPlanEditor
+                          key={`${selectedVehicleId}:${date}:${laneDrivers[selectedVehicleId] ?? ""}:${planningTimeZone}`}
+                          jobs={jobs}
+                          readOnly={!planningTenantId}
+                          preview={selectedDriverSchedule}
+                          planningDate={date}
+                          driverId={laneDrivers[selectedVehicleId] ?? null}
+                          timeZone={planningTimeZone}
+                          serviceStops={(pendingItineraries[selectedVehicleId] ?? persistedItineraries[selectedVehicleId])?.serviceStops ?? []}
+                          draft={editorDrafts[selectedVehicleId]}
+                          onInspect={setDetailJobId}
+                          onChange={(next) => {
+                            const updated = { ...editorDrafts };
+                            if (next) updated[selectedVehicleId] = next;
+                            else delete updated[selectedVehicleId];
+                            if (!next && !hasUnsavedWork && !Object.values(updated).some((value) => value.edited) && planningTenantId) {
+                              try { window.localStorage.removeItem(planningDraftStorageKey(planningTenantId, date)); } catch { /* Local storage may be unavailable. */ }
+                            }
+                            setEditorDrafts(updated);
+                          }}
+                        />
                         <div className="mt-3 max-h-64 overflow-auto rounded-md border border-line">
                           <table className="w-full text-left text-xs">
                             <thead className="sticky top-0 bg-surface">
