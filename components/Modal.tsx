@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, type ReactNode } from "react";
+import { modalTabTarget } from "../lib/ui/modalFocus";
 
 type Props = {
   open: boolean;
@@ -18,12 +19,7 @@ const widths: Record<NonNullable<Props["size"]>, string> = {
   lg: "max-w-2xl",
 };
 
-/* No focus trap: the consumers today are two confirm dialogs
-   (DeleteJobDialog, and the super-admin MoveTenantModal, which has form
-   fields and records the missing trap as a follow-up) and the Planning job
-   detail view, and this repo has no focus-trap dependency. Revisit if a
-   modal ever needs nested focusable content where Tab escaping the dialog
-   would matter more. Focus does return to the opener on close. */
+/* Contain keyboard focus while open; restore the opener on close. */
 export default function Modal({
   open,
   onClose,
@@ -53,12 +49,21 @@ export default function Modal({
         : null;
     panelRef.current?.focus();
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onCloseRef.current();
+      const panel = panelRef.current;
+      const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
+      // A higher overlay (for example label printing) owns its own focus.
+      if (!panel || panel.closest('[inert]') || dialogs[dialogs.length - 1] !== panel) return;
+      if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); onCloseRef.current(); }
+      if (e.key === "Tab" && !e.defaultPrevented) {
+        const controls = Array.from(panel.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')).filter(el => el.getClientRects().length > 0 && el.tabIndex >= 0);
+        const target = modalTabTarget<HTMLElement>(controls, document.activeElement as HTMLElement | null, panel, e.shiftKey);
+        if (target) { e.preventDefault(); target.focus(); }
+      }
     }
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("keydown", onKeyDown);
-      opener?.focus();
+      if (opener?.isConnected) opener.focus();
     };
   }, [open]);
 

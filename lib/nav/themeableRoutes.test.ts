@@ -128,6 +128,7 @@ describe("isThemeableRoute", () => {
         "/tachograph",
         "/telematics",
         "/settings",
+        "/settings/integrations",
         "/settings/users",
         "/settings/permissions",
         "/settings/invoices",

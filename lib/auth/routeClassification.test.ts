@@ -56,6 +56,9 @@ const PUBLIC_ROUTES = [
    returns are top-level navigations that carry the SameSite=Lax session
    cookie, and their handlers require a session anyway. */
 const PROTECTED_ROUTES = [
+  "/api/assistant",
+  "/api/integrations/catalogue",
+  "/settings/integrations",
   "/api/accounts/accounting",
   "/api/accounts/accounting/xero/callback",
   "/api/accounts/accounting/xero/connect",

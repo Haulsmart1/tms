@@ -40,6 +40,16 @@ export default function PermissionsPage() {
             </Link>{" "}
             page.
           </MessageBanner>
+          <section className="rounded-lg border border-line bg-surface p-4">
+            <h2 className="text-lg font-semibold">Current access boundaries</h2>
+            <ul className="space-y-2 text-sm text-ink-2">
+              <li>Office staff: authorised tenant operations and customer accounts.</li>
+              <li>Company administrators: company tenants, users, billing and integration configuration.</li>
+              <li>Drivers: assigned driver workflows; office accounts and Assistant context are refused server-side.</li>
+              <li>Platform administrators: platform management through its separate protected routes.</li>
+            </ul>
+            <p className="mt-3 text-sm text-ink-3">Tenant authorization and database row policies remain authoritative. Explicit capability checks currently cover the new Assistant and integration catalogue. Individual grants and a full site-wide action-permission migration are not activated.</p>
+          </section>
         </main>
       </div>
     </TenantGate>

@@ -1,0 +1,26 @@
+# Local modernisation handoff
+
+Baseline: clean `integration/operational-baseline`, commit `9cb0603`. Driver-aware scheduling, Driver PWA, SevenDay Planning, v1/v2 billing and internal software licences retained. No older source checkout was used. This worktree's installed dependency directory is a junction to shared existing packages; no dependency source was changed.
+
+Implemented:
+
+- Complete **source inventory** of the 56 pre-existing pages, plus the new integrations page. See product audit; a source inventory is not a page-by-page signed-in UX/runtime certification.
+- Shared loading-button activation guard, modal Tab containment and focus restoration, mobile navigation disclosure, corrected Settings permission copy and role-boundary explanation. Existing design tokens, dark default and public visual identity retained.
+- Invoicing selection checks for one customer/currency, missing price and required PO, per-job penny totals and labelled selection checkboxes. Existing server invoice transaction and accounting ledger authority remain unchanged.
+- Provider-neutral contextual Assistant interfaces, minimal allowlisted field projection, server tenant/office/capability checks, and an advisory panel on jobs/planning/customers/invoices/compliance areas. It offers explicitly labelled deterministic local guidance. Entity-scoped API reads are implemented; selected-record UI wiring and a real model adapter are not complete.
+- Integration registry/capability/tenant-installation models and honest Settings → Integrations catalogue. Existing provider connection controls stay in their own pages. No new installs or external plugins are activated.
+- Debbie v1 canonical proposal/customer-mapping/result contracts, deterministic validation, replay-safe mock, fenced outbox orchestration and a server-only Supabase repository. Proposed SQL is review-only and unexecuted. Actual install storage, encrypted vault adapter, signed webhooks, dispatcher, approved transfer UX and live receiver are outstanding.
+- Compliance provenance registry/review and consolidation of duplicate planning thresholds onto the existing central driver-hours constants. No uncertain legal interpretation was encoded or existing safety gate relaxed.
+- New explicit capability guards apply to Assistant/catalogue. Existing RLS/role checks remain authoritative elsewhere; individual grants and a full site-wide action-permission migration are not implemented.
+
+Performance/maintenance: centralised selection/permission/provenance helpers; new context deliberately excludes history, bank details, tokens and unnecessary payload. Effects cancel requests when tenant/page changes. No speculative domain rewrite, dependency upgrade or font/config change.
+
+Verification commands: `npm test -- --maxWorkers=2 --reporter=dot`, `npm run typecheck`, `node scripts/verify-build-offline.mjs`, `git diff --check`. No lint script exists. Standard Turbopack build cannot traverse the dependency junction; standard Webpack font retrieval is blocked by sandbox networking. Offline verification uses Webpack, a real local substitute font through Next's font test hook and an inert `.invalid` public Supabase fixture for prerendering. Its output is a validation artifact, not release typography/configuration and must not be deployed. Database/RLS/RPC execution, signed-in device/browser checks and genuine provider behavior remain unverified.
+
+External systems unchanged: no push, deploy, Vercel/domain/Supabase mutation, production SQL/data, emails, payment, Debbie connection/posting, real AI credential/provider call or booking. Main remains untouched. No migration is automatically executed.
+
+Source control: all 42 changed files were reviewed for secret patterns and unrelated paths with no findings; `git diff --check` passed. A local staging attempt failed because the worktree's Git metadata is under `tms-production-current/.git/worktrees/tms-operational-integration`, where creating `index.lock` was denied. No commits were created, no history was rewritten and no alternate repository was created. Changes remain unstaged in this worktree for Stuart's review and commit in an environment with writable Git metadata.
+
+Final verification: all 252 test files passed (2,893 tests) with two workers. Standalone `npm run typecheck` passed. The offline Webpack production-build verification completed successfully, including TypeScript, prerendering and route generation. SQL static-boundary checks passed again after the final audit-attribution change. No PostgreSQL runtime or hosted migration was used; SQL execution remains unverified. The default high-concurrency baseline had one dynamic-import timeout, which passed in isolation and in the complete two-worker run without changing its assertions or timeout.
+
+Remaining programme work: authenticated page-by-page keyboard/mobile/PWA verification, broader operational workflow simplification, individual action-permission migration, selected-entity Assistant UX, production integration installation/secret/webhook/audit infrastructure, Debbie proposal review/status UI and independent receiver validation, and qualified compliance interpretation. These are concrete unfinished items; this is a partial modernisation rather than a claim that every requested workflow is finished.

@@ -60,6 +60,7 @@ export default function Button({
   disabled,
   className,
   children,
+  onClick,
   ...props
 }: Props) {
   return (
@@ -74,6 +75,10 @@ export default function Button({
       disabled={disabled}
       aria-disabled={loading || undefined}
       aria-busy={loading || undefined}
+      onClick={loading || onClick ? (event) => {
+        if (loading) { event.preventDefault(); event.stopPropagation(); return; }
+        onClick?.(event);
+      } : undefined}
       {...props}
     >
       {/* children are kept during loading: swapping in "Please wait..." threw

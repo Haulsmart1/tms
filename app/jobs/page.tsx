@@ -14,6 +14,7 @@ import DeleteJobDialog from "./DeleteJobDialog";
 import JobLabelPrinter from "./JobLabelPrinter";
 import MasterLoadBuilder from "./MasterLoadBuilder";
 import Button from "../../components/Button";
+import RecordAssistant from "../../components/assistant/RecordAssistant";
 import { fetchAllPages, type PageResponse } from "../../lib/jobs/fetchPages";
 import { isStopLocked, planStopChanges } from "../../lib/jobs/stopDiff";
 import { saveStopPod } from "../../lib/pod/savePod";
@@ -1397,6 +1398,8 @@ export default function JobsPage() {
                   </div>
                 </div>
 
+
+                <RecordAssistant key={selectedJob.id} area="jobs" entityId={selectedJob.id} />
 
                 {/* ACCEPTANCE FORM */}
                 {acceptanceTarget?.id ===

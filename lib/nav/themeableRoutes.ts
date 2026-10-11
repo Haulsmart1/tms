@@ -56,6 +56,7 @@
    When every route is listed, this file and app/components/ThemeScope.tsx can
    both be deleted in one commit. */
 export const THEMEABLE_ROUTES: readonly string[] = [
+  "/settings/integrations",
   "/",                        // app/page.tsx                      (self-pins .light)
   "/login",                   // app/login/page.tsx                (no shell, no toggle)
   "/signup",                  // app/signup/page.tsx               (no shell, no toggle)

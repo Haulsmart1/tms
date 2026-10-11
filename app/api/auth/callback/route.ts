@@ -8,6 +8,7 @@ import {
 import type {
   EmailOtpType,
 } from "@supabase/supabase-js";
+import { authVerificationErrorCode } from "../../../../lib/auth/loginError";
 import {
   authCallbackRedirectStatus,
   decideAuthCallbackVerification,
@@ -308,7 +309,11 @@ async function completeAuthentication(
         "Unknown verification error",
     );
 
-    return withCookies(redirectTo("/login?error=auth"));
+    const recovery = new URLSearchParams({
+      error: authVerificationErrorCode(verificationError),
+      next: input.requestedNext,
+    });
+    return withCookies(redirectTo(`/login?${recovery}`));
   }
 
   let user =

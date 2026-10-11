@@ -24,6 +24,7 @@ import { mayBeTruncated } from "../../lib/invoices/listLimits";
 import { appendPage, type ListPageInfo } from "../../lib/accounts/listPaging";
 import type { InvoiceTotals } from "../../lib/invoices/totals";
 import { invoiceResendWarning } from "../../lib/invoices/resend";
+import { readySelection } from "../../lib/invoices/readySelection";
 import {
   calculateLineAmounts,
   roundMoney,
@@ -677,10 +678,7 @@ export default function CustomerAccountsPage() {
     new Set(selectedReady.map((job) => job.customer_id))
   );
 
-  const selectedTotal = selectedReady.reduce(
-    (sum, job) => sum + Number(job.customer_price ?? 0),
-    0
-  );
+  const selectedTotal = readySelection(selectedReady, invoicePoReference).total;
 
   const openInvoices = invoices.filter(
     (invoice) =>
@@ -832,6 +830,7 @@ export default function CustomerAccountsPage() {
   }
 
   async function createInvoice() {
+    if (working) return;
     if (!tenant.writeTenantId || selectedReady.length === 0) {
       setMessage("Choose at least one completed job.");
       return;
@@ -841,6 +840,8 @@ export default function CustomerAccountsPage() {
       setMessage("All selected jobs must belong to the same customer.");
       return;
     }
+    const readiness = readySelection(selectedReady, invoicePoReference);
+    if (readiness.reason) { setMessage(readiness.reason); return; }
 
     const customer = customers.find(
       (item) => item.id === selectedCustomerIds[0]
@@ -3928,10 +3929,9 @@ function ReadyToInvoicePanel({
             {selectedReady.length} selected
           </strong>
           <span className="font-mono tabular-nums text-ink-2">
-            {money(
-              selectedTotal,
-              selectedReady[0]?.currency_code || "GBP"
-            )}
+            {readySelection(selectedReady, invoicePoReference).currency
+              ? money(selectedTotal, readySelection(selectedReady, invoicePoReference).currency!)
+              : selectedReady.length ? "Mixed currencies" : money(0, "GBP")}
           </span>
         </div>
       </div>
@@ -3960,8 +3960,10 @@ function ReadyToInvoicePanel({
         working={working}
         label="Create Consolidated Invoice"
         onClick={createInvoice}
-        disabled={selectedReady.length === 0}
+        disabled={Boolean(readySelection(selectedReady, invoicePoReference).reason)}
       />
+      {selectedReady.length > 0 && readySelection(selectedReady, invoicePoReference).reason ? <p role="status" className="mt-2 text-sm text-warning-strong">{readySelection(selectedReady, invoicePoReference).reason}</p> : null}
+      <p className="mt-2 text-xs text-ink-3">Debbie transfer is not connected. TMS invoice creation does not post a Debbie ledger entry.</p>
 
       <div className="mt-3 overflow-x-auto rounded-lg border border-line">
         <table className="w-full border-collapse text-sm">
@@ -3983,6 +3985,7 @@ function ReadyToInvoicePanel({
                 <td className="border-b border-line px-3 py-2 text-ink">
                   <input
                     type="checkbox"
+                    aria-label={`Select completed job ${job.job_reference || job.job_id.slice(0, 8)}`}
                     checked={selectedJobs.includes(job.job_id)}
                     onChange={(event) =>
                       setSelectedJobs((current) =>

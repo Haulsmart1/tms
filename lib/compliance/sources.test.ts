@@ -1,0 +1,2 @@
+import{it,expect}from'vitest';import{ruleSource,RULE_SOURCES}from'./sources';
+it('effective dated guidance never applies before its start and unverified carrier policy is explicit',()=>{expect(ruleSource('international-light-goods','2026-06-30')).toBeNull();expect(ruleSource('international-light-goods','2026-07-01')?.effectiveFrom).toBe('2026-07-01');expect(RULE_SOURCES.find(r=>r.id==='ferry-dangerous-goods')).toMatchObject({classification:'carrier-policy',source:null,verifiedAt:null,encoded:false});});

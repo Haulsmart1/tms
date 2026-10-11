@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import AppShell from "./components/AppShell";
+import ContextualAssistant from "../components/assistant/ContextualAssistant";
 import ThemeScope from "./components/ThemeScope";
 import { TenantProvider } from "./components/TenantProvider";
 import PastDueBanner from "../components/billing/PastDueBanner";
@@ -83,6 +84,7 @@ export default function RootLayout({
           <div style={{ display: "flex", minHeight: "100vh" }}>
             <AppShell />
             <ThemeScope>{children}</ThemeScope>
+            <ContextualAssistant />
           </div>
         </TenantProvider>
       </body>

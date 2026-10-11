@@ -1,4 +1,4 @@
-import { Building2, Users, Lock, FileText, Banknote, CreditCard, ClipboardCheck, type LucideIcon } from "lucide-react";
+import { Building2, Users, Lock, FileText, Banknote, CreditCard, ClipboardCheck, Plug, type LucideIcon } from "lucide-react";
 
 export default function SettingsPage() {
     const cards: Array<{ title: string; description: string; href: string; icon: LucideIcon }> = [
@@ -16,10 +16,16 @@ export default function SettingsPage() {
             icon: Users,
         },
         {
-            title: "Page Permissions",
-            description: "Control which pages each user can access",
+            title: "Roles & Permissions",
+            description: "Review role boundaries and access controls; individual page grants are not enabled",
             href: "/settings/permissions",
             icon: Lock,
+        },
+        {
+            title: "Integrations",
+            description: "Review supported providers, approved capabilities and configuration boundaries",
+            href: "/settings/integrations",
+            icon: Plug,
         },
         {
             title: "Vehicle Licences",

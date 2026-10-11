@@ -104,8 +104,10 @@ export default async function AuthConfirmPage({
 
             <p className="mt-4 text-xs text-ink-2">
               This extra confirmation protects one-time login links
-              from automated email security scanners.
+              from automated email security scanners. Each link works once.
+              If you have already used your invitation, sign in with your existing account email.
             </p>
+            <Link href="/login" className="mt-3 inline-block text-sm text-primary-deep underline">Request a new login link</Link>
           </>
         ) : (
           <>

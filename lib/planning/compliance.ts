@@ -1,4 +1,5 @@
 import type { DriverHoursState } from "./driverHoursState";
+import { ASSIMILATED_DRIVER_HOURS_LIMITS } from "./driverHoursState";
 
 export type PlanningComplianceStatus =
   | "ok"
@@ -62,8 +63,8 @@ export type PlanningCompliance = {
   excludes travel from the vehicle to the first stop. The UI must say so, and
   the "ok" label deliberately makes no compliance claim.
 */
-const DRIVING_REVIEW_SECONDS = 4.5 * 60 * 60;
-const STANDARD_DAILY_DRIVING_SECONDS = 9 * 60 * 60;
+const DRIVING_REVIEW_SECONDS = ASSIMILATED_DRIVER_HOURS_LIMITS.maxContinuousDrivingSeconds;
+const STANDARD_DAILY_DRIVING_SECONDS = ASSIMILATED_DRIVER_HOURS_LIMITS.standardDailyDrivingSeconds;
 
 export const PLANNING_CHECKS_NOT_PERFORMED =
   "Not checked: daily and weekly rest, Working Time Directive limits, ferry and train rules, and HGV road restrictions. Drive times are car-routing estimates without traffic and exclude travel from the vehicle to the first stop.";

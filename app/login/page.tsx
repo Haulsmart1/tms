@@ -5,6 +5,7 @@ import type { FormEvent } from "react";
 import Link from "next/link";
 import Field from "../../components/Field";
 import Button from "../../components/Button";
+import { loginErrorMessage } from "../../lib/auth/loginError";
 
 /* `ds font-sans` is required here for the same reason as the landing page:
    Preflight is off, so this subtree opts into the scoped reset, and font-sans
@@ -21,18 +22,9 @@ export default function LoginPage() {
     const params = new URLSearchParams(window.location.search);
     setNext(params.get("next"));
 
-    const error = params.get("error");
-    if (error === "portal") {
-      setMessage(
-        "You are signed in, but we could not work out which portal to open. Try again in a moment, or go to your dashboard.",
-      );
-    } else if (error) {
-      // The auth callback redirects failures here with ?error=..., so an expired
-      // or already-used link lands on a page that can send a fresh one.
-      setMessage(
-        "That sign-in link didn't work or has expired. Enter your email and we'll send a fresh one.",
-      );
-    }
+    // Legacy provider redirects can carry errors in the URL fragment.
+    const fragment = new URLSearchParams(window.location.hash.slice(1));
+    setMessage(loginErrorMessage(params.get("error") ?? fragment.get("error_code") ?? fragment.get("error")));
   }, []);
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
@@ -84,6 +76,7 @@ export default function LoginPage() {
         </Link>
         <h1 className="mt-2 text-xl font-semibold text-ink">Sign in</h1>
         <p className="mt-1 text-sm text-ink-2">We&apos;ll email you a magic link.</p>
+        <p className="mt-2 text-xs text-ink-3">Each link works once. To sign in again or use another browser, request a new login link with your existing account email.</p>
 
         <form onSubmit={handleLogin} className="mt-4 grid gap-4" noValidate>
           <Field
