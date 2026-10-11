@@ -1,71 +1,24 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import Container from "../Container";
+import { Wordmark } from "./Brand";
 import { LEGAL_INDEX_PATH } from "../../lib/legal/routes";
 import { VENDOR } from "../../lib/legal/vendor";
+import { PUBLIC_CONTACT } from "../../lib/contact/details";
 
-/* Shared by the landing page and every policy page (components/legal/LegalShell).
+const productLinks = [
+  ["/features", "All features"], ["/features/transport-job-management", "Job management"],
+  ["/features/electronic-proof-of-delivery", "Proof of delivery"], ["/features/transport-invoicing", "Transport invoicing"],
+  ["/#pricing", "Pricing"], ["/guides/choosing-transport-management-software", "Choosing a TMS"],
+];
+const companyLinks = [["/contact", "Contact"], ["/terms", "Terms"], ["/privacy", "Privacy"], ["/cookies", "Cookies"], ["/accessibility", "Accessibility"], [LEGAL_INDEX_PATH, "All policies"]];
 
-   Privacy and Terms were hidden here while they were href="#" placeholders
-   (review SET-26). The pages now exist, so the links are back.
-
-   The identity line is the website disclosure a UK company has to make
-   (company name, where registered, number, registered office). The company
-   number is printed only when lib/legal/vendor.ts knows it: a marketing page
-   must never show a "[COMPANY NUMBER]" placeholder. No VAT number is shown
-   because none is recorded (see vendor.ts).
-
-   Small print is text-ink-2. It used to be text-ink-3, which is 4.15:1 in light
-   mode and is named as a known failure in the Accessibility Statement.
-
-   Contact is "/#request-access", not "#request-access", so it also works from a
-   policy page. On the landing page itself the two behave identically. */
 export default function Footer() {
-  const registration = [
-    `TMS Wizzard is a trading name of ${VENDOR.legalName}, registered in England and Wales`,
-    VENDOR.companyNumber ? `company number ${VENDOR.companyNumber}` : null,
-  ]
-    .filter(Boolean)
-    .join(", ");
-
-  return (
-    <footer className="border-t border-line bg-surface">
-      <Container className="py-6 text-xs text-ink-2">
-        <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
-          <div className="flex items-center gap-2">
-            <span className="h-4 w-4 rounded bg-line-strong" aria-hidden />
-            TMS Wizzard · Cloud transport management
-          </div>
-          <nav className="flex flex-wrap gap-x-4 gap-y-2" aria-label="Footer">
-            <Link href="/signup" className="hover:text-ink">
-              Get started
-            </Link>
-            <a href="/#request-access" className="hover:text-ink">
-              Contact
-            </a>
-            <Link href="/terms" className="hover:text-ink">
-              Terms
-            </Link>
-            <Link href="/privacy" className="hover:text-ink">
-              Privacy
-            </Link>
-            <Link href="/cookies" className="hover:text-ink">
-              Cookies
-            </Link>
-            <Link href="/accessibility" className="hover:text-ink">
-              Accessibility
-            </Link>
-            <Link href={LEGAL_INDEX_PATH} className="hover:text-ink">
-              All policies
-            </Link>
-          </nav>
-        </div>
-        <p className="mt-4 border-t border-line pt-4">
-          {registration}. Registered office: {VENDOR.addressLines.join(", ")}.{" "}
-          <a href={`mailto:${VENDOR.email}`} className="underline hover:text-ink">
-            {VENDOR.email}
-          </a>
-        </p>
-      </Container>
-    </footer>
-  );
+  const registration = [`TMS Wizard is a trading name of ${VENDOR.legalName}, registered in England and Wales`, VENDOR.companyNumber ? `company number ${VENDOR.companyNumber}` : null].filter(Boolean).join(", ");
+  return <footer className="brand-footer"><Container>
+    <div className="footer-grid"><div><Wordmark /><p className="footer-description">Cloud transport management for the work between booking, delivery and billing.</p><div className="footer-contact"><a href={PUBLIC_CONTACT.phoneHref}>{PUBLIC_CONTACT.phone}</a><a href={`mailto:${PUBLIC_CONTACT.email}`} className="break-all">{PUBLIC_CONTACT.email}</a></div></div>
+      <div><h2>THE PRODUCT</h2><nav aria-label="Product footer">{productLinks.map(([href,label]) => <Link href={href} key={href}>{label}</Link>)}</nav></div>
+      <div><h2>INFORMATION</h2><nav aria-label="Footer">{companyLinks.map(([href,label]) => <Link href={href} key={href}>{label}</Link>)}<Link href="/login" prefetch={false}>Sign in</Link></nav></div>
+    </div>
+    <p className="footer-registration">{registration}. Registered office: {VENDOR.addressLines.join(", ")}.<br/>TMS Wizard / Transport management software</p>
+  </Container></footer>;
 }

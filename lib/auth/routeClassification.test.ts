@@ -21,6 +21,14 @@ import { isPublicPath } from "./publicRoutes";
 
 const PUBLIC_ROUTES = [
   "/",
+  "/contact",
+  "/contact/thank-you",
+  "/features",
+  "/features/transport-job-management",
+  "/features/electronic-proof-of-delivery",
+  "/features/transport-invoicing",
+  "/guides/choosing-transport-management-software",
+  "/social-preview",
   "/login",
   "/auth/confirm",
   "/api/auth/callback",

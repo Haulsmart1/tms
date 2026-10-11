@@ -1,4 +1,5 @@
 import Link from "next/link";
+import AuthSurface from "../../../components/landing/AuthSurface";
 import {
   isMagicLinkEmailType,
   isValidMagicLinkTokenHash,
@@ -44,7 +45,7 @@ export default async function AuthConfirmPage({
     isMagicLinkEmailType(type);
 
   return (
-    <main className="ds grid min-h-screen place-items-center bg-canvas px-4 font-sans text-ink">
+    <AuthSurface>
       <section className="w-full max-w-sm rounded-lg border border-line bg-surface p-6 shadow-sm">
         <Link
           href="/"
@@ -60,7 +61,7 @@ export default async function AuthConfirmPage({
         {valid ? (
           <>
             <p className="mt-2 text-sm text-ink-2">
-              Press continue to securely sign in to TMS Wizzard.
+              Press continue to securely sign in to TMS Wizard.
             </p>
 
             {/* A sign-in link signs you in as whoever it was sent to. Someone
@@ -98,7 +99,7 @@ export default async function AuthConfirmPage({
                 type="submit"
                 className="w-full rounded-md bg-primary px-4 py-3 text-sm font-semibold text-on-primary hover:bg-primary-hover"
               >
-                Continue to TMS Wizzard
+                Continue to TMS Wizard
               </button>
             </form>
 
@@ -124,6 +125,6 @@ export default async function AuthConfirmPage({
           </>
         )}
       </section>
-    </main>
+    </AuthSurface>
   );
 }

@@ -1,10 +1,7 @@
 import type { Metadata } from "next";
+import { PRIVATE_ROBOTS, SITE_ORIGIN } from "../lib/seo/site";
 import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
-import AppShell from "./components/AppShell";
-import ContextualAssistant from "../components/assistant/ContextualAssistant";
-import ThemeScope from "./components/ThemeScope";
-import { TenantProvider } from "./components/TenantProvider";
-import PastDueBanner from "../components/billing/PastDueBanner";
+import SiteFrame from "./components/SiteFrame";
 import { THEME_SCRIPT } from "../lib/theme/themeScript";
 import "./globals.css";
 
@@ -45,8 +42,10 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TMS Wizzard",
-  description: "Transport Management System",
+  metadataBase: new URL(SITE_ORIGIN),
+  title: "TMS Wizard",
+  description: "Cloud transport management software for haulage operators.",
+  robots: PRIVATE_ROBOTS,
 };
 
 export default function RootLayout({
@@ -79,14 +78,7 @@ export default function RootLayout({
         {/* MUST stay the first child and MUST stay synchronous. See
             lib/theme/themeScript.ts for why. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
-        <TenantProvider>
-          <PastDueBanner />
-          <div style={{ display: "flex", minHeight: "100vh" }}>
-            <AppShell />
-            <ThemeScope>{children}</ThemeScope>
-            <ContextualAssistant />
-          </div>
-        </TenantProvider>
+        <SiteFrame>{children}</SiteFrame>
       </body>
     </html>
   );

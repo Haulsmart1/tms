@@ -40,7 +40,7 @@ function RecoveryActions({ showRetry, showRequestAccess }: { showRetry: boolean;
       ) : null}
       {showRequestAccess ? (
         <>
-          <a href="/#request-access" style={linkStyle}>
+          <a href="/contact" style={linkStyle}>
             Request access
           </a>
           <a href="/signup" style={linkStyle}>

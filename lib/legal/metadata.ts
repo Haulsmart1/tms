@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { getLegalDocument } from "./documents";
 import { documentStatus } from "./text";
+import { publicMetadata } from "../seo/site";
 
 /* Page metadata for one policy document. A document that still carries an
    unresolved placeholder is served noindex, so a search engine never caches a
@@ -11,8 +12,7 @@ export function legalMetadata(path: string): Metadata {
   const { draft } = documentStatus(doc.content);
 
   return {
-    title: `${doc.title} | TMS Wizzard`,
-    description: doc.summary,
+    ...publicMetadata(path, `${doc.title} | TMS Wizard`, doc.summary),
     robots: draft ? { index: false, follow: true } : { index: true, follow: true },
   };
 }

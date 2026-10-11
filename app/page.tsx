@@ -1,101 +1,44 @@
-import type { Metadata } from "next";
-import LandingNav from "../components/landing/LandingNav";
 import Hero from "../components/landing/Hero";
 import FeatureGrid from "../components/landing/FeatureGrid";
 import PricingCard from "../components/landing/PricingCard";
-import RequestAccessForm from "../components/landing/RequestAccessForm";
-import Footer from "../components/landing/Footer";
+import ContactSection from "../components/landing/ContactSection";
+import MarketingShell from "../components/landing/MarketingShell";
+import HomeQuestions from "../components/landing/HomeQuestions";
+import WorkflowStory from "../components/landing/WorkflowStory";
+import OperationalConfidence from "../components/landing/OperationalConfidence";
+import { pricingHeadline } from "../lib/billing/pricingCopy";
+import { jsonLd, publicMetadata, SITE_NAME, SITE_ORIGIN } from "../lib/seo/site";
 
-/* A server component. LandingNav and RequestAccessForm are the only client
-   components, so the marketing copy ships as static HTML for SEO.
-
-   The `ds` class is load-bearing: Preflight is disabled globally to protect the
-   ~15 legacy inline-styled pages, and `ds` opts this subtree into the scoped
-   reset in app/globals.css (border-style, box-sizing, control font
-   inheritance). Remove it and borders vanish and containers overflow.
-   `font-sans` is separate and equally required: without it this renders in
-   Inter rather than IBM Plex. See the comment in app/layout.tsx. */
-/* The page this replaced was heavily keyword-loaded. The new design is much
-   tighter, which is better for humans but drops most of those terms from the
-   indexable copy, and the root layout's metadata is only "TMS Wizzard" plus
-   "Transport Management System". This page-level metadata carries the head
-   terms and the audience terms that would otherwise have been lost. */
-export const metadata: Metadata = {
-  title: "TMS Wizzard | Cloud Transport Management Software for UK & EU Haulage",
-  description:
-    "Cloud transport management software for haulage, logistics and delivery operators. Jobs, proof of delivery, invoicing, fleet, drivers, subcontractors and live tracking in one platform. From £129 per 28 days, including your first 2 vehicles.",
-  keywords: [
-    "transport management software",
-    "TMS software",
-    "haulage software",
-    "fleet management software",
-    "proof of delivery",
-    "transport invoicing",
-    "subcontractor management",
-    "dispatch software",
-    "logistics software UK",
-  ],
-  openGraph: {
-    title: "TMS Wizzard | Cloud Transport Management Software",
-    description:
-      "Run jobs, proof of delivery, invoicing, fleet, drivers and subcontractors in one cloud platform built for UK and European haulage.",
-    type: "website",
-    locale: "en_GB",
-    siteName: "TMS Wizzard",
-  },
-};
+const pricing = pricingHeadline();
+export const metadata = publicMetadata("/", "TMS Wizard | Transport management software for UK haulage",
+  "Cloud transport management software for haulage operators. Connect jobs, proof of delivery, invoicing, vehicles, drivers and subcontractors in one platform.");
 
 export default function HomePage() {
-  // `light` pins the public marketing page to the light palette regardless
-  // of the console's theme. It is a sales asset viewed by prospects on
-  // ordinary monitors in daylight, and its light design shipped in July.
-  // Because the light values are a class rather than a media query, this
-  // needs no JavaScript and no separate mechanism. /login is deliberately
-  // NOT pinned: it is the first console screen an operator sees in a dim
-  // room.
   return (
-    <div className="ds light min-h-screen bg-canvas font-sans text-ink">
-      {/* A PLAIN script tag, not next/script. next/script defaults to
-          afterInteractive and injects client-side, so the structured data was
-          absent from the server-rendered HTML entirely and no crawler ever saw
-          it. Verified: 0 occurrences of type="application/ld+json" in the
-          served HTML before this change. Structured data must be server
-          rendered, which for a server component means a plain <script>. */}
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{
-          __html: JSON.stringify({
-            "@context": "https://schema.org",
-            "@type": "SoftwareApplication",
-            name: "TMS Wizzard",
-            applicationCategory: "BusinessApplication",
-            operatingSystem: "Web",
-            description:
-              "Cloud transport management software for jobs, proof of delivery, invoicing, vehicles, drivers, subcontractors, dispatch, and fleet management.",
+    <MarketingShell>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd({
+        "@context": "https://schema.org",
+        "@graph": [
+          { "@type": "WebSite", "@id": `${SITE_ORIGIN}/#website`, name: SITE_NAME, url: `${SITE_ORIGIN}/`, inLanguage: "en-GB" },
+          {
+            "@type": "SoftwareApplication", "@id": `${SITE_ORIGIN}/#software`, name: SITE_NAME,
+            url: `${SITE_ORIGIN}/`, applicationCategory: "BusinessApplication", operatingSystem: "Web",
+            description: "Cloud transport management software for jobs, proof of delivery, invoicing, vehicles, drivers and subcontractors.",
             offers: {
-              // Was price "0" (advertising the product as free), then "10"
-              // (the v1 weekly per-vehicle rate). Now the v2 MINIMUM, which is
-              // the lowest amount anyone actually pays and therefore the only
-              // honest "from" price. Quoting the 64.50 per-vehicle rate here
-              // would index a number no customer is ever charged, since one
-              // vehicle still costs 129.
-              "@type": "Offer",
-              price: "129",
-              priceCurrency: "GBP",
-              description:
-                "Per 28-day period, including the first 2 vehicles, billed in arrears",
+              "@type": "Offer", url: `${SITE_ORIGIN}/#pricing`,
+              price: (pricing.fromPence / 100).toFixed(2), priceCurrency: "GBP",
+              description: `Per ${pricing.periodDays}-day period, including the first ${pricing.includedVehicles} vehicles, billed in arrears. Excludes VAT.`,
             },
-          }),
-        }}
-      />
-      <LandingNav />
-      <main>
-        <Hero />
-        <FeatureGrid />
-        <PricingCard />
-        <RequestAccessForm />
-      </main>
-      <Footer />
-    </div>
+          },
+        ],
+      }) }} />
+      <Hero />
+      <WorkflowStory />
+      <FeatureGrid />
+      <OperationalConfidence />
+      <PricingCard />
+      <HomeQuestions />
+      <ContactSection />
+    </MarketingShell>
   );
 }

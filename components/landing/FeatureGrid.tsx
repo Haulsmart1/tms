@@ -9,39 +9,31 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import Container from "../Container";
+import Link from "next/link";
+import { SectionHeading } from "./Brand";
 
 const features = [
-  { icon: ClipboardList, title: "Jobs Management", body: "Plan, assign, dispatch." },
-  { icon: PackageCheck, title: "POD Capture", body: "Signatures and photos." },
-  { icon: ReceiptText, title: "Transport Invoicing", body: "Bill and reconcile." },
+  { icon: ClipboardList, title: "Jobs Management", body: "Bookings, stops and assignments.", href: "/features/transport-job-management" },
+  { icon: PackageCheck, title: "POD Capture", body: "Recipient details, photos and documents.", href: "/features/electronic-proof-of-delivery" },
+  { icon: ReceiptText, title: "Transport Invoicing", body: "Invoices, payments and statements.", href: "/features/transport-invoicing" },
   { icon: Truck, title: "Fleet Management", body: "Vehicles and assets." },
   { icon: UserRound, title: "Driver Management", body: "Hours and licences." },
   { icon: Network, title: "Subcontractors", body: "Rates and control." },
-  { icon: MapPin, title: "Live Tracking", body: "Real-time positions." },
-  { icon: ShieldCheck, title: "Compliance and Tacho", body: "Stay road-legal." },
+  { icon: MapPin, title: "Vehicle Tracking", body: "Latest available vehicle positions." },
+  { icon: ShieldCheck, title: "Compliance Records", body: "Driver activity and maintenance records." },
 ];
 
 export default function FeatureGrid() {
   return (
-    <section id="features" className="border-y border-line bg-surface py-12 md:py-16">
+    <section id="features" className="brand-section brand-feature-section">
       <Container>
-        <p className="text-overline uppercase text-ink-3">Everything in one place</p>
-        {/* Carries the head term. The old page was keyword-dense and the
-            redesign dropped most of it; this heading and the paragraph below
-            restore the search terms without hurting the design. */}
-        <h2 className="mt-1 text-xl font-semibold text-ink">
-          An all-in-one cloud transport management system
-        </h2>
-        <p className="mt-2 max-w-2xl text-base text-ink-2">
-          Cloud transport management software for haulage companies, logistics operators,
-          dispatch teams, fleet operators and delivery businesses.
-        </p>
-        <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {features.map(({ icon: Icon, title, body }) => (
-            <div key={title} className="rounded-lg border border-line p-4">
+        <SectionHeading label="AROUND THE TRANSPORT JOB" title="The people, vehicles and records behind the work."><p>Connect the core job workflow with fleet, driver and subcontractor records. Explore the tools your office needs, then check their fit against your own operation.</p></SectionHeading>
+        <div className="feature-cards">
+          {features.map(({ icon: Icon, title, body, href }) => (
+            <div key={title} className="feature-card">
               <Icon size={20} strokeWidth={2} className="text-primary" aria-hidden />
-              <h3 className="mt-2 text-base font-semibold text-ink">{title}</h3>
-              <p className="mt-1 text-sm text-ink-3">{body}</p>
+              <h3 className="mt-2 text-base font-semibold text-ink">{href ? <Link href={href} className="text-primary-deep underline">{title}</Link> : title}</h3>
+              <p className="mt-1 text-sm text-ink-2">{body}</p>
             </div>
           ))}
         </div>

@@ -3,6 +3,9 @@ import { shouldShowShell } from "./shouldShowShell";
 import type { TenantStatus } from "../tenant/context";
 
 describe("shouldShowShell", () => {
+  it.each(["ready", "loading", "signed-out", "no-tenant"] as const)("keeps confirmation in the public brand without console chrome for %s", status => {
+    expect(shouldShowShell("/auth/confirm", status)).toBe(false);
+  });
   it("hides on the public landing page regardless of status", () => {
     expect(shouldShowShell("/", "ready")).toBe(false);
     expect(shouldShowShell("/", "signed-out")).toBe(false);

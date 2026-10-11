@@ -1,4 +1,5 @@
 import Link from "next/link";
+import AuthSurface from "../../components/landing/AuthSurface";
 import SignupForm from "./SignupForm";
 import { SIGNUP_ENABLED_ENV, signupEnabled } from "../../lib/auth/signupGate";
 
@@ -19,7 +20,7 @@ export default function SignupPage() {
 
 function SignupClosed() {
   return (
-    <div className="ds grid min-h-screen place-items-center bg-canvas px-4 py-8 font-sans text-ink">
+    <AuthSurface>
       <div className="w-full max-w-sm rounded-lg border border-line bg-surface p-6 shadow-sm">
         {/* Explicit `underline`, as on /login: the .ds reset strips the UA
             underline from anchors, so a link has to opt back in. */}
@@ -29,12 +30,11 @@ function SignupClosed() {
 
         <h1 className="mt-2 text-xl font-semibold text-ink">Sign-ups are not open yet</h1>
         <p className="mt-2 text-sm text-ink-2">
-          We are onboarding operators by invitation for now. Leave your details and we will be in
-          touch when your account is ready.
+          Access is currently arranged with the team. Contact us to discuss your operation and the next steps for your account.
         </p>
 
         <p className="mt-4 text-sm">
-          <Link href="/#request-access" className="underline hover:text-ink">
+          <Link href="/contact" className="underline hover:text-ink">
             Request access
           </Link>
         </p>
@@ -46,6 +46,6 @@ function SignupClosed() {
           </Link>
         </p>
       </div>
-    </div>
+    </AuthSurface>
   );
 }

@@ -1,4 +1,8 @@
-# TMS Wizzard
+# TMS Wizard
+
+## Production UI composition recovery — 11 October 2026
+
+The modern public/product experience from `14d8ac2` and `481990f` is now reconciled with the operational baseline at `1261b1f`. The homepage, feature pages, guide, Contact flow and branded authentication surfaces use the public brand; operational routes retain the current tenant, security, billing, Driver PWA, POD, SevenDay planning, permissions, integrations and Assistant implementation. See [the source-composition recovery and verification report](docs/reviews/2026-10-11-production-ui-recovery.md). The production host is `tmswizard.cloud`; older inventory references below are historical. This repair is local; commit was subsequently authorised after verification, while push and deployment remain pending approval.
 
 ## Local modernisation update — 10 October 2026
 

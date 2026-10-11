@@ -5,13 +5,15 @@ import { getLegalDocument } from "../../lib/legal/documents";
 import { LEGAL_INDEX_PATH } from "../../lib/legal/routes";
 import { documentStatus, linkify, resolvePlaceholders, sectionId } from "../../lib/legal/text";
 import type { LegalBlock, LegalRun } from "../../lib/legal/types";
+import { publicContactText, PUBLIC_CONTACT } from "../../lib/contact/details";
 
 /* Renders one policy document. Every app/<policy>/page.tsx is this component
    with a path, so the ten pages cannot drift apart in layout or behaviour.
 
    The WORDS are not written here. They come verbatim from the PDFs in
    docs/TMS POLICIES/ through lib/legal/content/*.json. The only text this file
-   adds is page chrome: the draft notice, "On this page" and the back link.
+   adds is page chrome, the current website-form notice, and the user-approved
+   public contact-address substitution. Source documents remain unchanged.
 
    Body copy is text-ink and secondary copy text-ink-2. text-ink-3 is avoided
    throughout: it is a recorded contrast failure in light mode
@@ -21,7 +23,7 @@ import type { LegalBlock, LegalRun } from "../../lib/legal/types";
 function Text({ text, path }: { text: string; path: string }) {
   return (
     <>
-      {linkify(resolvePlaceholders(text), path).map((segment, i) =>
+      {linkify(publicContactText(resolvePlaceholders(text)), path).map((segment, i) =>
         segment.kind === "link" ? (
           segment.href.startsWith("/") ? (
             <Link key={i} href={segment.href} className="text-primary underline hover:text-primary-hover">
@@ -177,11 +179,18 @@ export default function LegalPage({ path }: { path: string }) {
           <address className="mt-6 rounded-lg border border-line bg-surface p-4 text-sm not-italic text-ink-2">
             <p className="font-semibold text-ink">Company details</p>
             {content.company.map((line) => (
-              <p key={line} className="mt-1">
+              <p key={publicContactText(line)} className="mt-1">
                 <Text text={line} path={path} />
               </p>
             ))}
           </address>
+
+          {path === "/privacy" || path === "/sub-processors" ? (
+            <aside aria-label="Website enquiry form update" className="mt-6 rounded-lg border border-line bg-surface p-4 text-sm text-ink-2">
+              <p className="font-semibold text-ink">Website enquiry form</p>
+              <p className="mt-2">The current <Link href={PUBLIC_CONTACT.path} className="underline">Contact form</Link> uses FormSubmit to forward the details you enter to {PUBLIC_CONTACT.email}. This is the provider for website enquiries; it does not process your operational TMS records through this form. Read <a href="https://formsubmit.co/privacy.pdf" className="underline">FormSubmit’s privacy information</a> alongside this document.</p>
+            </aside>
+          ) : null}
 
           <div className="mt-8 space-y-4">
             {content.intro.map((block, i) => (

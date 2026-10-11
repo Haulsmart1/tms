@@ -3,13 +3,13 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import Link from "next/link";
+import AuthSurface from "../../components/landing/AuthSurface";
 import Field from "../../components/Field";
 import Button from "../../components/Button";
 import { loginErrorMessage } from "../../lib/auth/loginError";
 
-/* `ds font-sans` is required here for the same reason as the landing page:
-   Preflight is off, so this subtree opts into the scoped reset, and font-sans
-   is what actually applies IBM Plex. See app/layout.tsx. */
+/* AuthSurface provides the public brand. Login recovery and destination
+   handling remain independent of its presentation. */
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
@@ -66,7 +66,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="ds grid min-h-screen place-items-center bg-canvas px-4 font-sans text-ink">
+    <AuthSurface>
       <div className="w-full max-w-sm rounded-lg border border-line bg-surface p-6 shadow-sm">
         {/* Explicit `underline`: the .ds reset strips the UA underline from all
             anchors, so a link that should read AS a link has to opt back in.
@@ -102,12 +102,12 @@ export default function LoginPage() {
         ) : null}
 
         <p className="mt-4 text-xs text-ink-3">
-          No account yet?{" "}
-          <Link href="/signup" className="underline hover:text-ink">
-            Create one
+          Need an account?{" "}
+          <Link href="/contact" className="underline hover:text-ink">
+            Request access
           </Link>
         </p>
       </div>
-    </div>
+    </AuthSurface>
   );
 }

@@ -50,7 +50,7 @@ export default function AppShell() {
     <aside id="tms-primary-navigation" onKeyDown={event => { if (event.key === 'Escape') setNavigationOpen(false); }} className={`ds fixed left-0 top-0 z-50 h-screen w-[220px] flex-none flex-col bg-chrome font-sans lg:sticky ${navigationOpen ? 'flex' : 'hidden lg:flex'}`}>
       <div className="flex flex-none items-center gap-2 border-b border-chrome-border px-4 py-4">
         <Logo variant="tile" size={28} />
-        <span className="text-sm font-semibold text-chrome-text-strong">TMS Wizzard</span>
+        <span className="text-sm font-semibold text-chrome-text-strong">TMS Wizard</span>
       </div>
 
       <nav aria-label="Primary" className="flex flex-1 flex-col gap-1 overflow-y-auto p-2.5">

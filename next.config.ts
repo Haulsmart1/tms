@@ -1,8 +1,9 @@
 import type { NextConfig } from "next";
+import { privateHeaderSource } from "./lib/seo/indexing";
 
 /*
-  Security response headers (review SET-16). This file exists only for
-  headers(); it sets no other option, so every build default is unchanged.
+  Security response headers (review SET-16) and the independent SEO noindex
+  boundary. This file sets only headers(), preserving all build defaults.
 
   Deliberately NOT a script-src Content-Security-Policy: the synchronous theme
   script in app/layout.tsx (lib/theme/themeScript.ts) and the landing page's
@@ -23,7 +24,10 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      { source: "/:path*", headers: securityHeaders },
+      { source: privateHeaderSource(), headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
+    ];
   },
 };
 

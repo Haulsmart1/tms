@@ -16,6 +16,15 @@
 /* Paths that are public and have no sub-paths. Matched exactly. */
 const PUBLIC_EXACT = new Set([
   "/",
+  "/contact",
+  "/contact/thank-you",
+  // Static marketing content only; never allow the /features or /guides prefix.
+  "/features",
+  "/features/transport-job-management",
+  "/features/electronic-proof-of-delivery",
+  "/features/transport-invoicing",
+  "/guides/choosing-transport-management-software",
+  "/social-preview",
   "/login",
   /* Scanner-safe confirmation page for emailed sign-in links. It performs no
      verification on GET; the human presses Continue, which POSTs below. */

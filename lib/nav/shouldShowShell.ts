@@ -1,4 +1,5 @@
 import { isLegalPath } from "../legal/routes";
+import { isPublicMarketingSurface } from "../seo/routes";
 import type { TenantStatus } from "../tenant/context";
 import { isSkeletonReadyRoute } from "./skeletonReadyRoutes";
 
@@ -12,8 +13,9 @@ import { isSkeletonReadyRoute } from "./skeletonReadyRoutes";
 // for defaults to hidden too.
 export function shouldShowShell(pathname: string, status: TenantStatus): boolean {
   if (
-    pathname === "/" ||
+    isPublicMarketingSurface(pathname) ||
     pathname === "/login" ||
+    pathname === "/auth/confirm" ||
     pathname === "/signup" ||
     // The public policy pages (/terms, /privacy and the rest). A signed-in
     // admin who follows a footer link must get the document, not the console

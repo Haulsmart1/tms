@@ -4,7 +4,7 @@ import { LEGAL_DOCUMENTS } from "./routes";
 
 describe("legalMetadata", () => {
   it("titles the page after the document", () => {
-    expect(legalMetadata("/terms").title).toBe("Terms and Conditions | TMS Wizzard");
+    expect(legalMetadata("/terms").title).toBe("Terms and Conditions | TMS Wizard");
   });
 
   it("lets every page be indexed now that no placeholder is left", () => {

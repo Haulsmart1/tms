@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import Link from "next/link";
+import AuthSurface from "../../components/landing/AuthSurface";
 import Field from "../../components/Field";
 import Button from "../../components/Button";
 import MessageBanner from "../../components/MessageBanner";
@@ -15,9 +16,8 @@ import {
 import { SIGNUP_FAILED_MESSAGE, SIGNUP_SENT_MESSAGE } from "../../lib/auth/signup";
 
 /* Self-serve signup (docs/superpowers/specs/2026-09-16-self-serve-signup-design.md).
-   Same skeleton as app/login/page.tsx: `ds font-sans` opts this subtree into
-   the scoped reset and IBM Plex (Preflight is off, see app/layout.tsx), and
-   the page follows the theme because it is listed in lib/nav/themeableRoutes.ts.
+   AuthSurface supplies the shared public brand frame, scoped reset and IBM
+   Plex fonts. Its light palette is independent of the operational theme.
 
    The server is authoritative. describeSignupFieldErrors mirrors the route's
    Zod schema so a typo is caught before a request, and the same field-keyed
@@ -96,7 +96,7 @@ export default function SignupForm() {
   }
 
   return (
-    <div className="ds grid min-h-screen place-items-center bg-canvas px-4 py-8 font-sans text-ink">
+    <AuthSurface>
       <div className="w-full max-w-sm rounded-lg border border-line bg-surface p-6 shadow-sm">
         {/* Explicit `underline`, as on /login: the .ds reset strips the UA
             underline from anchors, so a link has to opt back in. */}
@@ -126,7 +126,7 @@ export default function SignupForm() {
               {/* Honeypot: real users never see or focus this. sr-only and
                   aria-hidden keep it out of view and out of the accessibility
                   tree; tabIndex -1 keeps it out of the tab order. Same markup as
-                  components/landing/RequestAccessForm.tsx. */}
+                  components/contact/EnquiryForm.tsx. */}
               <div className="sr-only" aria-hidden="true">
                 <label htmlFor={SIGNUP_HONEYPOT_FIELD}>Company website</label>
                 <input
@@ -199,6 +199,6 @@ export default function SignupForm() {
           </>
         )}
       </div>
-    </div>
+    </AuthSurface>
   );
 }
