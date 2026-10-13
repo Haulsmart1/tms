@@ -1,4 +1,5 @@
 import { Fragment, type ReactNode } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "../lib/cn";
 import Skeleton from "./Skeleton";
 
@@ -11,9 +12,14 @@ export type Column<T> = {
      on every column or none: a mix lets the unspecified ones absorb all the
      leftover width, which opens a large gap in the middle of the row. */
   width?: string;
+  /* Opt-in header sorting. The page owns the order: DataTable only renders the
+     header as a button and reports clicks through onSortChange. */
+  sortKey?: string;
 };
 
 export type DataTableState = "loading" | "error" | "empty" | "ready";
+
+export type TableSort = { key: string; direction: "asc" | "desc" };
 
 type Props<T> = {
   columns: Column<T>[];
@@ -31,6 +37,10 @@ type Props<T> = {
   renderExpanded?: (row: T) => ReactNode;
   /** rowKey of the currently expanded row, if any. */
   expandedKey?: string | null;
+  /** Current order, for the header indicator and aria-sort. */
+  sort?: TableSort;
+  /** Called with a column's sortKey when its header is clicked. */
+  onSortChange?: (key: string) => void;
 };
 
 export default function DataTable<T>({
@@ -47,6 +57,8 @@ export default function DataTable<T>({
   emptyAction,
   renderExpanded,
   expandedKey = null,
+  sort,
+  onSortChange,
 }: Props<T>) {
   return (
     <div className="overflow-x-auto rounded-lg border border-line bg-surface shadow-sm">
@@ -65,17 +77,41 @@ export default function DataTable<T>({
         ) : null}
         <thead>
           <tr className="border-b border-line bg-surface-2">
-            {columns.map((col, i) => (
-              <th
-                key={`${col.header}-${i}`}
-                className={cn(
-                  "px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-ink-3",
-                  col.align === "right" ? "text-right" : "text-left",
-                )}
-              >
-                {col.header}
-              </th>
-            ))}
+            {columns.map((col, i) => {
+              const sortable = Boolean(col.sortKey && onSortChange);
+              const active = sortable && sort?.key === col.sortKey;
+              return (
+                <th
+                  key={`${col.header}-${i}`}
+                  aria-sort={
+                    active ? (sort?.direction === "asc" ? "ascending" : "descending") : undefined
+                  }
+                  className={cn(
+                    "px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-ink-3",
+                    col.align === "right" ? "text-right" : "text-left",
+                  )}
+                >
+                  {sortable ? (
+                    <button
+                      type="button"
+                      onClick={() => onSortChange?.(col.sortKey as string)}
+                      className="inline-flex items-center gap-1 bg-transparent font-semibold uppercase tracking-wide text-ink-3 hover:text-ink"
+                    >
+                      {col.header}
+                      {active ? (
+                        sort?.direction === "asc" ? (
+                          <ChevronUp size={12} aria-hidden />
+                        ) : (
+                          <ChevronDown size={12} aria-hidden />
+                        )
+                      ) : null}
+                    </button>
+                  ) : (
+                    col.header
+                  )}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
