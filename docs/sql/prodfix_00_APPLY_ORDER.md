@@ -37,6 +37,9 @@ carries an identical `pod_caller_is_office()`), so it can be applied at any time
 until then any tenant member, drivers included, can still delete assets from the browser. Run its VERIFY
 block afterwards. Before it is applied, `/assets` hides the archive controls, the archive and restore
 routes answer 503, delete still checks maintenance history first, and drivers can still write assets.
+It runs in one transaction, and its unique index aborts the whole file if duplicate asset numbers
+already exist, so first check this returns no rows:
+`select tenant_id, asset_number, count(*) from public.assets where asset_number is not null group by 1, 2 having count(*) > 1;`
 
 ## When to apply: SQL first, then deploy
 

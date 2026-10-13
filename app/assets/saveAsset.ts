@@ -4,7 +4,11 @@
    dialog to show. */
 
 import type { createClient } from "../../lib/supabase/browser";
-import { ASSET_NOT_UPDATED_MESSAGE, assetWriteMessage } from "../../lib/assets/errors";
+import {
+  ASSET_DUPLICATE_NUMBER_MESSAGE,
+  ASSET_NOT_UPDATED_MESSAGE,
+  assetWriteMessage,
+} from "../../lib/assets/errors";
 import { buildAssetPayload, validateAssetForm } from "../../lib/assets/payload";
 import type { Asset, AssetFormValues, AssetType } from "../../lib/assets/types";
 
@@ -45,7 +49,7 @@ export async function saveAsset(input: {
   const { data: duplicate, error: duplicateError } = await duplicateQuery.limit(1);
   if (duplicateError) throw new Error(assetWriteMessage(duplicateError));
   if ((duplicate ?? []).length > 0) {
-    throw new Error("Another asset in this tenant already uses that asset number.");
+    throw new Error(ASSET_DUPLICATE_NUMBER_MESSAGE);
   }
 
   const payload = buildAssetPayload(values, check.type);

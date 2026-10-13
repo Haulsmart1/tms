@@ -5,7 +5,8 @@
    maintenance_records.asset_id used to be ON DELETE SET NULL, so a delete
    silently orphaned the history. docs/sql/assets_01 makes it RESTRICT, so the
    database refuses too. Phase B/C will count asset_movements / asset_maintenance here once
-   anything writes them; until then assets_01 makes them RESTRICT, so the route answers "referenced". */
+   anything writes them. After assets_01 they are RESTRICT and a delete answers "referenced";
+   before it they still CASCADE (both are empty today). */
 
 export type AssetHistoryCounts = {
   maintenanceRows: number;

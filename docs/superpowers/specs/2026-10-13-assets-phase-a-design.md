@@ -2,7 +2,8 @@
 
 Date: 2026-10-13
 Branch: `ethan/assets-phase-a`
-Status: design approved, plan not yet written
+Status: implemented on `ethan/assets-phase-a` (plan `docs/superpowers/plans/2026-10-13-assets-phase-a.md`);
+`assets_01` not applied. Review fixes made during implementation are folded into the sections below.
 
 ## Context
 
@@ -60,11 +61,13 @@ Applied by hand in the Supabase SQL editor, like every other migration. Idempote
    - No DELETE policy, and `revoke delete, truncate on public.assets from public, anon, authenticated`.
 5. **Server-only archive columns.** A `BEFORE INSERT OR UPDATE` trigger on `assets`, not security definer (so
    `current_user` is the real caller):
-   - `AST01`: refuses any change to `archived_at` or `archived_by` unless the caller is `service_role`.
-   - `AST01` also refuses archive columns on insert.
+   - `service_role`, `postgres` and `supabase_admin` are exempt. `postgres` must be: the
+     `archived_by ON DELETE SET NULL` action runs as the table owner (`postgres`, checked in VERIFY), and
+     would otherwise hit `AST02` when a profile that archived an asset is deleted.
+   - `AST01`: refuses any browser change to `archived_at` or `archived_by`, and archive columns on insert.
    - `AST03`: pins `tenant_id` and `company_id` (no move on update; on insert the company must be the tenant's).
    - `AST02`: refuses any browser update to a row whose `archived_at` is not null (restore first, then edit).
-     `service_role` is exempt so restore works.
+   - The unique index answers a duplicate asset number with `23505`.
 6. **Verify block.** Read-only selects at the end confirming the columns, the FK action, the three policies,
    the missing DELETE grant and the trigger.
 
@@ -86,9 +89,13 @@ Contract, shared shape with `DELETE /api/vehicles/[id]`:
 - `401` not signed in
 - `403` no access to this asset's tenant
 - `404` unknown id or not a UUID
-- `409 {error:"has_maintenance_history"}` delete refused
-- `409 {error:"already_archived"}` / `{error:"not_archived"}` no-op archive or restore
-- `503` the `assets_01` columns are missing (PostgREST `42703` / `PGRST204`)
+Every non-200 body is `{ error: <readable sentence>, code: <result> }` (`assetRouteResponse` in
+`lib/assets/deleteRule.ts`); the page shows `error`.
+
+- `409 code "has_maintenance_history"` delete refused by maintenance history
+- `409 code "referenced"` delete refused by any other foreign key into `assets`
+- `409 code "already_archived"` / `"not_archived"` no-op archive or restore
+- `503 code "needs_migration"` the `assets_01` columns are missing (PostgREST `42703` / `PGRST204`)
 - `500` generic body; detail logged with `console.error`
 
 Delete is checked twice: the route counts `maintenance_records` for the asset and calls
@@ -103,13 +110,16 @@ New pure modules, each with a colocated test:
 - `lib/assets/register.ts`: `filterAssets(assets, { query, typeId, status, mechanical, showArchived })` and
   `sortAssets(assets, key, direction)`. Search matches name, asset number, registration, serial number and
   barcode, case-insensitive, trimmed. Archived rows are excluded unless `showArchived`. Sort is stable.
-- `lib/assets/errors.ts`: maps `AST01`, `AST02` and `42501` to user messages, falling back to the raw
-  message, in the style of `lib/billing/unlicensedVehicle.ts`.
+- `lib/assets/errors.ts`: maps `AST01`, `AST02`, `AST03`, `42501` and `23505` to user messages, falling
+  back to the raw message, in the style of `lib/billing/unlicensedVehicle.ts`.
+- `lib/assets/types.ts` and `lib/assets/payload.ts`: the shared asset types and the form-to-row payload,
+  moved out of the page so they can be tested.
 
 ## 3. The page
 
-Files: `app/assets/page.tsx` (shrinks), new `app/assets/AssetDialog.tsx`, `app/assets/types.ts` (adds
-`archived_at`, `archived_by`; drops `PLACEHOLDER_ASSET`). `AssetCard.tsx` is deleted.
+Files: `app/assets/page.tsx` (shrinks), new `app/assets/AssetDialog.tsx`, `app/assets/StatusBadge.tsx` and
+`app/assets/saveAsset.ts`. `app/assets/AssetCard.tsx` and `app/assets/types.ts` are deleted (types live in
+`lib/assets/types.ts`).
 
 1. **Header.** Kicker "Fleet", title "Assets", count badge, and an **Add asset** button (hidden for drivers).
 2. **Toolbar.** `SearchInput`; `Select` filters for Type, Status (Any / Active / Maintenance / Inactive) and

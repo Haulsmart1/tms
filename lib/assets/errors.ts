@@ -4,7 +4,10 @@
    THE CONTRACT with docs/sql/assets_01 (both sides change together):
      AST01  a browser write touched archived_at / archived_by (server-only)
      AST02  a browser update hit an archived row (restore it first)
-     AST03  a browser write moved an asset to another tenant or company
+     AST03  a browser write moved an asset to another tenant or company, or inserted it
+            under the wrong company (only if saveAsset's tenants lookup disagrees with the
+            trigger's, so the "moved" sentence is kept for both)
+     23505  the per-tenant unique asset-number index refused a duplicate
      42501  RLS refused the write (an insert, or an update whose new row fails WITH CHECK):
             the caller is not office staff. assets_01 guards archived_at / archived_by with
             the AST01 trigger ONLY, never with column REVOKEs: a column privilege error is
