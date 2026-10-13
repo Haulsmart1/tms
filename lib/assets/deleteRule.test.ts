@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ASSET_HAS_HISTORY_MESSAGE,
   ASSET_NEEDS_MIGRATION_MESSAGE,
+  ASSET_REFERENCED_MESSAGE,
   assetRouteResponse,
   decideAssetDelete,
 } from "./deleteRule";
@@ -38,6 +39,10 @@ describe("assetRouteResponse", () => {
     expect(assetRouteResponse("needs_migration")).toEqual({
       status: 503,
       body: { error: ASSET_NEEDS_MIGRATION_MESSAGE, code: "needs_migration" },
+    });
+    expect(assetRouteResponse("referenced")).toEqual({
+      status: 409,
+      body: { error: ASSET_REFERENCED_MESSAGE, code: "referenced" },
     });
   });
 });

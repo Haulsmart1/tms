@@ -13,7 +13,8 @@
 -- (DELETE /api/assets/[id], service role, admins only); asset numbers are unique per tenant; tenant_id and company_id are pinned;
 -- archived_at / archived_by are written only
 -- by the service role (POST /api/assets/[id]/archive and /restore); an archived row cannot be
--- edited until restored; the database refuses to delete an asset with maintenance history.
+-- edited until restored; the database refuses to delete an asset that has history in maintenance_records,
+-- asset_movements or asset_maintenance (all three foreign keys are RESTRICT).
 --
 -- Error codes, mirrored in lib/assets/errors.ts:
 --   AST01  a browser write touched archived_at / archived_by
@@ -35,25 +36,37 @@ alter table public.assets add constraint assets_archived_by_needs_at
   check (archived_by is null or archived_at is not null);
 
 -- ===========================================================================
--- 2. Maintenance history survives: SET NULL becomes RESTRICT
+-- 2. History survives in all three tables: SET NULL / CASCADE become RESTRICT
 -- ===========================================================================
--- Drop by lookup, not by name: a differently named SET NULL foreign key left beside the new RESTRICT one would still orphan history.
+-- maintenance_records was SET NULL (orphaned history); asset_movements and asset_maintenance are
+-- empty and unused today but were CASCADE, which would silently destroy history once Phase B/C
+-- writes rows.
+-- Drop by lookup, not by name: a differently named foreign key left beside the new RESTRICT one would still orphan or destroy history.
 do $$
-declare c record;
+declare
+  t text;
+  c record;
 begin
-  for c in
-    select con.conname from pg_constraint con
-    where con.conrelid = 'public.maintenance_records'::regclass and con.contype = 'f'
-      and con.confrelid = 'public.assets'::regclass
-      and con.conkey = array[(select attnum from pg_attribute
-                               where attrelid = 'public.maintenance_records'::regclass
-                                 and attname = 'asset_id')]::smallint[]
+  foreach t in array array['maintenance_records', 'asset_movements', 'asset_maintenance']
   loop
-    execute format('alter table public.maintenance_records drop constraint %I', c.conname);
+    for c in
+      select con.conname from pg_constraint con
+      where con.conrelid = format('public.%I', t)::regclass and con.contype = 'f'
+        and con.confrelid = 'public.assets'::regclass
+        and con.conkey = array[(select attnum from pg_attribute
+                                 where attrelid = format('public.%I', t)::regclass
+                                   and attname = 'asset_id')]::smallint[]
+    loop
+      execute format('alter table public.%I drop constraint %I', t, c.conname);
+    end loop;
   end loop;
 end $$;
 
 alter table public.maintenance_records add constraint maintenance_records_asset_id_fkey
+  foreign key (asset_id) references public.assets(id) on delete restrict;
+alter table public.asset_movements add constraint asset_movements_asset_id_fkey
+  foreign key (asset_id) references public.assets(id) on delete restrict;
+alter table public.asset_maintenance add constraint asset_maintenance_asset_id_fkey
   foreign key (asset_id) references public.assets(id) on delete restrict;
 
 -- ===========================================================================
@@ -210,9 +223,8 @@ select column_name from information_schema.columns
 where table_schema = 'public' and table_name = 'assets'
   and column_name in ('archived_at', 'archived_by');
 
--- Expect exactly 1 row: maintenance_records_asset_id_fkey | r
-select conname, confdeltype from pg_constraint
-where conrelid = 'public.maintenance_records'::regclass and confrelid = 'public.assets'::regclass;
+-- Expect exactly 3 rows, all r
+select conrelid::regclass, conname, confdeltype from pg_constraint where contype = 'f' and confrelid = 'public.assets'::regclass and conrelid in ('public.maintenance_records'::regclass, 'public.asset_movements'::regclass, 'public.asset_maintenance'::regclass);
 
 -- Expect exactly assets_insert (INSERT), assets_select (SELECT), assets_update (UPDATE)
 select policyname, cmd from pg_policies

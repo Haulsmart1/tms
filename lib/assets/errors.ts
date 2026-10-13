@@ -54,3 +54,13 @@ export function isMissingColumnError(error: unknown): boolean {
 export function isForeignKeyViolation(error: unknown): boolean {
   return asErrorLike(error)?.code === "23503";
 }
+
+/** A 23503 raised by maintenance_records (its message or details name the table). */
+export function isMaintenanceHistoryViolation(error: unknown): boolean {
+  const e = asErrorLike(error);
+  if (e?.code !== "23503") return false;
+  const text = [e.message, (e as { details?: unknown }).details].filter(
+    (value): value is string => typeof value === "string",
+  );
+  return text.some((value) => value.includes("maintenance_records"));
+}

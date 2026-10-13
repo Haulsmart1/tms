@@ -11,11 +11,17 @@
   the archive columns are writable only by the service role.
 */
 
+import "server-only";
+
 import { createAdminClient, createUserClient } from "../accounts/server";
 import { authorizeTenant, isUuid, TenantAccessError } from "../auth/serverTenantAccess";
 import { authorizeOfficeTenant } from "../jobs/officeAccess";
 import { assetRouteResponse, decideAssetDelete, type AssetRouteResult } from "./deleteRule";
-import { isForeignKeyViolation, isMissingColumnError } from "./errors";
+import {
+  isForeignKeyViolation,
+  isMaintenanceHistoryViolation,
+  isMissingColumnError,
+} from "./errors";
 
 export type RouteAnswer = { status: number; body: Record<string, unknown> };
 
@@ -143,8 +149,12 @@ export async function deleteAsset(id: string): Promise<RouteAnswer> {
 
     const removed = await auth.admin.from("assets").delete().eq("id", id).select("id");
     if (removed.error) {
-      // A record added between the count and the delete: assets_01's RESTRICT refuses it.
-      if (isForeignKeyViolation(removed.error)) return answer("has_maintenance_history");
+      // After assets_01 a record added between the count and the delete is refused by RESTRICT.
+      // Before it, maintenance_records is still SET NULL, so a record inserted in that window
+      // would be orphaned: accepted, the same trade-off as deleteWithoutRpc in
+      // app/api/vehicles/[id]/route.ts.
+      if (isMaintenanceHistoryViolation(removed.error)) return answer("has_maintenance_history");
+      if (isForeignKeyViolation(removed.error)) return answer("referenced");
       throw new Error(`asset delete failed: ${removed.error.message}`);
     }
     return answer((removed.data ?? []).length > 0 ? "ok" : "not_found");

@@ -32,10 +32,15 @@ describe("assets_01", () => {
     );
   });
 
-  it("drops the maintenance foreign key by lookup, not by name", () => {
+  it("drops the foreign keys by lookup, not by name", () => {
     expect(assets).toContain(
-      "execute format('alter table public.maintenance_records drop constraint %I', c.conname);",
+      "execute format('alter table public.%I drop constraint %I', t, c.conname);",
     );
+  });
+
+  it("makes the movements and maintenance links RESTRICT too", () => {
+    expect(assets).toContain("add constraint asset_movements_asset_id_fkey");
+    expect(assets).toContain("add constraint asset_maintenance_asset_id_fkey");
   });
 
   it("makes asset numbers unique per tenant", () => {

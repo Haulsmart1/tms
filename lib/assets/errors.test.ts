@@ -7,6 +7,7 @@ import {
   ASSET_TENANT_PINNED_MESSAGE,
   assetWriteMessage,
   isForeignKeyViolation,
+  isMaintenanceHistoryViolation,
   isMissingColumnError,
 } from "./errors";
 
@@ -58,5 +59,23 @@ describe("error predicates", () => {
     expect(isForeignKeyViolation({ code: "23503" })).toBe(true);
     expect(isForeignKeyViolation({ code: "23505" })).toBe(false);
     expect(isForeignKeyViolation(undefined)).toBe(false);
+  });
+
+  it("recognises a foreign key violation from maintenance_records only", () => {
+    expect(
+      isMaintenanceHistoryViolation({
+        code: "23503",
+        details: 'Key (id)=(x) is still referenced from table "maintenance_records".',
+      }),
+    ).toBe(true);
+    expect(
+      isMaintenanceHistoryViolation({
+        code: "23503",
+        details: 'Key (id)=(x) is still referenced from table "asset_movements".',
+      }),
+    ).toBe(false);
+    expect(
+      isMaintenanceHistoryViolation({ code: "23505", details: "maintenance_records" }),
+    ).toBe(false);
   });
 });

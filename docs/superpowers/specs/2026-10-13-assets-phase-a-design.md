@@ -50,7 +50,7 @@ Applied by hand in the Supabase SQL editor, like every other migration. Idempote
    Also a unique index on `(tenant_id, asset_number)` where `asset_number is not null`, so the database
    enforces one asset number per tenant (the page's duplicate check can lose a race).
 2. **History-preserving FK.** Drop `maintenance_records_asset_id_fkey` (`ON DELETE SET NULL`) and re-add it as
-   `ON DELETE RESTRICT`. `asset_movements` and `asset_maintenance` keep `CASCADE` (unused, empty; Phase B/C).
+   `ON DELETE RESTRICT`. `asset_movements` and `asset_maintenance` become `RESTRICT` too (unused, empty today; CASCADE would silently destroy their history once Phase B/C writes rows).
 3. **Office check.** `create or replace function public.pod_caller_is_office()` with a body byte-identical to
    `shifts_06`, plus the same `revoke`/`grant` lines. Either migration can be applied first.
 4. **Policies.** Drop `tenant_access` on `assets` and create:

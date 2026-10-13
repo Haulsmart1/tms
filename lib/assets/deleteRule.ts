@@ -4,7 +4,8 @@
    THE RULE. An asset with any maintenance history is archived, never deleted:
    maintenance_records.asset_id used to be ON DELETE SET NULL, so a delete
    silently orphaned the history. docs/sql/assets_01 makes it RESTRICT, so the
-   database refuses too. Phase C adds assignment history as another count. */
+   database refuses too. Phase B/C will count asset_movements / asset_maintenance here once
+   anything writes them; until then assets_01 makes them RESTRICT, so the route answers "referenced". */
 
 export type AssetHistoryCounts = {
   maintenanceRows: number;
@@ -16,6 +17,9 @@ export const ASSET_HAS_HISTORY_MESSAGE = "This asset has maintenance history. Ar
 export const ASSET_NEEDS_MIGRATION_MESSAGE =
   "Asset archiving needs the assets_01 database migration. Ask an administrator to apply it.";
 
+export const ASSET_REFERENCED_MESSAGE =
+  "This asset is still used by other records, so it cannot be deleted. Archive it instead.";
+
 export function decideAssetDelete(counts: AssetHistoryCounts): AssetDeleteDecision {
   return counts.maintenanceRows > 0 ? { kind: "refuse" } : { kind: "allow" };
 }
@@ -26,7 +30,8 @@ export type AssetRouteResult =
   | "has_maintenance_history"
   | "already_archived"
   | "not_archived"
-  | "needs_migration";
+  | "needs_migration"
+  | "referenced";
 
 export type AssetRouteHttp = {
   status: 200 | 404 | 409 | 503;
@@ -47,5 +52,7 @@ export function assetRouteResponse(result: AssetRouteResult): AssetRouteHttp {
       return { status: 409, body: { error: "This asset is not archived.", code: result } };
     case "needs_migration":
       return { status: 503, body: { error: ASSET_NEEDS_MIGRATION_MESSAGE, code: result } };
+    case "referenced":
+      return { status: 409, body: { error: ASSET_REFERENCED_MESSAGE, code: "referenced" } };
   }
 }
