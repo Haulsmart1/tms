@@ -135,7 +135,13 @@ export default function AssetDialog({
           </Button>
         ) : null}
         {canWrite ? (
-          <Button disabled={busy || archived} onClick={() => setMode("edit")}>
+          <Button
+            disabled={busy || archived}
+            onClick={() => {
+              cancelDelete();
+              setMode("edit");
+            }}
+          >
             Edit
           </Button>
         ) : null}
@@ -168,6 +174,7 @@ export default function AssetDialog({
                 value={confirmText}
                 onChange={(event) => setConfirmText(event.target.value)}
                 autoComplete="off"
+                autoFocus
               />
               <div className="flex flex-wrap gap-2">
                 <Button

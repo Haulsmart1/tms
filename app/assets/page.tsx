@@ -115,7 +115,7 @@ export default function AssetsPage() {
   const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
   const [loadError, setLoadError] = useState("");
   const [typeError, setTypeError] = useState("");
-  const [archiveSupported, setArchiveSupported] = useState(true);
+  const [archiveSupported, setArchiveSupported] = useState<boolean | null>(null);
 
   /* useTenant() folds drivers into "staff", so ask the database. null means
      unknown (the function is not installed yet): show the controls and let
@@ -172,7 +172,9 @@ export default function AssetsPage() {
 
     if (assetResult.error) {
       setLoadError(assetResult.error.message);
-      setAssets([]);
+      // Keep the rows (the open dialog reads from them) unless they belong
+      // to a different tenant than the one now active.
+      if (dataTenantId !== tenant.activeTenantId) setAssets([]);
     } else {
       setLoadError("");
       setAssets((assetResult.data as unknown as Asset[]) ?? []);
@@ -190,7 +192,12 @@ export default function AssetsPage() {
 
     setLoading(false);
     setHasLoaded(true);
-  }, [supabase, tenant]);
+  }, [supabase, tenant, dataTenantId]);
+
+  const loadAssetsRef = useRef(loadAssets);
+  useEffect(() => {
+    loadAssetsRef.current = loadAssets;
+  });
 
   useEffect(() => {
     void loadAssets();
@@ -216,11 +223,21 @@ export default function AssetsPage() {
   const activeCount = useMemo(() => assets.filter((asset) => !isArchived(asset)).length, [assets]);
   const filtering = hasActiveFilters(filters);
 
+  const allArchivedHidden =
+    assets.length > 0 && !filtering && !filters.showArchived && visibleAssets.length === 0;
+
   const canWrite = isOffice !== false;
   const canDelete = canWrite && (tenant.role === "admin" || tenant.role === "super_admin");
   const dialogAsset = dialog?.assetId
     ? (assets.find((asset) => asset.id === dialog.assetId) ?? null)
     : null;
+
+  useEffect(() => {
+    if (dialog?.assetId && !dialogAsset && !busy) {
+      setDialog(null);
+      setMessage("That asset is no longer available.");
+    }
+  }, [dialog, dialogAsset, busy]);
 
   const tableState: DataTableState = showSkeleton
     ? "loading"
@@ -262,7 +279,7 @@ export default function AssetsPage() {
       });
       setDialog(null);
       setMessage(outcome === "added" ? "Asset added." : "Asset updated.");
-      await loadAssets();
+      await loadAssetsRef.current();
     } catch (error) {
       setDialogError(error instanceof Error ? error.message : "Unable to save asset.");
     } finally {
@@ -276,20 +293,26 @@ export default function AssetsPage() {
     setBusy(true);
     setDialogError("");
 
-    const failure = await callAssetRoute(dialogAsset.id, action).catch(
-      () => "Network error. Check your connection and try again.",
-    );
+    try {
+      const failure = await callAssetRoute(dialogAsset.id, action).catch(
+        () => "Network error. Check your connection and try again.",
+      );
 
-    setBusy(false);
+      if (failure) {
+        setDialogError(failure);
+        return;
+      }
 
-    if (failure) {
-      setDialogError(failure);
-      return;
+      if (action === "delete") setDialog(null);
+      setMessage(ACTION_DONE[action]);
+      await loadAssetsRef.current();
+    } finally {
+      setBusy(false);
     }
+  }
 
-    if (action === "delete") setDialog(null);
-    setMessage(ACTION_DONE[action]);
-    await loadAssets();
+  function clearFilters() {
+    setFilters((current) => ({ ...EMPTY_FILTERS, showArchived: current.showArchived }));
   }
 
   return (
@@ -326,7 +349,11 @@ export default function AssetsPage() {
               value={filters.query}
               onChange={(query) => setFilters((current) => ({ ...current, query }))}
               placeholder="Search name, number, registration, serial or barcode"
-              resultHint={filtering ? `${visibleAssets.length} of ${assets.length}` : undefined}
+              resultHint={
+                filtering
+                  ? `${visibleAssets.length} of ${filters.showArchived ? assets.length : activeCount}`
+                  : undefined
+              }
               wrapperClassName="mb-0 min-w-[260px] flex-1"
             />
 
@@ -381,7 +408,7 @@ export default function AssetsPage() {
               <option value="no">No</option>
             </Select>
 
-            {archiveSupported ? (
+            {archiveSupported === true ? (
               <label className="flex h-10 items-center gap-2 text-sm text-ink">
                 <input
                   type="checkbox"
@@ -398,9 +425,7 @@ export default function AssetsPage() {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() =>
-                  setFilters((current) => ({ ...EMPTY_FILTERS, showArchived: current.showArchived }))
-                }
+                onClick={clearFilters}
               >
                 Clear filters
               </Button>
@@ -418,22 +443,36 @@ export default function AssetsPage() {
             onSortChange={(key) => setSort((current) => nextSort(current, key as SortKey))}
             errorMessage={loadError || undefined}
             onRetry={() => void loadAssets()}
-            emptyTitle={assets.length === 0 ? "No assets yet" : "No assets match these filters"}
+            emptyTitle={
+              assets.length === 0
+                ? "No assets yet"
+                : allArchivedHidden
+                  ? "All assets are archived"
+                  : "No assets match these filters"
+            }
             emptyDescription={
               assets.length === 0
                 ? "Add trailers, containers, pallets and equipment to start the register."
                 : undefined
             }
             emptyAction={
-              assets.length > 0 && filtering ? (
-                <Button variant="secondary" size="sm" onClick={() => setFilters(EMPTY_FILTERS)}>
+              allArchivedHidden ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setFilters((current) => ({ ...current, showArchived: true }))}
+                >
+                  Show archived
+                </Button>
+              ) : assets.length > 0 && filtering ? (
+                <Button variant="secondary" size="sm" onClick={clearFilters}>
                   Clear filters
                 </Button>
               ) : undefined
             }
           />
 
-          {dialog ? (
+          {dialog && !(dialog.assetId && !dialogAsset) ? (
             <AssetDialog
               key={dialog.key}
               asset={dialogAsset}
@@ -441,7 +480,7 @@ export default function AssetsPage() {
               assetTypes={assetTypes}
               canWrite={canWrite}
               canDelete={canDelete}
-              archiveSupported={archiveSupported}
+              archiveSupported={archiveSupported === true}
               busy={busy}
               error={dialogError}
               onClose={closeDialog}

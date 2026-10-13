@@ -95,7 +95,7 @@ export default function DataTable<T>({
                     <button
                       type="button"
                       onClick={() => onSortChange?.(col.sortKey as string)}
-                      className="inline-flex items-center gap-1 bg-transparent font-semibold uppercase tracking-wide text-ink-3 hover:text-ink"
+                      className="inline-flex items-center gap-1 border-0 bg-transparent p-0 font-semibold uppercase tracking-wide text-ink-3 hover:text-ink"
                     >
                       {col.header}
                       {active ? (
