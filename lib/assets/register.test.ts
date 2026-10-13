@@ -166,6 +166,32 @@ describe("sortAssets", () => {
     expect(ids(sortAssets(twins, { key: "name", direction: "desc" }))).toEqual(["x", "y"]);
   });
 
+  it("sorts numbers numerically", () => {
+    const nums = [
+      asset({ id: "ten", asset_number: "TRL-10" }),
+      asset({ id: "two", asset_number: "TRL-2" }),
+    ];
+    expect(ids(sortAssets(nums, { key: "number", direction: "asc" }))).toEqual(["two", "ten"]);
+  });
+
+  it("puts a null created_at last under the default sort", () => {
+    const dated = [
+      asset({ id: "none", created_at: null }),
+      asset({ id: "new", created_at: "2026-10-03T09:00:00" }),
+      asset({ id: "old", created_at: "2026-10-01T09:00:00" }),
+    ];
+    expect(ids(sortAssets(dated, DEFAULT_SORT))).toEqual(["new", "old", "none"]);
+  });
+
+  it("treats a null status as active when sorting", () => {
+    const statuses = [
+      asset({ id: "m", status: "maintenance" }),
+      asset({ id: "n", status: null }),
+      asset({ id: "i", status: "inactive" }),
+    ];
+    expect(ids(sortAssets(statuses, { key: "status", direction: "asc" }))).toEqual(["n", "i", "m"]);
+  });
+
   it("does not mutate its input", () => {
     const copy = [...list];
     sortAssets(list, { key: "name", direction: "asc" });

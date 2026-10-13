@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ASSET_ARCHIVE_GUARD_MESSAGE,
   ASSET_ARCHIVED_MESSAGE,
+  ASSET_DUPLICATE_NUMBER_MESSAGE,
   ASSET_OFFICE_ONLY_MESSAGE,
   assetWriteMessage,
   isForeignKeyViolation,
@@ -24,7 +25,13 @@ describe("assetWriteMessage", () => {
   });
 
   it("passes any other message through", () => {
-    expect(assetWriteMessage({ code: "23505", message: "duplicate key" })).toBe("duplicate key");
+    expect(assetWriteMessage({ code: "22001", message: "value too long" })).toBe("value too long");
+  });
+
+  it("explains a unique violation (23505) as a duplicate asset number", () => {
+    expect(assetWriteMessage({ code: "23505", message: "duplicate key" })).toBe(
+      ASSET_DUPLICATE_NUMBER_MESSAGE,
+    );
   });
 
   it("falls back when there is nothing usable", () => {

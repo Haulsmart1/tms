@@ -76,4 +76,19 @@ describe("buildAssetPayload", () => {
     expect(buildAssetPayload({ ...base, notes: "  Spare  " }, trailer).notes).toBe("Spare");
     expect(buildAssetPayload({ ...base, notes: "   " }, trailer).notes).toBeNull();
   });
+
+  it("keeps an explicit barcode when the identifier is internal", () => {
+    expect(buildAssetPayload({ ...base, barcode: " B1 " }, trailer).barcode).toBe("B1");
+  });
+
+  it.each(["trailer_number", "container_number", "pallet_number"])(
+    "uses the number as the reference for %s",
+    (identifierType) => {
+      expect(buildAssetPayload({ ...base, identifierType }, trailer).reference).toBe("TRL-012");
+    },
+  );
+
+  it.each(["barcode", "serial_number", "vrm"])("sets no reference for %s", (identifierType) => {
+    expect(buildAssetPayload({ ...base, identifierType }, trailer).reference).toBeNull();
+  });
 });
