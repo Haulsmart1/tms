@@ -123,6 +123,17 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
   billing was optional.
 - **Deleting a vehicle goes through `DELETE /api/vehicles/[id]`**, never a browser delete. It answers 409 when
   billing history exists, and `prodfix_31` makes billing evidence tables RESTRICT rather than cascade.
+- **Assets are archived, and deleted only through `DELETE /api/assets/[id]`.** `assets_01` makes
+  `archived_at`/`archived_by` server-only (trigger `guard_asset_archive`, `AST01`; deliberately no column
+  REVOKE, which would surface as 42501 before the trigger), refuses browser edits to an archived row
+  (`AST02`), pins `tenant_id`/`company_id` (`AST03`), limits insert and update to office callers
+  (`pod_caller_is_office()`, a copy of the `shifts_06` function kept identical by
+  `lib/assets/officeFunctionSql.test.ts`), revokes browser DELETE and TRUNCATE, makes asset numbers unique
+  per tenant, and makes every FK into `assets` (`maintenance_records`, `asset_movements`,
+  `asset_maintenance`) RESTRICT so a delete can never orphan history. Archive and restore
+  (`POST /api/assets/[id]/archive`, `/restore`) are office-only; delete is admin-only and answers 409 while
+  maintenance history exists. Rules live in `lib/assets/`; the error codes are mapped in
+  `lib/assets/errors.ts`.
 - **Walkaround checks gate driver work.** Own-fleet drivers need an open shift whose current vehicle passed
   (or passed with only minor defects) a walkaround before completing stops or saving PODs
   (`lib/walkaround/jobGate.ts`, enforced in the stop and POD routes, fails closed: no shift, no vehicle
@@ -329,7 +340,8 @@ docs/sql/                   numbered migrations, applied by hand in order in the
                              rls_01..rls_12 (tenancy, storage, job-files lockdown), billing_01..billing_07
                              (v1 platform billing, then v2 period billing), prodfix_01..prodfix_96 (the
                              2026-09-14 review fixes plus two follow-ups; order in prodfix_00_APPLY_ORDER.md),
-                             signup_01 (self-serve signup RPC), and shifts_01..06 (driver shifts and walkaround
+                             signup_01 (self-serve signup RPC), assets_01 (asset archive, office-only
+                             writes and RESTRICT history, 2026-10-13; not applied), and shifts_01..06 (driver shifts and walkaround
                              check tables, triggers, RPCs and storage policies, 2026-09-29; none applied yet),
                              tracking_01..02 (tracking links, ETA cache and job_stops.pod_flags, 2026-10-07;
                              not applied),
