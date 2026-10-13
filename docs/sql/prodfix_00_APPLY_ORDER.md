@@ -30,6 +30,14 @@ Verified against the live project on 2026-10-08 (security scan of that date).
 - **Known broken live, NOT fixed yet:** prodfix_20 `remove_company_user` sets `profiles.tenant_id`
   to null, which the NOT NULL refuses.
 
+## assets_01 (2026-10-13, not applied)
+
+`assets_01_archive_and_office_writes.sql` is independent of the prodfix series and of shifts_06 (it
+carries an identical `pod_caller_is_office()`), so it can be applied at any time; apply it early, because
+until then any tenant member, drivers included, can still delete assets from the browser. Run its VERIFY
+block afterwards. Before it is applied, `/assets` hides the archive controls, the archive and restore
+routes answer 503, delete still checks maintenance history first, and drivers can still write assets.
+
 ## When to apply: SQL first, then deploy
 
 Several code paths on `ethan/production-review-fixes` refuse to work until their SQL exists. That
