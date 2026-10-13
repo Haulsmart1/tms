@@ -10,7 +10,7 @@
 -- maintenance_records.asset_id was ON DELETE SET NULL, so a delete silently orphaned history.
 --
 -- After: drivers read only; office staff insert and update; nobody deletes from the browser
--- (DELETE /api/assets/[id], service role, admins only); asset numbers are unique per tenant;
+-- (DELETE /api/assets/[id], service role, admins only); asset numbers are unique per tenant; tenant_id and company_id are pinned;
 -- archived_at / archived_by are written only
 -- by the service role (POST /api/assets/[id]/archive and /restore); an archived row cannot be
 -- edited until restored; the database refuses to delete an asset with maintenance history.
@@ -18,6 +18,7 @@
 -- Error codes, mirrored in lib/assets/errors.ts:
 --   AST01  a browser write touched archived_at / archived_by
 --   AST02  a browser update hit an archived row
+--   AST03  a browser write moved an asset to another tenant or company, or inserted it under the wrong company
 
 begin;
 
@@ -28,10 +29,30 @@ alter table public.assets add column if not exists archived_at timestamptz null;
 alter table public.assets add column if not exists archived_by uuid null
   references public.profiles(id) on delete set null;
 
+-- archived_at without archived_by is legitimate (the archiving profile was deleted); the reverse is not.
+alter table public.assets drop constraint if exists assets_archived_by_needs_at;
+alter table public.assets add constraint assets_archived_by_needs_at
+  check (archived_by is null or archived_at is not null);
+
 -- ===========================================================================
 -- 2. Maintenance history survives: SET NULL becomes RESTRICT
 -- ===========================================================================
-alter table public.maintenance_records drop constraint if exists maintenance_records_asset_id_fkey;
+-- Drop by lookup, not by name: a differently named SET NULL foreign key left beside the new RESTRICT one would still orphan history.
+do $$
+declare c record;
+begin
+  for c in
+    select con.conname from pg_constraint con
+    where con.conrelid = 'public.maintenance_records'::regclass and con.contype = 'f'
+      and con.confrelid = 'public.assets'::regclass
+      and con.conkey = array[(select attnum from pg_attribute
+                               where attrelid = 'public.maintenance_records'::regclass
+                                 and attname = 'asset_id')]::smallint[]
+  loop
+    execute format('alter table public.maintenance_records drop constraint %I', c.conname);
+  end loop;
+end $$;
+
 alter table public.maintenance_records add constraint maintenance_records_asset_id_fkey
   foreign key (asset_id) references public.assets(id) on delete restrict;
 
@@ -114,13 +135,18 @@ create policy assets_update on public.assets
   using (public.can_access_tenant(tenant_id) and public.pod_caller_is_office())
   with check (public.can_access_tenant(tenant_id) and public.pod_caller_is_office());
 
-revoke delete on public.assets from authenticated, anon;
+-- TRUNCATE bypasses RLS.
+revoke delete, truncate on public.assets from public, anon, authenticated;
 revoke insert, update on public.assets from anon;
 
 -- ===========================================================================
 -- 6. Archive columns are server-only; archived rows are frozen
 -- ===========================================================================
 -- NOT security definer, deliberately: current_user must be the real caller.
+-- Also pins tenant_id and company_id (the prodfix_90 pattern).
+-- Warning: a future SECURITY DEFINER function owned by postgres that writes assets bypasses this
+-- guard; a future INVOKER trigger elsewhere that updates an archived asset will raise AST02 for
+-- browser callers.
 create or replace function public.guard_asset_archive()
 returns trigger
 language plpgsql
@@ -136,12 +162,26 @@ begin
       raise exception 'Assets are archived with the Archive button, not when they are created.'
         using errcode = 'AST01';
     end if;
+
+    -- Reads tenants under the caller's RLS, as the page's own lookup does; a hidden tenant gives
+    -- NULL and fails closed.
+    if new.company_id is distinct from
+       (select t.company_id from public.tenants t where t.id = new.tenant_id) then
+      raise exception 'An asset''s company must be the company of its tenant.'
+        using errcode = 'AST03';
+    end if;
     return new;
   end if;
 
   if old.archived_at is not null then
     raise exception 'This asset is archived. Restore it before editing.'
       using errcode = 'AST02';
+  end if;
+
+  if new.tenant_id is distinct from old.tenant_id
+     or new.company_id is distinct from old.company_id then
+    raise exception 'An asset cannot be moved to another tenant or company.'
+      using errcode = 'AST03';
   end if;
 
   if new.archived_at is distinct from old.archived_at
@@ -170,8 +210,9 @@ select column_name from information_schema.columns
 where table_schema = 'public' and table_name = 'assets'
   and column_name in ('archived_at', 'archived_by');
 
--- Expect 'r' (restrict)
-select confdeltype from pg_constraint where conname = 'maintenance_records_asset_id_fkey';
+-- Expect exactly 1 row: maintenance_records_asset_id_fkey | r
+select conname, confdeltype from pg_constraint
+where conrelid = 'public.maintenance_records'::regclass and confrelid = 'public.assets'::regclass;
 
 -- Expect exactly assets_insert (INSERT), assets_select (SELECT), assets_update (UPDATE)
 select policyname, cmd from pg_policies
@@ -187,3 +228,21 @@ where schemaname = 'public' and tablename = 'assets' and indexname = 'assets_ten
 -- Expect 1 row
 select tgname from pg_trigger
 where tgrelid = 'public.assets'::regclass and tgname = 'guard_asset_archive';
+
+-- Expect postgres: foreign key actions run as this owner and must be exempt in guard_asset_archive
+select tableowner from pg_tables where schemaname = 'public' and tablename = 'assets';
+
+-- Expect false, false
+select has_table_privilege('anon', 'public.assets', 'DELETE') as anon_can_delete,
+       has_table_privilege('authenticated', 'public.assets', 'TRUNCATE') as authenticated_can_truncate;
+
+-- Expect guard_asset_archive false, pod_caller_is_office true
+select proname, prosecdef from pg_proc
+where pronamespace = 'public'::regnamespace and proname in ('guard_asset_archive', 'pod_caller_is_office');
+
+-- Expect O (enabled)
+select tgenabled from pg_trigger
+where tgrelid = 'public.assets'::regclass and tgname = 'guard_asset_archive';
+
+-- Expect false (auth.uid() is null in the SQL editor); proves the function's tables and columns resolve
+select public.pod_caller_is_office();

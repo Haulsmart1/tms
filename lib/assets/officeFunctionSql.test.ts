@@ -32,6 +32,12 @@ describe("assets_01", () => {
     );
   });
 
+  it("drops the maintenance foreign key by lookup, not by name", () => {
+    expect(assets).toContain(
+      "execute format('alter table public.maintenance_records drop constraint %I', c.conname);",
+    );
+  });
+
   it("makes asset numbers unique per tenant", () => {
     expect(assets).toMatch(
       /create unique index if not exists assets_tenant_asset_number_key\s+on public\.assets \(tenant_id, asset_number\)/,
@@ -39,12 +45,13 @@ describe("assets_01", () => {
   });
 
   it("leaves the browser no way to delete assets", () => {
-    expect(assets).toContain("revoke delete on public.assets from authenticated, anon;");
+    expect(assets).toContain("revoke delete, truncate on public.assets from public, anon, authenticated;");
     expect(assets).not.toMatch(/create policy \w+ on public\.assets\s+for delete/);
   });
 
   it("guards the archive columns and archived rows", () => {
     expect(assets).toContain("errcode = 'AST01'");
     expect(assets).toContain("errcode = 'AST02'");
+    expect(assets).toContain("errcode = 'AST03'");
   });
 });

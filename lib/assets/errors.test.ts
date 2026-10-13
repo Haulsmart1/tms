@@ -4,6 +4,7 @@ import {
   ASSET_ARCHIVED_MESSAGE,
   ASSET_DUPLICATE_NUMBER_MESSAGE,
   ASSET_OFFICE_ONLY_MESSAGE,
+  ASSET_TENANT_PINNED_MESSAGE,
   assetWriteMessage,
   isForeignKeyViolation,
   isMissingColumnError,
@@ -16,6 +17,10 @@ describe("assetWriteMessage", () => {
 
   it("explains a browser write to the archive columns (AST01)", () => {
     expect(assetWriteMessage({ code: "AST01", message: "raw" })).toBe(ASSET_ARCHIVE_GUARD_MESSAGE);
+  });
+
+  it("explains a tenant or company move (AST03)", () => {
+    expect(assetWriteMessage({ code: "AST03", message: "raw" })).toBe(ASSET_TENANT_PINNED_MESSAGE);
   });
 
   it("explains an RLS refusal (42501) as office-only", () => {

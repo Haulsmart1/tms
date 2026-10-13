@@ -4,6 +4,7 @@
    THE CONTRACT with docs/sql/assets_01 (both sides change together):
      AST01  a browser write touched archived_at / archived_by (server-only)
      AST02  a browser update hit an archived row (restore it first)
+     AST03  a browser write moved an asset to another tenant or company
      42501  RLS refused the write (an insert, or an update whose new row fails WITH CHECK):
             the caller is not office staff. assets_01 guards archived_at / archived_by with
             the AST01 trigger ONLY, never with column REVOKEs: a column privilege error is
@@ -12,9 +13,11 @@
 
 export const ASSET_ARCHIVE_GUARD_ERRCODE = "AST01";
 export const ASSET_ARCHIVED_ERRCODE = "AST02";
+export const ASSET_TENANT_PINNED_ERRCODE = "AST03";
 
 export const ASSET_ARCHIVE_GUARD_MESSAGE =
   "Archive and restore assets with the buttons in the asset window.";
+export const ASSET_TENANT_PINNED_MESSAGE = "An asset cannot be moved to another tenant or company.";
 export const ASSET_ARCHIVED_MESSAGE = "This asset is archived. Restore it before editing.";
 export const ASSET_OFFICE_ONLY_MESSAGE = "Only office staff can add or change assets.";
 export const ASSET_DUPLICATE_NUMBER_MESSAGE =
@@ -35,6 +38,7 @@ export function assetWriteMessage(error: unknown, fallback = "Unable to save ass
   if (!e) return fallback;
   if (e.code === ASSET_ARCHIVED_ERRCODE) return ASSET_ARCHIVED_MESSAGE;
   if (e.code === ASSET_ARCHIVE_GUARD_ERRCODE) return ASSET_ARCHIVE_GUARD_MESSAGE;
+  if (e.code === ASSET_TENANT_PINNED_ERRCODE) return ASSET_TENANT_PINNED_MESSAGE;
   if (e.code === "42501") return ASSET_OFFICE_ONLY_MESSAGE;
   /* The page's duplicate pre-check can lose a race, so the unique index answers instead. */
   if (e.code === "23505") return ASSET_DUPLICATE_NUMBER_MESSAGE;

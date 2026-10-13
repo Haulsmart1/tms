@@ -46,7 +46,9 @@ The asset work is split into three phases, each with its own spec, plan and bran
 Applied by hand in the Supabase SQL editor, like every other migration. Idempotent where practical.
 
 1. **Columns.** `alter table assets add column if not exists archived_at timestamptz null`, and
-   `archived_by uuid null references profiles(id)`.
+   `archived_by uuid null references profiles(id)`, plus a check constraint `archived_by is null or archived_at is not null`.
+   Also a unique index on `(tenant_id, asset_number)` where `asset_number is not null`, so the database
+   enforces one asset number per tenant (the page's duplicate check can lose a race).
 2. **History-preserving FK.** Drop `maintenance_records_asset_id_fkey` (`ON DELETE SET NULL`) and re-add it as
    `ON DELETE RESTRICT`. `asset_movements` and `asset_maintenance` keep `CASCADE` (unused, empty; Phase B/C).
 3. **Office check.** `create or replace function public.pod_caller_is_office()` with a body byte-identical to
@@ -55,13 +57,15 @@ Applied by hand in the Supabase SQL editor, like every other migration. Idempote
    - `assets_select`: `FOR SELECT` using `can_access_tenant(tenant_id)` (drivers can still look up assets).
    - `assets_insert`: `FOR INSERT` with check `can_access_tenant(tenant_id) and pod_caller_is_office()`.
    - `assets_update`: `FOR UPDATE` using and with check `can_access_tenant(tenant_id) and pod_caller_is_office()`.
-   - No DELETE policy, and `revoke delete on public.assets from authenticated, anon`.
-5. **Server-only archive columns.** A `BEFORE UPDATE` trigger on `assets`, not security definer (so
+   - No DELETE policy, and `revoke delete, truncate on public.assets from public, anon, authenticated`.
+5. **Server-only archive columns.** A `BEFORE INSERT OR UPDATE` trigger on `assets`, not security definer (so
    `current_user` is the real caller):
    - `AST01`: refuses any change to `archived_at` or `archived_by` unless the caller is `service_role`.
+   - `AST01` also refuses archive columns on insert.
+   - `AST03`: pins `tenant_id` and `company_id` (no move on update; on insert the company must be the tenant's).
    - `AST02`: refuses any browser update to a row whose `archived_at` is not null (restore first, then edit).
      `service_role` is exempt so restore works.
-6. **Verify block.** Read-only selects at the end confirming the columns, the FK action, the four policies,
+6. **Verify block.** Read-only selects at the end confirming the columns, the FK action, the three policies,
    the missing DELETE grant and the trigger.
 
 ## 2. Server routes and `lib/assets/`
