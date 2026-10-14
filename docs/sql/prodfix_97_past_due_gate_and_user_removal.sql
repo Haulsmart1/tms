@@ -47,8 +47,12 @@ end $$;
 -- ---------------------------------------------------------------------------------------------
 alter table public.company_billing add column if not exists past_due_since timestamptz;
 
+-- The real start of an existing past_due spell is unknown: updated_at is not it, because the v2
+-- dunning path (lib/billing/periodServer.ts) sets status without touching updated_at and nothing
+-- maintains that column. Start the grace when the gate starts, so nobody loses part of the
+-- promised 7 days (2026-10-12 review, finding 7).
 update public.company_billing
-   set past_due_since = coalesce(updated_at, now())
+   set past_due_since = now()
  where status = 'past_due' and past_due_since is null;
 
 create or replace function public.stamp_company_billing_past_due_since()

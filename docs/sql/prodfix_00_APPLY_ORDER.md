@@ -7,6 +7,30 @@ end for what to apply now. They were written without access to the live database
 either changes nothing or raises and rolls back. Apply them by hand in the Supabase SQL editor, in
 the order below, and run the verify query at the bottom of each file before moving on.
 
+## Live state, 2026-10-14
+
+Applied on 2026-10-14 through the Supabase MCP, each followed by its VERIFY block (all passed):
+`assets_01`, `prodfix_96` (with the review-2 fix to `provision_tenant_user`, see below) and
+`shifts_06` (recorded as migration `shifts_06_rectification_and_pod_guards`; `execute_sql` refused it
+twice with "Invalid or expired requestState", `apply_migration` worked). `prodfix_99` was found
+already live. prodfix_96 STEP 8 succeeded, so `shift_vehicle_periods` is now licence-gated.
+
+Fixed before applying, from the 2026-10-12 `/code-review max` of merge c7aaf43:
+- prodfix_96 `provision_tenant_user` refuses (`other_company`) an account with no profile whose
+  active `driver_users` / `subcontractor_users` link is in another company, the SQL twin of
+  `portalLinkDecision`. Tested in a rolled-back block: foreign company `other_company`, unlinked
+  user `created`, the driver's own company `created`.
+- prodfix_97 backfills `past_due_since` with `now()`, not `updated_at` (which v2 dunning never sets).
+
+**Still NOT applied:**
+- `prodfix_97`: apply only AFTER deploying the code that adds `LIC03` to `KNOWN_RPC_REFUSALS`
+  (`lib/walkaround/server.ts`). Without it a past-due refusal reaches the driver queue as a 500 and
+  the shift's queued PODs are deleted. (After prodfix_96 STEP 8 the same gate already raises LIC01 and
+  LIC02 there, which the deployed code does handle.)
+- `shifts_05` and `prodfix_83`: dashboard only, unchanged from the 2026-10-08 notes below. The four
+  PERMISSIVE `walkaround_photos_block_*` policies (roles `public`, bucket-only) were still live on
+  2026-10-14, so anyone, signed in or not, can read and write walkaround photos (N-1, CRITICAL).
+
 ## Live state, 2026-10-08
 
 Verified against the live project on 2026-10-08 (security scan of that date).
@@ -273,7 +297,7 @@ a photo and see it recorded on the check.
 | 3 | `shifts_03_triggers.sql` | shifts_02; re-run after prodfix_30 if that is applied later. Confirm the server role name first (billing_03 pre-flight): the QR hash guard exempts `postgres`, `supabase_admin`, `service_role` | yes, but the 2026-10-08 re-run failed: `shift_vehicle_periods` is not licence-gated (prodfix_96 STEP 8) |
 | 4 | `shifts_04_rpcs.sql` | shifts_03 | yes |
 | 5 | `shifts_05_storage.sql` | none. Creates restrictive storage policies: if it raises 42501, create them in the dashboard as its header says | **no**: dashboard only (postgres does not own `storage.objects`). See N-1 above |
-| 6 | `shifts_06_rectification_and_pod_guards.sql` | shifts_04, prodfix_96 | no |
+| 6 | `shifts_06_rectification_and_pod_guards.sql` | shifts_04, prodfix_96 | yes (2026-10-14) |
 | check | `shifts_verify.sql` | all of the above | |
 
 ## Stop contacts, saved plans and load transfers, 2026-09-29/30
@@ -323,8 +347,8 @@ Findings: `docs/superpowers/reviews/2026-10-08-security-scan.md`. Do N-1 in the 
 
 | Order | File | Needs | Applied |
 |---|---|---|---|
-| 1 | `prodfix_96_security_scan_2026_10_08.sql` | everything marked applied above. B-1/H-5 revokes, N-2 subcontractor link tables read-only, C-4 identity-only `handle_new_user` plus the fixed `provision_tenant_user` and `create_company_with_admin`, `tracking_link` in the delivery-log CHECK, `roles` grants, `pg_temp` on every definer function, S-14/B-5/S-9 grants and saved-plan policies, shifts_03 licence gate re-run, S-10 load-transfer destination licence and VOR gate (LTR01). Re-running signup_01 or prodfix_20 afterwards reinstalls the broken RPC bodies: do not. | no |
-| 2 | `shifts_06_rectification_and_pod_guards.sql` | prodfix_96. S-1 WLK06 rectification guard, `rectified_by`, re-VOR on reopen, WLK02 open-defect backstop, N-3 POD01 completion-column guard, N-12 stop tenant binding, S-16 SHF08 driver-in-tenant assertion. | no |
+| 1 | `prodfix_96_security_scan_2026_10_08.sql` | everything marked applied above. B-1/H-5 revokes, N-2 subcontractor link tables read-only, C-4 identity-only `handle_new_user` plus the fixed `provision_tenant_user` and `create_company_with_admin`, `tracking_link` in the delivery-log CHECK, `roles` grants, `pg_temp` on every definer function, S-14/B-5/S-9 grants and saved-plan policies, shifts_03 licence gate re-run, S-10 load-transfer destination licence and VOR gate (LTR01). Re-running signup_01 or prodfix_20 afterwards reinstalls the broken RPC bodies: do not. | yes (2026-10-14) |
+| 2 | `shifts_06_rectification_and_pod_guards.sql` | prodfix_96. S-1 WLK06 rectification guard, `rectified_by`, re-VOR on reopen, WLK02 open-defect backstop, N-3 POD01 completion-column guard, N-12 stop tenant binding, S-16 SHF08 driver-in-tenant assertion. | yes (2026-10-14) |
 | 3 | `prodfix_97_past_due_gate_and_user_removal.sql` | prodfix_96, and the code that adds `app/api/subcontractors/**` writes (deploy first, or the subcontractors page cannot save). H-3 LIC03 gate after 7 days past_due (`company_billing.past_due_since`), `remove_company_user` deletes the profile (PRF01 if still referenced), M-4 subcontractor tables read-only from the browser. | no |
 
 ## Free internal vehicle licences (prodfix_99)

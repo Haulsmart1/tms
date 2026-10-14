@@ -8,6 +8,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { DriverAccessError, requireDriverSession, type DriverSession } from "../driver/server";
 import { loadOperatorProfile } from "../driver/operatorTimeZone";
+import {
+  CANCELLED_COMPANY_ERRCODE,
+  PAST_DUE_COMPANY_ERRCODE,
+  UNLICENSED_VEHICLE_ERRCODE,
+} from "../billing/unlicensedVehicle";
 import { acceptRecordedTime } from "../pod/recordedTime";
 import type { QueuedMeta } from "../pod/queuedMeta";
 import { operatorDayInTimeZone } from "../time";
@@ -477,9 +482,14 @@ export async function loadDriverShiftState(admin: SupabaseClient, session: Drive
   };
 }
 
-/** Business refusals raised by the shifts_04 RPCs (and prodfix_30's licence gate): 409 with the database's sentence. */
+/**
+ * Business refusals raised by the shifts_04 RPCs (and the prodfix_30 / prodfix_97 licence gate,
+ * which fires inside them on the shift_vehicle_periods insert): 409 with the database's sentence.
+ * The licence codes come from lib/billing/unlicensedVehicle.ts so a new one cannot be missed here.
+ */
 export const KNOWN_RPC_REFUSALS: readonly string[] = [
-  "SHF01", "SHF02", "SHF03", "SHF04", "SHF05", "SHF06", "SHF07", "SHF08", "WLK02", "WLK04", "LIC01", "LIC02",
+  "SHF01", "SHF02", "SHF03", "SHF04", "SHF05", "SHF06", "SHF07", "SHF08", "WLK02", "WLK04",
+  UNLICENSED_VEHICLE_ERRCODE, CANCELLED_COMPANY_ERRCODE, PAST_DUE_COMPANY_ERRCODE,
 ];
 
 /** Map an RPC error to an HTTP answer. Known business refusals are 409 with the database's sentence. */

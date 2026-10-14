@@ -268,7 +268,25 @@ begin
    where p.id = p_user_id
    for update of p;
 
-  if not found then
+  -- A portal-only account has no profile (C-4), so its active portal links are the only record of
+  -- who it works for. Same rule as portalLinkCompanies / portalLinkDecision in
+  -- app/api/settings/portal-invites: a link on a tenant of another company, or of no company, is
+  -- foreign. Without this, any company could staff-invite another company's portal driver, gain a
+  -- profile for them, and then portal-link them a second time (2026-10-12 review, finding 2).
+  if (not found or (v_profile.company_id is null and v_profile.tenant_id is null))
+     and exists (
+       select 1
+         from (select l.tenant_id from public.driver_users l
+                where l.user_id = p_user_id and l.active is true
+               union all
+               select l.tenant_id from public.subcontractor_users l
+                where l.user_id = p_user_id and l.active is true) links
+         left join public.tenants t on t.id = links.tenant_id
+        where t.company_id is distinct from v_company) then
+    return 'other_company';
+  end if;
+
+  if v_profile.id is null then
     insert into public.profiles (id, tenant_id, company_id, role_id)
     values (p_user_id, p_tenant_id, v_company, v_role_id);
     v_outcome := 'created';

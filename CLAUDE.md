@@ -62,10 +62,11 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
 
 - **RLS in Postgres is the actual isolation boundary**, not client-side filtering. SECURITY DEFINER helpers
   (`can_access_tenant`, `can_manage_tenant`) fail closed. Migrations live in `docs/sql/` as `rls_01`..`rls_12`,
-  then `prodfix_01`..`prodfix_96` (01 to 93 from the 2026-09-14 review, 94 to 96 later follow-ups; numbered,
+  then `prodfix_01`..`prodfix_99` (01 to 93 from the 2026-09-14 review, 94 to 99 later follow-ups; numbered,
   applied by hand in the Supabase SQL editor; there is no automated migration runner).
-  `docs/sql/prodfix_00_APPLY_ORDER.md` is the order and records what was applied; most of the series is
-  still unapplied, so several server-side checks refuse in prod until it is. `rls_09_verify.sql` is the
+  `docs/sql/prodfix_00_APPLY_ORDER.md` is the order and records what was applied; nearly all of the series
+  is live (prodfix_97 and the dashboard-only storage policies are the gaps), and a check whose SQL is
+  missing refuses in prod until it is applied. `rls_09_verify.sql` is the
   check script; re-run `prodfix_81` after using it.
 - **Roles and tenancy come from `profiles` only** (`role_id` -> `roles.name`, `company_id`, `tenant_id`), the
   same columns RLS and `get_tenant_context()` read. `memberships` is legacy: it may still be written for
@@ -199,7 +200,7 @@ invoices, vehicles, drivers, ...) are keyed by `tenant_id`. Roles: `super_admin`
   queued completion's phone time was refused, and `pod_late_sync` when a trusted phone time reached the
   server more than 15 minutes later (`podTimeFlags` in `lib/pod/recordedTime.ts`), so a backdated POD is
   always visible. The complete route retries without the column on PGRST204/42703. `/jobs` selects it and
-  StopCard shows "Time not trusted" and "Synced late". Once `shifts_06` is applied, only office callers
+  StopCard shows "Time not trusted" and "Synced late". Since `shifts_06` (applied 2026-10-14), only office callers
   (`pod_caller_is_office`, POD01) may change a stop's completion columns from the browser.
 - **Customer tracking links** copy the POD share link design. Tokens are random `trk_` strings stored only
   as a SHA-256 hash in `stop_tracking_links` (`lib/tracking/links.ts`, `linkStore.ts`); that table and
@@ -338,13 +339,14 @@ lib/rateLimit.ts            durable rate limits (RATE_LIMITS rules, checkRateLim
 lib/printing/pdfFonts.ts    Unicode fonts and text sanitising for every generated PDF
 docs/sql/                   numbered migrations, applied by hand in order in the Supabase SQL editor:
                              rls_01..rls_12 (tenancy, storage, job-files lockdown), billing_01..billing_07
-                             (v1 platform billing, then v2 period billing), prodfix_01..prodfix_96 (the
-                             2026-09-14 review fixes plus two follow-ups; order in prodfix_00_APPLY_ORDER.md),
+                             (v1 platform billing, then v2 period billing), prodfix_01..prodfix_99 (the
+                             2026-09-14 review fixes plus follow-ups; order in prodfix_00_APPLY_ORDER.md),
                              signup_01 (self-serve signup RPC), assets_01 (asset archive, office-only
-                             writes and RESTRICT history, 2026-10-13; not applied), and shifts_01..06 (driver shifts and walkaround
-                             check tables, triggers, RPCs and storage policies, 2026-09-29; none applied yet),
+                             writes and RESTRICT history, 2026-10-13; applied 2026-10-14), and shifts_01..06 (driver shifts and walkaround
+                             check tables, triggers, RPCs and storage policies, 2026-09-29; all applied
+                             except shifts_05, which is dashboard-only),
                              tracking_01..02 (tracking links, ETA cache and job_stops.pod_flags, 2026-10-07;
-                             not applied),
+                             applied),
                              and three timestamp-named files from 2026-09-29/30 (stop contacts, saved plans,
                              load transfers and stop windows; moved here from supabase/migrations/ because
                              they were not yet applied). `*_verify.sql`, `diag_*`, `schema_rls_dump.sql` and
