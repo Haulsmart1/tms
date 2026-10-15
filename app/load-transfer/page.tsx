@@ -21,6 +21,7 @@ import CameraScanner, {
 } from "../driver/CameraScanner";
 import TenantGate from "../components/TenantGate";
 import { useTenant } from "../components/TenantProvider";
+import styles from "./load-transfer.module.css";
 
 type Vehicle = {
   id: string;
@@ -29,8 +30,7 @@ type Vehicle = {
 
 type Driver = {
   id: string;
-  first_name: string | null;
-  last_name: string | null;
+  name: string | null;
 };
 
 type TransferResponse = {
@@ -59,15 +59,7 @@ const SCANNER_COPY: ScannerCopy = {
 };
 
 function driverName(driver: Driver): string {
-  const name = [
-    driver.first_name,
-    driver.last_name,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-
-  return name || "Unnamed driver";
+  return driver.name?.trim() || "Unnamed driver";
 }
 
 function responseError(
@@ -210,11 +202,12 @@ function LoadTransferPageContent() {
             supabase
               .from("drivers")
               .select(
-                "id,first_name,last_name",
+                "id,name",
               ),
           )
+          .eq("active", true)
           .order(
-            "last_name",
+            "name",
             {
               ascending: true,
             },
@@ -493,7 +486,7 @@ function LoadTransferPageContent() {
     return (
       <main className="ds min-h-screen bg-canvas p-6 text-ink">
         <div className="mx-auto max-w-4xl">
-          <h1 className="text-2xl font-semibold">
+          <h1 className={styles.title}>
             Transfer load
           </h1>
 
@@ -512,14 +505,15 @@ function LoadTransferPageContent() {
   }
 
   return (
-    <main className="ds min-h-screen bg-canvas p-6 text-ink">
-      <div className="mx-auto grid max-w-5xl gap-6">
-        <header>
-          <h1 className="text-2xl font-semibold">
+    <main className={`ds min-h-screen text-ink ${styles.page}`}>
+      <div className={`mx-auto grid max-w-6xl gap-6 ${styles.content}`}>
+        <header className={styles.hero}>
+          <p className={styles.eyebrow}>TMS WIZARD <span aria-hidden="true">/</span> FLEET OPERATIONS</p>
+          <h1 className={styles.title}>
             Transfer load
           </h1>
 
-          <p className="mt-1 text-sm text-ink-3">
+          <p className={styles.subtitle}>
             Scan serialized items from one
             vehicle to another. A partial
             load transfer does not
@@ -532,8 +526,8 @@ function LoadTransferPageContent() {
           {message}
         </MessageBanner>
 
-        <section className="rounded-xl border border-line bg-surface p-5 shadow-xs">
-          <h2 className="text-lg font-semibold">
+        <section className={styles.panel}>
+          <h2 className={styles.panelTitle}>
             Vehicles
           </h2>
 
@@ -648,10 +642,10 @@ function LoadTransferPageContent() {
           ) : null}
         </section>
 
-        <section className="rounded-xl border border-line bg-surface p-5 shadow-xs">
+        <section className={styles.panel}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-semibold">
+              <h2 className={styles.panelTitle}>
                 Scan load
               </h2>
 
@@ -723,10 +717,10 @@ function LoadTransferPageContent() {
           />
         </section>
 
-        <section className="rounded-xl border border-line bg-surface p-5 shadow-xs">
+        <section className={styles.panel}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-semibold">
+              <h2 className={styles.panelTitle}>
                 Review transfer
               </h2>
 
