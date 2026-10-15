@@ -444,7 +444,7 @@ async function flushOnce(force: boolean): Promise<void> {
     // Pause the queue for office intervention, preserving this item and all
     // subsequent work. Do not retry a permanent refusal in a tight loop.
     if (shouldHoldPodFailure(head.payload.kind, outcome)) {
-      paused = `POD not sent: ${outcome.kind === "rejected" ? outcome.error : outcome.error}. Tell the office; do not clear this phone.`;
+      paused = `POD not sent: ${outcome.kind === "rejected" ? outcome.error : "Server refused the POD"}. Tell the office; do not clear this phone.`;
       emit();
       break;
     }
