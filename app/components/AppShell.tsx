@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, ClipboardList, CircleCheck, MapPin, Receipt, Building2, Users,
   Truck, User, Boxes, TriangleAlert, Gauge, Navigation, ArrowUpRight, Settings, LogOut,
+  Menu, X,
   Route, Clock,
   type LucideIcon,
 } from "lucide-react";
@@ -46,8 +47,26 @@ export default function AppShell() {
   // stretch never grows it, and it scrolls away on any page taller than 100vh.
   return (
     <>
-    <button type="button" aria-expanded={navigationOpen} aria-controls="tms-primary-navigation" onClick={() => setNavigationOpen(!navigationOpen)} className="ds fixed bottom-4 left-4 z-[60] rounded-md border border-line bg-surface px-4 py-3 font-sans font-semibold text-ink shadow-lg lg:hidden">{navigationOpen ? 'Close navigation' : 'Navigation'}</button>
-    <aside id="tms-primary-navigation" onKeyDown={event => { if (event.key === 'Escape') setNavigationOpen(false); }} className={`ds fixed left-0 top-0 z-50 h-screen w-[220px] flex-none flex-col bg-chrome font-sans lg:sticky ${navigationOpen ? 'flex' : 'hidden lg:flex'}`}>
+    <button
+      type="button"
+      aria-expanded={navigationOpen}
+      aria-controls="tms-primary-navigation"
+      onClick={() => setNavigationOpen(!navigationOpen)}
+      className="ds fixed inset-x-0 top-0 z-[60] flex h-14 items-center gap-3 border-b border-chrome-border bg-chrome px-4 text-left font-sans font-semibold text-chrome-text-strong shadow-sm lg:hidden"
+    >
+      {navigationOpen ? <X size={20} aria-hidden /> : <Menu size={20} aria-hidden />}
+      <span>TMS Wizard</span>
+      <span className="ml-auto text-xs font-medium text-chrome-text">{navigationOpen ? "Close menu" : "Menu"}</span>
+    </button>
+    {navigationOpen ? (
+      <button
+        type="button"
+        aria-label="Close navigation menu"
+        onClick={() => setNavigationOpen(false)}
+        className="fixed inset-0 z-[45] bg-black/60 lg:hidden"
+      />
+    ) : null}
+    <aside id="tms-primary-navigation" onKeyDown={event => { if (event.key === 'Escape') setNavigationOpen(false); }} className={`ds fixed left-0 top-0 z-50 h-[100dvh] w-[min(20rem,calc(100vw-2rem))] flex-none flex-col bg-chrome font-sans shadow-2xl lg:sticky lg:h-screen lg:w-[220px] lg:shadow-none ${navigationOpen ? 'flex' : 'hidden lg:flex'}`}>
       <div className="flex flex-none items-center gap-2 border-b border-chrome-border px-4 py-4">
         <Logo variant="tile" size={28} />
         <span className="text-sm font-semibold text-chrome-text-strong">TMS Wizard</span>
