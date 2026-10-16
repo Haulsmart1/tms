@@ -6,7 +6,7 @@ import DriverSessionBoundary from "./DriverSessionBoundary";
 import DriverGpsTracker from "./DriverGpsTracker";
 
 export const metadata: Metadata = {
-  title: "TMS Wizzard Driver",
+  title: "TMS Wizard Driver",
   manifest: "/driver/manifest.webmanifest",
   appleWebApp: { capable: true, title: "TMS Driver", statusBarStyle: "black-translucent" },
   icons: { apple: "/driver/icon-192.png" },

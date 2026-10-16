@@ -176,7 +176,7 @@ export default function CameraScanner({ mode, copy, disabled = false, onScan }: 
           setState("starting");
           setOpen(true);
         }}
-        className="mt-2 min-h-12 w-full rounded-xl border border-blue-700 bg-white px-4 text-sm font-black text-blue-800 disabled:opacity-50"
+        className="mt-2 min-h-12 w-full rounded-xl border border-teal-700 bg-teal-700 px-4 text-sm font-bold text-white shadow-sm transition hover:border-teal-800 hover:bg-teal-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-200 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {copy.open}
       </button>
@@ -186,22 +186,22 @@ export default function CameraScanner({ mode, copy, disabled = false, onScan }: 
   const canScanAgain = state === "success" || state === "error";
 
   return (
-    <div className="mt-3 rounded-2xl border border-slate-300 bg-slate-950 p-3 text-white">
+    <div className="mt-3 rounded-2xl border border-slate-200 bg-[#10243a] p-4 text-white shadow-lg">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-sm font-black">{copy.title}</div>
+          <div className="text-sm font-bold tracking-wide">{copy.title}</div>
           <div className="mt-1 text-xs text-slate-300">{copy.aim}</div>
         </div>
-        <button type="button" onClick={closeScanner} className="min-h-10 rounded-lg border border-slate-600 px-3 text-xs font-black text-white">
+        <button type="button" onClick={closeScanner} className="min-h-10 rounded-lg border border-slate-500 px-3 text-xs font-bold text-white transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300">
           Close
         </button>
       </div>
 
       <div className="mt-3 overflow-hidden rounded-xl bg-black">
-        <video ref={videoRef} autoPlay muted playsInline className="aspect-[4/3] w-full object-cover" />
+        <video ref={videoRef} autoPlay muted playsInline aria-label="Live camera preview for barcode scanning" className="aspect-[4/3] w-full object-cover" />
       </div>
 
-      <div className="mt-3 rounded-xl bg-slate-900 p-3 text-sm" role="status" aria-live="polite">
+      <div className={`mt-3 rounded-xl p-3 text-sm leading-relaxed ${state === "success" ? "bg-emerald-950 text-emerald-100" : state === "error" ? "bg-rose-950 text-rose-100" : "bg-slate-900 text-slate-100"}`} role="status" aria-live="polite" aria-busy={state === "starting" || state === "submitting"}>
         {state === "starting" ? "Starting camera..." : null}
         {state === "scanning" ? copy.scanning : null}
         {state === "submitting" ? statusMessage || copy.checking : null}
@@ -214,7 +214,7 @@ export default function CameraScanner({ mode, copy, disabled = false, onScan }: 
           type="button"
           disabled={disabled}
           onClick={scanAgain}
-          className="mt-3 min-h-12 w-full rounded-xl bg-blue-600 px-4 text-sm font-black text-white disabled:opacity-50"
+          className="mt-3 min-h-12 w-full rounded-xl bg-teal-500 px-4 text-sm font-bold text-slate-950 shadow-sm transition hover:bg-teal-400 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-200 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Scan again
         </button>

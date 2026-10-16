@@ -40,6 +40,7 @@ import {
   withoutQrPayload,
 } from "../../lib/offline/driverSync";
 import { applyOutcome, enqueue, nextDue, type QueueItem } from "../../lib/offline/queue";
+import { shouldHoldPodFailure } from "../../lib/offline/podFailureRetention";
 import { readJsonSafe } from "../../lib/pod/uploadClient";
 import type { DriverEvent } from "../../lib/shifts/events";
 import { createClient } from "../../lib/supabase/browser";
@@ -434,6 +435,16 @@ async function flushOnce(force: boolean): Promise<void> {
     }
     if (outcome.kind === "stop") {
       paused = outcome.error;
+      emit();
+      break;
+    }
+
+    // A refused POD must never be removed from IndexedDB: it may be the only
+    // surviving copy of a barcode, photograph or delivery confirmation.
+    // Pause the queue for office intervention, preserving this item and all
+    // subsequent work. Do not retry a permanent refusal in a tight loop.
+    if (shouldHoldPodFailure(head.payload.kind, outcome)) {
+      paused = `POD not sent: ${outcome.kind === "rejected" ? outcome.error : "Server refused the POD"}. Tell the office; do not clear this phone.`;
       emit();
       break;
     }
