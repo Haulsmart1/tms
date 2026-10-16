@@ -1838,9 +1838,9 @@ export default function JobsPage() {
 
               {/* COMPACT JOB LIST */}
               <div className="overflow-x-auto rounded-lg border border-line bg-surface shadow-sm">
-                <div className="min-w-[1080px]">
+                <div className="min-w-0 xl:min-w-[1080px]">
 
-                  <div className="grid grid-cols-[auto_1.45fr_1.35fr_0.8fr_1.05fr_1.05fr_0.85fr_0.9fr_auto] gap-3 border-b border-line bg-surface-2 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-ink-3">
+                  <div className="hidden grid-cols-[auto_1.45fr_1.35fr_0.8fr_1.05fr_1.05fr_0.85fr_0.9fr_auto] gap-3 border-b border-line bg-surface-2 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-ink-3 xl:grid">
                     <div aria-label="Planning selection">Plan</div>
                     <div>Reference</div>
                     <div>Customer</div>
@@ -1861,7 +1861,7 @@ export default function JobsPage() {
                       {[0, 1, 2, 3, 4, 5].map((index) => (
                         <div
                           key={`job-skeleton-${index}`}
-                          className="grid grid-cols-[minmax(120px,1fr)_minmax(140px,1.4fr)_110px_110px_minmax(110px,1fr)_minmax(110px,1fr)_auto] items-center gap-3 border-t border-line px-4 py-3"
+                          className="grid grid-cols-2 gap-3 border-t border-line px-3 py-3 xl:grid-cols-[minmax(120px,1fr)_minmax(140px,1.4fr)_110px_110px_minmax(110px,1fr)_minmax(110px,1fr)_auto] xl:items-center xl:px-4"
                         >
                           <Skeleton w="10ch" h="0.875rem" />
                           <Skeleton w="14ch" h="0.875rem" />
@@ -1898,18 +1898,18 @@ export default function JobsPage() {
                       return (
                         <div
                           key={job.id}
-                          className="border-b border-line last:border-b-0"
+                          className="border-b border-line last:border-b-0 max-xl:bg-surface"
                         >
 
                           {/* ONE-LINE JOB ROW */}
                           <div
-                            className={`grid grid-cols-[auto_1.45fr_1.35fr_0.8fr_1.05fr_1.05fr_0.85fr_0.9fr_auto] items-center gap-3 px-4 py-2.5 text-sm ${
+                              className={`grid grid-cols-2 gap-x-3 gap-y-2 px-3 py-3 text-sm xl:grid-cols-[auto_1.45fr_1.35fr_0.8fr_1.05fr_1.05fr_0.85fr_0.9fr_auto] xl:items-center xl:gap-3 xl:px-4 xl:py-2.5 ${
                               expanded
                                 ? "bg-surface-2"
                                 : "bg-surface"
                             }`}
                           >
-                            <div>
+                            <div className="flex items-center">
                               <input
                                 type="checkbox"
                                 aria-label={`Select ${job.reference || "job"} for Planning`}
@@ -1925,24 +1925,28 @@ export default function JobsPage() {
                             </div>
 
                             <div
-                              className="truncate font-mono font-semibold text-ink"
+                              className="min-w-0 break-words font-mono font-semibold text-ink xl:truncate"
                               title={job.reference}
                             >
-                              {job.reference}
+                              <span className="mb-0.5 block text-[10px] font-sans font-medium uppercase tracking-wide text-ink-3 xl:hidden">Reference</span>
+                              {job.reference || "No reference"}
                             </div>
 
                             <div
-                              className="truncate text-ink"
+                              className="min-w-0 break-words text-ink xl:truncate"
                               title={job.customers?.name || ""}
                             >
+                              <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-ink-3 xl:hidden">Customer</span>
                               {job.customers?.name || "-"}
                             </div>
 
-                            <div className="font-mono text-xs text-ink-2">
+                            <div className="min-w-0 text-xs text-ink-2 xl:font-mono">
+                              <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-ink-3 xl:hidden">Date</span>
                               {job.scheduled_date || "-"}
                             </div>
 
                             <div>
+                              <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-ink-3 xl:hidden">Status</span>
                               <span
                                 className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${
                                   job.status === "pending_acceptance"
@@ -1956,22 +1960,25 @@ export default function JobsPage() {
                               </span>
                             </div>
 
-                            <div className="truncate text-xs text-ink-2">
+                            <div className="min-w-0 break-words text-xs text-ink-2 xl:truncate">
+                              <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-ink-3 xl:hidden">Collection ETA</span>
                               {formatDateTime(
                                 job.collection_eta
                               )}
                             </div>
 
-                            <div className="truncate font-mono text-xs text-ink-2">
+                            <div className="min-w-0 text-xs text-ink-2 xl:truncate xl:font-mono">
+                              <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-ink-3 xl:hidden">Vehicle</span>
                               {job.vehicles?.registration ||
                                 "-"}
                             </div>
 
-                            <div className="truncate text-xs text-ink-2">
+                            <div className="min-w-0 break-words text-xs text-ink-2 xl:truncate">
+                              <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-ink-3 xl:hidden">Driver</span>
                               {job.drivers?.name || "-"}
                             </div>
 
-                            <div className="flex justify-end gap-2">
+                            <div className="col-span-2 flex justify-end gap-2 xl:col-span-1">
                               {job.status ===
                               "pending_acceptance" ? (
                                 <Button

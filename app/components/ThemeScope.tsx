@@ -3,6 +3,8 @@
 import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { isThemeableRoute } from "../../lib/nav/themeableRoutes";
+import { useTenant } from "./TenantProvider";
+import { shouldShowShell } from "../../lib/nav/shouldShowShell";
 
 /* Pins every non-themeable route dark by putting `.dark` on the content
    wrapper, which re-declares the dark token values for that subtree and so
@@ -17,10 +19,12 @@ import { isThemeableRoute } from "../../lib/nav/themeableRoutes";
    every route is in THEMEABLE_ROUTES. */
 export default function ThemeScope({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const { status } = useTenant();
   const pinned = !isThemeableRoute(pathname);
+  const hasShell = shouldShowShell(pathname, status);
 
   return (
-    <div className={pinned ? "dark" : undefined} style={{ flex: 1, minWidth: 0 }}>
+    <div className={`tms-content min-w-0 flex-1${pinned ? " dark" : ""}${hasShell ? " tms-has-shell" : ""}`}>
       {children}
     </div>
   );
