@@ -434,7 +434,7 @@ const styles = {
   complianceGrid:
     "mb-4 grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3",
   infoGrid: "mt-3.5 grid grid-cols-2 gap-3",
-  listGrid: "grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-3.5",
+  listGrid: "grid grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] gap-3.5",
   jobLink: "block text-inherit no-underline",
   openJob: "mt-3.5 text-xs font-semibold text-primary-deep",
   listCard: "rounded-lg border border-line bg-surface-2 p-4",
