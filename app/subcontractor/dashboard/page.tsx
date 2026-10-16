@@ -527,7 +527,7 @@ const styles = {
   statValue:
     "font-mono text-2xl font-semibold tabular-nums slashed-zero text-ink",
   listGrid:
-    "mt-4 grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-3.5",
+    "mt-4 grid grid-cols-[repeat(auto-fit,minmax(min(100%,280px),1fr))] gap-3.5",
   listCard: "rounded-lg border border-line bg-surface-2 p-4",
   rowBetween: "flex items-start justify-between gap-3",
   badge:
@@ -537,7 +537,7 @@ const styles = {
   smallLabel: "block text-kicker uppercase text-ink-3",
   infoValue: "mt-0.5 block text-sm text-ink",
   inviteGrid:
-    "mt-4 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] items-end gap-3",
+    "mt-4 grid grid-cols-[repeat(auto-fit,minmax(min(100%,220px),1fr))] items-end gap-3",
   field: "grid gap-1.5",
   label: "text-sm font-medium text-ink-2",
   input:

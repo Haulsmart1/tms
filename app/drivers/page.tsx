@@ -1514,7 +1514,7 @@ export default function DriversPage() {
           {showSkeleton ? (
             <div
               aria-busy
-              className="mt-4 grid gap-3 grid-cols-[repeat(auto-fit,minmax(300px,1fr))]"
+              className="mt-4 grid gap-3 grid-cols-[repeat(auto-fit,minmax(min(100%,300px),1fr))]"
             >
               <span className="sr-only" role="status">
                 Loading drivers
@@ -1549,7 +1549,7 @@ export default function DriversPage() {
               ))}
             </div>
           ) : (
-            <div className="mt-4 grid gap-3 grid-cols-[repeat(auto-fit,minmax(300px,1fr))]">
+            <div className="mt-4 grid gap-3 grid-cols-[repeat(auto-fit,minmax(min(100%,300px),1fr))]">
               {filteredDrivers.map((driver) => {
                 const warnings = getDriverWarnings(driver);
 

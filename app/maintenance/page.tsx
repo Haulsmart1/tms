@@ -921,7 +921,7 @@ function MaintenanceRecords({ tabBar }: { tabBar: ReactNode }) {
                             </Badge>
                         </div>
 
-                        <div className="grid grid-cols-[repeat(auto-fit,minmax(270px,1fr))] gap-3">
+                        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,270px),1fr))] gap-3">
                             {vorVehicles.map(
                                 (vehicle) => (
                                     <div
@@ -1388,7 +1388,7 @@ function MaintenanceRecords({ tabBar }: { tabBar: ReactNode }) {
                     {showSkeleton ? (
                         <div
                             aria-busy
-                            className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-4"
+                            className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,300px),1fr))] gap-4"
                         >
                             <span className="sr-only" role="status">
                                 Loading maintenance records
@@ -1428,7 +1428,7 @@ function MaintenanceRecords({ tabBar }: { tabBar: ReactNode }) {
                             found.
                         </div>
                     ) : (
-                        <div className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-4">
+                        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,300px),1fr))] gap-4">
                             {records.map((record) => (
                                 <article
                                     key={record.id}
