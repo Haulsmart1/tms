@@ -18,13 +18,16 @@ export default function Card({ children, kicker, className, flush }: Props) {
   return (
     <div
       className={cn(
-        "rounded-lg border border-line bg-surface shadow-sm",
+        "rounded-xl border border-card bg-surface shadow-sm",
         flush ? "overflow-hidden" : "p-4",
         className,
       )}
     >
       {kicker ? (
-        <div className="mb-2 text-kicker uppercase text-ink-3">{kicker}</div>
+        <div className="mb-3 flex items-center gap-2 text-kicker uppercase tracking-[0.08em] text-primary">
+          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent" />
+          {kicker}
+        </div>
       ) : null}
       {children}
     </div>

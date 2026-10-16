@@ -122,6 +122,10 @@ const PAIRS: Pair[] = [
   { label: "ink on surface-2",            fg: "--ink",               bg: "--surface-2",     min: AA_TEXT },
   { label: "ink-2 on surface",            fg: "--ink-2",             bg: "--surface",       min: AA_TEXT },
   { label: "ink-2 on canvas",             fg: "--ink-2",             bg: "--canvas",        min: AA_TEXT },
+  { label: "ink-4 on surface",            fg: "--ink-4",             bg: "--surface",       min: AA_TEXT },
+  { label: "card border on canvas",       fg: "--card-border",       bg: "--canvas",        min: AA_NON_TEXT },
+  { label: "card border on surface",      fg: "--card-border",       bg: "--surface",       min: AA_NON_TEXT },
+  { label: "strong control border on surface", fg: "--line-strong",   bg: "--surface",       min: AA_NON_TEXT },
   { label: "chrome-text on chrome",       fg: "--chrome-text",       bg: "--chrome",        min: AA_TEXT },
   { label: "chrome-text-strong on chrome",fg: "--chrome-text-strong",bg: "--chrome",        min: AA_TEXT },
   { label: "chrome-text on chrome-raised",fg: "--chrome-text",       bg: "--chrome-raised", min: AA_TEXT },
@@ -169,53 +173,19 @@ describe.each([
   );
 });
 
-/* Pairs asserted against the dark default only. Their light-theme counterparts
-   are pre-existing shipped failures recorded in KNOWN_GAPS below, which this
-   branch deliberately does not fix, so they cannot go in PAIRS (which runs
-   against both themes). */
-const DARK_ONLY_PAIRS: Pair[] = [
-  { label: "line-strong on surface (input and control borders)", fg: "--line-strong", bg: "--surface", min: AA_NON_TEXT },
-];
-
-describe(":root only contrast", () => {
-  it.each(DARK_ONLY_PAIRS.map((p) => [p.label, p] as const))("%s", (_label, pair) => {
-    const block = blocks[":root"];
-    const fg = block[pair.fg];
-    const bg = block[pair.bg];
-    expect(fg, `${pair.fg} missing from :root`).toBeDefined();
-    expect(bg, `${pair.bg} missing from :root`).toBeDefined();
-    const ratio = contrastRatio(fg, bg);
-    expect(
-      ratio,
-      `${pair.label} in :root: ${pair.fg} on ${pair.bg} measures ${ratio.toFixed(2)}:1, needs ${pair.min}:1`,
-    ).toBeGreaterThanOrEqual(pair.min);
-  });
-});
-
 /* KNOWN GAPS, documented in the spec rather than fixed.
 
-   Three of these are pre-existing in the already-shipped light theme and are
-   NOT caused by the dark work; fixing them means changing shipped light values,
-   which is its own decision. The fourth is a dark token that no component uses.
+   The remaining gap is pre-existing in the light theme and is NOT caused by
+   the dark work.
 
    These assert the ratio does not get WORSE, so the gaps stay documented and
    cannot silently regress further. Raising any of them to its AA minimum and
    moving the pair into PAIRS above is a welcome future change. */
-/* Floors are the measured ratio truncated DOWN to two decimals, never rounded.
-   Rounding a floor to the nearest value makes it unsatisfiable whenever the
-   measurement rounds up: --ink-4 on .light measures 2.628180 and a floor of
-   2.63 can never be met. Both floors below that would have rounded up were
-   originally written that way and failed for exactly this reason. Truncate.
-   Exact measurements at the time of writing, for reference:
-     .light --ink-3        4.150979
-     .light --ink-4        2.628180
-     .light --line-strong  1.844191
-     :root  --ink-4        3.106927 */
+/* Floor is measured and truncated down to two decimals, never rounded up.
+   Exact measurement at the time of writing, for reference:
+     .light --ink-3        4.150979 */
 const KNOWN_GAPS = [
   { selector: ".light", fg: "--ink-3",       bg: "--surface", floor: 4.15, target: 4.5, note: "needs 4.5 as body text" },
-  { selector: ".light", fg: "--ink-4",       bg: "--surface", floor: 2.62, target: 4.5, note: "needs 4.5; unused by any component" },
-  { selector: ".light", fg: "--line-strong", bg: "--surface", floor: 1.84, target: 3,   note: "needs 3 as a UI component boundary" },
-  { selector: ":root",  fg: "--ink-4",       bg: "--surface", floor: 3.10, target: 4.5, note: "needs 4.5; unused by any component" },
 ] as const;
 
 describe("known contrast gaps (documented, must not regress)", () => {

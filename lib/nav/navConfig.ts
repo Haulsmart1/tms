@@ -27,9 +27,14 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "jobs", label: "Jobs", href: "/jobs", icon: "ClipboardList" },
       { id: "pod", label: "Proof of delivery", href: "/pod", icon: "CircleCheck" },
       { id: "tracking", label: "Tracking", href: "/tracking", icon: "MapPin" },
-      { id: "invoices", label: "Invoices", href: "/invoices", icon: "Receipt" },
+    ],
+  },
+  {
+    label: "Commercial",
+    items: [
       { id: "customers", label: "Customers", href: "/customers", icon: "Building2" },
       { id: "subcontractors", label: "Subcontractors", href: "/subcontractors", icon: "Users" },
+      { id: "invoices", label: "Invoices", href: "/invoices", icon: "Receipt" },
     ],
   },
   {
@@ -57,3 +62,8 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [{ id: "settings", label: "Settings", href: "/settings", icon: "Settings" }],
   },
 ];
+
+/** Keep the parent section selected while a user is on one of its sub-pages. */
+export function isNavItemActive(pathname: string, href: string): boolean {
+  return pathname === href || pathname.startsWith(`${href}/`);
+}

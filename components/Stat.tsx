@@ -37,8 +37,8 @@ export default function Stat({ label, value, sub, subTone = "neutral", onClick }
       type={onClick ? "button" : undefined}
       onClick={onClick}
       className={cn(
-        "flex min-w-0 flex-col items-start gap-1 rounded-lg border border-line bg-surface p-4 text-left shadow-sm",
-        onClick && "cursor-pointer hover:border-primary-tint-border hover:shadow-md",
+        "flex min-h-[104px] min-w-0 flex-col items-start gap-1 rounded-xl border border-card border-t-2 border-t-accent bg-surface p-4 text-left shadow-sm",
+        onClick && "cursor-pointer hover:border-primary hover:shadow-md",
       )}
     >
       <span className="text-xs font-medium text-ink-3">{label}</span>
