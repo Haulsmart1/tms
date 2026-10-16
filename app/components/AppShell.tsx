@@ -12,7 +12,7 @@ import {
 import { useTenant } from "./TenantProvider";
 import TenantSelector from "./TenantSelector";
 import Logo from "../../components/Logo";
-import { NAV_GROUPS } from "../../lib/nav/navConfig";
+import { isNavItemActive, NAV_GROUPS } from "../../lib/nav/navConfig";
 import { shouldShowShell } from "../../lib/nav/shouldShowShell";
 import { createClient } from "../../lib/supabase/browser";
 import ThemeToggle from "./ThemeToggle";
@@ -63,7 +63,7 @@ export default function AppShell() {
             ) : null}
             {group.items.map((item) => {
               const Icon = ICONS[item.icon];
-              const active = pathname === item.href;
+              const active = isNavItemActive(pathname, item.href);
               return (
                 <Link
                   key={item.id}

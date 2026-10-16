@@ -37,26 +37,29 @@
      checkboxes, scrollbars) in its dark variant, matching this theme. */
   color-scheme: dark;
   /* surfaces */
-  --canvas: #0F1626;
-  --surface: #161F31;
-  --surface-2: #131B2B;
+  --canvas: #0D1524;
+  --surface: #18263A;
+  --surface-2: #202F45;
   /* Hover fill for interactive elements (tabs, secondary/ghost buttons, table
      rows). Deliberately NOT --surface-2: that token also hosts --ink text
      elsewhere and brightening it to clear 3:1 against --canvas/--surface (the
      WCAG non-text minimum for a UI-component boundary) drops ink-on-surface-2
      below the 4.5:1 text minimum lib/theme/contrast.test.ts asserts. Same
      reasoning as --skeleton above, for the same underlying conflict. */
-  --surface-hover: #4E6AB4;
-  --line: #26324A;
-  --line-strong: #586B90;
-  /* Fill for loading skeletons. Deliberately NOT --surface-2: in the dark theme
-     --surface-2 (#131B2B) is darker than the --surface (#161F31) card it sits
-     on and measures 1.05:1, i.e. invisible. See lib/theme/contrast.test.ts. */
-  --skeleton: #2B3852;
+  --surface-hover: #536FB8;
+  --line: #34445D;
+  --line-strong: #6E819E;
+  /* Card edges are intentionally clearer than ordinary dividers so cards
+     remain easy to scan on the dark canvas without relying on shadows. */
+  --card-border: #71839E;
+  /* Fill for loading skeletons. Kept between the card surface and inset
+     surface so placeholders stay visible but never look like real content.
+     See lib/theme/contrast.test.ts. */
+  --skeleton: #364762;
   /* chrome, the sidebar surface */
   --chrome: #0C1220;
-  --chrome-raised: #1A2438;
-  --chrome-border: #26324A;
+  --chrome-raised: #18263A;
+  --chrome-border: #34445D;
   --chrome-text: #9AA7BD;
   --chrome-text-strong: #E8EEF9;
   /* Link colour inside the chrome sidebar. Chrome is dark in BOTH themes, so
@@ -70,7 +73,7 @@
   --ink: #D6DEEC;
   --ink-2: #9AA7BD;
   --ink-3: #7787A0;
-  --ink-4: #5E6C85;
+  --ink-4: #8290A7;
   /* brand */
   --primary: #7FA0F7;
   --primary-hover: #9AB4F9;
@@ -82,16 +85,11 @@
      hardcodes text-white, which measures 2.97:1 on the dark primary: an AA
      failure on the most-clicked control in the app. */
   --on-primary: #0F1626;
-  /* accent and warning deliberately share one amber in dark. In light they are
-     four distinct values because a light surface needs a separately darkened
-     "-strong" shade to clear 4.5:1, and accent sits a step apart from warning.
-     Against a dark surface a single mid amber already clears AA in every one of
-     those roles, so splitting it would be a difference nobody could see. */
-  /* accent */
-  --accent: #EFB458;
-  --accent-text: #EFB458;
-  --accent-tint: #33280F;
-  --accent-border: #A07E26;
+  /* Brand accent is teal; amber is reserved for warnings and due-soon states. */
+  --accent: #61D2C4;
+  --accent-text: #61D2C4;
+  --accent-tint: #15332F;
+  --accent-border: #367E76;
   /* semantic status */
   --success: #6FD79B;        --success-strong: #6FD79B;
   --success-tint: #14301F;   --success-border: #357A4F;
@@ -127,16 +125,17 @@
      ancestor .light (see the header comment above) would otherwise inherit
      color-scheme: light and render mismatched native form chrome. */
   color-scheme: dark;
-  --canvas: #0F1626;
-  --surface: #161F31;
-  --surface-2: #131B2B;
-  --surface-hover: #4E6AB4;
-  --line: #26324A;
-  --line-strong: #586B90;
-  --skeleton: #2B3852;
+  --canvas: #0D1524;
+  --surface: #18263A;
+  --surface-2: #202F45;
+  --surface-hover: #536FB8;
+  --line: #34445D;
+  --line-strong: #6E819E;
+  --card-border: #71839E;
+  --skeleton: #364762;
   --chrome: #0C1220;
-  --chrome-raised: #1A2438;
-  --chrome-border: #26324A;
+  --chrome-raised: #18263A;
+  --chrome-border: #34445D;
   --chrome-text: #9AA7BD;
   --chrome-text-strong: #E8EEF9;
   /* Link colour inside the chrome sidebar. Chrome is dark in BOTH themes, so
@@ -147,7 +146,7 @@
   --ink: #D6DEEC;
   --ink-2: #9AA7BD;
   --ink-3: #7787A0;
-  --ink-4: #5E6C85;
+  --ink-4: #8290A7;
   --primary: #7FA0F7;
   --primary-hover: #9AB4F9;
   --primary-active: #6489EF;
@@ -155,15 +154,10 @@
   --primary-tint-border: #4E6AB4;
   --primary-deep: #A9C0FB;
   --on-primary: #0F1626;
-  /* accent and warning deliberately share one amber in dark. In light they are
-     four distinct values because a light surface needs a separately darkened
-     "-strong" shade to clear 4.5:1, and accent sits a step apart from warning.
-     Against a dark surface a single mid amber already clears AA in every one of
-     those roles, so splitting it would be a difference nobody could see. */
-  --accent: #EFB458;
-  --accent-text: #EFB458;
-  --accent-tint: #33280F;
-  --accent-border: #A07E26;
+  --accent: #61D2C4;
+  --accent-text: #61D2C4;
+  --accent-tint: #15332F;
+  --accent-border: #367E76;
   --success: #6FD79B;        --success-strong: #6FD79B;
   --success-tint: #14301F;   --success-border: #357A4F;
   --warning: #EFB458;        --warning-strong: #EFB458;
@@ -191,17 +185,18 @@
    element permanently (app/page.tsx), since the public marketing page stays
    light regardless of the console's setting.
 
-   Values are the palette that shipped 2026-08-11, unchanged apart from the two
-   new --on-* tokens. Three known contrast gaps here are pre-existing and are
-   documented in lib/theme/contrast.test.ts rather than fixed. */
+   The light palette shares the same card hierarchy and blue/teal brand roles as
+   dark while retaining a light work surface. Remaining known contrast gaps are
+   documented in lib/theme/contrast.test.ts. */
 .light {
   color-scheme: light;
-  --canvas: #F2F4F8;
+  --canvas: #EEF2F8;
   --surface: #FFFFFF;
-  --surface-2: #EDF0F5;
+  --surface-2: #F3F6FA;
   --surface-hover: #7B8CAB;
-  --line: #E4E7EE;
-  --line-strong: #B9BFCC;
+  --line: #D6DEEA;
+  --line-strong: #8794A8;
+  --card-border: #77869B;
   --skeleton: #CDD4E1;
   /* Chrome is dark in BOTH themes, so these look like they should equal the
      dark block's. They deliberately do not: these are the values that shipped
@@ -220,7 +215,7 @@
   --ink: #0B1220;
   --ink-2: #5B6474;
   --ink-3: #737D8F;
-  --ink-4: #98A0B0;
+  --ink-4: #6C778B;
   --primary: #2953E3;
   --primary-hover: #1E41BD;
   --primary-active: #1A3595;
@@ -228,10 +223,10 @@
   --primary-tint-border: #C3D1F8;
   --primary-deep: #1E41BD;
   --on-primary: #FFFFFF;
-  --accent: #D97706;
-  --accent-text: #B45309;
-  --accent-tint: #FFFBEB;
-  --accent-border: #FDE68A;
+  --accent: #087E73;
+  --accent-text: #006B63;
+  --accent-tint: #E0F5F1;
+  --accent-border: #9BCFC5;
   --success: #0F8547;        --success-strong: #0C6B3A;
   --success-tint: #DCF3E5;   --success-border: #B7E4C7;
   --warning: #B25E09;        --warning-strong: #8F4B06;
