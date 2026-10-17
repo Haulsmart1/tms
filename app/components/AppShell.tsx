@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, ClipboardList, CircleCheck, MapPin, Receipt, Building2, Users,
@@ -30,7 +30,51 @@ export default function AppShell() {
   const router = useRouter();
   const { status, role, userEmail } = useTenant();
   const [navigationOpen, setNavigationOpen] = useState(false);
+  const menuButton = useRef<HTMLButtonElement>(null);
+  const navigation = useRef<HTMLElement>(null);
   useEffect(() => { setNavigationOpen(false); }, [pathname]);
+  useEffect(() => {
+    if (!navigationOpen) return;
+    const desktop = window.matchMedia("(min-width: 1024px)");
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusable = () => [menuButton.current, ...Array.from(
+      navigation.current?.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), select:not([disabled]), input:not([disabled]), [tabindex="0"]',
+      ) ?? [],
+    )].filter((element): element is HTMLElement => !!element && element.getClientRects().length > 0);
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setNavigationOpen(false);
+        menuButton.current?.focus();
+      }
+      if (event.key === "Tab") {
+        const elements = focusable();
+        const first = elements[0];
+        const last = elements.at(-1);
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+    }
+    const onDesktop = () => { if (desktop.matches) setNavigationOpen(false); };
+    // A selector list follows DOM order; explicitly prefer the active page.
+    const initialLink = navigation.current?.querySelector<HTMLElement>('a[aria-current="page"]')
+      ?? navigation.current?.querySelector<HTMLElement>('a[href]');
+    initialLink?.focus();
+    document.addEventListener("keydown", onKeyDown);
+    desktop.addEventListener("change", onDesktop);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+      desktop.removeEventListener("change", onDesktop);
+    };
+  }, [navigationOpen]);
 
   if (!shouldShowShell(pathname, status)) return null;
 
@@ -48,6 +92,7 @@ export default function AppShell() {
   return (
     <>
     <button
+      ref={menuButton}
       type="button"
       aria-expanded={navigationOpen}
       aria-controls="tms-primary-navigation"
@@ -62,11 +107,12 @@ export default function AppShell() {
       <button
         type="button"
         aria-label="Close navigation menu"
-        onClick={() => setNavigationOpen(false)}
+        onClick={() => { setNavigationOpen(false); menuButton.current?.focus(); }}
+        tabIndex={-1}
         className="fixed inset-0 z-[45] bg-black/60 lg:hidden"
       />
     ) : null}
-    <aside id="tms-primary-navigation" onKeyDown={event => { if (event.key === 'Escape') setNavigationOpen(false); }} className={`ds fixed left-0 top-0 z-50 h-[100dvh] w-[min(20rem,calc(100vw-2rem))] flex-none flex-col bg-chrome font-sans shadow-2xl lg:sticky lg:h-screen lg:w-[220px] lg:shadow-none ${navigationOpen ? 'flex' : 'hidden lg:flex'}`}>
+    <aside ref={navigation} id="tms-primary-navigation" className={`ds fixed left-0 top-0 z-50 h-[100dvh] w-[min(20rem,calc(100vw-2rem))] flex-none flex-col bg-chrome font-sans shadow-2xl lg:sticky lg:h-screen lg:w-[220px] lg:shadow-none ${navigationOpen ? 'flex' : 'hidden lg:flex'}`}>
       <div className="flex flex-none items-center gap-2 border-b border-chrome-border px-4 py-4">
         <Logo variant="tile" size={28} />
         <span className="text-sm font-semibold text-chrome-text-strong">TMS Wizard</span>
@@ -87,9 +133,15 @@ export default function AppShell() {
                 <Link
                   key={item.id}
                   href={item.href}
+                  onClick={() => {
+                    if (navigationOpen) {
+                      setNavigationOpen(false);
+                      menuButton.current?.focus();
+                    }
+                  }}
                   aria-current={active ? "page" : undefined}
                   className={
-                    "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-semibold no-underline " +
+                    "flex min-h-11 items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-semibold no-underline lg:min-h-0 " +
                     (active
                       ? "bg-primary text-on-primary"
                       : "text-chrome-text hover:bg-chrome-raised hover:text-chrome-text-strong")

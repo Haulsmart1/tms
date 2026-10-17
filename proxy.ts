@@ -3,6 +3,13 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { isApiPath, isPublicPath } from "./lib/auth/publicRoutes";
 
+const SESSION_ENTRY_PATHS = new Set([
+  "/login",
+  "/auth/confirm",
+  "/api/auth/magic-link",
+  "/api/auth/callback",
+]);
+
 /* Edge auth gate.
 
    This is defence in depth, NOT the security boundary. RLS in Postgres remains
@@ -65,6 +72,17 @@ export async function proxy(request: NextRequest) {
      in the logs. */
   let response = NextResponse.next({ request });
 
+  /* Recovery and session creation must not refresh the session being replaced.
+     An old cookie can contain an already-used refresh token. Refreshing it here
+     can race the callback's fresh session cookies and needlessly contacts Auth
+     before a visitor can request a new link. These exact routes already own
+     their validation, rate limits and same-origin checks; protected routes
+     below still require getUser(). No offline or application storage is reset. */
+  if (SESSION_ENTRY_PATHS.has(request.nextUrl.pathname)) {
+    response.headers.set("Cache-Control", "private, no-store");
+    return response;
+  }
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -100,7 +118,7 @@ export async function proxy(request: NextRequest) {
   /* getUser(), never getSession(). getSession() decodes whatever is in the
      cookie without verifying it against the auth server, so a forged cookie
      passes. getUser() validates the token. This call is also what triggers the
-     refresh-and-setAll above, so it runs on public paths too. */
+     refresh-and-setAll above, so it runs on other public paths too. */
   let user = null;
 
   try {
