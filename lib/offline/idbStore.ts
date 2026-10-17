@@ -49,14 +49,22 @@ function run<R>(mode: IDBTransactionMode, work: (store: IDBObjectStore) => IDBRe
   return open().then(
     (db) =>
       new Promise<R>((resolve, reject) => {
-        const request = work(db.transaction(STORE, mode).objectStore(STORE));
-        request.onsuccess = () => resolve(request.result);
+        const transaction = db.transaction(STORE, mode);
+        const request = work(transaction.objectStore(STORE));
+        // Request success precedes commit; a later abort must expose that the
+        // only surviving copy may still be in this page's memory.
+        transaction.oncomplete = () => resolve(request.result);
+        transaction.onabort = () => reject(transaction.error ?? new Error("Queue transaction aborted"));
+        transaction.onerror = () => reject(transaction.error);
         request.onerror = () => reject(request.error);
       }),
   );
 }
 
 export async function idbLoadAll<T>(): Promise<StoredItem<T>[]> {
+  // Once storage fails, disk may be behind memory. Do not replace a retained
+  // photo with an apparently successful but stale disk read during this page.
+  if (memoryOnly) return ([...memory.values()] as StoredItem<T>[]).sort((a, b) => a.seq - b.seq);
   try {
     if (!idbAvailable()) throw new Error("no indexedDB");
     const rows = await run("readonly", (store) => store.index("seq").getAll() as IDBRequest<StoredItem<T>[]>);
