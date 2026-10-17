@@ -207,6 +207,7 @@ export async function POST(request: Request, context: RouteContext) {
     if (deliveryStopsError) throw new Error(deliveryStopsError.message);
 
     const allDelivered = areAllDeliveryStopsDelivered(deliveryStops ?? []);
+    let jobCompleted = allDelivered && job.status === "completed";
 
     const jobCompletedAt =
       (deliveryStops ?? [])
@@ -232,16 +233,31 @@ export async function POST(request: Request, context: RouteContext) {
         updateJob = updateJob.eq("subcontractor_id", session.subcontractorId);
       }
 
-      const { error: updateJobError } = await updateJob;
+      const { data: updatedJob, error: updateJobError } = await updateJob.select("id").maybeSingle();
 
       if (updateJobError) throw new Error(updateJobError.message);
+      jobCompleted = Boolean(updatedJob);
+
+      if (!updatedJob) {
+        // Dispatch may have reassigned or cancelled the job since the initial
+        // read. Keep the saved stop evidence, but never report an unconfirmed
+        // job transition. A concurrent completion is safe to acknowledge.
+        const { data: currentJob, error: currentJobError } = await admin
+          .from("jobs")
+          .select("status,pod_status")
+          .eq("id", jobId)
+          .eq("tenant_id", session.tenantId)
+          .maybeSingle();
+        if (currentJobError) throw new Error(currentJobError.message);
+        jobCompleted = currentJob?.status === "completed" && currentJob?.pod_status === "delivered";
+      }
     }
 
     return NextResponse.json({
       ok: true,
       alreadyCompleted,
       completedAt,
-      jobCompleted: allDelivered,
+      jobCompleted,
     });
   } catch (error) {
     const response = driverErrorResponse(error);
