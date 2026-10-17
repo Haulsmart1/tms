@@ -57,7 +57,6 @@ export default function LoginPage() {
         return;
       }
       setMessage(payload.message ?? "Check your email for a sign-in link.");
-      setEmail("");
     } catch {
       setMessage("Unable to start login. Check your connection and try again.");
     } finally {
@@ -96,9 +95,17 @@ export default function LoginPage() {
         </form>
 
         {message ? (
-          <p role="status" className="mt-4 text-sm text-ink-2">
-            {message}
-          </p>
+          <div className="mt-4 space-y-3 text-sm text-ink-2">
+            <p role="status" aria-live="polite">{message}</p>
+            <p>
+              No email? Delivery can be temporarily limited. Avoid repeatedly
+              requesting links. If it still does not arrive, contact{" "}
+              <a className="underline" href="mailto:support@tmswizard.com?subject=TMS%20sign-in%20email%20not%20received">
+                support@tmswizard.com
+              </a>{" "}
+              with the time you tried. Never send your login link or password.
+            </p>
+          </div>
         ) : null}
 
         <p className="mt-4 text-xs text-ink-3">

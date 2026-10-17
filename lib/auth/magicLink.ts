@@ -26,4 +26,4 @@ export function confirmRedirectUrl(origin: string, rawNext: unknown): string {
    the address has an account, so the response cannot be used to enumerate
    who uses the platform. */
 export const MAGIC_LINK_SENT_MESSAGE =
-  "If that email address has a TMS Wizzard account, a sign-in link is on its way. Check your inbox and open the newest login email in the browser you want to use. Each link works once.";
+  "Your sign-in request has been received. If the address has a TMS Wizard account and email delivery is available, you will receive a link. Check your inbox and junk folder, and use only the newest link. Each link works once.";
