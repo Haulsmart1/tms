@@ -217,7 +217,10 @@ function installWindowHooks(): void {
     if (document.visibilityState === "visible") void runChained(true);
   });
   window.addEventListener("beforeunload", (event) => {
-    if (mine().length === 0) return;
+    // Signing out or switching accounts hides the previous owner's items.
+    // Storage failure still makes those items vulnerable when this tab closes.
+    // Use only a generic browser warning; never expose another driver's payload.
+    if (mine().length === 0 && !(isMemoryOnly() && queue.length > 0)) return;
     event.preventDefault();
     event.returnValue = "";
   });
