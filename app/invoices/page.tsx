@@ -4658,9 +4658,9 @@ function InvoicesPanel({
             </Field>
           </div>
 
-          <div className="mt-4 overflow-x-auto rounded-lg border border-line">
-            <table className="w-full border-collapse text-sm">
-              <thead>
+          <div className="mt-4 rounded-lg border border-line md:overflow-x-auto">
+            <table aria-label="Invoice lines to edit" className="block w-full border-collapse text-sm md:table">
+              <thead className="hidden md:table-header-group">
                 <tr>
                   <th className="border-b border-line px-3 py-2 text-left">
                     Description
@@ -4680,12 +4680,14 @@ function InvoicesPanel({
                 </tr>
               </thead>
 
-              <tbody>
+              <tbody className="block divide-y divide-line md:table-row-group md:divide-y-0">
                 {editingLines.map((line, index) => (
-                  <tr key={line.id}>
-                    <td className="border-b border-line p-2">
+                  <tr key={line.id} className="grid min-w-0 grid-cols-2 gap-3 p-3 md:table-row md:p-0">
+                    <td className="col-span-2 block min-w-0 md:table-cell md:border-b md:border-line md:p-2">
+                      <span className="mb-1 block font-medium md:hidden">Line {index + 1} · Description</span>
                       <input
-                        className="h-10 min-w-64 w-full rounded-md border border-ink-3 bg-surface px-3 text-base text-ink"
+                        aria-label={`Line ${index + 1} description`}
+                        className="h-11 min-w-0 w-full rounded-md border border-ink-3 bg-surface px-3 text-base text-ink md:h-10 md:min-w-64"
                         value={line.description || ""}
                         onChange={(event) =>
                           setEditingLines((current) =>
@@ -4702,12 +4704,14 @@ function InvoicesPanel({
                       />
                     </td>
 
-                    <td className="border-b border-line p-2 text-right">
+                    <td className="block min-w-0 md:table-cell md:border-b md:border-line md:p-2 md:text-right">
+                      <span className="mb-1 block font-medium md:hidden">Quantity</span>
                       <input
+                        aria-label={`Line ${index + 1} quantity`}
                         type="number"
                         min="0.01"
                         step="0.01"
-                        className="h-10 w-24 rounded-md border border-ink-3 bg-surface px-3 text-right text-base text-ink"
+                        className="h-11 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-right text-base text-ink md:h-10 md:w-24"
                         value={line.quantity ?? 1}
                         onChange={(event) =>
                           setEditingLines((current) =>
@@ -4724,12 +4728,14 @@ function InvoicesPanel({
                       />
                     </td>
 
-                    <td className="border-b border-line p-2 text-right">
+                    <td className="block min-w-0 md:table-cell md:border-b md:border-line md:p-2 md:text-right">
+                      <span className="mb-1 block font-medium md:hidden">Unit price</span>
                       <input
+                        aria-label={`Line ${index + 1} unit price`}
                         type="number"
                         min="0"
                         step="0.01"
-                        className="h-10 w-32 rounded-md border border-ink-3 bg-surface px-3 text-right text-base text-ink"
+                        className="h-11 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-right text-base text-ink md:h-10 md:w-32"
                         value={line.unit_price ?? 0}
                         onChange={(event) =>
                           setEditingLines((current) =>
@@ -4746,12 +4752,14 @@ function InvoicesPanel({
                       />
                     </td>
 
-                    <td className="border-b border-line p-2 text-right">
+                    <td className="block min-w-0 md:table-cell md:border-b md:border-line md:p-2 md:text-right">
+                      <span className="mb-1 block font-medium md:hidden">VAT %</span>
                       <input
+                        aria-label={`Line ${index + 1} VAT percentage`}
                         type="number"
                         min="0"
                         step="0.01"
-                        className="h-10 w-24 rounded-md border border-ink-3 bg-surface px-3 text-right text-base text-ink"
+                        className="h-11 w-full min-w-0 rounded-md border border-ink-3 bg-surface px-3 text-right text-base text-ink md:h-10 md:w-24"
                         value={line.vat_rate ?? 0}
                         onChange={(event) =>
                           setEditingLines((current) =>
@@ -4768,7 +4776,8 @@ function InvoicesPanel({
                       />
                     </td>
 
-                    <td className="border-b border-line px-3 py-2 text-right font-mono">
+                    <td className="block min-w-0 self-end break-words py-2 text-right font-mono md:table-cell md:border-b md:border-line md:px-3">
+                      <span className="mb-1 block font-sans font-medium md:hidden">Net</span>
                       {money(
                         Number(line.quantity ?? 0) *
                           Number(line.unit_price ?? 0),
