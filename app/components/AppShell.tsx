@@ -63,7 +63,10 @@ export default function AppShell() {
       }
     }
     const onDesktop = () => { if (desktop.matches) setNavigationOpen(false); };
-    navigation.current?.querySelector<HTMLElement>('a[aria-current="page"], a[href]')?.focus();
+    // A selector list follows DOM order; explicitly prefer the active page.
+    const initialLink = navigation.current?.querySelector<HTMLElement>('a[aria-current="page"]')
+      ?? navigation.current?.querySelector<HTMLElement>('a[href]');
+    initialLink?.focus();
     document.addEventListener("keydown", onKeyDown);
     desktop.addEventListener("change", onDesktop);
     return () => {
