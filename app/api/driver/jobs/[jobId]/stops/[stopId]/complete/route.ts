@@ -192,8 +192,19 @@ export async function POST(request: Request, context: RouteContext) {
       if (updateStopError) throw new Error(updateStopError.message);
 
       if (!updatedStops || updatedStops.length === 0) {
-        // Completed by someone else between the read and the write.
+        // A zero-row update can also mean the stop disappeared or its
+        // assignment changed. Re-authorize and confirm a persisted delivery
+        // before acknowledging the queue item; an uncertain result must keep
+        // the driver's evidence for reconciliation.
+        const current = await loadDriverJobStop(admin, session, jobId, stopId);
+        if (!current || current.stop.type !== "delivery" || current.stop.pod_status !== "delivered") {
+          return NextResponse.json(
+            { error: "Delivery completion could not be confirmed. Keep your evidence and contact the office." },
+            { status: 409 },
+          );
+        }
         alreadyCompleted = true;
+        completedAt = current.stop.delivered_at ?? completedAt;
       }
     }
 
