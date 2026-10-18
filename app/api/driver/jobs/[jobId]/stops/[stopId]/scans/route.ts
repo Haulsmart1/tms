@@ -140,6 +140,16 @@ export async function POST(request: Request, context: RouteContext) {
 
         if (duplicateError) throw new Error(duplicateError.message);
 
+        // A unique conflict alone does not prove this authorized scan was
+        // saved. A 2xx would delete its offline queue item even when the
+        // scoped read cannot confirm a persisted row. Hold for reconciliation.
+        if (!duplicate) {
+          return NextResponse.json(
+            { error: "The barcode scan could not be confirmed. Tell the office before retrying." },
+            { status: 409 },
+          );
+        }
+
         return NextResponse.json({
           ok: true,
           duplicate: true,
