@@ -291,6 +291,17 @@ function stopEndpoint(jobId: string, stopId: string): string {
   return `/api/driver/jobs/${encodeURIComponent(jobId)}/stops/${encodeURIComponent(stopId)}`;
 }
 
+/** A successful transport status alone is not an acknowledgement of stored POD. */
+function podRecordOutcome(result: { status: number | null; error: string | null; json: Record<string, unknown> }): SyncResult {
+  if (result.status !== null && result.status >= 200 && result.status < 300 && result.json.ok !== true) {
+    // A proxy/login page, truncated JSON or an unexpected success body can
+    // arrive with 2xx. Keep the original photo/scan/completion and retry; the
+    // routes explicitly return ok:true once their persistence is confirmed.
+    return { kind: "retry", error: "The server did not confirm this POD was saved. Keeping it on this phone.", status: null };
+  }
+  return eventOutcome(result.status, result.error);
+}
+
 /*
   Same three steps as lib/pod/uploadClient.ts. The client id makes the server
   derive the path, and the upload never overwrites: token null (already
@@ -341,7 +352,7 @@ async function sendPodPhoto(payload: Extract<QueuePayload, { kind: "pod_photo" }
     originalFilename: payload.filename,
     mimeType: payload.mimeType,
   });
-  return eventOutcome(record.status, record.error);
+  return podRecordOutcome(record);
 }
 
 async function sendPodScan(payload: Extract<QueuePayload, { kind: "pod_scan" }>): Promise<SyncResult> {
@@ -349,7 +360,7 @@ async function sendPodScan(payload: Extract<QueuePayload, { kind: "pod_scan" }>)
     serial_number: payload.serialNumber,
     scan_format: payload.scanFormat,
   });
-  return eventOutcome(result.status, result.error);
+  return podRecordOutcome(result);
 }
 
 async function sendPodComplete(payload: Extract<QueuePayload, { kind: "pod_complete" }>): Promise<SyncResult> {
@@ -360,7 +371,7 @@ async function sendPodComplete(payload: Extract<QueuePayload, { kind: "pod_compl
     recipient_name: payload.recipientName,
     pod_notes: payload.podNotes,
   });
-  return eventOutcome(result.status, result.error);
+  return podRecordOutcome(result);
 }
 
 async function sendItem(item: QueueItem<QueuePayload>): Promise<SendResult> {
