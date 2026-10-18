@@ -7,8 +7,8 @@
   2. Upload the bytes straight to storage with that token (never through a
      route handler, so the 4.5 MB function body limit does not apply).
   3. POST the path to the record endpoint, which checks the stored object and
-     writes the pod_evidence row. If recording fails, the server removes the
-     object.
+     writes the pod_evidence row. If recording is uncertain, the server keeps
+     the object so a committed record or a later retry cannot lose its bytes.
 
   Imports nothing server-only; the storage client is passed in.
 */
