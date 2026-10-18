@@ -1,7 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "../../app/api/driver/me/route";
-import { isDriverJobForDate } from "./dashboardJobs";
+import { dashboardAssignedJobs, isDriverJobForDate } from "./dashboardJobs";
+import { readDriverSnapshot, type Snapshot, type SnapshotStore } from "../offline/driverCache";
 import { loadPlanningBoardJobs } from "../planning/boardJobs";
 import { createSavedPlanSnapshot } from "../planning/savedPlan";
 import { loadSavedPlan } from "../planning/savedPlanStore";
@@ -93,8 +94,10 @@ beforeEach(() => {
         const order = params.get("order");
         if (order?.startsWith("route_order")) rows.sort((a, b) =>
           Number(a.route_order ?? Number.MAX_SAFE_INTEGER) - Number(b.route_order ?? Number.MAX_SAFE_INTEGER) || String(a.reference).localeCompare(String(b.reference)));
+        if (order?.startsWith("job_date.desc")) rows.sort((a, b) => String(b.job_date).localeCompare(String(a.job_date)));
         const columns = params.get("select")!.split(",");
-        data = rows.map((row) => Object.fromEntries(columns.map((col) => [col, (row as Record<string, unknown>)[col] ?? null])));
+        const limit = Number(params.get("limit") ?? rows.length);
+        data = rows.slice(0, limit).map((row) => Object.fromEntries(columns.map((col) => [col, (row as Record<string, unknown>)[col] ?? null])));
       } else if (table === "planning_saved_plans") {
         expect(url.searchParams.get("tenant_id")).toBe("eq.tenant-bob");
         data = { id: "saved-ht21", tenant_id: "tenant-bob", name: "HT21 EOR 25 jobs", planning_date: today, snapshot: storedSnapshot, created_at: "2026-10-08T06:00:00Z", updated_at: "2026-10-08T06:00:00Z" };
@@ -120,6 +123,46 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
 
 describe("driver dashboard API", () => {
+  it("retains and prioritizes an authorized carried-over assignment for offline reads beyond the recent 100 jobs", async () => {
+    dashboardRows = Array.from({ length: 120 }, (_, index) => job(`recent-${index}`, {
+      job_date: "2026-10-07", scheduled_date: "2026-10-07", planning_date: null,
+    }));
+    dashboardRows.push(
+      job("carried-over-today", { job_date: "2026-08-01", planning_date: today, route_order: 1 }),
+      job("another-driver-today", { driver_id: "alice", planning_date: today }),
+      job("another-tenant-today", { tenant_id: "other", planning_date: today }),
+    );
+    type Dashboard = { jobs: ReturnType<typeof job>[]; todayJobs?: ReturnType<typeof job>[] };
+    const snapshots = new Map<string, Snapshot<unknown>>();
+    const store: SnapshotStore = {
+      get: async <T>(owner: string, url: string) => snapshots.get(`${owner}:${url}`) as Snapshot<T> | undefined,
+      put: async (snapshot) => { snapshots.set(`${snapshot.owner}:${snapshot.url}`, snapshot); },
+      remove: async (owner, url) => { snapshots.delete(`${owner}:${url}`); },
+    };
+    const options = { owner: "bob-user", url: "/api/driver/me", store, isCurrent: () => true };
+    const online = await readDriverSnapshot<Dashboard>({ ...options, fetcher: async () => GET() });
+    expect(online.data.jobs).toHaveLength(100);
+    expect(online.data.jobs.some((row) => row.id === "carried-over-today")).toBe(false);
+    expect(online.data.todayJobs?.map((row) => row.id)).toEqual(["carried-over-today"]);
+
+    // The actual phone preparer has an 80-job bound. Today's carried-over
+    // route must be included before that bound, not just recent history.
+    const paths = dashboardAssignedJobs(online.data).slice(0, 80).map((row) => `/api/driver/jobs/${row.id}`);
+    expect(paths[0]).toBe("/api/driver/jobs/carried-over-today");
+    for (const url of paths) {
+      await readDriverSnapshot({ ...options, url, fetcher: async () => new Response(JSON.stringify({ job: { id: url.split("/").at(-1) } })) });
+    }
+    const offlineFetch = async () => { throw new TypeError("Network offline"); };
+    const offline = await readDriverSnapshot<Dashboard>({ ...options, fetcher: offlineFetch });
+    expect(offline.cached).toBe(true);
+    const offlineJobs = dashboardAssignedJobs(offline.data);
+    expect(offlineJobs.filter((row) => isDriverJobForDate(row, today)).map((row) => row.id)).toEqual(["carried-over-today"]);
+    expect(offlineJobs.some((row) => row.id.startsWith("another-"))).toBe(false);
+    const detail = await readDriverSnapshot<{ job: { id: string } }>({ ...options, url: paths[0], fetcher: offlineFetch });
+    expect(detail.cached).toBe(true);
+    expect(detail.data.job.id).toBe("carried-over-today");
+  });
+
   it("loads the planned route on the operator's day and excludes superseded Kent dates", async () => {
     const response = await GET();
     expect(response.status).toBe(200);
