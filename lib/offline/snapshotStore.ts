@@ -2,8 +2,10 @@ import type { Snapshot, SnapshotStore } from "./driverCache";
 import type { DriverEvent } from "../shifts/events";
 import { projectDriverState } from "../shifts/projection";
 import type { DriverShiftState } from "../walkaround/driverState";
+import { dashboardAssignedJobs } from "../driver/dashboardJobs";
 
 type ShiftSnapshot = Snapshot<DriverShiftState>;
+type AssignmentSnapshot = { jobs: { id: string }[]; todayJobs?: { id: string }[] };
 
 // A separate database leaves existing queued events and photos untouched.
 let database: Promise<IDBDatabase> | undefined;
@@ -48,15 +50,15 @@ export const snapshotStore: SnapshotStore = {
         } else if (snapshot.url.startsWith("/api/driver/jobs/")) {
           const dashboard = store.get([snapshot.owner, "/api/driver/me"]);
           dashboard.onsuccess = () => {
-            const current = dashboard.result as Snapshot<{ jobs: { id: string }[] }> | undefined;
-            if (current && current.savedAt >= snapshot.savedAt && !current.data.jobs.some((job) => snapshot.url === `/api/driver/jobs/${encodeURIComponent(job.id)}`)) return;
+            const current = dashboard.result as Snapshot<AssignmentSnapshot> | undefined;
+            if (current && current.savedAt >= snapshot.savedAt && !dashboardAssignedJobs(current.data).some((job) => snapshot.url === `/api/driver/jobs/${encodeURIComponent(job.id)}`)) return;
             store.put(snapshot);
           };
         } else store.put(snapshot);
         if (snapshot.url === "/api/driver/me") {
-          const jobs = (snapshot.data as { jobs?: { id: string }[] }).jobs;
-          if (!Array.isArray(jobs)) return;
-          const allowed = new Set(jobs.map((job) => `/api/driver/jobs/${encodeURIComponent(job.id)}`));
+          const assignments = snapshot.data as AssignmentSnapshot;
+          if (!Array.isArray(assignments.jobs)) return;
+          const allowed = new Set(dashboardAssignedJobs(assignments).map((job) => `/api/driver/jobs/${encodeURIComponent(job.id)}`));
           const cursor = store.openCursor();
           cursor.onsuccess = () => {
             const row = cursor.result;
