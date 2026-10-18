@@ -22,6 +22,8 @@ export type DriverStop = {
   pod_status: string | null;
   pod_photo_url: string | null;
   delivered_at: string | null;
+  recipient_name: string | null;
+  pod_notes: string | null;
 };
 
 export async function loadDriverJobStop(
@@ -47,7 +49,7 @@ export async function loadDriverJobStop(
 
   const { data: stop, error: stopError } = await admin
     .from("job_stops")
-    .select("id,type,pod_status,pod_photo_url,delivered_at")
+    .select("id,type,pod_status,pod_photo_url,delivered_at,recipient_name,pod_notes")
     .eq("id", stopId)
     .eq("job_id", jobId)
     .eq("tenant_id", session.tenantId)
