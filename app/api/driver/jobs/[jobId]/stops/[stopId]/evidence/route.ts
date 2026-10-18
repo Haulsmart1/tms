@@ -60,6 +60,7 @@ export async function POST(request: Request, context: RouteContext) {
     const admin = createAdminClient();
     const owner = { tenantId: session.tenantId, jobId, stopId };
     const storagePath = typeof body.storagePath === "string" ? body.storagePath : "";
+    const originalFilename = typeof body.originalFilename === "string" ? body.originalFilename : null;
 
     // Ownership first, so nothing below can be used to probe another job.
     const loaded = await loadDriverJobStop(admin, session, jobId, stopId);
@@ -72,7 +73,23 @@ export async function POST(request: Request, context: RouteContext) {
     // re-gating: the shift may have ended or the stop been delivered since.
     if (meta?.clientId && isQueuedPodEvidencePathFor(storagePath, owner, meta.clientId)) {
       const existing = await findEvidenceByPath(admin, session.tenantId, storagePath);
-      if (existing) return NextResponse.json({ ok: true, evidence: existing }, { status: 200 });
+      if (existing) {
+        // A path hit alone is not proof that this queue item's photo was saved.
+        // A conflicting or legacy row must not acknowledge away the phone's
+        // original photo. Do not download, overwrite or remove historical bytes.
+        const matches = typeof existing.id === "string" && existing.id.trim().length > 0
+          && existing.tenant_id === owner.tenantId && existing.job_id === jobId && existing.stop_id === stopId
+          && existing.storage_path === storagePath && existing.created_by === session.userId
+          && existing.evidence_type === "photo" && existing.mime_type === mimeType
+          && existing.original_filename === (originalFilename ? originalFilename.slice(0, 255) : null);
+        if (!matches) {
+          return NextResponse.json(
+            { error: "The saved photo does not match this queued upload. Tell the office." },
+            { status: 409 },
+          );
+        }
+        return NextResponse.json({ ok: true, evidence: existing }, { status: 200 });
+      }
     }
 
     // A request from the offline queue is gated at the time it was recorded.
@@ -109,7 +126,7 @@ export async function POST(request: Request, context: RouteContext) {
       ...owner,
       evidenceType: "photo",
       storagePath,
-      originalFilename: typeof body.originalFilename === "string" ? body.originalFilename : null,
+      originalFilename,
       mimeType,
       size: verified.size,
       createdBy: session.userId,
