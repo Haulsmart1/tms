@@ -81,7 +81,10 @@ export async function removeEvidenceObject(admin: SupabaseClient, path: string):
 
 /**
   Confirm the uploaded object exists at exactly `path` and matches the declared
-  type and size limit. An invalid object is removed.
+  type and size limit. Rejection does not remove bytes: this path may already
+  back recorded evidence, and the caller's MIME claim is not proof otherwise.
+  Even a missing row read would race a concurrent recorder. Any cleanup needs
+  a separate, explicitly authorized reconciliation, never upload validation.
 */
 export async function verifyUploadedEvidence(
   admin: SupabaseClient,
@@ -96,13 +99,11 @@ export async function verifyUploadedEvidence(
   const bytes = new Uint8Array(await data.arrayBuffer());
 
   if (bytes.byteLength === 0 || bytes.byteLength > MAX_POD_EVIDENCE_BYTES) {
-    await removeEvidenceObject(admin, path);
     return { ok: false, status: 413, message: "The file is empty or exceeds the 15 MB POD upload limit." };
   }
 
   const content = validateEvidenceContent(bytes, mimeType);
   if (!content.ok) {
-    await removeEvidenceObject(admin, path);
     return content;
   }
 
