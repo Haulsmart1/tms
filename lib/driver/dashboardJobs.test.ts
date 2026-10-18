@@ -1,8 +1,26 @@
 import { describe, expect, it } from "vitest";
 import {
+  dashboardAssignedJobs,
   getDriverJobOperationalDate,
   isDriverJobForDate,
 } from "./dashboardJobs";
+
+describe("dashboard assignments for offline preparation", () => {
+  it("deduplicates in favor of today's server-authorized route without changing either input", () => {
+    const current = Object.freeze({ id: "same", route_order: 1 });
+    const history = Object.freeze({ id: "same", route_order: 9 });
+    const data = { todayJobs: [current], jobs: [history, { id: "recent", route_order: 2 }] };
+    expect(dashboardAssignedJobs(data)).toEqual([current, data.jobs[1]]);
+    expect(data.jobs[0]).toBe(history);
+    expect(data.todayJobs).toEqual([current]);
+  });
+
+  it("supports older cached/API responses without a separate today's list", () => {
+    const jobs = [{ id: "old-api" }];
+    expect(dashboardAssignedJobs({ jobs })).toEqual(jobs);
+    expect(dashboardAssignedJobs({ jobs: [], todayJobs: [] })).toEqual([]);
+  });
+});
 
 describe("getDriverJobOperationalDate", () => {
   it("prefers scheduled_date when both dates exist", () => {
