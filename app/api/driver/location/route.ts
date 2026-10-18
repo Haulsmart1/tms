@@ -11,12 +11,22 @@ import { createAdminClient } from "../../../../lib/supabase/admin";
 export async function POST(request: NextRequest) {
   try {
     const session = await requireDriverSession();
+    const raw: unknown = await request.json();
+    const ownerId = raw && typeof raw === "object" ? (raw as Record<string, unknown>).ownerId : undefined;
+    // The phone may have captured this point before another driver signed in.
+    // Never turn a late A-owned (or unbound legacy) fix into B's vehicle data.
+    if (typeof ownerId !== "string" || ownerId !== session.userId) {
+      return NextResponse.json(
+        { error: "This GPS position belongs to another or unknown sign-in. Keep this page open and tell the office." },
+        { status: 409 },
+      );
+    }
     const admin = createAdminClient();
     const limit = await checkRateLimit(admin, RATE_LIMITS.driverLocation, session.userId);
     if (!limit.allowed) {
       return NextResponse.json({ error: "Too many location updates. Try again shortly." }, { status: 429 });
     }
-    const location = parseDriverLocation(await request.json());
+    const location = parseDriverLocation(raw);
 
     const { data: assignments, error: assignmentError } =
       await admin
