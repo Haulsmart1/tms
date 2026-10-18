@@ -39,7 +39,7 @@ import {
   type SyncResult,
   withoutQrPayload,
 } from "../../lib/offline/driverSync";
-import { applyOutcome, enqueue, nextDue, type QueueItem } from "../../lib/offline/queue";
+import { applyOutcome, enqueue, MAX_SERVER_FAILURES, nextDue, type QueueItem } from "../../lib/offline/queue";
 import { shouldHoldPodFailure } from "../../lib/offline/podFailureRetention";
 import { readJsonSafe } from "../../lib/pod/uploadClient";
 import type { DriverEvent } from "../../lib/shifts/events";
@@ -476,8 +476,17 @@ async function flushOnce(force: boolean): Promise<void> {
     // surviving copy of a barcode, photograph or delivery confirmation.
     // Pause the queue for office intervention, preserving this item and all
     // subsequent work. Do not retry a permanent refusal in a tight loop.
-    if (shouldHoldPodFailure(head.payload.kind, outcome, head.serverFailures)) {
-      paused = `POD not sent: ${outcome.kind === "rejected" ? outcome.error : "Server refused the POD"}. Tell the office; do not clear this phone.`;
+    // A transient server failure is not an explicit refusal of the check or
+    // defect photo. Keep those original records and dependent evidence too,
+    // rather than allowing applyOutcome's generic retry cap to delete them.
+    // Actual walkaround 4xx refusal policy is deliberately unchanged here.
+    const holdWalkaroundServerFailure = (head.payload.kind === "event" || head.payload.kind === "photo")
+      && outcome.kind === "retry" && typeof outcome.status === "number" && outcome.status >= 500
+      && head.serverFailures + 1 >= MAX_SERVER_FAILURES;
+    if (shouldHoldPodFailure(head.payload.kind, outcome, head.serverFailures) || holdWalkaroundServerFailure) {
+      paused = holdWalkaroundServerFailure
+        ? "Driver item not sent: the server could not confirm it was saved. Tell the office; do not clear this phone."
+        : `POD not sent: ${outcome.kind === "rejected" ? outcome.error : "Server refused the POD"}. Tell the office; do not clear this phone.`;
       emit();
       break;
     }
