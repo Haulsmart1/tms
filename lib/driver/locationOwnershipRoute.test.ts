@@ -7,6 +7,7 @@ vi.mock("../supabase/admin", () => ({ createAdminClient: mocks.admin }));
 vi.mock("./server", () => ({ requireDriverSession: mocks.session, driverErrorResponse: (error: { status?: number }) => ({ status: error.status ?? 500, message: "Driver request failed." }) }));
 vi.mock("../rateLimit", () => ({ checkRateLimit: async () => ({ allowed: true }), RATE_LIMITS: { driverLocation: {} } }));
 import { POST } from "../../app/api/driver/location/route";
+import { classifyLocationFailure } from "./gpsRetry";
 
 let requests: URL[];
 let positions: Record<string, unknown>[];
@@ -43,9 +44,14 @@ it("does not attribute owner A's queued GPS point to signed-in owner B's vehicle
   expect(positions).toEqual([]);
   expect(requests).toEqual([]);
 });
-it("holds unbound legacy GPS points instead of assigning the current user's vehicle", async () => {
-  expect((await post()).status).toBe(409);
+it("keeps an old GPS tab retrying without falsely recording or clearing an unbound fix", async () => {
+  const response = await post();
+  expect(response.status).toBe(503);
+  expect(response.headers.get("retry-after")).toBe("120");
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(classifyLocationFailure(response.status)).toBe("retry");
   expect(positions).toEqual([]);
+  expect(requests).toEqual([]);
 });
 it("allows a position bound to the verified current user and derives tenant/vehicle server-side", async () => {
   expect((await post("owner-b")).status).toBe(200);

@@ -15,6 +15,16 @@ export async function POST(request: NextRequest) {
     const ownerId = raw && typeof raw === "object" ? (raw as Record<string, unknown>).ownerId : undefined;
     // The phone may have captured this point before another driver signed in.
     // Never turn a late A-owned (or unbound legacy) fix into B's vehicle data.
+    // Previously loaded driver tabs omit ownerId. Their GPS retry policy
+    // treats 409 as terminal and clears all in-memory fixes. Fail closed
+    // without an insert, but use a retryable answer to avoid immediate loss.
+    // This is a transitional hold, not proof that old fixes can be recovered.
+    if (ownerId === undefined) {
+      return NextResponse.json(
+        { error: "This older GPS tab cannot verify who recorded this position. No position was saved. Keep the tab open and contact the office." },
+        { status: 503, headers: { "Retry-After": "120", "Cache-Control": "no-store" } },
+      );
+    }
     if (typeof ownerId !== "string" || ownerId !== session.userId) {
       return NextResponse.json(
         { error: "This GPS position belongs to another or unknown sign-in. Keep this page open and tell the office." },
