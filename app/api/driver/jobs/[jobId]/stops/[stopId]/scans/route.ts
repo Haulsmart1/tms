@@ -64,20 +64,9 @@ export async function POST(request: Request, context: RouteContext) {
       return NextResponse.json({ error: "Job stop not found." }, { status: 404 });
     }
 
-    if (!isWorkableJobStatus(loaded.job.status)) {
-      return NextResponse.json({ error: jobNotWorkableMessage(loaded.job.status) }, { status: 409 });
-    }
-
     if (loaded.stop.type !== "delivery") {
       return NextResponse.json(
         { error: "Barcode verification is recorded at delivery stops." },
-        { status: 409 },
-      );
-    }
-
-    if (loaded.stop.pod_status === "delivered") {
-      return NextResponse.json(
-        { error: "This delivery is already complete." },
         { status: 409 },
       );
     }
@@ -118,6 +107,22 @@ export async function POST(request: Request, context: RouteContext) {
         message: "This item has already been verified on this job.",
         scan: existing,
       });
+    }
+
+    // A saved job-wide verification remains an acknowledged no-op after
+    // dispatch or another device completes the stop. Its original reply may
+    // have been lost while the phone still holds the scan in its offline
+    // queue. Ownership, delivery type and expected serial are checked above;
+    // only an absent verification reaches these new-write gates.
+    if (!isWorkableJobStatus(loaded.job.status)) {
+      return NextResponse.json({ error: jobNotWorkableMessage(loaded.job.status) }, { status: 409 });
+    }
+
+    if (loaded.stop.pod_status === "delivered") {
+      return NextResponse.json(
+        { error: "This delivery is already complete." },
+        { status: 409 },
+      );
     }
 
     const { data: inserted, error: insertError } = await admin
