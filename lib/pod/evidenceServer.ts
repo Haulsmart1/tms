@@ -109,7 +109,7 @@ export async function verifyUploadedEvidence(
   return { ok: true, size: bytes.byteLength };
 }
 
-/** Insert the evidence row; on failure remove the object so nothing is orphaned. */
+/** Insert the evidence row, preserving uploaded bytes if persistence is uncertain. */
 export async function recordEvidenceRow(
   admin: SupabaseClient,
   row: PodEvidenceOwner & {
@@ -121,6 +121,15 @@ export async function recordEvidenceRow(
     createdBy: string;
   },
 ) {
+  const matches = (value: unknown): value is Record<string, unknown> => {
+    if (!value || typeof value !== "object") return false;
+    const saved = value as Record<string, unknown>;
+    return typeof saved.id === "string" && saved.id.length > 0
+      && saved.tenant_id === row.tenantId && saved.job_id === row.jobId && saved.stop_id === row.stopId
+      && saved.storage_path === row.storagePath && saved.evidence_type === row.evidenceType
+      && saved.mime_type === row.mimeType && saved.file_size_bytes === row.size && saved.created_by === row.createdBy
+      && saved.original_filename === (row.originalFilename ? row.originalFilename.slice(0, 255) : null);
+  };
   const { data: existing, error: existingError } = await admin
     .from("pod_evidence")
     .select(POD_EVIDENCE_SELECT)
@@ -128,7 +137,10 @@ export async function recordEvidenceRow(
     .eq("storage_path", row.storagePath)
     .maybeSingle();
   if (existingError) throw new Error(existingError.message);
-  if (existing) return existing;
+  if (existing) {
+    if (!matches(existing)) throw new Error("The saved evidence does not match this upload.");
+    return existing;
+  }
 
   const { data, error } = await admin
     .from("pod_evidence")
@@ -146,9 +158,15 @@ export async function recordEvidenceRow(
     .select(POD_EVIDENCE_SELECT)
     .single();
 
-  if (error) {
-    await removeEvidenceObject(admin, row.storagePath);
-    throw new Error(error.message);
+  if (error || !matches(data)) {
+    // The insert may have committed before its response was lost, or another
+    // retry may have inserted the same path after our initial lookup. Deleting
+    // storage here can destroy the photo behind that persisted evidence row.
+    // A scoped readback can confirm success; otherwise keep the bytes and let
+    // the existing queue retry/hold rules retain the phone's original photo.
+    const persisted = await findEvidenceByPath(admin, row.tenantId, row.storagePath);
+    if (matches(persisted)) return persisted;
+    throw new Error(error?.message ?? "The evidence record could not be confirmed.");
   }
 
   return data;
