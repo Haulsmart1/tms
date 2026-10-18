@@ -30,6 +30,20 @@ type CompleteBody = {
   recordedAt?: unknown;
 };
 
+function matchesQueuedCompletion(stop: { recipient_name: string | null; pod_notes: string | null }, body: CompleteBody): boolean {
+  const recipient = typeof body.recipient_name === "string" ? body.recipient_name.trim() : "";
+  const notes = typeof body.pod_notes === "string" ? body.pod_notes.trim() || null : null;
+  return recipient.length > 0 && recipient.length <= 200 && (notes === null || notes.length <= 4000)
+    && recipient === stop.recipient_name && notes === stop.pod_notes;
+}
+
+function unconfirmedCompletion() {
+  return NextResponse.json(
+    { error: "This delivery is complete, but this phone's recipient or notes were not confirmed as saved. Keep your evidence and contact the office." },
+    { status: 409 },
+  );
+}
+
 /*
   Complete a delivery stop from the driver app. Server-side rules (review POD-12):
   - the job must be open (not cancelled, unaccepted or already completed),
@@ -62,22 +76,27 @@ export async function POST(request: Request, context: RouteContext) {
     const { job, stop } = loaded;
     let alreadyCompleted = stop.pod_status === "delivered";
     let completedAt = stop.delivered_at ?? new Date().toISOString();
+    let body: CompleteBody = {};
+    try {
+      body = (await request.json()) as CompleteBody;
+      if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("Invalid body");
+    } catch {
+      // Preserve the existing bodyless, non-queued delivered-stop no-op.
+      if (!alreadyCompleted || request.body !== null) return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+      body = {};
+    }
+    const meta = parseQueuedMeta(body);
+    if (hasInvalidClientId(body, meta)) {
+      return NextResponse.json({ error: "Invalid clientId." }, { status: 400 });
+    }
+
+    // Another device or the office may have completed this stop while the
+    // driver's original recipient/notes were offline. A delivered status is
+    // not proof those fields were saved. Never overwrite the saved POD, and
+    // do not ACK away a conflicting queued completion.
+    if (alreadyCompleted && meta && !matchesQueuedCompletion(stop, body)) return unconfirmedCompletion();
 
     if (!alreadyCompleted) {
-      let body: CompleteBody;
-
-      try {
-        body = (await request.json()) as CompleteBody;
-      } catch {
-        return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
-      }
-
-      const meta = parseQueuedMeta(body);
-
-      if (hasInvalidClientId(body, meta)) {
-        return NextResponse.json({ error: "Invalid clientId." }, { status: 400 });
-      }
-
       const receivedAt = new Date();
       let recordedAt = receivedAt.toISOString();
       let timeTrusted = true;
@@ -203,6 +222,7 @@ export async function POST(request: Request, context: RouteContext) {
             { status: 409 },
           );
         }
+        if (meta && !matchesQueuedCompletion(current.stop, body)) return unconfirmedCompletion();
         alreadyCompleted = true;
         completedAt = current.stop.delivered_at ?? completedAt;
       }
