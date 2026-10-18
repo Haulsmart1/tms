@@ -72,9 +72,9 @@ const LAST_USER_KEY = "tms-driver-queue-user";
 const REQUEST_TIMEOUT_MS = 20_000;
 
 /** Bound waiting even when the storage SDK does not settle or support abort. */
-function awaitPodStorageUpload<T>(upload: PromiseLike<T>): Promise<T> {
+function awaitStorageUpload<T>(upload: PromiseLike<T>): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("POD storage upload timed out.")), REQUEST_TIMEOUT_MS);
+    const timeout = setTimeout(() => reject(new Error("Photo storage upload timed out.")), REQUEST_TIMEOUT_MS);
     Promise.resolve(upload).then(resolve, reject).finally(() => clearTimeout(timeout));
   });
 }
@@ -281,9 +281,12 @@ async function sendPhoto(item: QueueItem<QueuePayload>, payload: Extract<QueuePa
   const beforeUpload = await guardOwner(payload.ownerId);
   if (beforeUpload) return beforeUpload;
   try {
-    const { error } = await createClient()
+    // Defect photos share the same ordered flush lock as POD. Bound the wait
+    // here too; a stalled SDK request must not own that lock indefinitely.
+    // A timeout retains the original bytes; it does not cancel the SDK request.
+    const { error } = await awaitStorageUpload(createClient()
       .storage.from(PHOTO_BUCKET)
-      .uploadToSignedUrl(path, token, payload.blob, { contentType: payload.mimeType, upsert: false });
+      .uploadToSignedUrl(path, token, payload.blob, { contentType: payload.mimeType, upsert: false }));
     if (error) return { kind: "retry", error: "The photo upload did not complete.", status: null };
   } catch {
     return { kind: "retry", error: "The photo upload did not complete.", status: null };
@@ -343,7 +346,7 @@ async function sendPodPhoto(payload: Extract<QueuePayload, { kind: "pod_photo" }
       // original queued bytes and release the flush lock after the deadline.
       // This bounds waiting, not the underlying SDK request: a late success
       // is ignored here, and retry uses the same non-upsert client-id path.
-      const { error } = await awaitPodStorageUpload(createClient()
+      const { error } = await awaitStorageUpload(createClient()
         .storage.from(POD_BUCKET)
         .uploadToSignedUrl(upload.path, upload.token, payload.blob, { contentType: payload.mimeType, upsert: false }));
       failure = error;
