@@ -71,6 +71,14 @@ const REJECTED_KEY = "tms-driver-queue-rejected";
 const LAST_USER_KEY = "tms-driver-queue-user";
 const REQUEST_TIMEOUT_MS = 20_000;
 
+/** Bound waiting even when the storage SDK does not settle or support abort. */
+function awaitPodStorageUpload<T>(upload: PromiseLike<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("POD storage upload timed out.")), REQUEST_TIMEOUT_MS);
+    Promise.resolve(upload).then(resolve, reject).finally(() => clearTimeout(timeout));
+  });
+}
+
 let queue: StoredItem<QueuePayload>[] = [];
 let seq = 0;
 let rejected: RejectedItem[] = [];
@@ -331,9 +339,13 @@ async function sendPodPhoto(payload: Extract<QueuePayload, { kind: "pod_photo" }
     if (beforeUpload) return beforeUpload;
     let failure: unknown = null;
     try {
-      const { error } = await createClient()
+      // Storage can stall independently of the JSON endpoints. Keep the
+      // original queued bytes and release the flush lock after the deadline.
+      // This bounds waiting, not the underlying SDK request: a late success
+      // is ignored here, and retry uses the same non-upsert client-id path.
+      const { error } = await awaitPodStorageUpload(createClient()
         .storage.from(POD_BUCKET)
-        .uploadToSignedUrl(upload.path, upload.token, payload.blob, { contentType: payload.mimeType, upsert: false });
+        .uploadToSignedUrl(upload.path, upload.token, payload.blob, { contentType: payload.mimeType, upsert: false }));
       failure = error;
     } catch (error) {
       failure = error ?? new Error("Upload failed.");
