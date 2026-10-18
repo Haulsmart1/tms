@@ -83,7 +83,7 @@ let queue: StoredItem<QueuePayload>[] = [];
 let seq = 0;
 let rejected: RejectedItem[] = [];
 let paused: string | null = null;
-let sent: SentEvent[] = [];
+let sent: (SentEvent & { ownerId: string | undefined })[] = [];
 /** The signed-in user as far as this phone knows (see refreshUser). */
 let currentUser: string | null = null;
 let loading: Promise<void> | null = null;
@@ -100,7 +100,10 @@ function mine(): StoredItem<QueuePayload>[] {
 function emit(): void {
   const { mine: own, heldForOthers } = partitionByOwner(queue, currentUser);
   const visible = rejected.filter((r) => !r.ownerId || r.ownerId === currentUser);
-  snapshot = { pending: own, heldForOthers, rejected: visible, paused, sent, memoryOnly: isMemoryOnly() };
+  // A request accepted for the previous owner may finish after an auth change.
+  // Keep its acknowledgement scoped, just like pending and rejected evidence.
+  const ownSent = sent.filter((item) => item.ownerId === currentUser).map(({ event, sentAt }) => ({ event, sentAt }));
+  snapshot = { pending: own, heldForOthers, rejected: visible, paused, sent: ownSent, memoryOnly: isMemoryOnly() };
   for (const listener of listeners) listener(snapshot);
 }
 
@@ -496,7 +499,7 @@ async function flushOnce(force: boolean): Promise<void> {
     const result = applyOutcome(queue, head.id, outcome, now);
     let next = result.queue as StoredItem<QueuePayload>[];
     if (outcome.kind === "sent" && head.payload.kind === "event") {
-      sent = [...sent, { event: withoutQrPayload(head.payload.event), sentAt: now }].slice(-50);
+      sent = [...sent, { event: withoutQrPayload(head.payload.event), sentAt: now, ownerId: head.payload.ownerId }].slice(-50);
       if (head.payload.ownerId) {
         await reflectAcceptedShift(head.payload.ownerId, withoutQrPayload(head.payload.event), now).catch(() => {});
       }
