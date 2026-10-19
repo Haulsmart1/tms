@@ -3359,7 +3359,7 @@ export default function PlanningPage() {
           {loading ? (
             <p className="text-sm text-ink-3">Loading the day&apos;s jobs...</p>
           ) : (
-            <div className="flex items-start gap-4">
+            <div className="flex min-w-0 flex-col items-stretch gap-4 lg:flex-row lg:items-start">
               <UnassignedPool
                 jobs={unassigned}
                 subcontracted={subcontracted}
@@ -3371,7 +3371,7 @@ export default function PlanningPage() {
                 onAcceptJob={openAcceptance}
                 onDropJob={(jobId) => moveJob(jobId, null, null)}
               />
-              <div className="min-w-0 flex flex-1 flex-col gap-3">
+              <div className="flex min-w-0 w-full flex-1 flex-col gap-3">
                 <PlanningMap
                   markers={markers}
                   route={selectedRoute}
