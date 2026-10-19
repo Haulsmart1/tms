@@ -44,7 +44,7 @@ export default function UnassignedPool({
       aria-label="Unassigned jobs"
       onDragOver={handleDragOver}
       onDrop={handleDrop}
-      className="flex w-[240px] flex-none flex-col gap-2 rounded-lg border border-line bg-surface-2 p-3"
+      className="flex min-w-0 w-full flex-none flex-col gap-2 rounded-lg border border-line bg-surface-2 p-3 lg:w-[240px]"
     >
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-ink">
