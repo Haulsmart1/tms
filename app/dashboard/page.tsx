@@ -334,12 +334,15 @@ export default function DashboardPage() {
               sub={kpis.podsAwaiting > 0 ? "open delivery stops" : undefined}
               subTone="warning"
             />
-            <Stat
-              label="Overdue invoices"
-              value={showSkeleton ? <Skeleton display="inline-block" w="6ch" h="1.25rem" /> : money(kpis.overdueInvoicesTotal)}
-              sub={kpis.overdueInvoicesTotal > 0 ? "past due" : undefined}
-              subTone="danger"
-            />
+            {/* Currency needs the full phone row; five equal tiles remain on desktop. */}
+            <div className="col-span-2 min-w-0 md:col-span-1">
+              <Stat
+                label="Overdue invoices"
+                value={showSkeleton ? <Skeleton display="inline-block" w="6ch" h="1.25rem" /> : money(kpis.overdueInvoicesTotal)}
+                sub={kpis.overdueInvoicesTotal > 0 ? "past due" : undefined}
+                subTone="danger"
+              />
+            </div>
           </div> : null}
 
           {/* Own-fleet shifts and walkaround checks. Absent (not skeletoned)

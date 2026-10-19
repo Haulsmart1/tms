@@ -24,6 +24,11 @@ describe("operational workspace composition", () => {
     expect(html).toContain("Refresh overview");
     expect(html).not.toContain("On the road");
   });
+  it("keeps overdue money within a full-width mobile KPI row", () => {
+    const html = renderToStaticMarkup(createElement(DashboardPage));
+    expect(html).toContain("grid-cols-2 gap-3 md:grid-cols-5");
+    expect(html).toMatch(/class="col-span-2 min-w-0 md:col-span-1"><div[^>]*>[\s\S]*?Overdue invoices/);
+  });
   it("shows loading rather than invented operational counts on first render", () => {
     const html = renderToStaticMarkup(createElement(DashboardPage));
     expect(html).toContain("Loading dashboard");

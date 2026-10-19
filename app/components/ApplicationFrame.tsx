@@ -15,8 +15,8 @@ export default function ApplicationFrame({ children }: { children: ReactNode }) 
       <div style={{ display: "flex", minHeight: "100vh" }}>
         <AppShell />
         <ThemeScope>{children}</ThemeScope>
-        <ContextualAssistant />
       </div>
+      <ContextualAssistant />
     </TenantProvider>
   );
 }
