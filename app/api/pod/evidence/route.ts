@@ -16,8 +16,8 @@ export const dynamic = "force-dynamic";
 /*
   Console evidence upload, step 2: the file is already in storage. Confirm it
   sits at a path this tenant, job and stop own (review POD-10), check its real
-  size and leading bytes, then record the row. A failed insert removes the
-  object with the service role (review POD-17).
+  size and leading bytes, then record the row. An uncertain insert retains
+  the object for a confirmed readback or retry.
 */
 export async function POST(request: Request) {
   try {

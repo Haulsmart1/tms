@@ -3,7 +3,7 @@
 import { loadDriverData, prepareAssignedJobs, snapshotMessage, useDriverIdentity } from "../driverIdentity";
 import Skeleton from "../../../components/Skeleton";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { getDriverJobOperationalDate, isDriverJobForDate } from "../../../lib/driver/dashboardJobs";
+import { dashboardAssignedJobs, getDriverJobOperationalDate, isDriverJobForDate } from "../../../lib/driver/dashboardJobs";
 import { gateForState } from "../../../lib/shifts/driverActions";
 import { operatorDay } from "../../../lib/time";
 import { useDriverShift } from "../useDriverShift";
@@ -82,9 +82,10 @@ export default function DriverDashboardPage() {
       if (request !== loadSeq.current) return;
 
       hasDashboard.current = true;
-      setData(result.cached ? { ...body, today: operatorDay(new Date()), todayJobs: undefined } : body);
+      const assignedJobs = dashboardAssignedJobs(body);
+      setData(result.cached ? { ...body, jobs: assignedJobs, today: operatorDay(new Date()), todayJobs: undefined } : body);
       setMessage(snapshotMessage(result));
-      if (!result.cached) void prepareAssignedJobs(owner, body.jobs);
+      if (!result.cached) void prepareAssignedJobs(owner, assignedJobs);
     } catch (error) {
       if (request !== loadSeq.current) return;
       if ((error as { status?: number }).status) { hasDashboard.current = false; setData(null); }

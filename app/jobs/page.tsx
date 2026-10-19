@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { ArrowDown, ArrowUpRight, Boxes, Plus, RefreshCw } from "lucide-react";
 import { createClient } from "../../lib/supabase/browser";
 import { JobPageValidation, CollectionStopValidation, DeliveryStopValidation } from "../../lib/supabase/validation/job";
 import { useTenant } from "../components/TenantProvider";
@@ -13,7 +15,7 @@ import StopCard from "./StopCard";
 import DeleteJobDialog from "./DeleteJobDialog";
 import JobLabelPrinter from "./JobLabelPrinter";
 import MasterLoadBuilder from "./MasterLoadBuilder";
-import Button from "../../components/Button";
+import Button, { buttonClasses } from "../../components/Button";
 import RecordAssistant from "../../components/assistant/RecordAssistant";
 import { fetchAllPages, type PageResponse } from "../../lib/jobs/fetchPages";
 import { isStopLocked, planStopChanges } from "../../lib/jobs/stopDiff";
@@ -84,6 +86,8 @@ export default function JobsPage() {
   const [hasLoaded, setHasLoaded] = useState(false);
   const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const selectedJobDetailRef = useRef<HTMLDivElement>(null);
   const [podForms, setPodForms] = useState<Record<string, any>>({});
   const [jobsNotice, setJobsNotice] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; reference: string; tenant_id: string } | null>(null);
@@ -237,6 +241,12 @@ export default function JobsPage() {
     setExpandedJobId(requestedJob.id);
   }, [jobs]);
 
+  useEffect(() => {
+    if (!expandedJobId) return;
+    selectedJobDetailRef.current?.scrollIntoView({ block: "start" });
+    selectedJobDetailRef.current?.focus({ preventScroll: true });
+  }, [expandedJobId]);
+
   function resetForm() {
     setEditingJobId(null);
     setForm({
@@ -265,6 +275,7 @@ export default function JobsPage() {
   }
 
   function startEdit(job: any) {
+    setFormOpen(true);
     setEditingJobId(job.id);
     setForm({
       reference: job.reference || "",
@@ -944,13 +955,30 @@ export default function JobsPage() {
   return (
     <TenantGate>
       <div className="ds min-h-screen bg-canvas font-sans text-ink">
-      <main className="mx-auto max-w-6xl px-6 py-8">
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">Jobs</h1>
-        <p className="mt-1 text-sm text-ink-2">
-          Create jobs, edit jobs, delete unaccepted or planned jobs, and complete POD from one screen.
-        </p>
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
+        <header className="rounded-2xl border border-line bg-surface p-5 shadow-sm sm:p-7">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">TMS Wizard · Operations</p>
+              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-ink">Jobs & loads</h1>
+              <p className="mt-2 max-w-xl text-sm leading-relaxed text-ink-2">From collection to proof of delivery. Find the job, review its evidence and keep dispatch moving.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" disabled={jobsLoading} onClick={() => void loadData()}><RefreshCw size={16} aria-hidden />{jobsLoading ? "Loading…" : "Refresh jobs"}</Button>
+              <a href="#job-editor" onClick={() => setFormOpen(true)} className={buttonClasses("primary")}><Plus size={18} aria-hidden />{editingJobId ? "Continue editing" : "Create a job"}</a>
+            </div>
+          </div>
+          <nav aria-label="Job workspace" className="mt-5 flex flex-wrap gap-2 border-t border-line pt-4">
+            <a href="#jobs-board" className={buttonClasses("secondary", "sm")}><ArrowDown size={15} aria-hidden />Jobs board</a>
+            <a href="#load-builder" className={buttonClasses("secondary", "sm")}><Boxes size={15} aria-hidden />Build a load</a>
+            <Link href="/load-transfer" className={buttonClasses("secondary", "sm")}>Load transfer<ArrowUpRight size={15} aria-hidden /></Link>
+            <Link href="/planning" className={buttonClasses("secondary", "sm")}>Planning & dispatch<ArrowUpRight size={15} aria-hidden /></Link>
+          </nav>
+        </header>
 
-        <div className="mt-6">
+        <details id="job-editor" open={formOpen} onToggle={(event) => setFormOpen(event.currentTarget.open)} className="mt-5 scroll-mt-24 rounded-xl border border-line bg-surface p-4">
+          <summary className="min-h-11 cursor-pointer text-sm font-semibold text-ink">{editingJobId ? "Edit selected job" : "Create a new job"}<span className="ml-2 font-normal text-ink-2">Collection, delivery and allocation details</span></summary>
+          <div className="pt-4">
           <JobForm
             form={form}
             editingJobId={editingJobId}
@@ -968,7 +996,8 @@ export default function JobsPage() {
             onSubmit={saveJob}
             onCancelEdit={resetForm}
           />
-        </div>
+          </div>
+        </details>
 
         {/* tone="neutral" preserves this banner's existing look: it carries
             load failures and save feedback alike, so it is not success-only. */}
@@ -1103,11 +1132,11 @@ export default function JobsPage() {
             <div className="mt-6 space-y-4">
 
               {/* FILTERS */}
-              <div className="sticky top-0 z-10 rounded-lg border border-line bg-surface p-4 shadow-sm">
+              <section id="jobs-board" aria-label="Jobs board filters" className="scroll-mt-24 rounded-xl border border-line bg-surface p-4 shadow-sm">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h2 className="text-sm font-semibold text-ink">
-                      Job filters
+                      Jobs board
                     </h2>
 
                     <div className="mt-0.5 text-xs text-ink-3">
@@ -1128,6 +1157,7 @@ export default function JobsPage() {
                     <Button
                       type="button"
                       variant="secondary"
+                      aria-pressed={jobFilters.status === "pending_acceptance"}
                       onClick={() =>
                         setJobFilters((current) => ({
                           ...current,
@@ -1334,12 +1364,12 @@ export default function JobsPage() {
                     />
                   </label>
                 </div>
-              </div>
+              </section>
 
 
               {/* SELECTED JOB */}
               {selectedJob ? (
-              <div id="selected-job-detail" className="scroll-mt-28 rounded-xl border-2 border-line-strong bg-white px-5 py-5 text-ink shadow-lg sm:px-6">
+              <div id="selected-job-detail" ref={selectedJobDetailRef} tabIndex={-1} role="region" aria-label={`Job ${selectedJob.reference || "details"}`} className="scroll-mt-28 rounded-xl border-2 border-primary bg-surface px-5 py-5 text-ink shadow-lg outline-none focus-visible:ring-2 focus-visible:ring-primary sm:px-6">
 
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                   <div>
@@ -1354,6 +1384,15 @@ export default function JobsPage() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setExpandedJobId(null);
+                        document.getElementById("jobs-board")?.scrollIntoView({ block: "start" });
+                      }}
+                    >
+                      Back to board
+                    </Button>
                     {selectedJob.status === "planned" ||
                     selectedJob.status === "pending_acceptance" ? (
                       <Button
@@ -1829,12 +1868,14 @@ export default function JobsPage() {
                 </div>
               </div>
 
+              <section id="load-builder" aria-label="Load manifest builder" className="scroll-mt-24">
               <MasterLoadBuilder
                 jobs={jobs}
                 vehicles={vehicles}
                 drivers={drivers}
                 tenantId={tenant.activeTenantId}
               />
+              </section>
 
               {/* COMPACT JOB LIST */}
               <div className="overflow-x-auto rounded-lg border border-line bg-surface shadow-sm">
@@ -1874,8 +1915,9 @@ export default function JobsPage() {
                       ))}
                     </div>
                   ) : filteredJobs.length === 0 ? (
-                    <div className="px-4 py-10 text-center text-sm text-ink-3">
-                      No jobs match the current filters.
+                    <div className="px-4 py-10 text-center text-sm text-ink-2">
+                      <p className="font-semibold text-ink">{jobs.length === 0 ? "No jobs loaded" : "No jobs match these filters"}</p>
+                      <p className="mt-2">{message ? "Review the message above and retry loading before allocating work." : jobs.length === 0 ? "Create a job to start a collection and delivery workflow." : "Adjust the search, date or allocation filters to widen the board."}</p>
                     </div>
                   ) : (
                     filteredJobs.map((job) => {
@@ -1924,13 +1966,17 @@ export default function JobsPage() {
                               />
                             </div>
 
-                            <div
-                              className="min-w-0 break-words font-mono font-semibold text-ink xl:truncate"
+                            <button
+                              type="button"
+                              onClick={() => setExpandedJobId(job.id)}
+                              aria-expanded={expanded}
+                              aria-controls={expanded ? "selected-job-detail" : undefined}
+                              className="min-h-11 min-w-0 break-words rounded border-0 bg-transparent p-0 text-left font-mono font-semibold text-primary hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 xl:truncate"
                               title={job.reference}
                             >
                               <span className="mb-0.5 block text-[10px] font-sans font-medium uppercase tracking-wide text-ink-3 xl:hidden">Reference</span>
                               {job.reference || "No reference"}
-                            </div>
+                            </button>
 
                             <div
                               className="min-w-0 break-words text-ink xl:truncate"
@@ -1950,9 +1996,9 @@ export default function JobsPage() {
                               <span
                                 className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${
                                   job.status === "pending_acceptance"
-                                    ? "border-amber-400/40 bg-amber-400/10 text-amber-300"
+                                    ? "border-warning-border bg-warning-tint text-warning-strong"
                                     : job.status === "delivered"
-                                      ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-300"
+                                      ? "border-success-border bg-success-tint text-success-strong"
                                       : "border-line bg-surface-2 text-ink-2"
                                 }`}
                               >
@@ -1994,6 +2040,9 @@ export default function JobsPage() {
                               <Button
                                 type="button"
                                 variant="secondary"
+                                aria-expanded={expanded}
+                                aria-controls={expanded ? "selected-job-detail" : undefined}
+                                aria-label={`${expanded ? "Hide" : "View"} ${job.reference || "job"} details`}
                                 onClick={() =>
                                   setExpandedJobId(
                                     expanded ? null : job.id

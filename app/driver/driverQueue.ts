@@ -39,7 +39,7 @@ import {
   type SyncResult,
   withoutQrPayload,
 } from "../../lib/offline/driverSync";
-import { applyOutcome, enqueue, nextDue, type QueueItem } from "../../lib/offline/queue";
+import { applyOutcome, enqueue, MAX_SERVER_FAILURES, nextDue, type QueueItem } from "../../lib/offline/queue";
 import { shouldHoldPodFailure } from "../../lib/offline/podFailureRetention";
 import { readJsonSafe } from "../../lib/pod/uploadClient";
 import type { DriverEvent } from "../../lib/shifts/events";
@@ -71,11 +71,19 @@ const REJECTED_KEY = "tms-driver-queue-rejected";
 const LAST_USER_KEY = "tms-driver-queue-user";
 const REQUEST_TIMEOUT_MS = 20_000;
 
+/** Bound waiting even when the storage SDK does not settle or support abort. */
+function awaitStorageUpload<T>(upload: PromiseLike<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Photo storage upload timed out.")), REQUEST_TIMEOUT_MS);
+    Promise.resolve(upload).then(resolve, reject).finally(() => clearTimeout(timeout));
+  });
+}
+
 let queue: StoredItem<QueuePayload>[] = [];
 let seq = 0;
 let rejected: RejectedItem[] = [];
 let paused: string | null = null;
-let sent: SentEvent[] = [];
+let sent: (SentEvent & { ownerId: string | undefined })[] = [];
 /** The signed-in user as far as this phone knows (see refreshUser). */
 let currentUser: string | null = null;
 let loading: Promise<void> | null = null;
@@ -92,7 +100,10 @@ function mine(): StoredItem<QueuePayload>[] {
 function emit(): void {
   const { mine: own, heldForOthers } = partitionByOwner(queue, currentUser);
   const visible = rejected.filter((r) => !r.ownerId || r.ownerId === currentUser);
-  snapshot = { pending: own, heldForOthers, rejected: visible, paused, sent, memoryOnly: isMemoryOnly() };
+  // A request accepted for the previous owner may finish after an auth change.
+  // Keep its acknowledgement scoped, just like pending and rejected evidence.
+  const ownSent = sent.filter((item) => item.ownerId === currentUser).map(({ event, sentAt }) => ({ event, sentAt }));
+  snapshot = { pending: own, heldForOthers, rejected: visible, paused, sent: ownSent, memoryOnly: isMemoryOnly() };
   for (const listener of listeners) listener(snapshot);
 }
 
@@ -217,7 +228,10 @@ function installWindowHooks(): void {
     if (document.visibilityState === "visible") void runChained(true);
   });
   window.addEventListener("beforeunload", (event) => {
-    if (mine().length === 0) return;
+    // Signing out or switching accounts hides the previous owner's items.
+    // Storage failure still makes those items vulnerable when this tab closes.
+    // Use only a generic browser warning; never expose another driver's payload.
+    if (mine().length === 0 && !(isMemoryOnly() && queue.length > 0)) return;
     event.preventDefault();
     event.returnValue = "";
   });
@@ -270,9 +284,12 @@ async function sendPhoto(item: QueueItem<QueuePayload>, payload: Extract<QueuePa
   const beforeUpload = await guardOwner(payload.ownerId);
   if (beforeUpload) return beforeUpload;
   try {
-    const { error } = await createClient()
+    // Defect photos share the same ordered flush lock as POD. Bound the wait
+    // here too; a stalled SDK request must not own that lock indefinitely.
+    // A timeout retains the original bytes; it does not cancel the SDK request.
+    const { error } = await awaitStorageUpload(createClient()
       .storage.from(PHOTO_BUCKET)
-      .uploadToSignedUrl(path, token, payload.blob, { contentType: payload.mimeType, upsert: false });
+      .uploadToSignedUrl(path, token, payload.blob, { contentType: payload.mimeType, upsert: false }));
     if (error) return { kind: "retry", error: "The photo upload did not complete.", status: null };
   } catch {
     return { kind: "retry", error: "The photo upload did not complete.", status: null };
@@ -281,11 +298,26 @@ async function sendPhoto(item: QueueItem<QueuePayload>, payload: Extract<QueuePa
   const beforeRecord = await guardOwner(payload.ownerId);
   if (beforeRecord) return beforeRecord;
   const record = await post(PHOTO_RECORD_URL, { defectClientId: payload.defectClientId, path });
-  return photoOutcome(record.status, record.error, item.attempts);
+  return recordOutcome(record, "walkaround photo", (status, error) => photoOutcome(status, error, item.attempts));
 }
 
 function stopEndpoint(jobId: string, stopId: string): string {
   return `/api/driver/jobs/${encodeURIComponent(jobId)}/stops/${encodeURIComponent(stopId)}`;
+}
+
+/** These record routes explicitly acknowledge persistence with ok:true, not transport status alone. */
+function recordOutcome(
+  result: { status: number | null; error: string | null; json: Record<string, unknown> },
+  label = "POD",
+  classify = eventOutcome,
+): SyncResult {
+  if (result.status !== null && result.status >= 200 && result.status < 300 && result.json.ok !== true) {
+    // A proxy/login page, truncated JSON or an unexpected success body can
+    // arrive with 2xx. Keep the original event/photo/scan/completion and retry;
+    // never project an accepted shift from an unconfirmed response either.
+    return { kind: "retry", error: `The server did not confirm this ${label} was saved. Keeping it on this phone.`, status: null };
+  }
+  return classify(result.status, result.error);
 }
 
 /*
@@ -317,9 +349,13 @@ async function sendPodPhoto(payload: Extract<QueuePayload, { kind: "pod_photo" }
     if (beforeUpload) return beforeUpload;
     let failure: unknown = null;
     try {
-      const { error } = await createClient()
+      // Storage can stall independently of the JSON endpoints. Keep the
+      // original queued bytes and release the flush lock after the deadline.
+      // This bounds waiting, not the underlying SDK request: a late success
+      // is ignored here, and retry uses the same non-upsert client-id path.
+      const { error } = await awaitStorageUpload(createClient()
         .storage.from(POD_BUCKET)
-        .uploadToSignedUrl(upload.path, upload.token, payload.blob, { contentType: payload.mimeType, upsert: false });
+        .uploadToSignedUrl(upload.path, upload.token, payload.blob, { contentType: payload.mimeType, upsert: false }));
       failure = error;
     } catch (error) {
       failure = error ?? new Error("Upload failed.");
@@ -338,7 +374,7 @@ async function sendPodPhoto(payload: Extract<QueuePayload, { kind: "pod_photo" }
     originalFilename: payload.filename,
     mimeType: payload.mimeType,
   });
-  return eventOutcome(record.status, record.error);
+  return recordOutcome(record);
 }
 
 async function sendPodScan(payload: Extract<QueuePayload, { kind: "pod_scan" }>): Promise<SyncResult> {
@@ -346,7 +382,7 @@ async function sendPodScan(payload: Extract<QueuePayload, { kind: "pod_scan" }>)
     serial_number: payload.serialNumber,
     scan_format: payload.scanFormat,
   });
-  return eventOutcome(result.status, result.error);
+  return recordOutcome(result);
 }
 
 async function sendPodComplete(payload: Extract<QueuePayload, { kind: "pod_complete" }>): Promise<SyncResult> {
@@ -357,7 +393,7 @@ async function sendPodComplete(payload: Extract<QueuePayload, { kind: "pod_compl
     recipient_name: payload.recipientName,
     pod_notes: payload.podNotes,
   });
-  return eventOutcome(result.status, result.error);
+  return recordOutcome(result);
 }
 
 async function sendItem(item: QueueItem<QueuePayload>): Promise<SendResult> {
@@ -378,7 +414,7 @@ async function sendItem(item: QueueItem<QueuePayload>): Promise<SendResult> {
       return sendPodComplete(payload);
     case "event": {
       const result = await post(EVENTS_URL, payload.event);
-      return eventOutcome(result.status, result.error);
+      return recordOutcome(result, "driver event");
     }
   }
 }
@@ -443,8 +479,17 @@ async function flushOnce(force: boolean): Promise<void> {
     // surviving copy of a barcode, photograph or delivery confirmation.
     // Pause the queue for office intervention, preserving this item and all
     // subsequent work. Do not retry a permanent refusal in a tight loop.
-    if (shouldHoldPodFailure(head.payload.kind, outcome)) {
-      paused = `POD not sent: ${outcome.kind === "rejected" ? outcome.error : "Server refused the POD"}. Tell the office; do not clear this phone.`;
+    // A transient server failure is not an explicit refusal of the check or
+    // defect photo. Keep those original records and dependent evidence too,
+    // rather than allowing applyOutcome's generic retry cap to delete them.
+    // Actual walkaround 4xx refusal policy is deliberately unchanged here.
+    const holdWalkaroundServerFailure = (head.payload.kind === "event" || head.payload.kind === "photo")
+      && outcome.kind === "retry" && typeof outcome.status === "number" && outcome.status >= 500
+      && head.serverFailures + 1 >= MAX_SERVER_FAILURES;
+    if (shouldHoldPodFailure(head.payload.kind, outcome, head.serverFailures) || holdWalkaroundServerFailure) {
+      paused = holdWalkaroundServerFailure
+        ? "Driver item not sent: the server could not confirm it was saved. Tell the office; do not clear this phone."
+        : `POD not sent: ${outcome.kind === "rejected" ? outcome.error : "Server refused the POD"}. Tell the office; do not clear this phone.`;
       emit();
       break;
     }
@@ -454,7 +499,7 @@ async function flushOnce(force: boolean): Promise<void> {
     const result = applyOutcome(queue, head.id, outcome, now);
     let next = result.queue as StoredItem<QueuePayload>[];
     if (outcome.kind === "sent" && head.payload.kind === "event") {
-      sent = [...sent, { event: withoutQrPayload(head.payload.event), sentAt: now }].slice(-50);
+      sent = [...sent, { event: withoutQrPayload(head.payload.event), sentAt: now, ownerId: head.payload.ownerId }].slice(-50);
       if (head.payload.ownerId) {
         await reflectAcceptedShift(head.payload.ownerId, withoutQrPayload(head.payload.event), now).catch(() => {});
       }

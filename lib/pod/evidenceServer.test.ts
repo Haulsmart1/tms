@@ -1,6 +1,6 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
-import { createEvidenceUploadUrl, findEvidenceByPath } from "./evidenceServer";
+import { createEvidenceUploadUrl, findEvidenceByPath, recordEvidenceRow } from "./evidenceServer";
 
 const owner = {
   tenantId: "11111111-1111-4111-8111-111111111111",
@@ -95,6 +95,113 @@ describe("createEvidenceUploadUrl", () => {
     await expect(createEvidenceUploadUrl(admin, owner, "photos", "pod.jpg", { clientId })).rejects.toThrow(/relation missing/);
     expect(calls.signed).toEqual([]);
   });
+});
+
+describe("recordEvidenceRow persistence ambiguity (real Supabase query builder)", () => {
+  const storagePath = `${owner.tenantId}/${owner.jobId}/${owner.stopId}/photos/q-${clientId}-pod.jpg`;
+  const input = { ...owner, evidenceType: "photo" as const, storagePath, originalFilename: "pod.jpg", mimeType: "image/jpeg", size: 120, createdBy: clientId };
+  const persisted = { id: "e1", tenant_id: owner.tenantId, job_id: owner.jobId, stop_id: owner.stopId, storage_path: storagePath,
+    evidence_type: "photo", mime_type: "image/jpeg", file_size_bytes: 120, created_by: clientId, original_filename: "pod.jpg" };
+
+  function sdkAdmin(options: { initial?: unknown; recovered?: unknown; recoveryFails?: boolean; insertStatus?: number; insertBody?: unknown; initialFails?: boolean } = {}) {
+    const calls = { removals: 0, inserts: 0, lookups: [] as URL[] };
+    const admin = createClient("https://pod-test.example", "test-key", {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      global: { fetch: async (request, init) => {
+        const url = new URL(String(request));
+        const method = init?.method ?? "GET";
+        if (url.pathname === "/rest/v1/pod_evidence" && method === "GET") {
+          calls.lookups.push(url);
+          if ((calls.lookups.length === 1 && options.initialFails) || (calls.lookups.length > 1 && options.recoveryFails)) {
+            return new Response(JSON.stringify({ code: "08006", message: "read unavailable" }), { status: 503 });
+          }
+          return new Response(JSON.stringify(calls.lookups.length === 1 ? options.initial ?? null : options.recovered ?? null), { status: 200 });
+        }
+        if (url.pathname === "/rest/v1/pod_evidence" && method === "POST") {
+          calls.inserts++;
+          return new Response(JSON.stringify("insertBody" in options ? options.insertBody : { code: "23505", message: "duplicate key value" }), { status: options.insertStatus ?? 409 });
+        }
+        if (url.pathname === "/storage/v1/object/pod-files" && method === "DELETE") {
+          calls.removals++;
+          return new Response(JSON.stringify([{ name: storagePath }]), { status: 200 });
+        }
+        throw new Error(`Unexpected request ${method} ${url.pathname}`);
+      } },
+    });
+    return { admin, calls };
+  }
+
+  it("acknowledges an insert error only after reading an exact matching row and preserves its object", async () => {
+    const { admin, calls } = sdkAdmin({ recovered: persisted });
+    expect(await recordEvidenceRow(admin, input)).toEqual(persisted);
+    expect(calls.removals).toBe(0);
+    expect(calls.lookups).toHaveLength(2);
+    for (const url of calls.lookups) {
+      expect(url.searchParams.get("tenant_id")).toBe(`eq.${owner.tenantId}`);
+      expect(url.searchParams.get("storage_path")).toBe(`eq.${storagePath}`);
+    }
+  });
+
+  it("recovers a committed insert whose response was replaced by a gateway failure", async () => {
+    const { admin, calls } = sdkAdmin({ recovered: persisted, insertStatus: 504, insertBody: { message: "gateway timeout" } });
+    expect(await recordEvidenceRow(admin, input)).toEqual(persisted);
+    expect(calls.removals).toBe(0);
+  });
+
+  it("keeps uploaded bytes and refuses to acknowledge when no persisted row can be read", async () => {
+    const { admin, calls } = sdkAdmin();
+    await expect(recordEvidenceRow(admin, input)).rejects.toThrow("duplicate key value");
+    expect(calls.removals).toBe(0);
+  });
+
+  it("keeps uploaded bytes when recovery lookup also fails", async () => {
+    const { admin, calls } = sdkAdmin({ recoveryFails: true });
+    await expect(recordEvidenceRow(admin, input)).rejects.toThrow();
+    expect(calls.removals).toBe(0);
+  });
+
+  it("does not return success for a successful HTTP insert with no evidence row", async () => {
+    const { admin, calls } = sdkAdmin({ insertStatus: 201, insertBody: null });
+    await expect(recordEvidenceRow(admin, input)).rejects.toThrow();
+    expect(calls.removals).toBe(0);
+  });
+
+  it("does not write or remove bytes after the initial lookup fails", async () => {
+    const { admin, calls } = sdkAdmin({ initialFails: true });
+    await expect(recordEvidenceRow(admin, input)).rejects.toThrow("read unavailable");
+    expect(calls.inserts).toBe(0);
+    expect(calls.removals).toBe(0);
+  });
+
+  it("returns an ordinary confirmed insert without an extra readback", async () => {
+    const { admin, calls } = sdkAdmin({ insertStatus: 201, insertBody: persisted });
+    expect(await recordEvidenceRow(admin, input)).toEqual(persisted);
+    expect(calls.lookups).toHaveLength(1);
+    expect(calls.removals).toBe(0);
+  });
+
+  it("reuses an exact matching initial row without inserting or removing bytes", async () => {
+    const { admin, calls } = sdkAdmin({ initial: persisted });
+    expect(await recordEvidenceRow(admin, input)).toEqual(persisted);
+    expect(calls.inserts).toBe(0);
+    expect(calls.removals).toBe(0);
+  });
+
+  it("does not acknowledge an initial row from another creator", async () => {
+    const { admin, calls } = sdkAdmin({ initial: { ...persisted, created_by: "another-user" } });
+    await expect(recordEvidenceRow(admin, input)).rejects.toThrow("does not match");
+    expect(calls.inserts).toBe(0);
+    expect(calls.removals).toBe(0);
+  });
+
+  it.each(["tenant_id", "job_id", "stop_id", "storage_path", "evidence_type", "mime_type", "file_size_bytes", "created_by", "original_filename", "id"])(
+    "does not acknowledge conflicting persisted %s metadata", async (field) => {
+      const recovered = { ...persisted, [field]: field === "id" ? "" : "different" };
+      const { admin, calls } = sdkAdmin({ recovered });
+      await expect(recordEvidenceRow(admin, input)).rejects.toThrow();
+      expect(calls.removals).toBe(0);
+    },
+  );
 });
 
 describe("findEvidenceByPath", () => {

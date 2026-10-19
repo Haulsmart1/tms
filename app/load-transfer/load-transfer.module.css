@@ -1,7 +1,7 @@
 .page {
   background:
     radial-gradient(ellipse at 7% 0%, rgba(14, 165, 164, 0.09), transparent 34rem),
-    #f3f6f8;
+    var(--canvas);
   padding: clamp(1rem, 3vw, 2.5rem);
 }
 
@@ -69,20 +69,51 @@
 }
 
 .panel {
-  border: 1px solid #e1e8ed;
+  border: 1px solid var(--line);
   border-radius: 1.25rem;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--surface);
   padding: clamp(1rem, 2.4vw, 1.5rem);
   box-shadow: 0 8px 28px rgba(21, 42, 58, 0.055);
 }
 
 .panelTitle {
   margin: 0;
-  color: #14283d;
+  color: var(--ink);
   font-size: 1.1rem;
   font-weight: 750;
   letter-spacing: -0.015em;
 }
+
+.panel select { min-height: 2.75rem; }
+
+.steps {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem 1.5rem;
+  margin: 1.5rem 0 0;
+  padding: 1.25rem 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  list-style: none;
+  color: #f0f8fb;
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
+.steps li { display: flex; align-items: center; gap: 0.6rem; }
+.steps li span { color: #8fe4d6; font-variant-numeric: tabular-nums; }
+.sectionLabel { margin: 0 0 0.5rem; color: var(--ink-2); font-size: 0.65rem; font-weight: 750; letter-spacing: 0.12em; }
+.panelCopy { margin: 0.65rem 0 0; color: var(--ink-2); font-size: 0.85rem; line-height: 1.6; }
+.notice { margin: 1rem 0 0; padding: 0.9rem 1rem; border: 1px solid var(--line); border-radius: 0.75rem; color: var(--ink-2); font-size: 0.85rem; line-height: 1.6; }
+.serialInput { min-width: 0; min-height: 2.75rem; flex: 1; border: 1px solid var(--line-strong); border-radius: 0.6rem; background: var(--canvas); padding: 0.65rem 0.85rem; color: var(--ink); font: inherit; font-size: 1rem; }
+.serialInput::placeholder { color: var(--ink-2); }
+.serialInput:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.routeSummary { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 1rem; margin-top: 1.25rem; border: 1px solid var(--line); border-radius: 0.85rem; background: var(--canvas); padding: 1rem; }
+.routeSummary div { min-width: 0; display: grid; gap: 0.3rem; }
+.routeSummary div > span { color: var(--ink-2); font-size: 0.75rem; }
+.routeSummary strong { color: var(--ink); overflow-wrap: anywhere; font-size: 0.95rem; }
+.routeArrow { color: var(--ink-2); font-size: 1.3rem; }
 
 @media (max-width: 640px) {
   .page {

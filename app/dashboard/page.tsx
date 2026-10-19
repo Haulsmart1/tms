@@ -7,7 +7,9 @@ import { createClient } from "../../lib/supabase/browser";
 import { useTenant } from "../components/TenantProvider";
 import TenantGate from "../components/TenantGate";
 import Stat from "../../components/Stat";
-import DataTable, { type Column } from "../../components/DataTable";
+import TodayJobsTable, { type TodayJobRow } from "../../components/dashboard/TodayJobsTable";
+import Button, { buttonClasses } from "../../components/Button";
+import { ArrowUpRight, RefreshCw, Route, ScanLine, Truck } from "lucide-react";
 import { buildNeedsAttention, type AttentionItem, type RevenueDay } from "../../lib/dashboard/aggregate";
 import { buildRevenueForDays, lastNDayKeys, NON_COLLECTABLE_STATUS_FILTER } from "../../lib/dashboard/days";
 import { fleetAttention, fleetTiles, type FleetTiles } from "../../lib/dashboard/fleetReadiness";
@@ -28,13 +30,6 @@ type Kpis = {
   overdueInvoicesTotal: number;
 };
 
-type TodayJobRow = {
-  id: string;
-  reference: string;
-  customerName: string;
-  status: string;
-};
-
 function money(value: number): string {
   return new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(value);
 }
@@ -45,6 +40,7 @@ export default function DashboardPage() {
   const router = useRouter();
 
   const [state, setState] = useState<"loading" | "error" | "ready">("loading");
+  const [refreshKey, setRefreshKey] = useState(0);
   const [kpis, setKpis] = useState<Kpis>({
     jobsToday: 0, unassigned: 0, onTheRoad: 0, podsAwaiting: 0, overdueInvoicesTotal: 0,
   });
@@ -262,20 +258,7 @@ export default function DashboardPage() {
     void loadGettingStarted();
     void loadFleet();
     return () => { cancelled = true; };
-  }, [tenant.activeTenantId, tenant.status]);
-
-  const jobColumns: Column<TodayJobRow>[] = [
-    { header: "Reference", cell: (r) => <span className="font-mono text-sm font-medium text-ink">{r.reference}</span> },
-    { header: "Customer", cell: (r) => r.customerName },
-    {
-      header: "Status",
-      cell: (r) => (
-        <span className="inline-flex items-center rounded-full bg-primary-tint px-2.5 py-0.5 text-xs font-semibold text-primary-deep">
-          {r.status}
-        </span>
-      ),
-    },
-  ];
+  }, [tenant.activeTenantId, tenant.status, refreshKey]);
 
   const maxRevenue = Math.max(1, ...revenue.map((d) => d.total));
 
@@ -299,18 +282,34 @@ export default function DashboardPage() {
           max-w-6xl and leaves the page background showing either side. Same
           shape as app/jobs/page.tsx:249-250. */}
       <div className="ds min-h-screen bg-canvas font-sans text-ink">
-        <main className="mx-auto max-w-6xl px-6 py-8">
-          <h1 className="text-2xl font-semibold tracking-tight text-ink">Dashboard</h1>
+        <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
+          <header className="rounded-2xl border border-line bg-surface p-5 shadow-sm sm:p-7">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">TMS Wizard · Operations</p>
+                <h1 className="mt-2 text-3xl font-semibold tracking-tight text-ink">Operations overview</h1>
+                <p className="mt-2 max-w-xl text-sm leading-relaxed text-ink-2">Plan the work. Follow the evidence. Keep every movement connected.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" aria-label="Refresh overview" disabled={state === "loading"} onClick={() => setRefreshKey((key) => key + 1)}><RefreshCw size={16} aria-hidden />{state === "loading" ? "Loading…" : "Refresh overview"}</Button>
+                <Link href="/jobs" className={buttonClasses("primary")}><Truck size={17} aria-hidden />Open jobs board<ArrowUpRight size={16} aria-hidden /></Link>
+              </div>
+            </div>
+            <nav aria-label="Operations shortcuts" className="mt-5 grid gap-2 border-t border-line pt-4 sm:grid-cols-3">
+              {[{ href: "/planning", label: "Plan & dispatch", detail: "Allocate vehicles and drivers", Icon: Route }, { href: "/load-transfer", label: "Transfer a load", detail: "Keep movements traceable", Icon: Truck }, { href: "/pod", label: "Review POD evidence", detail: "Check recorded delivery evidence", Icon: ScanLine }].map(({ href, label, detail, Icon }) => <Link key={href} href={href} className="flex min-h-16 items-center gap-3 rounded-xl px-3 py-2 hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"><Icon size={20} className="shrink-0 text-primary" aria-hidden /><span><span className="block text-sm font-semibold text-ink">{label}</span><span className="mt-0.5 block text-xs text-ink-2">{detail}</span></span><ArrowUpRight size={15} className="ml-auto shrink-0 text-ink-2" aria-hidden /></Link>)}
+            </nav>
+          </header>
 
           {gettingStarted ? <GettingStartedPanel {...gettingStarted} className="mt-6" /> : null}
 
           {state === "error" ? (
-            <div className="mt-6 rounded-lg border border-danger-border bg-danger-tint p-4 text-sm text-danger-strong">
-              Couldn't load the dashboard. Refresh to try again.
+            <div role="alert" className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-danger-border bg-danger-tint p-4 text-sm text-danger-strong">
+              <span>Overview unavailable. Open the jobs board or retry; no records have been changed.</span>
+              <Button variant="secondary" onClick={() => setRefreshKey((key) => key + 1)}>Retry overview</Button>
             </div>
           ) : null}
 
-          <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-5" aria-busy={showSkeleton}>
+          {state !== "error" ? <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-5" aria-busy={showSkeleton}>
             {/* One announcement for the whole page, not one per skeleton bar.
                 Replaces the announcement the old "Loading..." text gave free. */}
             {showSkeleton ? <span className="sr-only" role="status">Loading dashboard</span> : null}
@@ -325,7 +324,7 @@ export default function DashboardPage() {
               subTone="warning"
             />
             <Stat
-              label="On the road"
+              label="Jobs with a vehicle"
               value={showSkeleton ? <Skeleton display="inline-block" w="2.5ch" h="1.25rem" /> : String(kpis.onTheRoad)}
               sub="rostered today"
             />
@@ -341,7 +340,7 @@ export default function DashboardPage() {
               sub={kpis.overdueInvoicesTotal > 0 ? "past due" : undefined}
               subTone="danger"
             />
-          </div>
+          </div> : null}
 
           {/* Own-fleet shifts and walkaround checks. Absent (not skeletoned)
               until the fleet load above succeeds, same as GettingStartedPanel
@@ -387,12 +386,10 @@ export default function DashboardPage() {
                   View all
                 </Link>
               </div>
-              <DataTable
-                columns={jobColumns}
+              <TodayJobsTable
                 rows={todayJobs}
-                rowKey={(r) => r.id}
                 state={showSkeleton ? "loading" : state === "error" ? "error" : todayJobs.length ? "ready" : "empty"}
-                emptyTitle="No jobs scheduled today"
+                onRetry={() => setRefreshKey((key) => key + 1)}
               />
             </section>
 
@@ -408,8 +405,10 @@ export default function DashboardPage() {
                       </li>
                     ))}
                   </ul>
+                ) : state === "error" ? (
+                  <p className="text-sm text-ink-2">Attention checks are unavailable. Review jobs and evidence before making allocations.</p>
                 ) : combinedAttention.length === 0 ? (
-                  <p className="text-sm text-ink-3">Nothing needs attention right now.</p>
+                  <p className="text-sm text-ink-2">No attention items found in this overview.</p>
                 ) : (
                   <ul className="flex flex-col gap-2">
                     {combinedAttention.slice(0, 5).map((item) => (
@@ -424,7 +423,7 @@ export default function DashboardPage() {
                 )}
               </div>
 
-              <div className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+              {state !== "error" ? <div className="rounded-lg border border-line bg-surface p-4 shadow-sm">
                 <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-3">
                   Revenue · last 7 days
                 </h2>
@@ -446,7 +445,7 @@ export default function DashboardPage() {
                         </div>
                       ))}
                 </div>
-              </div>
+              </div> : null}
             </section>
           </div>
         </main>

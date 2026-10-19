@@ -30,6 +30,20 @@ type CompleteBody = {
   recordedAt?: unknown;
 };
 
+function matchesQueuedCompletion(stop: { recipient_name: string | null; pod_notes: string | null }, body: CompleteBody): boolean {
+  const recipient = typeof body.recipient_name === "string" ? body.recipient_name.trim() : "";
+  const notes = typeof body.pod_notes === "string" ? body.pod_notes.trim() || null : null;
+  return recipient.length > 0 && recipient.length <= 200 && (notes === null || notes.length <= 4000)
+    && recipient === stop.recipient_name && notes === stop.pod_notes;
+}
+
+function unconfirmedCompletion() {
+  return NextResponse.json(
+    { error: "This delivery is complete, but this phone's recipient or notes were not confirmed as saved. Keep your evidence and contact the office." },
+    { status: 409 },
+  );
+}
+
 /*
   Complete a delivery stop from the driver app. Server-side rules (review POD-12):
   - the job must be open (not cancelled, unaccepted or already completed),
@@ -62,22 +76,27 @@ export async function POST(request: Request, context: RouteContext) {
     const { job, stop } = loaded;
     let alreadyCompleted = stop.pod_status === "delivered";
     let completedAt = stop.delivered_at ?? new Date().toISOString();
+    let body: CompleteBody = {};
+    try {
+      body = (await request.json()) as CompleteBody;
+      if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("Invalid body");
+    } catch {
+      // Preserve the existing bodyless, non-queued delivered-stop no-op.
+      if (!alreadyCompleted || request.body !== null) return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+      body = {};
+    }
+    const meta = parseQueuedMeta(body);
+    if (hasInvalidClientId(body, meta)) {
+      return NextResponse.json({ error: "Invalid clientId." }, { status: 400 });
+    }
+
+    // Another device or the office may have completed this stop while the
+    // driver's original recipient/notes were offline. A delivered status is
+    // not proof those fields were saved. Never overwrite the saved POD, and
+    // do not ACK away a conflicting queued completion.
+    if (alreadyCompleted && meta && !matchesQueuedCompletion(stop, body)) return unconfirmedCompletion();
 
     if (!alreadyCompleted) {
-      let body: CompleteBody;
-
-      try {
-        body = (await request.json()) as CompleteBody;
-      } catch {
-        return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
-      }
-
-      const meta = parseQueuedMeta(body);
-
-      if (hasInvalidClientId(body, meta)) {
-        return NextResponse.json({ error: "Invalid clientId." }, { status: 400 });
-      }
-
       const receivedAt = new Date();
       let recordedAt = receivedAt.toISOString();
       let timeTrusted = true;
@@ -192,8 +211,20 @@ export async function POST(request: Request, context: RouteContext) {
       if (updateStopError) throw new Error(updateStopError.message);
 
       if (!updatedStops || updatedStops.length === 0) {
-        // Completed by someone else between the read and the write.
+        // A zero-row update can also mean the stop disappeared or its
+        // assignment changed. Re-authorize and confirm a persisted delivery
+        // before acknowledging the queue item; an uncertain result must keep
+        // the driver's evidence for reconciliation.
+        const current = await loadDriverJobStop(admin, session, jobId, stopId);
+        if (!current || current.stop.type !== "delivery" || current.stop.pod_status !== "delivered") {
+          return NextResponse.json(
+            { error: "Delivery completion could not be confirmed. Keep your evidence and contact the office." },
+            { status: 409 },
+          );
+        }
+        if (meta && !matchesQueuedCompletion(current.stop, body)) return unconfirmedCompletion();
         alreadyCompleted = true;
+        completedAt = current.stop.delivered_at ?? completedAt;
       }
     }
 
@@ -207,6 +238,7 @@ export async function POST(request: Request, context: RouteContext) {
     if (deliveryStopsError) throw new Error(deliveryStopsError.message);
 
     const allDelivered = areAllDeliveryStopsDelivered(deliveryStops ?? []);
+    let jobCompleted = allDelivered && job.status === "completed";
 
     const jobCompletedAt =
       (deliveryStops ?? [])
@@ -232,16 +264,31 @@ export async function POST(request: Request, context: RouteContext) {
         updateJob = updateJob.eq("subcontractor_id", session.subcontractorId);
       }
 
-      const { error: updateJobError } = await updateJob;
+      const { data: updatedJob, error: updateJobError } = await updateJob.select("id").maybeSingle();
 
       if (updateJobError) throw new Error(updateJobError.message);
+      jobCompleted = Boolean(updatedJob);
+
+      if (!updatedJob) {
+        // Dispatch may have reassigned or cancelled the job since the initial
+        // read. Keep the saved stop evidence, but never report an unconfirmed
+        // job transition. A concurrent completion is safe to acknowledge.
+        const { data: currentJob, error: currentJobError } = await admin
+          .from("jobs")
+          .select("status,pod_status")
+          .eq("id", jobId)
+          .eq("tenant_id", session.tenantId)
+          .maybeSingle();
+        if (currentJobError) throw new Error(currentJobError.message);
+        jobCompleted = currentJob?.status === "completed" && currentJob?.pod_status === "delivered";
+      }
     }
 
     return NextResponse.json({
       ok: true,
       alreadyCompleted,
       completedAt,
-      jobCompleted: allDelivered,
+      jobCompleted,
     });
   } catch (error) {
     const response = driverErrorResponse(error);

@@ -142,6 +142,12 @@ select:not([multiple]) {
   }
 }
 
+/* The fixed menu remains visible on tablets after the phone-only gutter
+   adjustments above end. Do not let page headings sit underneath it. */
+@media (min-width: 640px) and (max-width: 1023px) {
+  .tms-has-shell main { padding-top: 4.5rem; }
+}
+
 .light select:not([multiple]) {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23737D8F' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") !important;
 }
