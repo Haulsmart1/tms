@@ -42,9 +42,10 @@ export default function UnassignedPool({
   return (
     <section
       aria-label="Unassigned jobs"
+      tabIndex={0}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
-      className="flex min-w-0 w-full flex-none flex-col gap-2 rounded-lg border border-line bg-surface-2 p-3 lg:w-[240px]"
+      className="flex min-w-0 w-full max-h-96 flex-none flex-col gap-2 overflow-y-auto rounded-lg border border-line bg-surface-2 p-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary lg:w-[240px] lg:max-h-none lg:overflow-y-visible"
     >
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-ink">
@@ -80,7 +81,7 @@ export default function UnassignedPool({
           {/* Read-only: visible so the day's full picture is here, but routed
               by the subcontractor, not by this operator's fleet. */}
           {subcontracted.map((job) => (
-            <div key={job.id} className="rounded-md border border-line bg-surface px-2.5 py-2 text-sm opacity-70">
+            <div key={job.id} className="min-w-0 break-words [overflow-wrap:anywhere] rounded-md border border-line bg-surface px-2.5 py-2 text-sm opacity-70">
               <p className="font-semibold text-ink">{job.reference ?? "No reference"}</p>
               <p className="text-xs text-ink-3">{job.customer_name ?? "No customer"}</p>
             </div>

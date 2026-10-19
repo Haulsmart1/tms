@@ -63,18 +63,18 @@ export default function VehicleLane({
       onClick={onSelect}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
-      className={`cursor-pointer rounded-lg border p-3 transition-colors ${
+      className={`min-w-0 max-w-full cursor-pointer break-words [overflow-wrap:anywhere] rounded-lg border p-3 transition-colors ${
         selected ? "border-primary bg-surface" : "border-line bg-surface-2 hover:bg-surface"
       }`}
     >
-      <header className="mb-2 flex items-center gap-3">
+      <header className="mb-2 flex min-w-0 flex-wrap items-center gap-3">
         <h3 className="text-sm font-semibold text-ink">{vehicle.registration}</h3>
         <select
           aria-label={`Driver for ${vehicle.registration}`}
           value={driverId ?? ""}
           onChange={(e) => onDriverChange(e.target.value || null)}
           onClick={(e) => e.stopPropagation()}
-          className="rounded-md border border-line bg-surface px-1.5 py-0.5 text-xs text-ink"
+          className="min-h-11 min-w-0 w-full max-w-full rounded-md border border-line bg-surface px-1.5 py-0.5 text-xs text-ink sm:w-auto sm:max-w-[16rem]"
         >
           <option value="">No driver</option>
           {drivers.map((d) => (
@@ -90,7 +90,7 @@ export default function VehicleLane({
           </span>
         ) : null}
         <div
-          className="ml-auto flex items-center gap-2"
+          className="flex min-w-0 w-full flex-wrap items-center gap-2 sm:ml-auto sm:w-auto [&_button]:min-h-11"
           onClick={(event) => event.stopPropagation()}
         >
           <VehicleLabelPrinter

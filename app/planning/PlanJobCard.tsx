@@ -123,13 +123,13 @@ export default function PlanJobCard({
       onDragEnd={handleDragEnd}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
-      className={`cursor-grab rounded-md border bg-surface px-2.5 py-2 text-sm shadow-sm active:cursor-grabbing ${
+      className={`min-w-0 max-w-full cursor-grab break-words [overflow-wrap:anywhere] rounded-md border bg-surface px-2.5 py-2 text-sm shadow-sm active:cursor-grabbing ${
         selected ? "border-primary ring-1 ring-primary" : "border-line"
       }`}
     >
       {onSelectedChange ? (
         <label
-          className="mb-1.5 flex cursor-pointer items-center gap-2 text-xs font-medium text-ink-2"
+          className="mb-1.5 flex min-h-11 cursor-pointer items-center gap-2 text-xs font-medium text-ink-2"
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
@@ -171,7 +171,7 @@ export default function PlanJobCard({
 
       {sequence !== null && (onMoveUp || onMoveDown) ? (
         <div
-          className="mt-2 flex items-center gap-1"
+          className="mt-2 flex flex-wrap items-center gap-1"
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
@@ -183,7 +183,7 @@ export default function PlanJobCard({
             type="button"
             draggable={false}
             disabled={!canMoveUp}
-            className="rounded border border-line px-2 py-0.5 text-xs text-ink disabled:cursor-not-allowed disabled:opacity-40"
+            className="min-h-11 rounded border border-line px-2 py-0.5 text-xs text-ink disabled:cursor-not-allowed disabled:opacity-40"
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -197,7 +197,7 @@ export default function PlanJobCard({
             type="button"
             draggable={false}
             disabled={!canMoveDown}
-            className="rounded border border-line px-2 py-0.5 text-xs text-ink disabled:cursor-not-allowed disabled:opacity-40"
+            className="min-h-11 rounded border border-line px-2 py-0.5 text-xs text-ink disabled:cursor-not-allowed disabled:opacity-40"
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -210,7 +210,7 @@ export default function PlanJobCard({
       ) : null}
 
       {job.status === "pending_acceptance" ? (
-        <div className="mt-2 flex items-center justify-between gap-2">
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
           <span className="rounded border border-line px-1.5 py-0.5 text-xs text-warning">
             {sequence !== null
               ? "Assigned · Awaiting acceptance"
@@ -221,7 +221,7 @@ export default function PlanJobCard({
             <button
               type="button"
               draggable={false}
-              className="rounded-md border border-line bg-surface px-2 py-1 text-xs font-semibold text-ink hover:bg-surface-2"
+              className="min-h-11 rounded-md border border-line bg-surface px-2 py-1 text-xs font-semibold text-ink hover:bg-surface-2"
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();

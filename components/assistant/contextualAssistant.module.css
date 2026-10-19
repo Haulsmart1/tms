@@ -1,0 +1,39 @@
+/* On phones and tablets guidance follows the workspace, never covers job cards.
+   ApplicationFrame keeps this outside the sidebar/content flex row. */
+.assistant {
+  position: static;
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  padding: 1rem;
+  padding-block-end: calc(1rem + env(safe-area-inset-bottom));
+}
+
+.panel {
+  inline-size: 20rem;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  max-block-size: 65vh;
+  max-block-size: 65dvh;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+
+.touchTarget {
+  min-block-size: 44px;
+  max-inline-size: 100%;
+  white-space: normal;
+}
+
+/* Retain the existing floating desktop guidance, within the viewport. */
+@media (min-width: 1024px) {
+  .assistant {
+    position: fixed;
+    inset-inline-end: 1rem;
+    inset-block-end: max(1rem, env(safe-area-inset-bottom));
+    z-index: 40;
+    inline-size: auto;
+    max-inline-size: calc(100vw - 2rem);
+    padding: 0;
+  }
+}

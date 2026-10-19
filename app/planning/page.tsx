@@ -2930,8 +2930,8 @@ export default function PlanningPage() {
 
   return (
     <TenantGate>
-      <div className="ds min-h-screen bg-canvas font-sans text-ink">
-        <div className="flex flex-col gap-4 p-6">
+      <div className="ds min-h-screen min-w-0 max-w-full bg-canvas font-sans text-ink">
+        <main className="flex min-w-0 max-w-full flex-col gap-4 p-3 sm:p-6">
           <header className="flex flex-wrap items-center gap-3">
             <h1 className="text-xl font-semibold">Planning</h1>
             <input
@@ -2939,7 +2939,7 @@ export default function PlanningPage() {
               aria-label="Plan date"
               value={date}
               onChange={(e) => e.target.value && setDate(e.target.value)}
-              className="rounded-md border border-line bg-surface px-2 py-1 text-sm text-ink"
+              className="min-h-11 min-w-0 max-w-full rounded-md border border-line bg-surface px-2 py-1 text-sm text-ink"
             />
             {selectedRoute ? (
               <span className="text-sm text-ink-2">
@@ -3028,7 +3028,7 @@ export default function PlanningPage() {
 
           <section
             aria-label="Planning actions"
-            className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-2 p-3"
+            className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-2 p-3 [&_button]:min-h-11 [&_button]:h-auto [&_button]:max-w-full [&_button]:py-2"
           >
             <Button
               variant="secondary"
@@ -3060,7 +3060,7 @@ export default function PlanningPage() {
                 setBulkVehicleId(vehicleId);
                 setSelectedVehicleId(vehicleId || null);
               }}
-              className="rounded-md border border-line bg-surface px-2 py-1.5 text-sm text-ink"
+              className="min-h-11 min-w-0 max-w-full rounded-md border border-line bg-surface px-2 py-1.5 text-sm text-ink"
             >
               <option value="">Choose vehicle</option>
               {vehicles.map((vehicle) => (
@@ -3159,7 +3159,7 @@ export default function PlanningPage() {
                   Discard loaded plan
                 </Button>
 
-                <span className="text-xs font-medium text-ink">
+                <span className="min-w-0 max-w-full break-words [overflow-wrap:anywhere] text-xs font-medium text-ink">
                   Loaded: {stagedSavedPlan.name}
                 </span>
               </>
@@ -3248,7 +3248,7 @@ export default function PlanningPage() {
                   maxLength={120}
                   placeholder="Plan name"
                   aria-label="Saved plan name"
-                  className="min-w-52 rounded-md border border-line bg-surface px-2 py-1.5 text-sm text-ink"
+                  className="min-h-11 min-w-0 w-full rounded-md border border-line bg-surface px-2 py-1.5 text-sm text-ink sm:w-auto sm:min-w-52"
                 />
 
                 <Button
@@ -3359,7 +3359,7 @@ export default function PlanningPage() {
           {loading ? (
             <p className="text-sm text-ink-3">Loading the day&apos;s jobs...</p>
           ) : (
-            <div className="flex min-w-0 flex-col items-stretch gap-4 lg:flex-row lg:items-start">
+            <div className="flex min-w-0 w-full flex-col items-start gap-4 lg:flex-row">
               <UnassignedPool
                 jobs={unassigned}
                 subcontracted={subcontracted}
@@ -3646,7 +3646,7 @@ export default function PlanningPage() {
               </div>
             </div>
           )}
-        </div>
+        </main>
         {acceptanceTarget ? (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
