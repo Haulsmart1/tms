@@ -15,6 +15,7 @@ import {
   type ResolveMode,
 } from "../../lib/tenant/revalidate";
 import { applyTenantFilter } from "../../lib/tenant/filter";
+import { withTenantResolveDeadline } from "../../lib/tenant/resolveDeadline";
 
 const TenantContext = createContext<TenantContextValue | null>(null);
 
@@ -107,7 +108,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     try {
       let user: { id: string; email?: string | null } | null = null;
       try {
-        const res = await supabase.auth.getUser();
+        const res = await withTenantResolveDeadline(supabase.auth.getUser());
         /* getUser does not throw for network or 5xx failures: it swallows any
            AuthError and hands back a null user. Treating that null as "signed
            out" would bounce someone to /login mid-form on a flaky connection,
@@ -146,7 +147,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
 
       let raw: unknown;
       try {
-        const res = await supabase.rpc("get_tenant_context");
+        const res = await withTenantResolveDeadline(supabase.rpc("get_tenant_context"));
         if (res.error) throw res.error;
         raw = res.data;
       } catch (err) {
