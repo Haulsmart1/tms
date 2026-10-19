@@ -484,11 +484,13 @@ function LoadTransferPageContent() {
     && !tenant.activeTenantId
   ) {
     return (
-      <main className="ds min-h-screen bg-canvas p-6 text-ink">
+      <main className={`ds font-sans min-h-screen text-ink ${styles.page}`}>
         <div className="mx-auto max-w-4xl">
-          <h1 className={styles.title}>
-            Transfer load
-          </h1>
+          <header className={styles.hero}>
+            <p className={styles.eyebrow}>TMS WIZARD / FLEET OPERATIONS</p>
+            <h1 className={styles.title}>Transfer load</h1>
+            <p className={styles.subtitle}>Choose a tenant to load its vehicles and drivers.</p>
+          </header>
 
           <MessageBanner
             tone="warning"
@@ -505,7 +507,7 @@ function LoadTransferPageContent() {
   }
 
   return (
-    <main className={`ds min-h-screen text-ink ${styles.page}`}>
+    <main className={`ds font-sans min-h-screen text-ink ${styles.page}`}>
       <div className={`mx-auto grid max-w-6xl gap-6 ${styles.content}`}>
         <header className={styles.hero}>
           <p className={styles.eyebrow}>TMS WIZARD <span aria-hidden="true">/</span> FLEET OPERATIONS</p>
@@ -520,16 +522,23 @@ function LoadTransferPageContent() {
             automatically move the whole
             job or change Planning.
           </p>
+          <ol className={styles.steps} aria-label="Transfer workflow">
+            <li><span>01</span> Choose vehicles</li>
+            <li><span>02</span> Scan each item</li>
+            <li><span>03</span> Review & confirm</li>
+          </ol>
         </header>
 
         <MessageBanner tone={tone}>
           {message}
         </MessageBanner>
 
-        <section className={styles.panel}>
-          <h2 className={styles.panelTitle}>
-            Vehicles
+        <section className={styles.panel} aria-labelledby="transfer-vehicles-title" aria-busy={loading}>
+          <p className={styles.sectionLabel}>01 / ROUTE</p>
+          <h2 className={styles.panelTitle} id="transfer-vehicles-title">
+            Choose the handover
           </h2>
+          <p className={styles.panelCopy}>Select the vehicle carrying the items and the vehicle receiving them.</p>
 
           <div className="mt-4 grid gap-4 md:grid-cols-3">
             <Select
@@ -631,6 +640,10 @@ function LoadTransferPageContent() {
             </Select>
           </div>
 
+          {!loading && vehicles.length < 2 ? (
+            <p className={styles.notice}>At least two active vehicles are needed for a transfer. Check this tenant’s vehicle register before continuing.</p>
+          ) : null}
+
           {sourceVehicleId
           && destinationVehicleId
           && sourceVehicleId
@@ -642,11 +655,12 @@ function LoadTransferPageContent() {
           ) : null}
         </section>
 
-        <section className={styles.panel}>
+        <section className={styles.panel} aria-labelledby="transfer-scan-title">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className={styles.panelTitle}>
-                Scan load
+              <p className={styles.sectionLabel}>02 / ITEMS</p>
+              <h2 className={styles.panelTitle} id="transfer-scan-title">
+                Build your transfer batch
               </h2>
 
               <p className="mt-1 text-sm text-ink-3">
@@ -664,6 +678,7 @@ function LoadTransferPageContent() {
                 variant="secondary"
                 disabled={submitting}
                 onClick={clearBatch}
+                size="lg"
               >
                 Clear batch
               </Button>
@@ -687,6 +702,7 @@ function LoadTransferPageContent() {
               autoComplete="off"
               autoCapitalize="off"
               spellCheck={false}
+              aria-describedby="transfer-scan-help"
               value={manualValue}
               disabled={submitting}
               onChange={(event) =>
@@ -695,11 +711,12 @@ function LoadTransferPageContent() {
                 )
               }
               placeholder="Scan or enter barcode / serial"
-              className="h-10 min-w-0 flex-1 rounded-md border border-ink-3 bg-surface px-3 text-base text-ink placeholder:text-ink-3"
+              className={styles.serialInput}
             />
 
             <Button
               type="submit"
+              size="lg"
               disabled={
                 submitting
                 || !manualValue.trim()
@@ -715,13 +732,17 @@ function LoadTransferPageContent() {
             disabled={submitting}
             onScan={cameraScan}
           />
+          <p id="transfer-scan-help" className={styles.panelCopy}>
+            Scan the item’s barcode, not the job reference. This batch stays on this page until confirmed; leaving or reloading the page loses the unconfirmed batch.
+          </p>
         </section>
 
-        <section className={styles.panel}>
+        <section className={styles.panel} aria-labelledby="transfer-review-title">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className={styles.panelTitle}>
-                Review transfer
+              <p className={styles.sectionLabel}>03 / CONFIRM</p>
+              <h2 className={styles.panelTitle} id="transfer-review-title">
+                Check before moving custody
               </h2>
 
               <p className="mt-1 text-sm text-ink-3">
@@ -735,9 +756,15 @@ function LoadTransferPageContent() {
             </span>
           </div>
 
+          <div className={styles.routeSummary}>
+            <div><span>From</span><strong>{vehicles.find((vehicle) => vehicle.id === sourceVehicleId)?.registration || "Choose source vehicle"}</strong></div>
+            <span className={styles.routeArrow} aria-hidden="true">→</span>
+            <div><span>To</span><strong>{vehicles.find((vehicle) => vehicle.id === destinationVehicleId)?.registration || "Choose destination vehicle"}</strong></div>
+          </div>
+
           {scannedValues.length === 0 ? (
             <p className="mt-4 rounded-lg border border-dashed border-line p-5 text-sm text-ink-3">
-              No items scanned yet.
+              Your batch is empty. Scan or enter the first item above, then check every serial here before confirming.
             </p>
           ) : (
             <ol className="mt-4 grid gap-2">
@@ -757,11 +784,12 @@ function LoadTransferPageContent() {
 
                     <button
                       type="button"
+                      aria-label={`Remove ${value} from this transfer batch`}
                       disabled={submitting}
                       onClick={() =>
                         removeScan(value)
                       }
-                      className="rounded-md border border-line px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-surface disabled:opacity-50"
+                      className="min-h-11 rounded-md border border-line px-3 py-2 text-sm font-semibold text-ink-2 hover:bg-surface disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                     >
                       Remove
                     </button>
@@ -774,6 +802,8 @@ function LoadTransferPageContent() {
           <div className="mt-5 border-t border-line pt-5">
             <Button
               type="button"
+              size="lg"
+              className="w-full sm:w-auto"
               loading={submitting}
               disabled={!canConfirm}
               onClick={confirmTransfer}

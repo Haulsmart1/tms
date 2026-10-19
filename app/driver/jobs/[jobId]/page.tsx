@@ -369,11 +369,12 @@ export default function DriverJobPage({
           );
         })}
 
-        <section className="mt-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <header className="mt-2 rounded-2xl border border-slate-800 bg-slate-950 p-5 text-white shadow-sm">
+          <p className="mb-4 text-[10px] font-black uppercase tracking-[0.2em] text-cyan-300">TMS WIZARD / DRIVER WORKSPACE</p>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <div className="text-xs font-black uppercase tracking-wider text-blue-700">
-                Driver Job
+              <div className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                Assigned job
               </div>
 
               <h1 className="mt-1 text-2xl font-black">
@@ -389,7 +390,7 @@ export default function DriverJobPage({
             />
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-3">
+          <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-white p-4 text-slate-950">
             <Info
               label="Date"
               value={formatDate(
@@ -428,12 +429,14 @@ export default function DriverJobPage({
               {job.notes}
             </div>
           ) : null}
-        </section>
+          <p className="mt-4 border-t border-slate-700 pt-4 text-xs leading-5 text-slate-300">Follow the stops below. At delivery: match items, save photo evidence, then record the recipient and complete.</p>
+        </header>
 
         <section className="mt-4">
           <h2 className="px-1 text-lg font-black">
-            Route
+            Your stops
           </h2>
+          <p className="mt-1 px-1 text-sm leading-6 text-slate-600">Recorded status is shown for each stop. Items waiting to send remain on this phone until TMS accepts them.</p>
 
           <div className="mt-3 grid gap-3">
             {job.stops.map(
@@ -826,9 +829,9 @@ function StopCard({
           href={navigationUrl}
           target="_blank"
           rel="noreferrer"
-          className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl bg-slate-950 px-4 text-sm font-black text-white"
+          className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl bg-slate-950 px-4 text-sm font-black text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-700"
         >
-          Open Navigation
+          Navigate to this stop ↗
         </a>
 
         <div className="mt-4 grid grid-cols-2 gap-3">
@@ -874,8 +877,9 @@ function StopCard({
 
         {isDelivery ? (
           <div className="mt-5 border-t border-slate-100 pt-5">
+            <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-cyan-800">02 / DELIVERY EVIDENCE</p>
             <h3 className="text-base font-black">
-              Proof of Delivery
+              Record proof of delivery
             </h3>
 
             {delivered ? (
@@ -979,6 +983,7 @@ function StopCard({
                   <div className="text-xs font-black uppercase tracking-wide text-slate-600">
                     POD photos
                   </div>
+                  <p className="mt-1 text-xs leading-5 text-slate-600">Save at least one photo before completing. Photos waiting to send are not yet server-recorded.</p>
 
                   <div className="mt-2 grid grid-cols-2 gap-2">
                     <button
@@ -1042,6 +1047,7 @@ function StopCard({
                     ? "Please wait..."
                     : "Complete Delivery"}
                 </button>
+                <p className="mt-2 text-xs leading-5 text-slate-600">Completion is saved to this phone’s queue first. Check the sending status above before treating it as accepted by TMS.</p>
               </>
             )}
 
@@ -1096,13 +1102,13 @@ function StopCard({
             </div>
 
             {message ? (
-              <div className="mt-3 rounded-xl bg-emerald-50 p-3 text-sm font-bold text-emerald-900">
+              <div role="status" className="mt-3 rounded-xl bg-emerald-50 p-3 text-sm font-bold text-emerald-900">
                 {message}
               </div>
             ) : null}
 
             {error ? (
-              <div className="mt-3 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-800">
+              <div role="alert" className="mt-3 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-800">
                 {error}
               </div>
             ) : null}

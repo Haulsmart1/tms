@@ -91,6 +91,11 @@ export default function BarcodeVerification({
       [scans, allPendingScans],
     );
 
+  const serverRecordedKeys = useMemo(
+    () => new Set(scans.map((scan) => `${scan.job_item_id}\u0000${scan.serial_number}`)),
+    [scans],
+  );
+
   const expectedCount =
     serializedItems.reduce(
       (total, item) =>
@@ -280,30 +285,37 @@ export default function BarcodeVerification({
   }
 
   return (
-    <section className="mt-5 border-t border-slate-100 pt-5">
+    <section className="mt-5 rounded-2xl border border-cyan-200 bg-cyan-50/40 p-4" aria-label="Item barcode verification" aria-busy={busy}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h3 className="text-base font-black">
-            Barcode verification
+          <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-cyan-800">01 / MATCH ITEMS</p>
+          <h3 className="text-base font-black text-slate-950">
+            Scan & match freight
           </h3>
 
-          <p className="mt-1 text-xs text-slate-500">
-            Job-wide serialized freight verification.
+          <p className="mt-1 text-xs leading-5 text-slate-600">
+            Match every serial for this job before completing delivery.
           </p>
         </div>
 
-        <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">
+        <div className="rounded-full border border-cyan-200 bg-white px-3 py-1.5 text-xs font-black text-cyan-900">
           {verifiedCount} /{" "}
-          {expectedCount} verified
+          {expectedCount} matched
         </div>
       </div>
+
+      <progress className="mt-3 h-2 w-full accent-cyan-700" value={verifiedCount} max={expectedCount} aria-label="Job serials matched on this phone or recorded by server" />
+      <p className="mt-2 text-xs leading-5 text-slate-600">
+        Matched includes scans waiting on this phone. Only “Server recorded” confirms a scan has reached TMS.
+      </p>
+      {paused ? <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-900" role="status">Sending paused: {paused} Keep this phone’s saved evidence; do not clear site data.</p> : null}
 
       <div className="mt-3 grid gap-2">
         {serializedItems.map(
           (item) => (
             <div
               key={item.id}
-              className="rounded-xl border border-slate-200 bg-slate-50 p-3"
+              className="min-w-0 rounded-xl border border-slate-200 bg-white p-3"
             >
               <div className="font-bold">
                 {item.description ||
@@ -324,6 +336,7 @@ export default function BarcodeVerification({
                       verifiedKeys.has(
                         `${item.id}\u0000${expectedSerial}`,
                       );
+                    const serverRecorded = serverRecordedKeys.has(`${item.id}\u0000${expectedSerial}`);
 
                     return (
                       <span
@@ -332,14 +345,12 @@ export default function BarcodeVerification({
                         }
                         className={
                           verified
-                            ? "rounded-lg bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-900"
-                            : "rounded-lg bg-white px-2 py-1 text-xs font-bold text-slate-700"
+                            ? "max-w-full break-all rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs font-bold text-emerald-900"
+                            : "max-w-full break-all rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-bold text-slate-700"
                         }
                       >
                         {expectedSerial}
-                        {verified
-                          ? " ✓"
-                          : ""}
+                        <span className="mt-1 block text-[10px] font-semibold">{serverRecorded ? "Server recorded" : verified ? "On phone · waiting to send" : "Awaiting scan"}</span>
                       </span>
                     );
                   },
@@ -369,6 +380,8 @@ export default function BarcodeVerification({
           autoCorrect="off"
           spellCheck={false}
           maxLength={250}
+          aria-describedby={`barcode-help-${stopId}`}
+          autoComplete="off"
           onChange={(event) =>
             setSerial(
               event.target.value,
@@ -383,7 +396,7 @@ export default function BarcodeVerification({
               void verifyManualSerial();
             }
           }}
-          className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-950 outline-none focus:border-blue-600"
+          className="mt-1 min-h-12 w-full rounded-xl border border-slate-400 bg-white px-3 text-base text-slate-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-700"
           placeholder="Scan or enter serial number"
         />
       </label>
@@ -394,28 +407,20 @@ export default function BarcodeVerification({
         onClick={() =>
           void verifyManualSerial()
         }
-        className="mt-2 min-h-12 w-full rounded-xl bg-blue-700 px-4 text-sm font-black text-white disabled:opacity-50"
+        className="mt-2 min-h-12 w-full rounded-xl bg-cyan-800 px-4 text-sm font-black text-white disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-800"
       >
         {busy
           ? "Checking..."
           : "Verify Item"}
       </button>
 
-      <p className="mt-2 text-xs text-slate-500">
+      <p id={`barcode-help-${stopId}`} className="mt-2 text-xs leading-5 text-slate-600">
         Camera and manual entry are checked on this phone, then again by the server when sent.
       </p>
 
-      {message ? (
-        <div className="mt-3 rounded-xl bg-emerald-50 p-3 text-sm font-bold text-emerald-900">
-          {message}
-        </div>
-      ) : null}
+      <div role="status" aria-live="polite" className={message ? "mt-3 rounded-xl bg-emerald-50 p-3 text-sm font-bold text-emerald-900" : "sr-only"}>{message}</div>
 
-      {error ? (
-        <div className="mt-3 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-800">
-          {error}
-        </div>
-      ) : null}
+      <div role="alert" className={error ? "mt-3 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-800" : "sr-only"}>{error}</div>
     </section>
   );
 }

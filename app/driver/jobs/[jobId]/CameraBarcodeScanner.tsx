@@ -14,13 +14,13 @@ type Props = {
 };
 
 const COPY: ScannerCopy = {
-  open: "Scan with camera",
-  title: "Camera barcode scanner",
+  open: "Open camera scanner",
+  title: "Match item barcode",
   aim: "Point the rear camera at the Code 128 barcode.",
   scanning: "Scanning for a barcode...",
   checking: "Barcode detected. Verifying item...",
   manualEntry: "serial",
-  footer: "If camera access is unavailable, close the scanner and enter the serial manually.",
+  footer: "Match the item’s Code 128 serial, not the job reference. If the camera is unavailable, close this scanner and enter the serial manually below.",
 };
 
 export default function CameraBarcodeScanner({ disabled = false, onScan }: Props) {
