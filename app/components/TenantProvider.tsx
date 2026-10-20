@@ -16,6 +16,7 @@ import {
 } from "../../lib/tenant/revalidate";
 import { applyTenantFilter } from "../../lib/tenant/filter";
 import { withTenantResolveDeadline } from "../../lib/tenant/resolveDeadline";
+import { isTransientAuthFailure } from "../../lib/auth/authAvailability";
 
 const TenantContext = createContext<TenantContextValue | null>(null);
 
@@ -115,7 +116,10 @@ export function TenantProvider({ children }: { children: ReactNode }) {
            which is the exact failure this change exists to prevent. A genuine
            session-missing error is not retryable, so revoked access still
            reaches the signed-out branch below. */
-        if (res.error && isAuthRetryableFetchError(res.error)) throw res.error;
+        if (
+          res.error &&
+          (isAuthRetryableFetchError(res.error) || isTransientAuthFailure(res.error))
+        ) throw res.error;
         user = res.data.user;
       } catch (err) {
         if (isStale()) return;
