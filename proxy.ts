@@ -1,7 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
+import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { isApiPath, isPublicPath } from "./lib/auth/publicRoutes";
+import { isTransientAuthFailure } from "./lib/auth/authAvailability";
 
 const SESSION_ENTRY_PATHS = new Set([
   "/login",
@@ -65,6 +67,23 @@ function unauthenticated(
   return redirect;
 }
 
+/* A server outage must not be mistaken for an expired session. The page
+   stays protected (503), and refreshing it retries the auth check without
+   clearing cookies or IndexedDB driver evidence. An actual missing/revoked
+   session still gets the existing 401 or /login redirect. */
+function temporarilyUnavailable(request: NextRequest, response: NextResponse): NextResponse {
+  const retry = isApiPath(request.nextUrl.pathname)
+    ? NextResponse.json({ error: "auth_temporarily_unavailable" }, { status: 503 })
+    : new NextResponse(
+        '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TMS Wizard - Try again</title></head><body><main><h1>Sign-in check temporarily unavailable</h1><p>Your session could not be verified right now. No work has been cleared.</p><p><a href="">Retry this page</a></p></main></body></html>',
+        { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } },
+      );
+  retry.headers.set("Cache-Control", "private, no-store");
+  retry.headers.set("Retry-After", "5");
+  for (const cookie of response.cookies.getAll()) retry.cookies.set(cookie);
+  return retry;
+}
+
 export async function proxy(request: NextRequest) {
   /* Held in a mutable binding because setAll below has to rebuild it. Returning
      a response created BEFORE the cookie writes silently discards the refreshed
@@ -120,17 +139,26 @@ export async function proxy(request: NextRequest) {
      passes. getUser() validates the token. This call is also what triggers the
      refresh-and-setAll above, so it runs on other public paths too. */
   let user = null;
+  let verificationUnavailable = false;
 
   try {
-    const { data } = await supabase.auth.getUser();
+    const { data, error } = await supabase.auth.getUser();
     user = data.user;
+    verificationUnavailable = Boolean(error && (
+      isAuthRetryableFetchError(error) || isTransientAuthFailure(error)
+    ));
   } catch {
-    user = null;
+    // A failed verification is NOT proof that the user signed out.
+    verificationUnavailable = true;
   }
 
   if (isPublicPath(request.nextUrl.pathname)) return response;
 
-  if (!user) return unauthenticated(request, response);
+  if (!user) {
+    return verificationUnavailable
+      ? temporarilyUnavailable(request, response)
+      : unauthenticated(request, response);
+  }
 
   return response;
 }
