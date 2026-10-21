@@ -3366,7 +3366,11 @@ export default function PlanningPage() {
                 geocodeSettled={geocodeSettled && !geocodeUnavailable}
                 displacedNotes={displacedNotes}
                 selectedJobIds={selectedUnassignedJobIds}
+                vehicles={vehicles}
                 onToggleJob={toggleUnassignedSelection}
+                onMoveJob={(jobId, vehicleId) =>
+                  moveJob(jobId, vehicleId, null)
+                }
                 onOpenJob={setDetailJobId}
                 onAcceptJob={openAcceptance}
                 onDropJob={(jobId) => moveJob(jobId, null, null)}
@@ -3597,6 +3601,10 @@ export default function PlanningPage() {
                       }
                       driverId={laneDrivers[v.id] ?? null}
                       drivers={drivers}
+                      moveTargets={vehicles.map((vehicle) => ({
+                        id: vehicle.id,
+                        label: vehicle.registration,
+                      }))}
                       selected={v.id === selectedVehicleId}
                       summary={laneSummary(v.id)}
                       regimeSummary={
@@ -3636,6 +3644,9 @@ export default function PlanningPage() {
                       onAcceptJob={openAcceptance}
                       onMoveJob={(jobId, offset) =>
                         moveLaneJob(jobId, v.id, offset)
+                      }
+                      onMoveToVehicle={(jobId, vehicleId) =>
+                        moveJob(jobId, vehicleId, null)
                       }
                       onDropJob={(jobId, beforeJobId) =>
                         moveJob(jobId, v.id, beforeJobId)

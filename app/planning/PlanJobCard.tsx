@@ -26,6 +26,10 @@ type Props = {
   canMoveDown?: boolean;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
+  /** Touch-safe alternative to HTML drag-and-drop. */
+  moveTargets?: { id: string; label: string }[];
+  currentMoveTargetId?: string | null;
+  onMoveTargetChange?: (vehicleId: string | null) => void;
 };
 
 export const JOB_ID_MIME = "text/plain";
@@ -45,6 +49,9 @@ export default function PlanJobCard({
   canMoveDown = false,
   onMoveUp,
   onMoveDown,
+  moveTargets = [],
+  currentMoveTargetId = null,
+  onMoveTargetChange,
 }: Props) {
   const dragged = useRef(false);
   const stops = sortedStops(job);
@@ -168,6 +175,38 @@ export default function PlanJobCard({
       <p className="text-xs text-ink-3">
         {job.customer_name ?? "No customer"} · {placeSummary}
       </p>
+
+      {onMoveTargetChange && moveTargets.length > 0 ? (
+        <label
+          className="mt-2 block text-xs font-medium text-ink-2"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          Move job
+          <select
+            aria-label={`Move ${job.reference ?? "job"} to`}
+            draggable={false}
+            value={currentMoveTargetId ?? ""}
+            onChange={(e) => {
+              const targetId = e.currentTarget.value || null;
+              if (targetId !== currentMoveTargetId) onMoveTargetChange(targetId);
+            }}
+            onClick={(e) => e.stopPropagation()}
+            onDragStart={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            className="mt-1 min-h-11 w-full min-w-0 max-w-full rounded-md border border-line bg-surface px-2 py-1.5 text-sm text-ink"
+          >
+            <option value="">Unassigned</option>
+            {moveTargets.map((target) => (
+              <option key={target.id} value={target.id}>
+                {target.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
 
       {sequence !== null && (onMoveUp || onMoveDown) ? (
         <div

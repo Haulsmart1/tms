@@ -38,7 +38,8 @@ describe("planning mobile containment", () => {
     const html = renderToStaticMarkup(createElement(UnassignedPool, {
       jobs: [job], subcontracted: [], geocodeSettled: false,
       displacedNotes: {}, selectedJobIds: new Set([job.id]),
-      onToggleJob: noop, onOpenJob: noop, onAcceptJob: noop, onDropJob: noop,
+      vehicles: [{ id: "vehicle-fixture", registration: "MX69 UJZ" }],
+      onToggleJob: noop, onMoveJob: noop, onOpenJob: noop, onAcceptJob: noop, onDropJob: noop,
     }));
     expect(html).toContain("min-w-0 w-full");
     expect(html).toContain("lg:w-[240px]");
@@ -49,6 +50,9 @@ describe("planning mobile containment", () => {
     expect(html).toContain('type="checkbox"');
     expect(html).toContain("checked");
     expect(html).toContain("1 selected");
+    expect(html).toContain("On a phone, use Move job below");
+    expect(html).toContain('aria-label="Move RMA');
+    expect(html).toContain("MX69 UJZ");
     expect(html).toContain(job.reference!);
   });
 
@@ -56,12 +60,13 @@ describe("planning mobile containment", () => {
     const html = renderToStaticMarkup(createElement(VehicleLane, {
       vehicle: { id: "vehicle-fixture", registration: "MX69 UJZ" }, jobs: [job],
       driverId: "driver-fixture", drivers: [{ id: "driver-fixture", name: "Driver".repeat(40) }],
+      moveTargets: [{ id: "vehicle-fixture", label: "MX69 UJZ" }, { id: "vehicle-two", label: "MX20 ABC" }],
       selected: true, summary: "2 jobs · 245 km · 5 h 42 m",
       regimeSummary: { status: "empty", regime: null, reviewRequired: false, hasOverrides: false, warningCount: 0, jobs: [] },
       compliance: { status: "incomplete", statusLabel: "Not checked", dataComplete: false,
         plannedDrivingSeconds: null, dailyDrivingRemainingSeconds: null, breakDueAfterSeconds: null, warnings: [], missing: ["Recorded hours"] },
       geocodeSettled: false, onSelect: noop, onDriverChange: noop, onOpenJob: noop,
-      onAcceptJob: noop, onMoveJob: noop, onDropJob: noop,
+      onAcceptJob: noop, onMoveJob: noop, onMoveToVehicle: noop, onDropJob: noop,
     }));
     expect(html).toContain('class="mb-2 flex min-w-0 flex-wrap items-center gap-3"');
     expect(html).toContain('aria-label="Driver for MX69 UJZ"');
@@ -69,6 +74,8 @@ describe("planning mobile containment", () => {
     expect(html).toContain("sm:max-w-[16rem]");
     expect(html).toContain("Rest and WTD not checked");
     expect(html).toContain("Missing: Recorded hours");
+    expect(html).toContain('value="vehicle-fixture" selected=""');
+    expect(html).toContain("MX20 ABC");
     expect(html).toContain('selected=""');
   });
 
@@ -76,6 +83,8 @@ describe("planning mobile containment", () => {
     const html = renderToStaticMarkup(createElement(PlanJobCard, {
       job, sequence: 1, geocodeSettled: false, onOpen: noop, onAccept: noop,
       onSelectedChange: noop, onMoveUp: noop, onMoveDown: noop,
+      moveTargets: [{ id: "vehicle-fixture", label: "MX69 UJZ" }],
+      onMoveTargetChange: noop,
       canMoveUp: false, canMoveDown: true,
     }));
     expect(html).toContain('role="button"');
