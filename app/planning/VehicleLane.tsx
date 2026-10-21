@@ -18,6 +18,7 @@ type Props = {
   canonicalDropNumbersByJobId?: Record<string, number[]>;
   driverId: string | null;
   drivers: { id: string; name: string }[];
+  moveTargets: { id: string; label: string }[];
   selected: boolean;
   /** e.g. "3 jobs · 92 km · 2 h 41 m", or null before this lane has a route. */
   summary: string | null;
@@ -32,15 +33,16 @@ type Props = {
   onOpenJob: (jobId: string) => void;
   onAcceptJob: (jobId: string) => void;
   onMoveJob: (jobId: string, offset: -1 | 1) => void;
+  onMoveToVehicle: (jobId: string, vehicleId: string | null) => void;
   /** beforeJobId null means append to the end of the lane. */
   onDropJob: (draggedJobId: string, beforeJobId: string | null) => void;
 };
 
 export default function VehicleLane({
-  vehicle, jobs, canonicalDropNumbersByJobId, driverId, drivers, selected, summary, regimeSummary,
+  vehicle, jobs, canonicalDropNumbersByJobId, driverId, drivers, moveTargets, selected, summary, regimeSummary,
   compliance,
   geocodeSettled, driverConflict, onSelect, onDriverChange, onOpenJob,
-  onAcceptJob, onMoveJob, onDropJob,
+  onAcceptJob, onMoveJob, onMoveToVehicle, onDropJob,
 }: Props) {
   const displayedJobs = jobsInCanonicalDropOrder(
     jobs,
@@ -217,6 +219,11 @@ export default function VehicleLane({
             canMoveDown={canonicalDropNumbersByJobId === undefined && index < displayedJobs.length - 1}
             onMoveUp={() => onMoveJob(job.id, -1)}
             onMoveDown={() => onMoveJob(job.id, 1)}
+            moveTargets={moveTargets}
+            currentMoveTargetId={vehicle.id}
+            onMoveTargetChange={(vehicleId) =>
+              onMoveToVehicle(job.id, vehicleId)
+            }
             onDropBefore={(draggedId) => onDropJob(draggedId, job.id)}
           />
         ))}

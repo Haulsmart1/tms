@@ -11,7 +11,9 @@ type Props = {
   /** job id -> disclosure note for jobs displaced from an inactive vehicle. */
   displacedNotes: Record<string, string>;
   selectedJobIds: Set<string>;
+  vehicles: { id: string; registration: string }[];
   onToggleJob: (jobId: string, selected: boolean) => void;
+  onMoveJob: (jobId: string, vehicleId: string | null) => void;
   onOpenJob: (jobId: string) => void;
   onAcceptJob: (jobId: string) => void;
   onDropJob: (draggedJobId: string) => void;
@@ -23,7 +25,9 @@ export default function UnassignedPool({
   geocodeSettled,
   displacedNotes,
   selectedJobIds,
+  vehicles,
   onToggleJob,
+  onMoveJob,
   onOpenJob,
   onAcceptJob,
   onDropJob,
@@ -55,6 +59,11 @@ export default function UnassignedPool({
           {jobs.filter((job) => selectedJobIds.has(job.id)).length} selected
         </span>
       </div>
+      {jobs.length > 0 && vehicles.length > 0 ? (
+        <p className="text-xs text-ink-3">
+          On a phone, use Move job below. Dragging remains available on desktop.
+        </p>
+      ) : null}
       {jobs.length === 0 ? (
         <p className="text-xs text-ink-3">Every job for this date is assigned.</p>
       ) : (
@@ -67,6 +76,11 @@ export default function UnassignedPool({
             note={displacedNotes[job.id]}
             selected={selectedJobIds.has(job.id)}
             onSelectedChange={(selected) => onToggleJob(job.id, selected)}
+            moveTargets={vehicles.map((vehicle) => ({
+              id: vehicle.id,
+              label: vehicle.registration,
+            }))}
+            onMoveTargetChange={(vehicleId) => onMoveJob(job.id, vehicleId)}
             onOpen={onOpenJob}
             onAccept={onAcceptJob}
           />
