@@ -245,6 +245,13 @@ async function completeAuthentication(
 
           setAll(cookiesToSet) {
             for (const cookie of cookiesToSet) {
+              /*
+               * Make a session issued by verifyOtp/exchangeCodeForSession
+               * visible to the getUser() call below during this same request.
+               * Keeping it only in pendingCookies writes it to the browser,
+               * but leaves the SSR adapter reading the pre-login cookie jar.
+               */
+              request.cookies.set(cookie.name, cookie.value);
               pendingCookies.push(cookie);
             }
           },
