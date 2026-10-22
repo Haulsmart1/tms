@@ -47,6 +47,34 @@ describe("real callback handler with isolated Auth fixtures", () => {
     expect(response.headers.get("set-cookie")).toContain("SameSite=lax");
   });
 
+  it("makes the newly issued session readable before resolving the authenticated user", async () => {
+    fake.createServerClient.mockImplementation((_url, _key, options) => {
+      fake.verifyOtp.mockImplementation(async () => {
+        options.cookies.setAll([
+          {
+            name: "fixture-session",
+            value: "signed-in",
+            options: { path: "/", sameSite: "lax" },
+          },
+        ]);
+        return { error: null };
+      });
+      fake.getUser.mockImplementation(async () => {
+        const session = options.cookies
+          .getAll()
+          .find((cookie: { name: string }) => cookie.name === "fixture-session");
+        return session?.value === "signed-in"
+          ? { data: { user: { id: "fixture-user" } }, error: null }
+          : { data: { user: null }, error: { message: "No readable session" } };
+      });
+      return { auth: fake };
+    });
+
+    const response = await POST(post());
+    expect(location(response).pathname).toBe("/jobs");
+    expect(response.headers.get("set-cookie")).toContain("fixture-session=signed-in");
+  });
+
   it("reproduces Chrome first redemption, Chrome replay, then Safari replay without the Chrome session", async () => {
     expect(location(await POST(post("invite"))).pathname).toBe("/jobs");
     fake.createServerClient.mockReturnValue({ auth: fake });
