@@ -245,6 +245,13 @@ async function completeAuthentication(
 
           setAll(cookiesToSet) {
             for (const cookie of cookiesToSet) {
+              /*
+               * Make a session issued by verifyOtp/exchangeCodeForSession
+               * visible to the getUser() call below during this same request.
+               * Keeping it only in pendingCookies writes it to the browser,
+               * but leaves the SSR adapter reading the pre-login cookie jar.
+               */
+              request.cookies.set(cookie.name, cookie.value);
               pendingCookies.push(cookie);
             }
           },
@@ -253,6 +260,16 @@ async function completeAuthentication(
     );
 
   const withCookies = (response: NextResponse) => {
+    /*
+     * @supabase/ssr 0.9 does not pass the cache-protection headers introduced
+     * by the newer adapter contract into setAll(). A callback response carries
+     * user-specific Set-Cookie values, so prevent any CDN or reverse proxy from
+     * storing and replaying it to another browser.
+     */
+    response.headers.set("Cache-Control", "private, no-store");
+    response.headers.set("Pragma", "no-cache");
+    response.headers.set("Expires", "0");
+
     for (const { name, value, options } of pendingCookies) {
       response.cookies.set(name, value, options);
     }
