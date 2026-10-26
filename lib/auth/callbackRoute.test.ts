@@ -47,6 +47,15 @@ describe("real callback handler with isolated Auth fixtures", () => {
     expect(response.headers.get("set-cookie")).toContain("SameSite=lax");
   });
 
+  it("prevents an auth response containing session cookies from being cached", async () => {
+    const response = await POST(post());
+
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("pragma")).toBe("no-cache");
+    expect(response.headers.get("expires")).toBe("0");
+    expect(response.headers.get("set-cookie")).toContain("fixture-session=signed-in");
+  });
+
   it("makes the newly issued session readable before resolving the authenticated user", async () => {
     fake.createServerClient.mockImplementation((_url, _key, options) => {
       fake.verifyOtp.mockImplementation(async () => {
