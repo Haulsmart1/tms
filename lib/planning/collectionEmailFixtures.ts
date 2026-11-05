@@ -8,3 +8,11 @@ export const exampleJob: CollectionEmailJob = {
 };
 export const appointment: CollectionEmailOptions = { kind: "planned_window", date: "2026-11-07", window: "AM", collectedAt: "2026-11-05T10:00:00Z" };
 
+export const deliveryJob: CollectionEmailJob = {
+  ...exampleJob,
+  job_stops: [...exampleJob.job_stops, { ...exampleJob.job_stops[0],
+    id: "30000000-0000-4000-8000-000000000002", type: "delivery", stop_order: 2,
+    delivered_at: null, address_line: "2 Delivery Road", city: "Destination", postcode: "BB2 2BB",
+    contact_name: "Delivery Recipient", contact_email: "deliver@example.test", contact_phone: "01234 000002" }],
+};
+

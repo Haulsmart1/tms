@@ -21,6 +21,7 @@ type Props = {
   onOpen?: (jobId: string) => void;
   onAccept?: (jobId: string) => void;
   onCollectionReceipt?: () => void;
+  onAppointmentEmail?: () => void;
   selected?: boolean;
   onSelectedChange?: (selected: boolean) => void;
   canMoveUp?: boolean;
@@ -41,6 +42,7 @@ export default function PlanJobCard({
   onOpen,
   onAccept,
   onCollectionReceipt,
+  onAppointmentEmail,
   selected = false,
   onSelectedChange,
   canMoveUp = false,
@@ -210,6 +212,11 @@ export default function PlanJobCard({
           </button>
         </div>
       ) : null}
+
+      {onAppointmentEmail ? <button type="button" draggable={false}
+        className="mt-2 min-h-11 rounded-md border border-line px-2 text-xs font-semibold text-ink"
+        onKeyDown={(event) => event.stopPropagation()}
+        onClick={(event) => { event.preventDefault(); event.stopPropagation(); onAppointmentEmail(); }}>Send collection / delivery time</button> : null}
 
       {onCollectionReceipt ? <button type="button" draggable={false}
         className="mt-2 min-h-11 rounded-md border border-line px-2 text-xs font-semibold text-ink"

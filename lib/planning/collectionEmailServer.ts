@@ -5,7 +5,7 @@ import { loadPodBranding } from "../pod/brandingServer";
 import { documentEmailAllowed } from "../documents/emailLimits";
 import { sendMicrosoftGraphEmail } from "../documents/delivery";
 
-const JOB_SELECT = "id,tenant_id,reference,status,job_stops(id,tenant_id,type,stop_order,status,collected_at,address_line,city,postcode,contact_name,contact_email,contact_phone),job_items(serial_numbers,description,quantity)";
+const JOB_SELECT = "id,tenant_id,reference,status,job_stops(id,tenant_id,type,stop_order,status,collected_at,delivered_at,address_line,city,postcode,contact_name,contact_email,contact_phone),job_items(serial_numbers,description,quantity)";
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
 export async function loadCollectionEmails(admin: SupabaseClient, tenantId: string, jobIds: string[], options: CollectionEmailOptions) {
@@ -24,9 +24,12 @@ export async function loadCollectionEmails(admin: SupabaseClient, tenantId: stri
     const message = buildCollectionEmail(job, options, branding.carrierName);
     message.preview.fingerprint = digest([message.preview, message.html]);
     // One receipt per stop/contact, regardless of later time corrections;
-    // one appointment per date/window/contact. A different window is an update.
+    // one appointment per stop/date/window/contact. Keep existing AM/PM keys
+    // stable; specific times must differ so an amended appointment can be sent.
     const key = "planning-email:" + digest([tenantId, message.preview.stopId, options.kind, message.preview.email,
-      options.kind === "planned_window" ? [options.date, options.window] : "receipt"]);
+      options.kind === "planned_window" ? options.window === "CUSTOM"
+        ? [options.date, options.window, options.timeFrom, options.timeTo || ""]
+        : [options.date, options.window] : "receipt"]);
     return { ...message, key };
   });
 }
@@ -37,7 +40,7 @@ type Message = Awaited<ReturnType<typeof loadCollectionEmails>>[number];
  * duplicates. Ambiguous provider failures remain claimed for manual checking. */
 export async function sendCollectionEmail(admin: SupabaseClient, userId: string, message: Message, options: CollectionEmailOptions) {
   const row = message.preview;
-  if (row.issue || !row.email || !row.stopId) return { status: "skipped", message: row.issue || "No collection email." };
+  if (row.issue || !row.email || !row.stopId) return { status: "skipped", message: row.issue || "No contact email." };
   const { data: prior, error: priorError } = await admin.from("job_notification_log").select("status")
     .eq("tenant_id", row.tenantId).eq("idempotency_key", message.key).maybeSingle();
   if (priorError) throw new Error("Unable to check email history.");
@@ -48,7 +51,9 @@ export async function sendCollectionEmail(admin: SupabaseClient, userId: string,
     channel: "email", notification_type: options.kind, status: "pending", idempotency_key: message.key,
     recipient_name: row.name, recipient_email: row.email, provider: "microsoft_graph", initiated_by: userId,
     metadata: { source: "planning", subject: row.subject, text: row.text, fingerprint: row.fingerprint,
-      ...(options.kind === "planned_window" ? { collectionDate: options.date, window: options.window, timeZone: "Europe/London" }
+      ...(options.kind === "planned_window" ? { stopType: options.stopType ?? "collection", appointmentDate: options.date,
+        ...(options.stopType === "delivery" ? { deliveryDate: options.date } : { collectionDate: options.date }),
+        window: options.window, ...(options.window === "CUSTOM" ? { timeFrom: options.timeFrom, timeTo: options.timeTo || null } : {}), timeZone: "Europe/London" }
         : { collectionConfirmedBy: userId, collectedAt: options.collectedAt }) },
   }).select("id").single();
   if (claimError?.code === "23505") return duplicateResult("pending");

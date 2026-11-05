@@ -55,6 +55,7 @@ describe("planning mobile containment", () => {
   it("wraps real lane controls, bounds the native driver select, and retains compliance", () => {
     const html = renderToStaticMarkup(createElement(VehicleLane, {
       vehicle: { id: "vehicle-fixture", registration: "MX69 UJZ" }, jobs: [job],
+      planningDate: "2026-11-07", emailEnabled: true,
       driverId: "driver-fixture", drivers: [{ id: "driver-fixture", name: "Driver".repeat(40) }],
       selected: true, summary: "2 jobs · 245 km · 5 h 42 m",
       regimeSummary: { status: "empty", regime: null, reviewRequired: false, hasOverrides: false, warningCount: 0, jobs: [] },
@@ -69,6 +70,9 @@ describe("planning mobile containment", () => {
     expect(html).toContain("sm:max-w-[16rem]");
     expect(html).toContain("Rest and WTD not checked");
     expect(html).toContain("Missing: Recorded hours");
+    expect(html).toContain("Send collection / delivery time</button>");
+    expect(html).toContain("Email collection receipt</button>");
+    expect(html).toContain("Email collection / delivery times</button>");
     expect(html).toContain('selected=""');
   });
 
