@@ -143,7 +143,7 @@ async function getMicrosoftGraphAccessToken(): Promise<string> {
   return body.access_token;
 }
 
-async function sendMicrosoftGraphEmail(input: {
+export async function sendMicrosoftGraphEmail(input: {
   recipient: string;
   subject: string;
   text: string;

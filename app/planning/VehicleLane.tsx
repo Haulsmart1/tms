@@ -1,6 +1,8 @@
 "use client";
 
-import type { DragEvent } from "react";
+import { useState, type DragEvent } from "react";
+import CollectionEmailDialog from "./CollectionEmailDialog";
+import type { CollectionEmailKind } from "../../lib/planning/collectionEmail";
 import PlanJobCard, { JOB_ID_MIME } from "./PlanJobCard";
 import VehicleLabelPrinter from "./VehicleLabelPrinter";
 import type { PlanJob } from "../../lib/planning/types";
@@ -15,6 +17,8 @@ import { jobsInCanonicalDropOrder } from "../../lib/planning/canonicalLaneOrder"
 type Props = {
   vehicle: { id: string; registration: string };
   jobs: PlanJob[];
+  planningDate?: string;
+  emailEnabled?: boolean;
   canonicalDropNumbersByJobId?: Record<string, number[]>;
   driverId: string | null;
   drivers: { id: string; name: string }[];
@@ -40,8 +44,11 @@ export default function VehicleLane({
   vehicle, jobs, canonicalDropNumbersByJobId, driverId, drivers, selected, summary, regimeSummary,
   compliance,
   geocodeSettled, driverConflict, onSelect, onDriverChange, onOpenJob,
-  onAcceptJob, onMoveJob, onDropJob,
+  onAcceptJob, onMoveJob, onDropJob, planningDate, emailEnabled = false,
 }: Props) {
+  const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
+  const [emailTarget, setEmailTarget] = useState<{ jobs: PlanJob[]; kind: CollectionEmailKind } | null>(null);
+  const selectedOnVan = jobs.filter((job) => selectedJobs.has(job.id));
   const displayedJobs = jobsInCanonicalDropOrder(
     jobs,
     canonicalDropNumbersByJobId
@@ -102,6 +109,14 @@ export default function VehicleLane({
           </span>
         </div>
       </header>
+
+      {emailEnabled && jobs.length > 0 ? <div className="mb-3 flex flex-wrap items-center gap-2" onClick={(event) => event.stopPropagation()}>
+        <button type="button" className="min-h-11 rounded-md border border-line px-3 text-sm text-ink" onClick={() => setSelectedJobs(new Set(jobs.map((job) => job.id)))}>Select all on van</button>
+        <button type="button" className="min-h-11 rounded-md border border-line px-3 text-sm text-ink" onClick={() => setSelectedJobs(new Set())}>Clear</button>
+        <span className="text-sm text-ink-3">{selectedOnVan.length} selected</span>
+        <button type="button" disabled={selectedOnVan.length === 0} className="min-h-11 rounded-md border border-line bg-surface px-3 text-sm font-semibold text-ink disabled:opacity-40"
+          onClick={() => setEmailTarget({ jobs: selectedOnVan, kind: "planned_window" })}>Email AM / PM collection</button>
+      </div> : null}
 
       <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
         <span className="rounded border border-line bg-surface px-1.5 py-0.5 text-ink-2">
@@ -213,6 +228,11 @@ export default function VehicleLane({
             geocodeSettled={geocodeSettled}
             onOpen={onOpenJob}
             onAccept={onAcceptJob}
+            selected={selectedJobs.has(job.id)}
+            onSelectedChange={emailEnabled ? (checked) => setSelectedJobs((previous) => {
+              const next = new Set(previous); if (checked) next.add(job.id); else next.delete(job.id); return next;
+            }) : undefined}
+            onCollectionReceipt={emailEnabled ? () => setEmailTarget({ jobs: [job], kind: "collection_receipt" }) : undefined}
             canMoveUp={canonicalDropNumbersByJobId === undefined && index > 0}
             canMoveDown={canonicalDropNumbersByJobId === undefined && index < displayedJobs.length - 1}
             onMoveUp={() => onMoveJob(job.id, -1)}
@@ -227,6 +247,8 @@ export default function VehicleLane({
           drop a job here
         </div>
       </div>
+      {emailTarget ? <CollectionEmailDialog jobs={emailTarget.jobs} kind={emailTarget.kind} date={planningDate ?? ""}
+        vehicleRegistration={vehicle.registration} onClose={() => setEmailTarget(null)} /> : null}
     </section>
   );
 }

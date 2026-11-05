@@ -20,6 +20,7 @@ type Props = {
   onDropBefore?: (draggedJobId: string) => void;
   onOpen?: (jobId: string) => void;
   onAccept?: (jobId: string) => void;
+  onCollectionReceipt?: () => void;
   selected?: boolean;
   onSelectedChange?: (selected: boolean) => void;
   canMoveUp?: boolean;
@@ -39,6 +40,7 @@ export default function PlanJobCard({
   onDropBefore,
   onOpen,
   onAccept,
+  onCollectionReceipt,
   selected = false,
   onSelectedChange,
   canMoveUp = false,
@@ -208,6 +210,11 @@ export default function PlanJobCard({
           </button>
         </div>
       ) : null}
+
+      {onCollectionReceipt ? <button type="button" draggable={false}
+        className="mt-2 min-h-11 rounded-md border border-line px-2 text-xs font-semibold text-ink"
+        onKeyDown={(event) => event.stopPropagation()}
+        onClick={(event) => { event.preventDefault(); event.stopPropagation(); onCollectionReceipt(); }}>Email collection receipt</button> : null}
 
       {job.status === "pending_acceptance" ? (
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
