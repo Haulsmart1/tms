@@ -1158,8 +1158,6 @@ export default function JobsPage() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    <BackToSavedPlan jobId={selectedJob.id} tenantId={selectedJob.tenant_id}
-                      planningDate={selectedJob.planning_date || selectedJob.scheduled_date} vehicleId={selectedJob.vehicle_id} />
                     <Button
                       type="button"
                       variant="secondary"
@@ -1390,6 +1388,8 @@ export default function JobsPage() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
+                    <BackToSavedPlan jobId={selectedJob.id} tenantId={selectedJob.tenant_id}
+                      planningDate={selectedJob.planning_date || selectedJob.scheduled_date} vehicleId={selectedJob.vehicle_id} />
                     <Button
                       variant="secondary"
                       onClick={() => {
