@@ -6,11 +6,11 @@ import {
   useRef,
   useState,
 } from "react";
-import JsBarcode from "jsbarcode";
+import PrintedBoxLabel, { labelLayoutError } from "../../components/printing/PrintedBoxLabel";
+import { toLabelStops } from "../../lib/planning/jobDetail";
 import Button from "../../components/Button";
 import type {
   PlanJob,
-  PlanStop,
 } from "../../lib/planning/types";
 import {
   BOX_LABEL_TEMPLATES,
@@ -22,11 +22,9 @@ import {
 import {
   formatStopAddress,
   paginateLabels,
-  type LabelStop,
 } from "../../lib/printing/jobLabels";
 import {
   buildVehicleLabels,
-  type VehicleLabel,
   type VehicleLabelStopSelections,
 } from "../../lib/printing/vehicleLabels";
 
@@ -34,50 +32,6 @@ type Props = {
   vehicleRegistration: string;
   jobs: PlanJob[];
 };
-
-function labelStop(stop: PlanStop): LabelStop | null {
-  if (
-    stop.type !== "collection"
-    && stop.type !== "delivery"
-  ) {
-    return null;
-  }
-
-  return {
-    id: stop.id,
-    stop_order: stop.stop_order,
-    type: stop.type,
-    address_line: stop.address_line,
-    city: stop.city,
-    postcode: stop.postcode,
-  };
-}
-
-function BarcodeSvg({ value }: { value: string }) {
-  const ref = useRef<SVGSVGElement | null>(null);
-
-  useEffect(() => {
-    if (!ref.current) {
-      return;
-    }
-
-    JsBarcode(ref.current, value, {
-      format: "CODE128",
-      displayValue: false,
-      margin: 0,
-      height: 28,
-      width: 1.3,
-    });
-  }, [value]);
-
-  return (
-    <svg
-      ref={ref}
-      aria-label={`Barcode ${value}`}
-      className="h-[8mm] w-full"
-    />
-  );
-}
 
 function numericInput(
   value: number,
@@ -104,6 +58,8 @@ export default function VehicleLabelPrinter({
   jobs,
 }: Props) {
   const [open, setOpen] = useState(false);
+  const [layoutError, setLayoutError] = useState<string | null>(null);
+  const printRootRef = useRef<HTMLDivElement | null>(null);
   const [templateId, setTemplateId] =
     useState(BOX_LABEL_TEMPLATES[0].id);
   const [customTemplate, setCustomTemplate] =
@@ -119,9 +75,7 @@ export default function VehicleLabelPrinter({
       jobs.map((job) => ({
         id: job.id,
         reference: job.reference,
-        stops: job.stops
-          .map(labelStop)
-          .filter((stop): stop is LabelStop => stop !== null),
+        stops: toLabelStops(job.stops),
         items: job.items ?? [],
       })),
     [jobs],
@@ -192,6 +146,8 @@ export default function VehicleLabelPrinter({
       : BOX_LABEL_TEMPLATES.find(
           (template) => template.id === templateId,
         ) ?? BOX_LABEL_TEMPLATES[0];
+
+  useEffect(() => { setLayoutError(null); }, [selectedTemplate, stopSelections]);
 
   const capacity = templateCapacity(selectedTemplate);
   const templateError = validateLabelTemplate(selectedTemplate);
@@ -273,7 +229,9 @@ export default function VehicleLabelPrinter({
 
   function printLabels() {
     if (!printError) {
-      window.print();
+      const error = labelLayoutError(printRootRef.current);
+      setLayoutError(error);
+      if (!error) window.print();
     }
   }
 
@@ -562,6 +520,8 @@ export default function VehicleLabelPrinter({
                 </div>
               ) : null}
 
+              {layoutError ? <div role="alert" className="mt-3 text-sm text-red-700">{layoutError}</div> : null}
+
               <div className="mt-4 flex justify-end">
                 <Button
                   type="button"
@@ -574,7 +534,7 @@ export default function VehicleLabelPrinter({
               </div>
             </div>
 
-            <div className="vehicle-label-print-root bg-white">
+            <div ref={printRootRef} className="vehicle-label-print-root bg-white">
               {pages.map((page, pageIndex) => (
                 <div
                   key={pageIndex}
@@ -610,9 +570,14 @@ export default function VehicleLabelPrinter({
                       );
 
                     return (
-                      <VehicleBoxLabel
+                      <PrintedBoxLabel
                         key={label.key}
-                        label={label}
+                        jobReference={label.jobReference}
+                        box={label.box}
+                        boxNumber={label.boxNumber}
+                        totalBoxes={label.totalJobBoxes}
+                        collection={label.collection}
+                        delivery={label.delivery}
                         widthMm={selectedTemplate.labelWidthMm}
                         heightMm={selectedTemplate.labelHeightMm}
                         leftMm={left}
@@ -627,91 +592,5 @@ export default function VehicleLabelPrinter({
         </div>
       ) : null}
     </>
-  );
-}
-
-function VehicleBoxLabel({
-  label,
-  widthMm,
-  heightMm,
-  leftMm,
-  topMm,
-}: {
-  label: VehicleLabel;
-  widthMm: number;
-  heightMm: number;
-  leftMm: number;
-  topMm: number;
-}) {
-  const compact = heightMm < 45;
-
-  return (
-    <article
-      className="absolute box-border overflow-hidden border border-slate-300 bg-white text-black"
-      style={{
-        left: `${leftMm}mm`,
-        top: `${topMm}mm`,
-        width: `${widthMm}mm`,
-        height: `${heightMm}mm`,
-        padding: compact ? "1.6mm" : "3mm",
-        fontFamily: "Arial, Helvetica, sans-serif",
-      }}
-    >
-      <div
-        className="flex items-start justify-between gap-2 font-bold"
-        style={{
-          fontSize: compact ? "7.5pt" : "11pt",
-          lineHeight: 1.05,
-        }}
-      >
-        <span className="truncate">
-          JOB {label.jobReference}
-        </span>
-        <span className="shrink-0">
-          BOX {label.boxNumber}/{label.totalJobBoxes}
-        </span>
-      </div>
-
-      <div
-        className="mt-[1mm] grid gap-[0.6mm]"
-        style={{
-          fontSize: compact ? "6.2pt" : "9pt",
-          lineHeight: 1.1,
-        }}
-      >
-        <div className="line-clamp-2">
-          <strong>FROM:</strong>{" "}
-          {formatStopAddress(label.collection)}
-        </div>
-
-        <div className="line-clamp-2">
-          <strong>TO:</strong>{" "}
-          {formatStopAddress(label.delivery)}
-        </div>
-
-        {!compact
-        && (label.box.sku || label.box.description) ? (
-          <div className="truncate">
-            <strong>ITEM:</strong>{" "}
-            {[label.box.sku, label.box.description]
-              .filter(Boolean)
-              .join(" - ")}
-          </div>
-        ) : null}
-      </div>
-
-      <div className={compact ? "mt-[0.8mm]" : "mt-[2mm]"}>
-        <BarcodeSvg value={label.box.serial} />
-        <div
-          className="truncate text-center font-mono font-semibold"
-          style={{
-            fontSize: compact ? "6.5pt" : "9pt",
-            lineHeight: 1,
-          }}
-        >
-          {label.box.serial}
-        </div>
-      </div>
-    </article>
   );
 }

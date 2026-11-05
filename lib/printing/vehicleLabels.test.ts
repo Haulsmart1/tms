@@ -89,6 +89,8 @@ describe("buildVehicleLabels", () => {
           address_line: "Second Collection",
           city: null,
           postcode: "G1 1AA",
+          contact_name: "Second collection contact",
+          contact_phone: "07700 900456",
         },
         {
           id: "delivery-2",
@@ -113,6 +115,9 @@ describe("buildVehicleLabels", () => {
     });
 
     const result = buildVehicleLabels([job(), second]);
+
+    expect(result.labels[2].collection.contact_name).toBe("Second collection contact");
+    expect(result.labels[2].collection.contact_phone).toBe("07700 900456");
 
     expect(result.labels[0].collection.address_line)
       .toBe("Collection Road");

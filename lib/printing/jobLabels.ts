@@ -10,6 +10,8 @@ export type LabelStop = {
   address_line: string;
   city: string | null;
   postcode: string | null;
+  contact_name?: string | null;
+  contact_phone?: string | null;
 };
 
 export type LabelJobItem = {

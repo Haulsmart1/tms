@@ -38,6 +38,7 @@ describe("saved plan board loading", () => {
     expect(requests).toHaveLength(2);
     expect(requests.every((request) => request.searchParams.get("tenant_id") === "in.(bob-tenant)")).toBe(true);
     expect(requests.every((request) => !request.searchParams.get("select")!.includes("*"))).toBe(true);
+    expect(requests.every((request) => request.searchParams.get("select")!.includes("contact_name,contact_phone"))).toBe(true);
   });
 
   it("fails the load when a snapshot read fails instead of silently dropping its jobs", async () => {
