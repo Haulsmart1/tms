@@ -12,6 +12,7 @@ import PlanningMap, { type MapMarker } from "./PlanningMap";
 import UnassignedPool from "./UnassignedPool";
 import VehicleLane from "./VehicleLane";
 import JobDetailDialog from "./JobDetailDialog";
+import { readPlanningReturnContext, type PlanningReturnContext } from "../../lib/planning/navigation";
 import { draftAssignment } from "../../lib/planning/jobDetail";
 import { stopsNeedingGeocode } from "../../lib/planning/geocoding";
 import { computeSaveDiff, type LanePlan } from "../../lib/planning/saveDiff";
@@ -256,6 +257,8 @@ export default function PlanningPage() {
   const [editorDrafts, setEditorDrafts] = useState<Record<string, SevenDayPlanEditorDraft>>({});
   const [stagedSavedPlan, setStagedSavedPlan] =
     useState<LoadedSavedPlan | null>(null);
+  const [returnContext, setReturnContext] = useState<PlanningReturnContext | null>(null);
+  const restoredReturnPlan = useRef<string | null>(null);
   const pendingSavedPlanOpen = useRef<LoadedSavedPlan | null>(null);
   const [saveStatus, setSaveStatus] = useState<
     "idle" | "pending" | "saving" | "saved" | "local-only"
@@ -1818,7 +1821,8 @@ export default function PlanningPage() {
     setSaveStatus("pending");
 
     setSelectedVehicleId(
-      vehicles.find(
+      (returnContext?.planId === loaded.id && returnContext.vehicleId && activeVehicleIds.has(returnContext.vehicleId)
+        ? returnContext.vehicleId : null) ?? vehicles.find(
         (vehicle) => (orders[vehicle.id] ?? []).length > 0
       )?.id ??
         vehicles[0]?.id ??
@@ -2090,6 +2094,22 @@ export default function PlanningPage() {
     // Refresh only when the tenant changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planningTenantId]);
+
+  useEffect(() => {
+    setReturnContext(readPlanningReturnContext(window.location.search));
+  }, []);
+
+  useEffect(() => {
+    if (!returnContext?.planId || !planningTenantId || returnContext.tenantId !== planningTenantId || loading || savedPlanBusy) return;
+    const key = `${planningTenantId}:${returnContext.planId}`;
+    if (restoredReturnPlan.current === key) return;
+    restoredReturnPlan.current = key;
+    // Reuse the read-only saved-plan open path. This stages its current jobs;
+    // returning from a job never applies or overwrites the saved plan.
+    void openNamedPlan(returnContext.planId);
+    // Open once after the initial board has loaded, not after subsequent edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [returnContext, planningTenantId, loading, savedPlanBusy]);
 
   useEffect(() => {
     if (
@@ -3778,6 +3798,8 @@ export default function PlanningPage() {
               vehicleLabel={vehicleLabel}
               driverLabel={driverLabel}
               timeZone={planningTimeZone}
+              planningContext={planningTenantId ? { tenantId: planningTenantId, date,
+                planId: stagedSavedPlan?.id || null, vehicleId } : undefined}
               geocodeSettled={geocodeSettled && !geocodeUnavailable}
               onClose={() => setDetailJobId(null)}
               onAccept={(jobId) => {

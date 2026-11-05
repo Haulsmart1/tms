@@ -14,6 +14,7 @@ import {
 } from "../../lib/planning/jobDetail";
 import { sortedStops } from "../../lib/planning/waypoints";
 import type { PlanJob } from "../../lib/planning/types";
+import { planningJobHref, type PlanningReturnContext } from "../../lib/planning/navigation";
 
 type Props = {
   job: PlanJob;
@@ -24,6 +25,7 @@ type Props = {
       the lane has no driver or the job is unassigned. */
   driverLabel: string | null;
   timeZone: string;
+  planningContext?: PlanningReturnContext;
   /** True once geocoding has been attempted, so a missing fix means "failed",
       never "still loading". Same meaning as on PlanJobCard. */
   geocodeSettled: boolean;
@@ -45,6 +47,7 @@ export default function JobDetailDialog({
   vehicleLabel,
   driverLabel,
   timeZone,
+  planningContext,
   geocodeSettled,
   onClose,
   onAccept,
@@ -83,7 +86,7 @@ export default function JobDetailDialog({
             items={items}
           />
           <Link
-            href={`/jobs?job=${encodeURIComponent(job.id)}`}
+            href={planningJobHref(job.id, planningContext)}
             className={buttonClasses("secondary", "md", "whitespace-nowrap")}
           >
             Open in Jobs

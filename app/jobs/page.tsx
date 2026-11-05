@@ -20,6 +20,8 @@ import RecordAssistant from "../../components/assistant/RecordAssistant";
 import { fetchAllPages, type PageResponse } from "../../lib/jobs/fetchPages";
 import { isStopLocked, planStopChanges } from "../../lib/jobs/stopDiff";
 import { saveStopPod } from "../../lib/pod/savePod";
+import { initialStopPodForm } from "../../lib/pod/consolePod";
+import BackToSavedPlan from "./BackToSavedPlan";
 import { isUnlicensedVehicleError, unlicensedVehicleMessage } from "../../lib/billing/unlicensedVehicle";
 
 type FormStop = {
@@ -309,12 +311,11 @@ export default function JobsPage() {
   }
 
   function updatePodForm(stopId: string, field: string, value: string) {
+    const stop = jobs.flatMap((job) => job.job_stops ?? []).find((stop) => stop.id === stopId);
     setPodForms((current) => ({
       ...current,
       [stopId]: {
-        recipient_name: current[stopId]?.recipient_name || "",
-        pod_notes: current[stopId]?.pod_notes || "",
-        pod_photo_url: current[stopId]?.pod_photo_url || "",
+        ...(current[stopId] ?? initialStopPodForm(stop ?? {})),
         [field]: value,
       },
     }));
@@ -927,12 +928,13 @@ export default function JobsPage() {
   /* Same save as /pod (review POD-14): lib/pod/savePod.ts stamps
      pod_updated_at, filters by tenant and job, and refuses to complete a
      cancelled or unaccepted job. */
-  async function savePod(jobId: string, stopId: string) {
+  async function savePod(jobId: string, stopId: string): Promise<boolean> {
     const job = jobs.find((candidate) => candidate.id === jobId);
     const stop = job?.job_stops?.find((candidate: any) => candidate.id === stopId);
-    if (!job?.tenant_id || !stop) { setMessage("This stop is no longer loaded. Refresh and try again."); return; }
+    if (!job?.tenant_id || !stop) { setMessage("This stop is no longer loaded. Refresh and try again."); return false; }
+    if (tenant.status !== "ready" || tenant.activeTenantId !== job.tenant_id) { setMessage("Select this job's workspace before recording completion."); return false; }
 
-    const podForm = podForms[stopId] || { recipient_name: "", pod_notes: "", pod_photo_url: "" };
+    const podForm = podForms[stopId] ?? initialStopPodForm(stop);
 
     try {
       await saveStopPod(supabase, {
@@ -944,12 +946,14 @@ export default function JobsPage() {
         podNotes: podForm.pod_notes,
         markComplete: true,
       });
-      setMessage("POD saved.");
+      await loadData();
+      setMessage(stop.type === "collection" ? "Collection confirmed. Marked as collected." : "Delivery confirmed. POD saved.");
+      return true;
     } catch (error) {
       setMessage(`POD save error: ${error instanceof Error ? error.message : "Unable to save POD."}`);
+      return false;
     }
 
-    await loadData();
   }
 
   return (
@@ -1154,6 +1158,8 @@ export default function JobsPage() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
+                    <BackToSavedPlan jobId={selectedJob.id} tenantId={selectedJob.tenant_id}
+                      planningDate={selectedJob.planning_date || selectedJob.scheduled_date} vehicleId={selectedJob.vehicle_id} />
                     <Button
                       type="button"
                       variant="secondary"
@@ -1798,6 +1804,7 @@ export default function JobsPage() {
                                 stopId
                               )
                             }
+                            onMarkCollected={(stopId) => savePod(selectedJob.id, stopId)}
                           />
                         )
                       )}

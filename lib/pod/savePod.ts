@@ -72,10 +72,13 @@ export async function saveStopPod(
     .update(buildStopPodPatch(input, now))
     .eq("id", input.stopId)
     .eq("tenant_id", input.tenantId)
-    .eq("job_id", input.jobId);
+    .eq("job_id", input.jobId)
+    .eq("type", input.stopType);
 
   if (input.markComplete) {
     stopUpdate = stopUpdate.or("pod_status.is.null,pod_status.eq.pending");
+    stopUpdate = stopUpdate.is("collected_at", null).is("delivered_at", null)
+      .or("status.is.null,status.not.in.(completed,collected,delivered)");
   }
 
   const { data: updatedStops, error: stopError } = await stopUpdate.select("id");
