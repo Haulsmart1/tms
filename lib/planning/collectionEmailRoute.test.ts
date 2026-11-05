@@ -55,3 +55,20 @@ it("rejects invalid selections and never sends an unbounded batch in one request
   expect((await POST(request({ action: "send", jobIds: [exampleJob.id, "10000000-0000-4000-8000-000000000002"] }))).status).toBe(400);
   expect(sendCollectionEmail).not.toHaveBeenCalled();
 });
+it("validates appointment type and time before loading contacts", async () => {
+  for (const options of [
+    { ...appointment, stopType: "other" },
+    { ...appointment, stopType: "delivery", window: "CUSTOM", timeFrom: "26:00" },
+    { ...appointment, stopType: "delivery", window: "CUSTOM", timeFrom: "14:00", timeTo: "13:00" },
+    { ...appointment, stopType: "delivery", kind: "collection_receipt" },
+  ]) expect((await POST(request({ options }))).status).toBe(400);
+  expect(loadCollectionEmails).not.toHaveBeenCalled();
+  expect(sendCollectionEmail).not.toHaveBeenCalled();
+});
+it("requires a fresh preview for sending a delivery time", async () => {
+  const options = { ...appointment, stopType: "delivery", window: "CUSTOM", timeFrom: "14:30" };
+  expect((await POST(request({ action: "send", options, fingerprint: "stale" }))).status).toBe(409);
+  expect(sendCollectionEmail).not.toHaveBeenCalled();
+  expect((await POST(request({ action: "send", options, fingerprint: "reviewed" }))).status).toBe(200);
+  expect(sendCollectionEmail).toHaveBeenCalledWith(expect.anything(), "operator", expect.anything(), options);
+});

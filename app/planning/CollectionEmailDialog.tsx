@@ -7,12 +7,16 @@ import type { CollectionEmailKind, CollectionEmailOptions, CollectionEmailPrevie
 const control = "min-h-11 rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink disabled:opacity-40";
 type Result = { status: string; message: string };
 
-export default function CollectionEmailDialog({ jobs, date, kind, vehicleRegistration, onClose }: {
-  jobs: PlanJob[]; date: string; kind: CollectionEmailKind; vehicleRegistration: string; onClose: () => void;
+export default function CollectionEmailDialog({ jobs, date, kind, vehicleRegistration, initialWindow = "AM", onClose }: {
+  jobs: PlanJob[]; date: string; kind: CollectionEmailKind; vehicleRegistration: string;
+  initialWindow?: CollectionEmailOptions["window"]; onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [collectionDate, setCollectionDate] = useState(date);
-  const [window, setWindow] = useState<"AM" | "PM">("AM");
+  const [window, setWindow] = useState<CollectionEmailOptions["window"]>(initialWindow);
+  const [stopType, setStopType] = useState<"collection" | "delivery">("collection");
+  const [timeFrom, setTimeFrom] = useState("");
+  const [timeTo, setTimeTo] = useState("");
   const [collectedAt, setCollectedAt] = useState(() => {
     const now = new Date();
     return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
@@ -26,7 +30,9 @@ export default function CollectionEmailDialog({ jobs, date, kind, vehicleRegistr
   useEffect(() => { dialog.current?.showModal(); }, []);
 
   function options(): CollectionEmailOptions {
-    return { kind, date: collectionDate, window, collectedAt: collectedAt && Number.isFinite(new Date(collectedAt).getTime()) ? new Date(collectedAt).toISOString() : "" };
+    return { kind, date: collectionDate, window, stopType: receipt ? "collection" : stopType,
+      ...(window === "CUSTOM" && !receipt ? { timeFrom, timeTo } : {}),
+      collectedAt: collectedAt && Number.isFinite(new Date(collectedAt).getTime()) ? new Date(collectedAt).toISOString() : "" };
   }
   function changed() { setRows([]); setResults({}); setError(""); }
   async function request(body: Record<string, unknown>) {
@@ -41,7 +47,7 @@ export default function CollectionEmailDialog({ jobs, date, kind, vehicleRegistr
     setBusy("preview"); setError(""); setRows([]); setResults({});
     try {
       const tenantId = jobs[0]?.tenant_id;
-      if (!tenantId || jobs.some((job) => job.tenant_id !== tenantId)) throw new Error("Select one workspace before emailing collections.");
+      if (!tenantId || jobs.some((job) => job.tenant_id !== tenantId)) throw new Error("Select one workspace before emailing appointments.");
       const value = await request({ action: "preview", tenantId, jobIds: jobs.map((job) => job.id), options: options() });
       setRows(value.rows);
     } catch (err) { setError(err instanceof Error ? err.message : "Unable to preview emails."); }
@@ -71,7 +77,7 @@ export default function CollectionEmailDialog({ jobs, date, kind, vehicleRegistr
     <dialog ref={dialog} aria-labelledby="collection-email-title" onClose={onClose}
       onCancel={(event) => { if (busy) event.preventDefault(); }} onClick={(event) => event.stopPropagation()}
       className="m-auto w-[min(46rem,95vw)] max-h-[90vh] overflow-y-auto rounded-xl border border-line bg-surface p-5 text-ink shadow-xl backdrop:bg-black/60">
-      <h2 id="collection-email-title" className="text-lg font-semibold">{receipt ? "Email collection receipt" : "Email collection appointments"}</h2>
+      <h2 id="collection-email-title" className="text-lg font-semibold">{receipt ? "Email collection receipt" : "Send collection / delivery time"}</h2>
       <p className="mt-1 text-sm text-ink-3">{vehicleRegistration} · {jobs.length} {jobs.length === 1 ? "job" : "jobs"}</p>
       <form onSubmit={(event) => { event.preventDefault(); void preview(); }} className="mt-4 grid gap-3">
         {receipt ? <>
@@ -84,15 +90,32 @@ export default function CollectionEmailDialog({ jobs, date, kind, vehicleRegistr
             I confirm these goods have been collected.
           </label>
         </> : <div className="flex flex-wrap gap-3">
-          <label className="grid gap-1 text-sm">Collection date
+          <label className="grid gap-1 text-sm">Appointment
+            <select value={stopType} disabled={Boolean(busy)} className={control}
+              onChange={(event) => { setStopType(event.target.value as "collection" | "delivery"); changed(); }}>
+              <option value="collection">Collection</option><option value="delivery">Delivery</option>
+            </select>
+          </label>
+          <label className="grid gap-1 text-sm">Date
             <input type="date" required disabled={Boolean(busy)} value={collectionDate} className={control}
               onChange={(event) => { setCollectionDate(event.target.value); changed(); }} />
           </label>
-          <label className="grid gap-1 text-sm">Collection window (UK time)
-            <select value={window} disabled={Boolean(busy)} className={control} onChange={(event) => { setWindow(event.target.value as "AM" | "PM"); changed(); }}>
+          <label className="grid gap-1 text-sm">Time (UK time)
+            <select value={window} disabled={Boolean(busy)} className={control} onChange={(event) => { setWindow(event.target.value as CollectionEmailOptions["window"]); changed(); }}>
               <option value="AM">AM · 09:00–12:00</option><option value="PM">PM · 12:00–17:00</option>
+              <option value="CUSTOM">Specific time / time window</option>
             </select>
           </label>
+          {window === "CUSTOM" ? <>
+            <label className="grid gap-1 text-sm">Time / from (UK time)
+              <input type="time" required disabled={Boolean(busy)} value={timeFrom} className={control}
+                onChange={(event) => { setTimeFrom(event.target.value); changed(); }} />
+            </label>
+            <label className="grid gap-1 text-sm">Until (optional, same day)
+              <input type="time" disabled={Boolean(busy)} value={timeTo} className={control}
+                onChange={(event) => { setTimeTo(event.target.value); changed(); }} />
+            </label>
+          </> : null}
         </div>}
         <button type="submit" disabled={Boolean(busy)} className={`${control} justify-self-start`}>{busy === "preview" ? "Loading contacts…" : "Preview emails"}</button>
       </form>
@@ -113,7 +136,7 @@ export default function CollectionEmailDialog({ jobs, date, kind, vehicleRegistr
         <button type="button" disabled={Boolean(busy)} className={control} onClick={onClose}>Close</button>
         <button type="button" disabled={Boolean(busy) || ready === 0 || (receipt && !confirmed)}
           className={`${control} bg-primary font-semibold`} onClick={() => void send()}>
-          {busy === "send" ? "Sending…" : receipt ? "Send collection receipt" : `Send ${ready} collection emails`}
+          {busy === "send" ? "Sending…" : receipt ? "Send collection receipt" : `Send ${ready} ${stopType} ${ready === 1 ? "email" : "emails"}`}
         </button>
       </div>
     </dialog>

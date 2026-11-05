@@ -2,7 +2,7 @@
 
 import { useState, type DragEvent } from "react";
 import CollectionEmailDialog from "./CollectionEmailDialog";
-import type { CollectionEmailKind } from "../../lib/planning/collectionEmail";
+import type { CollectionEmailKind, CollectionEmailOptions } from "../../lib/planning/collectionEmail";
 import PlanJobCard, { JOB_ID_MIME } from "./PlanJobCard";
 import VehicleLabelPrinter from "./VehicleLabelPrinter";
 import type { PlanJob } from "../../lib/planning/types";
@@ -47,7 +47,7 @@ export default function VehicleLane({
   onAcceptJob, onMoveJob, onDropJob, planningDate, emailEnabled = false,
 }: Props) {
   const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
-  const [emailTarget, setEmailTarget] = useState<{ jobs: PlanJob[]; kind: CollectionEmailKind } | null>(null);
+  const [emailTarget, setEmailTarget] = useState<{ jobs: PlanJob[]; kind: CollectionEmailKind; window?: CollectionEmailOptions["window"] } | null>(null);
   const selectedOnVan = jobs.filter((job) => selectedJobs.has(job.id));
   const displayedJobs = jobsInCanonicalDropOrder(
     jobs,
@@ -115,7 +115,7 @@ export default function VehicleLane({
         <button type="button" className="min-h-11 rounded-md border border-line px-3 text-sm text-ink" onClick={() => setSelectedJobs(new Set())}>Clear</button>
         <span className="text-sm text-ink-3">{selectedOnVan.length} selected</span>
         <button type="button" disabled={selectedOnVan.length === 0} className="min-h-11 rounded-md border border-line bg-surface px-3 text-sm font-semibold text-ink disabled:opacity-40"
-          onClick={() => setEmailTarget({ jobs: selectedOnVan, kind: "planned_window" })}>Email AM / PM collection</button>
+          onClick={() => setEmailTarget({ jobs: selectedOnVan, kind: "planned_window" })}>Email collection / delivery times</button>
       </div> : null}
 
       <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
@@ -233,6 +233,7 @@ export default function VehicleLane({
               const next = new Set(previous); if (checked) next.add(job.id); else next.delete(job.id); return next;
             }) : undefined}
             onCollectionReceipt={emailEnabled ? () => setEmailTarget({ jobs: [job], kind: "collection_receipt" }) : undefined}
+            onAppointmentEmail={emailEnabled ? () => setEmailTarget({ jobs: [job], kind: "planned_window", window: "CUSTOM" }) : undefined}
             canMoveUp={canonicalDropNumbersByJobId === undefined && index > 0}
             canMoveDown={canonicalDropNumbersByJobId === undefined && index < displayedJobs.length - 1}
             onMoveUp={() => onMoveJob(job.id, -1)}
@@ -248,6 +249,7 @@ export default function VehicleLane({
         </div>
       </div>
       {emailTarget ? <CollectionEmailDialog jobs={emailTarget.jobs} kind={emailTarget.kind} date={planningDate ?? ""}
+        initialWindow={emailTarget.window}
         vehicleRegistration={vehicle.registration} onClose={() => setEmailTarget(null)} /> : null}
     </section>
   );

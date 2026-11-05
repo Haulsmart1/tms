@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
     const ids = [...new Set<string>(body.jobIds)];
     if (body.action === "send" && ids.length !== 1) return NextResponse.json({ error: "Send one contact per request." }, { status: 400 });
     const options = body.options as CollectionEmailOptions | undefined;
-    const invalid = options ? collectionEmailOptionsError(options) : "Choose the collection email details.";
+    const invalid = options ? collectionEmailOptionsError(options) : "Choose the email details.";
     if (invalid) return NextResponse.json({ error: invalid }, { status: 400 });
     const client = await createApiSupabase();
     const { data: { user }, error } = await client.auth.getUser();
@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     if (body.action === "preview") return NextResponse.json({ rows: messages.map((m) => m.preview) });
     if (options!.kind === "collection_receipt" && body.confirmCollected !== true) return NextResponse.json({ error: "Confirm that the goods have actually been collected before sending a receipt." }, { status: 409 });
     const message = messages[0];
-    if (body.fingerprint !== message.preview.fingerprint) return NextResponse.json({ error: "The collection details have changed. Preview the email again." }, { status: 409 });
+    if (body.fingerprint !== message.preview.fingerprint) return NextResponse.json({ error: "The appointment or contact details have changed. Preview the email again." }, { status: 409 });
     // The email uses canonical stored contacts and the explicitly reviewed
     // date/window. It never publishes a draft plan or completes a job.
     return NextResponse.json(await sendCollectionEmail(admin, user.id, message, options!));
@@ -38,6 +38,6 @@ export async function POST(request: NextRequest) {
     const access = officeAccessErrorResponse(error);
     if (access) return NextResponse.json({ error: access.message }, { status: access.status });
     console.error("[collection-email] request failed", error instanceof Error ? error.name : "Error");
-    return NextResponse.json({ error: "Unable to prepare or send the collection email. Refresh and check the job contacts." }, { status: 500 });
+    return NextResponse.json({ error: "Unable to prepare or send the email. Refresh and check the job contacts." }, { status: 500 });
   }
 }

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createClient } from "@supabase/supabase-js";
-import { exampleJob, appointment } from "./collectionEmailFixtures";
+import { exampleJob, appointment, deliveryJob } from "./collectionEmailFixtures";
 import { loadCollectionEmails, sendCollectionEmail } from "./collectionEmailServer";
 import { sendMicrosoftGraphEmail } from "../documents/delivery";
 import { documentEmailAllowed } from "../documents/emailLimits";
@@ -14,7 +14,7 @@ function database({ conflict = false, logUpdateFails = false, foreign = false } 
   const client = createClient("https://email-test.invalid", "test-key", { auth: { persistSession: false }, global: { fetch: async (input, init) => {
     const url = new URL(String(input)); const method = init?.method ?? "GET"; requests.push({ url, method });
     const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
-    if (url.pathname.endsWith("/jobs")) return json(foreign ? [] : [exampleJob]);
+    if (url.pathname.endsWith("/jobs")) return json(foreign ? [] : [deliveryJob]);
     if (method === "POST") {
       const body = JSON.parse(String(init?.body));
       if (conflict || records[body.idempotency_key]) return json({ code: "23505" }, 409);
@@ -31,6 +31,29 @@ function database({ conflict = false, logUpdateFails = false, foreign = false } 
 }
 beforeEach(() => { vi.clearAllMocks(); vi.mocked(documentEmailAllowed).mockResolvedValue(true); vi.mocked(sendMicrosoftGraphEmail).mockResolvedValue({ acknowledgementId: "graph-accepted" }); });
 describe("collection email delivery", () => {
+  it("keeps collection and delivery times distinct and deduplicates only the same appointment", async () => {
+    const db = database();
+    const load = async (options: typeof appointment) => (await loadCollectionEmails(db.client, exampleJob.tenant_id, [exampleJob.id], options))[0];
+    const original = await load(appointment);
+    const explicitCollection = await load({ ...appointment, stopType: "collection", timeFrom: "unused" });
+    expect(explicitCollection.key).toBe(original.key);
+    const options = { ...appointment, stopType: "delivery" as const, window: "CUSTOM" as const, timeFrom: "14:30" };
+    const message = await load(options);
+    expect((await load({ ...options, timeTo: "" })).key).toBe(message.key);
+    expect((await load({ ...options, timeFrom: "15:00" })).key).not.toBe(message.key);
+    expect((await load({ ...options, timeTo: "16:00" })).key).not.toBe(message.key);
+    expect((await load({ ...options, stopType: "collection" })).key).not.toBe(message.key);
+    expect((await load({ ...options, timeFrom: "15:00" })).preview.fingerprint).not.toBe(message.preview.fingerprint);
+    await sendCollectionEmail(db.client, "operator", message, options);
+    const record = Object.values(db.records)[0];
+    expect(record.recipient_email).toBe("deliver@example.test");
+    expect(record.stop_id).toBe(deliveryJob.job_stops[1].id);
+    expect(record.metadata).toMatchObject({ stopType: "delivery", timeFrom: "14:30", deliveryDate: appointment.date });
+    expect(record.metadata).not.toHaveProperty("collectionDate");
+    expect(sendMicrosoftGraphEmail).toHaveBeenCalledWith(expect.objectContaining({ recipient: "deliver@example.test" }));
+    expect((await sendCollectionEmail(db.client, "operator", message, options)).status).toBe("already_sent");
+    expect(sendMicrosoftGraphEmail).toHaveBeenCalledTimes(1);
+  });
   it("scopes job lookups to the tenant and fails closed on missing/foreign jobs", async () => {
     const db = database({ foreign: true });
     await expect(loadCollectionEmails(db.client, exampleJob.tenant_id, [exampleJob.id], appointment)).rejects.toThrow("unavailable");
