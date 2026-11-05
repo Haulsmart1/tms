@@ -14,6 +14,8 @@ import { createClient } from "../../lib/supabase/browser";
 import PodLink from "../components/PodLink";
 import SendTrackingLinkDialog from "./SendTrackingLinkDialog";
 import { useTenant } from "../components/TenantProvider";
+import { initialStopPodForm } from "../../lib/pod/consolePod";
+import { isStopLocked } from "../../lib/jobs/stopDiff";
 import {
   errorFromBody,
   readJsonSafe,
@@ -62,6 +64,7 @@ export type Stop = {
   pod_status: string | null;
   recipient_name: string | null;
   delivered_at: string | null;
+  collected_at?: string | null;
   pod_notes: string | null;
   pod_photo_url: string | null;
   /** Set by the driver routes (tracking_02): pod_time_untrusted, pod_late_sync. */
@@ -84,7 +87,8 @@ type Props = {
     field: keyof PodFormState,
     value: string
   ) => void;
-  onMarkDelivered: (stopId: string) => void;
+  onMarkDelivered: (stopId: string) => Promise<boolean>;
+  onMarkCollected: (stopId: string) => Promise<boolean>;
 };
 
 export default function StopCard({
@@ -94,6 +98,7 @@ export default function StopCard({
   podForm,
   onPodFieldChange,
   onMarkDelivered,
+  onMarkCollected,
 }: Props) {
   const supabase = useMemo(() => createClient(), []);
   const tenant = useTenant();
@@ -103,6 +108,8 @@ export default function StopCard({
   const [evidenceError, setEvidenceError] = useState("");
   const [evidenceMessage, setEvidenceMessage] = useState("");
   const [trackingOpen, setTrackingOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const saveInFlight = useRef(false);
 
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -110,11 +117,8 @@ export default function StopCard({
 
   const activeTenantId = tenant.activeTenantId;
 
-  const form: PodFormState = podForm ?? {
-    recipient_name: "",
-    pod_notes: "",
-    pod_photo_url: "",
-  };
+  const form: PodFormState = podForm ?? initialStopPodForm(stop);
+  const locked = isStopLocked(stop);
 
   const tenantMatches =
     Boolean(activeTenantId) && activeTenantId === tenantId;
@@ -307,7 +311,8 @@ export default function StopCard({
     }
   }
 
-  function handleMarkDelivered() {
+  async function handleMarkComplete() {
+    if (saveInFlight.current || locked) return;
     clearMessages();
 
     if (!tenantMatches) {
@@ -319,22 +324,33 @@ export default function StopCard({
 
     if (!form.recipient_name.trim()) {
       setEvidenceError(
-        "Recipient name is required before marking this delivery complete."
+        stop.type === "collection" ? "Enter the name of the person the goods were collected from."
+          : "Recipient name is required before marking this delivery complete."
       );
       return;
     }
 
-    if (evidence.length === 0 && !stop.pod_photo_url) {
+    if (stop.type === "delivery" && evidence.length === 0 && !stop.pod_photo_url) {
       setEvidenceError(
         "Upload at least one POD photo or document before marking this delivery complete."
       );
       return;
     }
 
-    onMarkDelivered(stop.id);
+    saveInFlight.current = true;
+    setSaving(true);
+    try {
+      const saved = await (stop.type === "collection" ? onMarkCollected(stop.id) : onMarkDelivered(stop.id));
+      if (!saved) setEvidenceError("Unable to save. Check the job message and try again.");
+    } catch (error) {
+      setEvidenceError(error instanceof Error ? error.message : "Unable to save this stop.");
+    } finally {
+      saveInFlight.current = false;
+      setSaving(false);
+    }
   }
 
-  const busy = Boolean(uploading);
+  const busy = Boolean(uploading) || saving;
 
   return (
     <div className="rounded-md border border-line bg-surface-2 p-3.5">
@@ -386,6 +402,12 @@ export default function StopCard({
         {stop.pod_status || "pending"}
       </div>
 
+      {stop.type === "collection" && stop.collected_at ? (
+        <div className="mt-1.5 text-sm font-semibold text-ink">
+          Collected at: {new Date(stop.collected_at).toLocaleString("en-GB")}
+        </div>
+      ) : null}
+
       {stop.delivered_at ? (
         <div className="mt-1.5 text-xs text-ink-3">
           Delivered at:{" "}
@@ -417,7 +439,7 @@ export default function StopCard({
 
       {stop.recipient_name ? (
         <div className="mt-1.5 text-sm text-ink">
-          Recipient: {stop.recipient_name}
+          {stop.type === "collection" ? "Collected from" : "Recipient"}: {stop.recipient_name}
         </div>
       ) : null}
 
@@ -491,12 +513,11 @@ export default function StopCard({
         </div>
       ) : null}
 
-      {stop.type === "delivery" &&
-      stop.pod_status !== "delivered" ? (
+      {!locked ? (
         <div className="mt-3 grid max-w-xl gap-3">
           <Field
             id={`recipient-${stop.id}`}
-            label="Recipient name"
+            label={stop.type === "collection" ? "Collected from" : "Recipient name"}
             value={form.recipient_name}
             onChange={(event) =>
               onPodFieldChange(
@@ -509,7 +530,7 @@ export default function StopCard({
 
           <Field
             id={`notes-${stop.id}`}
-            label="POD notes"
+            label={stop.type === "collection" ? "Collection notes (optional)" : "POD notes"}
             value={form.pod_notes}
             onChange={(event) =>
               onPodFieldChange(
@@ -522,12 +543,13 @@ export default function StopCard({
 
           <div className="rounded-md border border-line bg-surface p-3">
             <div className="text-sm font-semibold text-ink">
-              POD evidence
+              {stop.type === "collection" ? "Collection evidence (optional)" : "POD evidence"}
             </div>
 
             <div className="mt-1 text-xs text-ink-3">
-              Take a delivery photo or upload a POD
-              document. Maximum 15 MB per file.
+              {stop.type === "collection"
+                ? "Confirm the goods have been collected. You can add a photo or document if available; it is not required."
+                : "Take a delivery photo or upload a POD document. Maximum 15 MB per file."}
             </div>
 
             <input
@@ -643,15 +665,15 @@ export default function StopCard({
             <Button
               type="button"
               disabled={busy || !tenantMatches}
-              onClick={handleMarkDelivered}
+              onClick={() => void handleMarkComplete()}
             >
-              Mark Delivered
+              {saving ? "Saving…" : stop.type === "collection" ? "Mark collected" : "Mark Delivered"}
             </Button>
 
             {/* Same gate as the POD controls: only while this stop's own
                 tenant is the active one. The routes refuse drivers and any
                 caller outside the tenant, so this is presentation only. */}
-            {tenantMatches ? (
+            {tenantMatches && stop.type === "delivery" ? (
               <Button
                 type="button"
                 variant="secondary"
@@ -662,7 +684,7 @@ export default function StopCard({
             ) : null}
           </div>
 
-          {tenantMatches ? (
+          {tenantMatches && stop.type === "delivery" ? (
             <SendTrackingLinkDialog
               open={trackingOpen}
               onClose={() => setTrackingOpen(false)}
