@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import JsBarcode from "jsbarcode";
+import PrintedBoxLabel, { labelLayoutError } from "../../components/printing/PrintedBoxLabel";
 import Button from "../../components/Button";
 import {
   BOX_LABEL_TEMPLATES,
@@ -24,7 +24,6 @@ import {
   resolveStopSelection,
   type LabelJobItem,
   type LabelStop,
-  type SerializedBox,
 } from "../../lib/printing/jobLabels";
 
 type Props = {
@@ -33,36 +32,6 @@ type Props = {
   stops: LabelStop[];
   items: LabelJobItem[];
 };
-
-function BarcodeSvg({
-  value,
-}: {
-  value: string;
-}) {
-  const ref = useRef<SVGSVGElement | null>(null);
-
-  useEffect(() => {
-    if (!ref.current) {
-      return;
-    }
-
-    JsBarcode(ref.current, value, {
-      format: "CODE128",
-      displayValue: false,
-      margin: 0,
-      height: 28,
-      width: 1.3,
-    });
-  }, [value]);
-
-  return (
-    <svg
-      ref={ref}
-      aria-label={`Barcode ${value}`}
-      className="h-[8mm] w-full"
-    />
-  );
-}
 
 function stopLabel(stop: LabelStop): string {
   return `#${stop.stop_order} - ${formatStopAddress(stop)}`;
@@ -95,6 +64,8 @@ export default function JobLabelPrinter({
   items,
 }: Props) {
   const [open, setOpen] = useState(false);
+  const [layoutError, setLayoutError] = useState<string | null>(null);
+  const printRootRef = useRef<HTMLDivElement | null>(null);
   const titleId = useId();
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const [templateId, setTemplateId] =
@@ -136,6 +107,8 @@ export default function JobLabelPrinter({
       : BOX_LABEL_TEMPLATES.find(
           (template) => template.id === templateId,
         ) ?? BOX_LABEL_TEMPLATES[0];
+
+  useEffect(() => { setLayoutError(null); }, [selectedTemplate, collectionId, deliveryId]);
 
   const capacity = templateCapacity(selectedTemplate);
 
@@ -254,7 +227,9 @@ export default function JobLabelPrinter({
       return;
     }
 
-    window.print();
+    const error = labelLayoutError(printRootRef.current);
+    setLayoutError(error);
+    if (!error) window.print();
   }
 
   return (
@@ -602,6 +577,8 @@ export default function JobLabelPrinter({
                 </div>
               )}
 
+              {layoutError ? <div role="alert" className="mt-3 text-sm text-red-700">{layoutError}</div> : null}
+
               <div className="mt-4 flex justify-end">
                 <Button
                   type="button"
@@ -614,7 +591,7 @@ export default function JobLabelPrinter({
               </div>
             </div>
 
-            <div className="label-print-root bg-white">
+            <div ref={printRootRef} className="label-print-root bg-white">
               {previewStops
                 ? pages.map((page, pageIndex) => (
                 <div
@@ -661,7 +638,7 @@ export default function JobLabelPrinter({
                       ) + 1;
 
                     return (
-                      <BoxLabel
+                      <PrintedBoxLabel
                         key={`${box.jobItemId}-${box.serial}`}
                         box={box}
                         boxNumber={absoluteBoxNumber}
@@ -694,102 +671,5 @@ export default function JobLabelPrinter({
           )
         : null}
     </>
-  );
-}
-
-function BoxLabel({
-  box,
-  boxNumber,
-  totalBoxes,
-  jobReference,
-  collection,
-  delivery,
-  widthMm,
-  heightMm,
-  leftMm,
-  topMm,
-}: {
-  box: SerializedBox;
-  boxNumber: number;
-  totalBoxes: number;
-  jobReference: string;
-  collection: LabelStop;
-  delivery: LabelStop;
-  widthMm: number;
-  heightMm: number;
-  leftMm: number;
-  topMm: number;
-}) {
-  const compact = heightMm < 45;
-
-  return (
-    <article
-      className="absolute box-border overflow-hidden border border-slate-300 bg-white text-black"
-      style={{
-        left: `${leftMm}mm`,
-        top: `${topMm}mm`,
-        width: `${widthMm}mm`,
-        height: `${heightMm}mm`,
-        padding: compact ? "1.6mm" : "3mm",
-        fontFamily: "Arial, Helvetica, sans-serif",
-      }}
-    >
-      <div
-        className="flex items-start justify-between gap-2 font-bold"
-        style={{
-          fontSize: compact ? "7.5pt" : "11pt",
-          lineHeight: 1.05,
-        }}
-      >
-        <span className="truncate">
-          JOB {jobReference}
-        </span>
-
-        <span className="shrink-0">
-          BOX {boxNumber}/{totalBoxes}
-        </span>
-      </div>
-
-      <div
-        className="mt-[1mm] grid gap-[0.6mm]"
-        style={{
-          fontSize: compact ? "6.2pt" : "9pt",
-          lineHeight: 1.1,
-        }}
-      >
-        <div className="line-clamp-2">
-          <strong>FROM:</strong>{" "}
-          {formatStopAddress(collection)}
-        </div>
-
-        <div className="line-clamp-2">
-          <strong>TO:</strong>{" "}
-          {formatStopAddress(delivery)}
-        </div>
-
-        {!compact && (box.sku || box.description) ? (
-          <div className="truncate">
-            <strong>ITEM:</strong>{" "}
-            {[box.sku, box.description]
-              .filter(Boolean)
-              .join(" - ")}
-          </div>
-        ) : null}
-      </div>
-
-      <div className={compact ? "mt-[0.8mm]" : "mt-[2mm]"}>
-        <BarcodeSvg value={box.serial} />
-
-        <div
-          className="truncate text-center font-mono font-semibold"
-          style={{
-            fontSize: compact ? "6.5pt" : "9pt",
-            lineHeight: 1,
-          }}
-        >
-          {box.serial}
-        </div>
-      </div>
-    </article>
   );
 }

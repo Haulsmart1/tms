@@ -107,7 +107,8 @@ describe("toLabelStops", () => {
   });
 
   it("carries only the label fields", () => {
-    const [result] = toLabelStops([stop({ id: "a", lat: 53.8, lng: -1.5 })]);
+    const [result] = toLabelStops([stop({ id: "a", lat: 53.8, lng: -1.5,
+      contact_name: "Collection contact", contact_phone: "07700 900123" })]);
     expect(result).toEqual({
       id: "a",
       stop_order: 1,
@@ -115,6 +116,8 @@ describe("toLabelStops", () => {
       address_line: "1 High St",
       city: "Leeds",
       postcode: "LS1 1AA",
+      contact_name: "Collection contact",
+      contact_phone: "07700 900123",
     });
   });
 });
