@@ -10,6 +10,7 @@ const collection = {
   type: "collection" as const,
   contact_name: "Alex Collector",
   contact_phone: "+447700900123",
+  contact_email: "alex.collector@example.com",
   address_line: "10 Example Street",
   city: "Example Town",
   postcode: "AB1 2CD",
@@ -22,6 +23,7 @@ const delivery = {
   type: "delivery" as const,
   contact_name: "Warehouse Contact",
   contact_phone: "+447700900456",
+  contact_email: "warehouse@example.com",
   address_line: "20 Delivery Road",
 };
 
@@ -42,22 +44,26 @@ describe("printed box label", () => {
     }));
     expect(markup).toContain("Alex Collector");
     expect(markup).toContain("+447700900123");
+    expect(markup).toContain("<strong>EMAIL:</strong> alex.collector@example.com");
     expect(markup).toContain("10 Example Street, Example Town, AB1 2CD");
     expect(markup).toContain("20 Delivery Road, Example Town, AB1 2CD");
     expect(markup).toContain(`aria-label="Barcode ${box.serial}"`);
     expect(markup).toContain(`>${box.serial}</div>`);
     expect(markup).not.toContain("Warehouse Contact");
     expect(markup).not.toContain("+447700900456");
+    expect(markup).not.toContain("warehouse@example.com");
   });
 
   it("shows missing contact fields explicitly without substituting the delivery contact", () => {
     const markup = renderToStaticMarkup(createElement(PrintedBoxLabel, {
       box, boxNumber: 1, totalBoxes: 1, jobReference: "RTNMUK00001",
-      collection: { ...collection, contact_name: null, contact_phone: null },
+      collection: { ...collection, contact_name: null, contact_phone: null, contact_email: null },
       delivery, widthMm: 63.5, heightMm: 33.9, leftMm: 0, topMm: 0,
     }));
     expect(markup).toContain("<strong>NAME:</strong> Not recorded");
     expect(markup).toContain("<strong>TEL:</strong> Not recorded");
+    expect(markup).toContain("<strong>EMAIL:</strong> Not recorded");
     expect(markup).not.toContain("Warehouse Contact");
+    expect(markup).not.toContain("warehouse@example.com");
   });
 });
