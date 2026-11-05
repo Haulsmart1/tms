@@ -3581,7 +3581,9 @@ export default function PlanningPage() {
                 ) : (
                   displayVehicles.map((v) => (
                     <VehicleLane
-                      key={v.id}
+                      key={`${v.id}:${date}:${planningTenantId}`}
+                      planningDate={date}
+                      emailEnabled={Boolean(planningTenantId)}
                       vehicle={v}
                       jobs={(laneOrders[v.id] ?? [])
                         .map((id) => jobById.get(id))

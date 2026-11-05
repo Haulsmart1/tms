@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isOpenPlanningJob } from "./collectionEmail";
 
 const JOB_SELECT = `
   id, tenant_id, reference, status, scheduled_date, planning_date,
@@ -33,7 +34,9 @@ export async function loadPlanningBoardJobs(
     if (result.error) return result;
     for (const row of result.data ?? []) rows.set(String(row.id), row);
   }
-  return { data: [...rows.values()], error: null };
+  // A saved snapshot can still reference jobs since completed or cancelled.
+  // Do not resurrect those jobs into either a lane or the unassigned pool.
+  return { data: [...rows.values()].filter(isOpenPlanningJob), error: null };
 }
 
 /** A date change renders before its asynchronous board load completes.

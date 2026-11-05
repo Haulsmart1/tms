@@ -24,6 +24,19 @@ function clientFor(rows: Array<Record<string, unknown>>, failIds = false) {
 }
 
 describe("saved plan board loading", () => {
+  it("keeps open jobs but excludes completed/cancelled jobs from the day and old saved snapshots", async () => {
+    const { client } = clientFor([
+      { id: "open", tenant_id: "tenant", planning_date: today, status: "planned" },
+      { id: "unknown", tenant_id: "tenant", planning_date: today, status: null },
+      { id: "complete", tenant_id: "tenant", planning_date: today, status: "completed" },
+      { id: "old-complete", tenant_id: "tenant", planning_date: "2026-10-01", status: "completed" },
+      { id: "cancelled", tenant_id: "tenant", planning_date: "2026-10-01", status: "cancelled" },
+      { id: "old-open", tenant_id: "tenant", planning_date: "2026-10-01", status: "planned" },
+    ]);
+    const result = await loadPlanningBoardJobs(client, { tenantIds: ["tenant"], planningDate: today, savedJobIds: ["old-complete", "cancelled", "old-open"] });
+    expect(result.data!.map((row) => row.id)).toEqual(["open", "unknown", "old-open"]);
+  });
+
   it("loads all 25 HT21 EOR snapshot jobs despite older source dates without borrowing another tenant's job", async () => {
     const ids = Array.from({ length: 25 }, (_, i) => `job-${i + 1}`);
     const rows = ids.map((id) => ({ id, tenant_id: "bob-tenant", scheduled_date: "2026-10-04", planning_date: null }));
