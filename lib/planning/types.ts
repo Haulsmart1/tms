@@ -22,6 +22,7 @@ export type PlanStop = {
   postcode: string | null;
   contact_name?: string | null;
   contact_phone?: string | null;
+  contact_email?: string | null;
   /** TomTom geocode cache, written by app/api/tomtom/geocode. NULL until then. */
   lat: number | null;
   lng: number | null;

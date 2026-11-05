@@ -8,7 +8,7 @@ const JOB_SELECT = `
   journey_scope, origin_country_code, destination_country_code,
   compliance_regime_override, compliance_override_reason,
   customers ( name ),
-  job_stops (id, stop_order, type, address_line, city, postcode, contact_name, contact_phone, lat, lng, booked_from, booked_to),
+  job_stops (id, stop_order, type, address_line, city, postcode, contact_name, contact_phone, contact_email, lat, lng, booked_from, booked_to),
   job_items (id, sku, description, quantity, serial_numbers, external_reference, notes)
 `;
 

@@ -91,6 +91,7 @@ describe("buildVehicleLabels", () => {
           postcode: "G1 1AA",
           contact_name: "Second collection contact",
           contact_phone: "07700 900456",
+          contact_email: "second.collector@example.com",
         },
         {
           id: "delivery-2",
@@ -118,6 +119,7 @@ describe("buildVehicleLabels", () => {
 
     expect(result.labels[2].collection.contact_name).toBe("Second collection contact");
     expect(result.labels[2].collection.contact_phone).toBe("07700 900456");
+    expect(result.labels[2].collection.contact_email).toBe("second.collector@example.com");
 
     expect(result.labels[0].collection.address_line)
       .toBe("Collection Road");

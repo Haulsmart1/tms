@@ -51,6 +51,7 @@ export default function PrintedBoxLabel({
         <div data-label-content style={{ display: "grid", gap: compact ? "0.3mm" : "0.8mm", overflowWrap: "anywhere" }}>
           <div><strong>NAME:</strong> {collection.contact_name?.trim() || "Not recorded"}</div>
           <div><strong>TEL:</strong> {collection.contact_phone?.trim() || "Not recorded"}</div>
+          <div><strong>EMAIL:</strong> {collection.contact_email?.trim() || "Not recorded"}</div>
           <div><strong>FROM:</strong> {formatStopAddress(collection)}</div>
           <div><strong>TO:</strong> {formatStopAddress(delivery)}</div>
           {!compact && (box.sku || box.description) ? (
@@ -69,7 +70,7 @@ export default function PrintedBoxLabel({
   );
 }
 
-/** Refuse to silently cut off long names, addresses or barcodes on small or
+/** Refuse to silently cut off long names, emails, addresses or barcodes on small or
  * custom stock. Check the actual rendered label before opening print. */
 export function labelLayoutError(root: HTMLElement | null): string | null {
   if (!root) return "Open the label preview before printing.";

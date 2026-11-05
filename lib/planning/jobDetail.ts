@@ -67,6 +67,7 @@ export function toLabelStops(stops: PlanStop[]): LabelStop[] {
           postcode: stop.postcode,
           contact_name: stop.contact_name,
           contact_phone: stop.contact_phone,
+          contact_email: stop.contact_email,
         },
       ];
     });

@@ -480,7 +480,7 @@ export default function PlanningPage() {
       stops: (row.job_stops ?? []).map((s: any) => ({
         id: s.id, stop_order: s.stop_order, type: s.type,
         address_line: s.address_line, city: s.city, postcode: s.postcode,
-        contact_name: s.contact_name, contact_phone: s.contact_phone,
+        contact_name: s.contact_name, contact_phone: s.contact_phone, contact_email: s.contact_email,
         lat: s.lat, lng: s.lng,
       })),
       items: (row.job_items ?? []).map((item: any) => ({
