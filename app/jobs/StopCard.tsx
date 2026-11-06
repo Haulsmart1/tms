@@ -250,7 +250,9 @@ export default function StopCard({
 
       setEvidenceMessage(
         evidenceType === "photo"
-          ? "POD photo uploaded successfully."
+          ? stop.type === "delivery"
+            ? "Photo saved. You can mark delivered without a separate POD document."
+            : "POD photo uploaded successfully."
           : "POD document uploaded successfully."
       );
 
@@ -332,7 +334,7 @@ export default function StopCard({
 
     if (stop.type === "delivery" && evidence.length === 0 && !stop.pod_photo_url) {
       setEvidenceError(
-        "Upload at least one POD photo or document before marking this delivery complete."
+        "Add one delivery photo, then mark delivered. A separate POD document is optional."
       );
       return;
     }
@@ -549,7 +551,7 @@ export default function StopCard({
             <div className="mt-1 text-xs text-ink-3">
               {stop.type === "collection"
                 ? "Confirm the goods have been collected. You can add a photo or document if available; it is not required."
-                : "Take a delivery photo or upload a POD document. Maximum 15 MB per file."}
+                : "One delivery photo is enough. A separate POD document is optional. Maximum 15 MB per file."}
             </div>
 
             <input
@@ -644,7 +646,7 @@ export default function StopCard({
               >
                 {uploading === "document"
                   ? "Uploading..."
-                  : "Upload POD"}
+                  : "Upload POD (optional)"}
               </Button>
             </div>
           </div>
