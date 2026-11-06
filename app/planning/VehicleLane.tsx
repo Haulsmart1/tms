@@ -17,6 +17,7 @@ import { jobsInCanonicalDropOrder } from "../../lib/planning/canonicalLaneOrder"
 type Props = {
   vehicle: { id: string; registration: string };
   jobs: PlanJob[];
+  completedJobs?: PlanJob[];
   planningDate?: string;
   emailEnabled?: boolean;
   canonicalDropNumbersByJobId?: Record<string, number[]>;
@@ -41,7 +42,7 @@ type Props = {
 };
 
 export default function VehicleLane({
-  vehicle, jobs, canonicalDropNumbersByJobId, driverId, drivers, selected, summary, regimeSummary,
+  vehicle, jobs, completedJobs = [], canonicalDropNumbersByJobId, driverId, drivers, selected, summary, regimeSummary,
   compliance,
   geocodeSettled, driverConflict, onSelect, onDriverChange, onOpenJob,
   onAcceptJob, onMoveJob, onDropJob, planningDate, emailEnabled = false,
@@ -106,6 +107,7 @@ export default function VehicleLane({
           />
           <span className="text-xs text-ink-3">
             {summary ?? `${jobs.length} ${jobs.length === 1 ? "job" : "jobs"}`}
+            {completedJobs.length > 0 ? ` · ${completedJobs.length} delivered` : ""}
           </span>
         </div>
       </header>
@@ -248,6 +250,16 @@ export default function VehicleLane({
           drop a job here
         </div>
       </div>
+      {completedJobs.length > 0 ? (
+        <div className="mt-3 border-t border-line pt-3">
+          <h4 className="mb-2 text-xs font-semibold text-success">Delivered · {completedJobs.length}</h4>
+          <div className="flex flex-wrap items-stretch gap-2">
+            {completedJobs.map((job) => (
+              <PlanJobCard key={job.id} job={job} sequence={null} geocodeSettled={false} onOpen={onOpenJob} readOnly />
+            ))}
+          </div>
+        </div>
+      ) : null}
       {emailTarget ? <CollectionEmailDialog jobs={emailTarget.jobs} kind={emailTarget.kind} date={planningDate ?? ""}
         initialWindow={emailTarget.window}
         vehicleRegistration={vehicle.registration} onClose={() => setEmailTarget(null)} /> : null}

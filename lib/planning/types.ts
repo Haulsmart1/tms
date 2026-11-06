@@ -23,6 +23,10 @@ export type PlanStop = {
   contact_name?: string | null;
   contact_phone?: string | null;
   contact_email?: string | null;
+  status?: string | null;
+  pod_status?: string | null;
+  collected_at?: string | null;
+  delivered_at?: string | null;
   /** TomTom geocode cache, written by app/api/tomtom/geocode. NULL until then. */
   lat: number | null;
   lng: number | null;

@@ -3,6 +3,7 @@
 import { useRef, type DragEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { isRoutable, sortedStops } from "../../lib/planning/waypoints";
 import type { PlanJob } from "../../lib/planning/types";
+import { planningJobProgress } from "../../lib/planning/jobProgress";
 
 type Props = {
   job: PlanJob;
@@ -28,6 +29,7 @@ type Props = {
   canMoveDown?: boolean;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
+  readOnly?: boolean;
 };
 
 export const JOB_ID_MIME = "text/plain";
@@ -49,11 +51,21 @@ export default function PlanJobCard({
   canMoveDown = false,
   onMoveUp,
   onMoveDown,
+  readOnly = false,
 }: Props) {
   const dragged = useRef(false);
   const stops = sortedStops(job);
   const first = stops[0];
   const last = stops[stops.length - 1];
+  const progress = planningJobProgress(job);
+  const progressClass = progress === "delivered"
+    ? "border-success bg-success-tint"
+    : progress === "collected" || progress === "part_collected"
+      ? "border-warning bg-warning-tint"
+      : "border-line bg-surface";
+  const progressLabel = progress === "delivered" ? "Delivered"
+    : progress === "collected" ? "Collected"
+      : progress === "part_collected" ? "Part collected" : null;
   const placeSummary =
     stops.length === 0
       ? "No stops"
@@ -118,20 +130,20 @@ export default function PlanJobCard({
 
   return (
     <div
-      draggable
+      draggable={!readOnly}
       role={onOpen ? "button" : undefined}
       tabIndex={onOpen ? 0 : undefined}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
-      className={`min-w-0 max-w-full cursor-grab break-words [overflow-wrap:anywhere] rounded-md border bg-surface px-2.5 py-2 text-sm shadow-sm active:cursor-grabbing ${
-        selected ? "border-primary ring-1 ring-primary" : "border-line"
+      onDragStart={readOnly ? undefined : handleDragStart}
+      onDragEnd={readOnly ? undefined : handleDragEnd}
+      onDragOver={readOnly ? undefined : handleDragOver}
+      onDrop={readOnly ? undefined : handleDrop}
+      className={`min-w-0 max-w-full break-words [overflow-wrap:anywhere] rounded-md border px-2.5 py-2 text-sm shadow-sm ${progressClass} ${readOnly ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"} ${
+        selected ? "ring-2 ring-primary" : ""
       }`}
     >
-      {onSelectedChange ? (
+      {!readOnly && onSelectedChange ? (
         <label
           className="mb-1.5 flex min-h-11 cursor-pointer items-center gap-2 text-xs font-medium text-ink-2"
           onClick={(e) => e.stopPropagation()}
@@ -172,8 +184,13 @@ export default function PlanJobCard({
       <p className="text-xs text-ink-3">
         {job.customer_name ?? "No customer"} · {placeSummary}
       </p>
+      {progressLabel ? (
+        <p className={`mt-1 text-xs font-semibold ${progress === "delivered" ? "text-success" : "text-warning"}`}>
+          {progressLabel}{progress === "collected" && sequence !== null ? " · On van" : ""}
+        </p>
+      ) : null}
 
-      {sequence !== null && (onMoveUp || onMoveDown) ? (
+      {!readOnly && sequence !== null && (onMoveUp || onMoveDown) ? (
         <div
           className="mt-2 flex flex-wrap items-center gap-1"
           onClick={(e) => e.stopPropagation()}
@@ -213,17 +230,17 @@ export default function PlanJobCard({
         </div>
       ) : null}
 
-      {onAppointmentEmail ? <button type="button" draggable={false}
+      {!readOnly && onAppointmentEmail ? <button type="button" draggable={false}
         className="mt-2 min-h-11 rounded-md border border-line px-2 text-xs font-semibold text-ink"
         onKeyDown={(event) => event.stopPropagation()}
         onClick={(event) => { event.preventDefault(); event.stopPropagation(); onAppointmentEmail(); }}>Send collection / delivery time</button> : null}
 
-      {onCollectionReceipt ? <button type="button" draggable={false}
+      {!readOnly && onCollectionReceipt ? <button type="button" draggable={false}
         className="mt-2 min-h-11 rounded-md border border-line px-2 text-xs font-semibold text-ink"
         onKeyDown={(event) => event.stopPropagation()}
         onClick={(event) => { event.preventDefault(); event.stopPropagation(); onCollectionReceipt(); }}>Email collection receipt</button> : null}
 
-      {job.status === "pending_acceptance" ? (
+      {!readOnly && job.status === "pending_acceptance" ? (
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
           <span className="rounded border border-line px-1.5 py-0.5 text-xs text-warning">
             {sequence !== null

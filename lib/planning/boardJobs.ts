@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isOpenPlanningJob } from "./collectionEmail";
+import { planningJobProgress } from "./jobProgress";
 
 const JOB_SELECT = `
   id, tenant_id, reference, status, scheduled_date, planning_date,
@@ -8,7 +9,7 @@ const JOB_SELECT = `
   journey_scope, origin_country_code, destination_country_code,
   compliance_regime_override, compliance_override_reason,
   customers ( name ),
-  job_stops (id, stop_order, type, address_line, city, postcode, contact_name, contact_phone, contact_email, lat, lng, booked_from, booked_to),
+  job_stops (id, stop_order, type, status, pod_status, collected_at, delivered_at, address_line, city, postcode, contact_name, contact_phone, contact_email, lat, lng, booked_from, booked_to),
   job_items (id, sku, description, quantity, serial_numbers, external_reference, notes)
 `;
 
@@ -19,24 +20,32 @@ export async function loadPlanningBoardJobs(
   client: SupabaseClient,
   input: { tenantIds: string[]; planningDate: string; savedJobIds: string[] },
 ) {
-  if (input.tenantIds.length === 0) return { data: [], error: null };
+  if (input.tenantIds.length === 0) return { data: [], completedData: [], error: null };
   const query = () => client.from("jobs").select(JOB_SELECT).in("tenant_id", input.tenantIds);
   const day = await query()
     .or(`planning_date.eq.${input.planningDate},and(planning_date.is.null,scheduled_date.eq.${input.planningDate})`)
     .order("created_at", { ascending: true });
-  if (day.error) return day;
+  if (day.error) return { ...day, completedData: [] };
   const rows = new Map((day.data ?? []).map((row) => [String(row.id), row]));
   const missing = [...new Set(input.savedJobIds)].filter((id) => !rows.has(id));
   // Bound the URL size even for a large saved plan. The query builder escapes
   // the ids; no snapshot content is interpolated into a raw filter string.
   for (let start = 0; start < missing.length; start += 100) {
     const result = await query().in("id", missing.slice(start, start + 100));
-    if (result.error) return result;
+    if (result.error) return { ...result, completedData: [] };
     for (const row of result.data ?? []) rows.set(String(row.id), row);
   }
-  // A saved snapshot can still reference jobs since completed or cancelled.
-  // Do not resurrect those jobs into either a lane or the unassigned pool.
-  return { data: [...rows.values()].filter(isOpenPlanningJob), error: null };
+  // Completed jobs are display-only history on their recorded van. They must
+  // never enter route calculations, assignment saves or the unassigned pool.
+  const completedData = [...rows.values()].filter((row) =>
+    planningJobProgress({ status: row.status, stops: row.job_stops }) === "delivered"
+  );
+  const completedIds = new Set(completedData.map((row) => row.id));
+  return {
+    data: [...rows.values()].filter((row) => isOpenPlanningJob(row) && !completedIds.has(row.id)),
+    completedData,
+    error: null,
+  };
 }
 
 /** A date change renders before its asynchronous board load completes.
