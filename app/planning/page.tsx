@@ -194,6 +194,7 @@ export default function PlanningPage() {
      while that save was in flight. */
   const [saveRound, setSaveRound] = useState(0);
   const [jobs, setJobs] = useState<PlanJob[]>([]);
+  const [completedJobs, setCompletedJobs] = useState<PlanJob[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [positions, setPositions] = useState<Map<string, PositionReading>>(
@@ -301,12 +302,23 @@ export default function PlanningPage() {
   const canonicalMutationGeneration = useRef<Record<string, number>>({});
 
   const jobById = useMemo(() => new Map(jobs.map((j) => [j.id, j])), [jobs]);
+  const detailJobById = useMemo(() => new Map([...jobs, ...completedJobs].map((j) => [j.id, j])), [jobs, completedJobs]);
+  const completedByVehicle = useMemo(() => {
+    const grouped = new Map<string, PlanJob[]>();
+    for (const job of completedJobs) {
+      if (!job.vehicle_id || job.subcontractor_id) continue;
+      const lane = grouped.get(job.vehicle_id) ?? [];
+      lane.push(job);
+      grouped.set(job.vehicle_id, lane);
+    }
+    return grouped;
+  }, [completedJobs]);
 
   /* A reload can drop the open job (moved to another day, deleted elsewhere);
      an empty dialog would otherwise linger over the board. */
   useEffect(() => {
-    if (detailJobId && !jobById.has(detailJobId)) setDetailJobId(null);
-  }, [detailJobId, jobById]);
+    if (detailJobId && !detailJobById.has(detailJobId)) setDetailJobId(null);
+  }, [detailJobId, detailJobById]);
 
   const driverById = useMemo(
     () => new Map(drivers.map((driver) => [driver.id, driver])),
@@ -410,7 +422,7 @@ export default function PlanningPage() {
 
     const resolvedTimeZone = await timeZonePromise;
     const savedPlan = pendingSavedPlanOpen.current;
-    const { data: jobsData, error: jobsError } = await loadPlanningBoardJobs(supabase, {
+    const { data: jobsData, completedData, error: jobsError } = await loadPlanningBoardJobs(supabase, {
       tenantIds: tenant.activeTenantId ? [tenant.activeTenantId] : tenant.tenants.map((option) => option.id),
       planningDate: date,
       savedJobIds: savedPlan?.tenantId === planningTenantId && savedPlan.planningDate === date
@@ -458,7 +470,7 @@ export default function PlanningPage() {
     const loadedTimeZone = resolvedTimeZone.timeZone;
     const loadNotices: string[] = [];
 
-    const loaded: PlanJob[] = (jobsData ?? []).map((row: any) => ({
+    const toPlanJob = (row: any): PlanJob => ({
       id: row.id,
       tenant_id: row.tenant_id,
       reference: row.reference,
@@ -484,6 +496,7 @@ export default function PlanningPage() {
         id: s.id, stop_order: s.stop_order, type: s.type,
         address_line: s.address_line, city: s.city, postcode: s.postcode,
         contact_name: s.contact_name, contact_phone: s.contact_phone, contact_email: s.contact_email,
+        status: s.status, pod_status: s.pod_status, collected_at: s.collected_at, delivered_at: s.delivered_at,
         lat: s.lat, lng: s.lng,
       })),
       items: (row.job_items ?? []).map((item: any) => ({
@@ -495,7 +508,9 @@ export default function PlanningPage() {
         external_reference: item.external_reference,
         notes: item.notes,
       })),
-    }));
+    });
+    const loaded: PlanJob[] = (jobsData ?? []).map(toPlanJob);
+    const completed: PlanJob[] = (completedData ?? []).map(toPlanJob);
 
     // Fetched unfiltered so retired vehicles' registrations are still known
     // (for the displaced-job disclosure below); lanes and everything else
@@ -712,6 +727,7 @@ export default function PlanningPage() {
     setTimeZoneNote(resolvedTimeZone.note);
     if (loadNotices.length > 0) setMessage(loadNotices.join(" "));
     setJobs(loaded);
+    setCompletedJobs(completed);
     setSelectedUnassignedJobIds(new Set());
     setBulkVehicleId("");
     setVehicles(vehicleList);
@@ -1685,7 +1701,9 @@ export default function PlanningPage() {
       lanes: lanePlans.map((lane) => ({
         vehicleId: lane.vehicleId,
         driverId: lane.driverId,
-        jobIds: [...lane.jobIds],
+        // Retain display-only history when updating CBA or another saved
+        // plan, even if those jobs still carry an older operational date.
+        jobIds: [...lane.jobIds, ...(completedByVehicle.get(lane.vehicleId) ?? []).map((job) => job.id)],
       })),
       pendingItineraries,
       persistedItineraries,
@@ -1716,6 +1734,7 @@ export default function PlanningPage() {
   function stageLoadedSavedPlan(loaded: LoadedSavedPlan) {
     const activeVehicleIds = new Set(vehicles.map((vehicle) => vehicle.id));
     const knownJobIds = new Set(jobs.map((job) => job.id));
+    const completedJobIds = new Set(completedJobs.map((job) => job.id));
     const knownDriverIds = new Set(drivers.map((driver) => driver.id));
 
     const orders: Record<string, string[]> = {};
@@ -1738,6 +1757,7 @@ export default function PlanningPage() {
       }
 
       orders[lane.vehicleId] = lane.jobIds.filter((jobId) => {
+        if (completedJobIds.has(jobId)) return false;
         if (!knownJobIds.has(jobId)) {
           omittedJobs += 1;
           return false;
@@ -3608,6 +3628,7 @@ export default function PlanningPage() {
                       jobs={(laneOrders[v.id] ?? [])
                         .map((id) => jobById.get(id))
                         .filter((j): j is PlanJob => Boolean(j))}
+                      completedJobs={completedByVehicle.get(v.id) ?? []}
                       canonicalDropNumbersByJobId={
                         pendingItineraries[v.id] ?? persistedItineraries[v.id]
                           ? buildPlanningDropNumbersByJobId(
@@ -3778,9 +3799,11 @@ export default function PlanningPage() {
         ) : null}
 
         {(() => {
-          const detailJob = detailJobId ? jobById.get(detailJobId) : undefined;
+          const detailJob = detailJobId ? detailJobById.get(detailJobId) : undefined;
           if (!detailJob) return null;
-          const { vehicleId, driverId } = draftAssignment(
+          const { vehicleId, driverId } = !jobById.has(detailJob.id)
+            ? { vehicleId: detailJob.vehicle_id, driverId: detailJob.driver_id }
+            : draftAssignment(
             detailJob.id,
             laneOrders,
             laneDrivers

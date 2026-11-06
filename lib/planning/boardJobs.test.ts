@@ -35,6 +35,19 @@ describe("saved plan board loading", () => {
     ]);
     const result = await loadPlanningBoardJobs(client, { tenantIds: ["tenant"], planningDate: today, savedJobIds: ["old-complete", "cancelled", "old-open"] });
     expect(result.data!.map((row) => row.id)).toEqual(["open", "unknown", "old-open"]);
+    expect(result.completedData.map((row) => row.id)).toEqual(["complete", "old-complete"]);
+  });
+
+  it("loads stop progress and separates delivered work from routable jobs", async () => {
+    const { client, requests } = clientFor([
+      { id: "collected", tenant_id: "tenant", planning_date: today, status: "accepted", job_stops: [{ type: "collection", pod_status: "collected" }, { type: "delivery", pod_status: "pending" }] },
+      { id: "delivered", tenant_id: "tenant", planning_date: today, status: "accepted", job_stops: [{ type: "delivery", pod_status: "delivered" }] },
+      { id: "foreign-complete", tenant_id: "other", planning_date: today, status: "completed" },
+    ]);
+    const result = await loadPlanningBoardJobs(client, { tenantIds: ["tenant"], planningDate: today, savedJobIds: ["foreign-complete"] });
+    expect(result.data!.map((row) => row.id)).toEqual(["collected"]);
+    expect(result.completedData.map((row) => row.id)).toEqual(["delivered"]);
+    expect(requests[0].searchParams.get("select")).toContain("status,pod_status,collected_at,delivered_at");
   });
 
   it("loads all 25 HT21 EOR snapshot jobs despite older source dates without borrowing another tenant's job", async () => {
@@ -62,7 +75,7 @@ describe("saved plan board loading", () => {
 
   it("does not query without an authorized tenant scope", async () => {
     const { client, requests } = clientFor([]);
-    expect(await loadPlanningBoardJobs(client, { tenantIds: [], planningDate: today, savedJobIds: ["foreign"] })).toEqual({ data: [], error: null });
+    expect(await loadPlanningBoardJobs(client, { tenantIds: [], planningDate: today, savedJobIds: ["foreign"] })).toEqual({ data: [], completedData: [], error: null });
     expect(requests).toEqual([]);
   });
 });
