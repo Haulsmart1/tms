@@ -394,6 +394,7 @@ export default function PodPage() {
       }
 
       const uploadedCount = files.length;
+      await loadData();
 
       setMessage(
         `${uploadedCount} ${
@@ -404,10 +405,8 @@ export default function PodPage() {
             : uploadedCount === 1
               ? "document"
               : "documents"
-        } uploaded successfully.`
+        } uploaded successfully.${evidenceType === "photo" && stop.type === "delivery" ? " You can mark delivered without a separate POD document." : ""}`
       );
-
-      await loadData();
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -499,7 +498,7 @@ export default function PodPage() {
       setErrorMessage(
         isCollection
           ? "Upload at least one collection photo or document before marking the stop collected."
-          : "Upload at least one POD photo or document before completing delivery."
+          : "Add one delivery photo, then mark delivered. A separate POD document is optional."
       );
       return;
     }
@@ -1450,7 +1449,8 @@ export default function PodPage() {
                               <div className="grid gap-3 sm:grid-cols-2">
                                 <EvidenceUpload
                                   title={stop.type === "collection" ? "Collection Photos" : "Delivery Photos"}
-                                  description="Upload one or more photos."
+                                  buttonLabel="ADD PHOTO"
+                                  description={stop.type === "delivery" ? "One photo is enough to complete delivery. No separate POD document is needed." : "Upload one or more photos."}
                                   accept="image/*"
                                   multiple
                                   uploading={
@@ -1475,32 +1475,36 @@ export default function PodPage() {
                                   }}
                                 />
 
-                                <EvidenceUpload
-                                  title={stop.type === "collection" ? "Collection Documents" : "Delivery Documents"}
-                                  description="PDF, Word or image documents."
-                                  accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.heic"
-                                  multiple
-                                  uploading={
-                                    uploadingKey ===
-                                    `${stop.id}-document`
-                                  }
-                                  onChange={(
-                                    event
-                                  ) => {
-                                    const selectedFiles = Array.from(
-                                      event.currentTarget.files ?? []
-                                    );
+                                <details className="rounded-lg border border-line bg-surface p-3">
+                                  <summary className="cursor-pointer text-sm font-semibold text-ink">Add POD document (optional)</summary>
+                                  <EvidenceUpload
+                                    title={stop.type === "collection" ? "Collection Documents" : "Delivery Documents"}
+                                    buttonLabel="ADD DOCUMENT (OPTIONAL)"
+                                    description="Optional supporting paperwork. PDF, Word or image documents."
+                                    accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.heic"
+                                    multiple
+                                    uploading={
+                                      uploadingKey ===
+                                      `${stop.id}-document`
+                                    }
+                                    onChange={(
+                                      event
+                                    ) => {
+                                      const selectedFiles = Array.from(
+                                        event.currentTarget.files ?? []
+                                      );
 
-                                    event.currentTarget.value = "";
+                                      event.currentTarget.value = "";
 
-                                    void uploadFiles(
-                                      selectedFiles,
-                                      job,
-                                      stop,
-                                      "document"
-                                    );
-                                  }}
-                                />
+                                      void uploadFiles(
+                                        selectedFiles,
+                                        job,
+                                        stop,
+                                        "document"
+                                      );
+                                    }}
+                                  />
+                                </details>
                               </div>
 
                               <div className="grid gap-2.5">
@@ -1692,6 +1696,7 @@ export default function PodPage() {
 function EvidenceUpload({
   title,
   description,
+  buttonLabel,
   accept,
   multiple,
   uploading,
@@ -1699,6 +1704,7 @@ function EvidenceUpload({
 }: {
   title: string;
   description: string;
+  buttonLabel: string;
   accept: string;
   multiple: boolean;
   uploading: boolean;
@@ -1706,11 +1712,6 @@ function EvidenceUpload({
     event: ChangeEvent<HTMLInputElement>
   ) => void;
 }) {
-  const buttonLabel =
-    title === "Delivery Photos"
-      ? "ADD DELIVERY PHOTOS"
-      : "ADD DELIVERY DOCUMENTS";
-
   return (
     <div className="grid min-h-[140px] content-between gap-3 rounded-lg border border-line bg-surface p-4">
       <div>
