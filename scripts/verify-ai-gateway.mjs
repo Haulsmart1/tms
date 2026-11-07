@@ -22,7 +22,7 @@ try {
         question: 'Is this job collected or delivered? Give one brief summary of its progress and next step.',
         accepts: proposals => {
           const text = proposals.map(p => p.text).join(' ');
-          return /collected|on the van/i.test(text) && /awaiting|pending|not (?:yet )?deliver/i.test(text);
+          return /collected|on the van/i.test(text) && /awaiting|pending|not (?:yet )?deliver|delivery (?:is )?(?:not confirmed|unconfirmed)/i.test(text);
         },
       },
       {
