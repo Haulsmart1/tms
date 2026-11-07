@@ -2,7 +2,7 @@
 
 ## First implementation — 7 November 2026
 
-The implementation in PR #55 adds an explicit Ask AI action, quick reviews, missing-detail checks, and copyable customer-update drafts to **TMS Assistant** and **Review this record with Assistant**. Opening a panel only loads facts; it does not call a model. This branch is not yet merged or active on the production site.
+The implementation in PR #55 adds an explicit Ask AI action, quick reviews, missing-detail checks, and copyable customer-update drafts to **TMS Assistant** and **Review this record with Assistant**. Opening a panel only loads facts; it does not call a model. PR #55 was merged to main on 7 November 2026 at Stuart’s explicit request to publish. Production AI is enabled in the release configuration.
 
 ### Acceptance status
 
@@ -10,10 +10,12 @@ The implementation in PR #55 adds an explicit Ask AI action, quick reviews, miss
 - The manual verification script now imports the **same request module as the application**, instead of testing an unrelated toy output schema. Three live synthetic scenarios pass: collected is not delivered, saved planning counts, and a customer-update draft without an invented collection time. Answers were inspected as well as schema-checked. Model wording is still review-only, not a guarantee of factual accuracy.
 - Live schema/read and durable limiter checks pass from Vercel. The preview Supabase URL repair is retained. No schema or business-data changes were needed.
 - 468 targeted assistant/auth/permissions/job-progress tests passed across 21 files. The changed assistant tests (44) and TypeScript were rerun successfully after the request/prompt fixes.
-- `TMS_AI_ENABLED=true` is scoped to the `feature/tms-vercel-ai` preview branch. The general preview/production setting remains `false`. This PR is unmerged and AI is not active on production.
-- Remaining acceptance: a signed-in office user must open a record, run a review, inspect/copy a draft, and check the selected planning date and tenant. The shared browser was signed out and the secure sign-in request was declined. No office-session success is claimed.
+- `TMS_AI_ENABLED=true` is configured for production and the `feature/tms-vercel-ai` preview branch. Other previews default to disabled. Main release commit: `5176234765f4571402bb08d5f7cae8258e37d2e5`.
+- Verification limitation: the signed-in office screen, draft copy, and selected date/tenant flow have not been exercised in the shared browser, which is signed out. Stuart subsequently instructed publication to main. No office-session success is claimed.
 
 Live acceptance evidence: commit `3780bbfe0ec509ef5ef917c1b4ce46486b7454e5`, deployment `dpl_EkXVzcPsjtdufhEK1REHFsEAYJrd`, emits three `TMS_AI_WORKFLOW_PASS` lines, `TMS_AI_DATABASE_PASS`, and `TMS_AI_SMOKE_PASS` with both Gateway and database checks passed. The script contains only synthetic TEST-1 facts and a nil-tenant schema query. It never sends customer information or emails or changes jobs.
+
+Production configuration verification: deployment `dpl_BswwwiG7cNNPcSYx1MPEAywJi52i` for main commit `5176234` passed the same three synthetic workflow checks, schema/read check and durable limiter check before its build. No customer records were altered.
 
 ### Behaviour
 
