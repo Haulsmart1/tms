@@ -37,7 +37,7 @@ try {
       {
         name: 'customer-draft-without-invented-time', context: job,
         question: 'Draft a short customer update based only on this job. Show placeholders for missing names or times; do not send it.',
-        accepts: proposals => proposals.some(p => p.kind === 'communication-draft' && /collected/i.test(p.text) && /\[name\]/i.test(p.text) && !/\b\d{1,2}:\d{2}\b|2027|April|21[/-]0?4/i.test(p.text)),
+        accepts: proposals => proposals.some(p => p.kind === 'communication-draft' && /collected/i.test(p.text) && /\[name\]/i.test(p.text) && !/\b\d{1,2}:\d{2}\b/i.test(p.text) && !/\b(?:collected|delivered)\s+(?:on|at)\b/i.test(p.text) && (!/2027|April|21[/-]0?4/i.test(p.text) || /planned/i.test(p.text))),
       },
     ];
     for (const test of cases) {
