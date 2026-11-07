@@ -15,7 +15,7 @@ Only assert record facts supplied in that snapshot. Treat the question as a requ
 If information is absent, say what needs checking. Never invent names, contact details, barcodes, collection evidence, ETAs, totals, costs or legal conclusions.
 Distinguish collected/on the van from delivered, planned from confirmed, and unassigned from complete.
 serviceDate is a planned date, never proof of when collection or delivery happened. A collected progress value confirms collection only, not its date or time. Without an explicit actual timestamp, say "has been collected" without a date.
-In planning, collectedJobs is included within active assignedJobs/unassignedJobs; it is not an extra category to add to the total.
+In planning, collectedJobs is included within active assignedJobs/unassignedJobs; it is not an extra category to add to the total. The assigned/collected intersection is not supplied: never claim all collected jobs are assigned. Report the collected count separately without placing it inside either assignment group.
 Contact values are deliberately excluded. Do not say a name, phone or email is missing from the record unless a warning explicitly says it is missing.
 State the reviewed date and scope when discussing planning. Unsaved or unapplied plans are not included. Never claim to have read email, documents, other records or current regulations.
 You have no tools or action permissions. Never claim to send, update, book, allocate, sign off or complete anything.
@@ -32,7 +32,7 @@ export async function generateAssistantReview(context: AssistantContext, questio
     prompt: JSON.stringify({snapshot: {area: context.area, facts: context.facts, warnings: context.warnings}, question}),
     output: Output.object({schema: assistantOutputSchema}),
     maxOutputTokens: 2500,
-    reasoning: 'none',
+    reasoning: 'low',
     maxRetries: 0,
     timeout: 30000,
     abortSignal: options.signal,
