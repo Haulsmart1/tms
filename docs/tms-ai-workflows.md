@@ -6,14 +6,18 @@ The implementation in PR #55 adds an explicit Ask AI action, quick reviews, miss
 
 ### Acceptance status
 
-- Normal Vercel preview builds pass. Local assistant, authorization, permissions and job-progress regression checks pass; TypeScript passes.
-- The live synthetic Gateway request returned `finishReason: content-filter`, `rawFinishReason: refusal`, no visible text and zero output tokens. No real customer data was sent. Gateway request logs confirm project authentication as TMS and an HTTP 200 response from Anthropic; the provider's refusal remains unresolved.
-- The preview database URL contained an extra trailing `h` in its project reference. It was corrected to the TMS Project endpoint verified through Supabase. The database schema/read and durable limiter checks now pass from a fresh Vercel deployment. No schema or business-data changes were required.
-- `TMS_AI_ENABLED=false` remains configured for production and future previews until Gateway inference and an authenticated office-session review pass. Existing deployed previews retain their build-time configuration. No production code, jobs or customer emails were changed.
-- Do not merge or enable the feature based only on a successful build. Resolve the provider refusal, run the full synthetic check, then verify the office UI and tenant access in a signed-in session.
+- The verified Vercel preview build is READY. The provider connection is repaired. TMS now uses `openai/gpt-6-luna` through Vercel AI Gateway with the existing TMS project OIDC identity. The earlier Anthropic refusal is no longer the active blocker; no provider filters or authentication controls were weakened.
+- The manual verification script now imports the **same request module as the application**, instead of testing an unrelated toy output schema. Three live synthetic scenarios pass: collected is not delivered, saved planning counts, and a customer-update draft without an invented collection time. Answers were inspected as well as schema-checked. Model wording is still review-only, not a guarantee of factual accuracy.
+- Live schema/read and durable limiter checks pass from Vercel. The preview Supabase URL repair is retained. No schema or business-data changes were needed.
+- 468 targeted assistant/auth/permissions/job-progress tests passed across 21 files. The changed assistant tests (44) and TypeScript were rerun successfully after the request/prompt fixes.
+- `TMS_AI_ENABLED=true` is scoped to the `feature/tms-vercel-ai` preview branch. The general preview/production setting remains `false`. This PR is unmerged and AI is not active on production.
+- Remaining acceptance: a signed-in office user must open a record, run a review, inspect/copy a draft, and check the selected planning date and tenant. The shared browser was signed out and the secure sign-in request was declined. No office-session success is claimed.
 
-Provider diagnostic evidence: Gateway request `gen_01M6SYMH210YXA5FCMF22XW25X` at 2026-11-07 02:50:36 UTC, model `anthropic/claude-haiku-5.5`, Anthropic IAD1, 352 input tokens and zero output tokens. The request contains only the synthetic TEST-1 collection/delivery example in the verification script. Vercel deployment `dpl_GJ65BGiHEZDV7LX1bsp9CkkSv7Yu` records the passing database check followed by the provider refusal. No bypass, filter changes or alternate-provider retries were performed.
+Live acceptance evidence: commit `3780bbfe0ec509ef5ef917c1b4ce46486b7454e5`, deployment `dpl_EkXVzcPsjtdufhEK1REHFsEAYJrd`, emits three `TMS_AI_WORKFLOW_PASS` lines, `TMS_AI_DATABASE_PASS`, and `TMS_AI_SMOKE_PASS` with both Gateway and database checks passed. The script contains only synthetic TEST-1 facts and a nil-tenant schema query. It never sends customer information or emails or changes jobs.
 
+### Behaviour
+
+- Planned service dates are explicitly labelled and must not be presented as actual collection/delivery dates. Omitted snapshot fields are not evidence that the full record is missing data. Collected planning counts overlap assignment groups and must not be added as an extra job category.
 - Job reviews include reference, saved status/progress, date, assignment presence, ETAs, towns/postcodes and contact completeness. Names, phone/email values, street addresses, attachments and free-text job notes are not transmitted automatically.
 - Planning reviews use a date chosen in the Assistant and saved database assignments. Unapplied saved plans and browser-only changes are excluded. Active assigned/unassigned, missing-driver, collected and delivered counts are calculated by code before sending them to AI. Reads over 500 jobs report the total and a limit warning instead of incomplete detailed counts.
 - Customer/invoice reviews use the existing minimal record facts. They do not inspect full histories, amounts, banking data or external accounting systems.
@@ -21,7 +25,7 @@ Provider diagnostic evidence: Gateway request `gen_01M6SYMH210YXA5FCMF22XW25X` a
 
 ## Configuration and operations
 
-Use Node 22 or later (TMS deploys on Node 24), installed `ai` SDK 7, and `TMS_AI_ENABLED=true` plus `TMS_AI_MODEL=anthropic/claude-haiku-5.5`. This model was present in the full Gateway catalogue on 7 November 2026 and supports structured output. The model remains server-configurable.
+Use Node 24 (including for the verification script), installed `ai` SDK 7, and `TMS_AI_ENABLED=true` plus `TMS_AI_MODEL=openai/gpt-6-luna`. This model was verified in the Gateway catalogue and with live structured-output requests on 7 November 2026. The model remains server-configurable. Requests use low reasoning effort within the existing token cap.
 
 On Vercel, the SDK authenticates with the project's automatic OIDC token. No Debbie key is copied. For local development, link the TMS project and pull short-lived OIDC or use a separate server-only AI_GATEWAY_API_KEY. Never put keys in NEXT_PUBLIC variables.
 
@@ -31,7 +35,7 @@ The existing durable `rate_limit_hit` RPC is required. AI calls fail closed if i
 
 Disable AI with `TMS_AI_ENABLED=false` and redeploy; local facts continue working. Logs record model, area and token usage only, never questions or customer facts. Gateway Logs provide provider usage and cost. Provider failures show a retryable message and leave all operational records unchanged.
 
-Run `node scripts/verify-ai-gateway.mjs` explicitly in the linked environment for a single synthetic inference plus empty-tenant schema/read and separate limiter-counter checks. Use `--gateway-only` to isolate the provider request, or `--database-only` to verify database access and limits without inference. Neither isolated check proves the other works. It does not contact customers or change jobs. The script is not run on normal builds. Office-session browser acceptance remains a separate check.
+Run `node scripts/verify-ai-gateway.mjs` explicitly in the linked environment for three synthetic workflow requests plus empty-tenant schema/read and separate limiter-counter checks. Use `--gateway-only` to isolate the provider request, or `--database-only` to verify database access and limits without inference. Neither isolated check proves the other works. It does not contact customers or change jobs. The script is not run on normal builds. Office-session browser acceptance remains a separate check.
 
 ## Next opportunities, in useful order
 
