@@ -43,10 +43,11 @@ try {
     for (const test of cases) {
       stage = `gateway-${test.name}`;
       const proposals = await generateAssistantReview(test.context, test.question, {model: process.env.TMS_AI_MODEL});
-      if (!test.accepts(proposals) || proposals.some(p => p.requiresApproval !== true)) throw new Error('unexpected_answer');
       // These fixtures contain no customer information; their answers are safe
       // to retain as acceptance evidence. Normal application prompts stay private.
-      console.log('TMS_AI_WORKFLOW_PASS', JSON.stringify({scenario: test.name, proposals}));
+      console.log('TMS_AI_WORKFLOW_RESPONSE', JSON.stringify({scenario: test.name, proposals}));
+      if (!test.accepts(proposals) || proposals.some(p => p.requiresApproval !== true)) throw new Error('unexpected_answer');
+      console.log('TMS_AI_WORKFLOW_PASS', JSON.stringify({scenario: test.name}));
     }
     console.log('TMS_AI_GATEWAY_PASS', JSON.stringify({model: process.env.TMS_AI_MODEL, scenarios: cases.length}));
   }
