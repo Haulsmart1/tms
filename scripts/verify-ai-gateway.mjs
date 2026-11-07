@@ -13,7 +13,7 @@ try {
     stage = 'gateway';
     const job = {
       tenantId: 'synthetic-only', area: 'jobs',
-      facts: {reference: 'TEST-1', status: 'accepted', progress: 'collected', serviceDate: '2026-11-07', vehicleAssigned: 'Yes', driverAssigned: 'Yes', collectionCount: 1, deliveryCount: 1, collectionETA: null, deliveryETA: null},
+      facts: {reference: 'TEST-1', status: 'accepted', progress: 'collected', serviceDate: '2027-04-21', vehicleAssigned: 'Yes', driverAssigned: 'Yes', collectionCount: 1, deliveryCount: 1, collectionETA: null, deliveryETA: null},
       warnings: ['No delivery time recorded. Customer name is not included in this snapshot.'],
     };
     const cases = [
@@ -37,7 +37,7 @@ try {
       {
         name: 'customer-draft-without-invented-time', context: job,
         question: 'Draft a short customer update based only on this job. Show placeholders for missing names or times; do not send it.',
-        accepts: proposals => proposals.some(p => p.kind === 'communication-draft' && /collected/i.test(p.text) && /\[name\]/i.test(p.text) && !/\b\d{1,2}:\d{2}\b/.test(p.text)),
+        accepts: proposals => proposals.some(p => p.kind === 'communication-draft' && /collected/i.test(p.text) && /\[name\]/i.test(p.text) && !/\b\d{1,2}:\d{2}\b|2027|April|21[/-]0?4/i.test(p.text)),
       },
     ];
     for (const test of cases) {

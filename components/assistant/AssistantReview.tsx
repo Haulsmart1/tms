@@ -7,7 +7,7 @@ import { operatorDay } from '../../lib/time';
 type Result = {mode: 'local-guidance' | 'ai'; context: AssistantContext; proposals: AssistantProposal[]; providerConfigured: boolean; generatedAt?: string};
 const LABELS: Record<string, string> = {
   reference: 'Job', status: 'Recorded status', progress: 'Progress', name: 'Customer',
-  serviceDate: 'Service date', vehicleAssigned: 'Vehicle assigned', driverAssigned: 'Driver assigned',
+  serviceDate: 'Planned service date', vehicleAssigned: 'Vehicle assigned', driverAssigned: 'Driver assigned',
   collectionCount: 'Collection stops', deliveryCount: 'Delivery stops', collectionETA: 'Collection ETA', deliveryETA: 'Delivery ETA',
   collectionLocations: 'Collection towns / postcodes', deliveryLocations: 'Delivery towns / postcodes',
   date: 'Review date', totalJobs: 'Total jobs', assignedJobs: 'Active assigned', unassignedJobs: 'Active unassigned',
