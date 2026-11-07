@@ -39,6 +39,12 @@ export class GatewayAssistant implements AssistantProvider {
       timeout: 30000,
       abortSignal: this.signal,
     });
+    // Do not publish a filtered, interrupted or truncated response even when
+    // its partial output happens to match the schema.
+    if (result.finishReason !== 'stop') {
+      console.warn('[tms-ai] generation incomplete', {model: process.env.TMS_AI_MODEL, finishReason: result.finishReason});
+      throw new Error('AI_GENERATION_INCOMPLETE');
+    }
     // Validate even when SDK output is mocked; nothing executable crosses this boundary.
     const output = assistantOutputSchema.parse(result.output);
     console.info('[tms-ai] review', {area: context.area, model: process.env.TMS_AI_MODEL, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens});

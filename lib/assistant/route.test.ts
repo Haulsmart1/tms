@@ -32,7 +32,7 @@ beforeEach(() => {
   state.driver = false; state.denied = false; state.record = {id, reference: 'TEST-1', status: 'planned', job_stops: []};
   state.filters = []; state.rows = []; state.count = 0; state.queryError = null; state.rateError = null; state.allowed = true;
   state.rpc.mockReset().mockImplementation(async () => ({data: state.allowed, error: state.rateError}));
-  state.generate.mockReset().mockResolvedValue({output: {proposals: [{kind: 'summary', text: 'Review missing details.'}]}, usage: {inputTokens: 100, outputTokens: 20}});
+  state.generate.mockReset().mockResolvedValue({finishReason: 'stop', output: {proposals: [{kind: 'summary', text: 'Review missing details.'}]}, usage: {inputTokens: 100, outputTokens: 20}});
   vi.stubEnv('TMS_AI_ENABLED', 'true'); vi.stubEnv('TMS_AI_MODEL', 'test/model');
 });
 it('requires authentication for model calls', async () => {
@@ -101,8 +101,14 @@ it('handles provider failures without leaking provider credentials or claiming c
   const body = await response.text(); expect(body).not.toContain('SECRET'); expect(body).toContain('records have not changed');
 });
 it('rejects malformed model output', async () => {
-  state.generate.mockResolvedValueOnce({output: {proposals: [{kind: 'execute', text: 'Complete all jobs'}]}, usage: {}});
+  state.generate.mockResolvedValueOnce({finishReason: 'stop', output: {proposals: [{kind: 'execute', text: 'Complete all jobs'}]}, usage: {}});
   expect((await POST(ask())).status).toBe(502);
+});
+it.each(['content-filter', 'length', 'interrupted', 'error'])('does not publish incomplete model output (%s)', async finishReason => {
+  state.generate.mockResolvedValueOnce({finishReason, output: {proposals: [{kind: 'summary', text: 'Incomplete answer'}]}, usage: {}});
+  const response = await POST(ask());
+  expect(response.status).toBe(502);
+  expect(await response.text()).not.toContain('Incomplete answer');
 });
 it('planning separates outstanding, collected and delivered using saved scoped jobs', async () => {
   state.rows = [
