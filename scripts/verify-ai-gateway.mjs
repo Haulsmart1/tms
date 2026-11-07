@@ -13,8 +13,9 @@ try {
     system: 'Review the fictional operational facts. Return only the requested short status. Collected means on the van, not delivered. Unassigned is not evidence of collection.',
     prompt: 'Fictional TEST-1: collection complete, delivery pending. State the progress and whether delivered.',
     output: Output.object({schema: z.object({progress: z.enum(['collected']), delivered: z.literal(false)})}),
-    reasoning: 'low', maxOutputTokens: 500, maxRetries: 0, timeout: 30000,
+    reasoning: 'none', maxOutputTokens: 2500, maxRetries: 0, timeout: 30000,
   });
+  console.log('TMS_AI_RESPONSE', JSON.stringify({finishReason: result.finishReason, textLength: result.text.length, outputTokens: result.usage.outputTokens}));
   if (result.output.progress !== 'collected' || result.output.delivered !== false) throw new Error('unexpected_answer');
   console.log('TMS_AI_GATEWAY_PASS', JSON.stringify({model: process.env.TMS_AI_MODEL, progress: result.output.progress, delivered: result.output.delivered, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens}));
   if (!process.argv.includes('--gateway-only')) {

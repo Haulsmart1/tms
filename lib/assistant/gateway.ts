@@ -34,7 +34,7 @@ export class GatewayAssistant implements AssistantProvider {
       prompt: JSON.stringify({snapshot: {area: context.area, facts: context.facts, warnings: context.warnings}, question}),
       output: Output.object({schema: assistantOutputSchema}),
       maxOutputTokens: 2500,
-      reasoning: 'low',
+      reasoning: 'none',
       maxRetries: 0,
       timeout: 30000,
       abortSignal: this.signal,
