@@ -14,7 +14,7 @@ const LABELS: Record<string, string> = {
   missingDrivers: 'Active jobs without drivers', collectedJobs: 'Collected, awaiting delivery', deliveredJobs: 'Delivered',
   currency: 'Currency', invoiceReference: 'Invoice', poReference: 'Purchase order',
 };
-const PROGRESS_LABELS: Record<string, string> = {pending: 'Awaiting collection', part_collected: 'Part collected', collected: 'Collected / on the van', delivered: 'Delivered'};
+const PROGRESS_LABELS: Record<string, string> = {cancelled: 'Cancelled', pending: 'Awaiting collection', part_collected: 'Part collected', collected: 'Collected / on the van', delivered: 'Delivered'};
 const KINDS: Record<AssistantProposal['kind'], string> = {
   summary: 'Summary', 'missing-information': 'Missing information', 'communication-draft': 'Draft — review before sending', 'next-step': 'Next step', explanation: 'Details',
 };

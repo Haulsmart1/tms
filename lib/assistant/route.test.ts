@@ -132,3 +132,9 @@ it('does not fabricate planning counts if the data query fails', async () => {
   const response = await POST(req({area: 'planning', question: 'Review'}));
   expect(response.status).toBe(503); expect(await response.text()).not.toContain('PRIVATE'); expect(state.generate).not.toHaveBeenCalled();
 });
+
+it('shows a cancelled job as cancelled rather than awaiting collection', async () => {
+  state.record = {...state.record, status: 'cancelled'};
+  const response = await GET(new NextRequest(`https://example.test/api/assistant?area=jobs&entityId=${id}`));
+  expect((await response.json()).context.facts.progress).toBe('cancelled');
+});

@@ -51,7 +51,7 @@ export async function loadAssistantContext(caller: Caller, input: Input): Promis
       const deliveries = stops.filter(s => s.type === 'delivery');
       context.facts = {
         reference: text(row.reference), status: text(row.status),
-        progress: planningJobProgress({status: text(row.status), stops}),
+        progress: ['cancelled', 'canceled'].includes((text(row.status) ?? '').toLowerCase()) ? 'cancelled' : planningJobProgress({status: text(row.status), stops}),
         serviceDate: text(row.planning_date) ?? text(row.scheduled_date),
         vehicleAssigned: row.vehicle_id ? 'Yes' : 'No', driverAssigned: row.driver_id ? 'Yes' : 'No',
         collectionCount: collections.length, deliveryCount: deliveries.length,
