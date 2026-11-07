@@ -6,7 +6,7 @@ The modern public/product experience from `14d8ac2` and `481990f` is now reconci
 
 ## Local modernisation update — 10 October 2026
 
-See [the product audit](docs/reviews/2026-10-10-product-audit.md), [implementation and verification handoff](docs/reviews/2026-10-10-modernisation-handoff.md), [Debbie proposal contract](docs/contracts/debbie-v1.md) and [compliance source review](docs/reviews/2026-10-10-compliance-review.md). Settings now has an integrations catalogue; office workflows have advisory local Assistant guidance. No model provider, Debbie transfer or new external integration is activated. Individual page grants remain disabled.
+See [the product audit](docs/reviews/2026-10-10-product-audit.md), [implementation and verification handoff](docs/reviews/2026-10-10-modernisation-handoff.md), [Debbie proposal contract](docs/contracts/debbie-v1.md) and [compliance source review](docs/reviews/2026-10-10-compliance-review.md). Settings now has an integrations catalogue; office workflows have a Vercel AI Assistant for explicit job reviews, missing-information checks, saved-day planning summaries and customer-message drafts. Server-side `TMS_AI_ENABLED` and `TMS_AI_MODEL` enable AI Gateway with Vercel OIDC. Local facts remain available without a provider. Debbie transfers remain inactive. See [AI setup and workflow opportunities](docs/tms-ai-workflows.md). Individual page grants remain disabled.
 
 The older inventory's “no service worker” Driver notes are historical: the consolidated Driver PWA now supports offline reopening after successful online preparation, as described in [the Driver PWA handoff](docs/handoffs/2026-10-09-driver-pwa.md). Driver-aware and SevenDay planning, both billing models and internal licences are preserved.
 
