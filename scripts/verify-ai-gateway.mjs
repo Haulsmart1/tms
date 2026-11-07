@@ -6,6 +6,11 @@ import { createClient } from '@supabase/supabase-js';
 
 let stage = 'configuration';
 try {
+  const gatewayOnly = process.argv.includes('--gateway-only');
+  const databaseOnly = process.argv.includes('--database-only');
+  if (gatewayOnly && databaseOnly) throw new Error('configuration_missing');
+  let gatewayResult;
+  if (!databaseOnly) {
   if (process.env.TMS_AI_ENABLED !== 'true' || !process.env.TMS_AI_MODEL) throw new Error('configuration_missing');
   stage = 'gateway';
   const result = await generateText({
@@ -15,10 +20,14 @@ try {
     output: Output.object({schema: z.object({progress: z.enum(['collected']), delivered: z.literal(false)})}),
     reasoning: 'none', maxOutputTokens: 2500, maxRetries: 0, timeout: 30000,
   });
-  console.log('TMS_AI_RESPONSE', JSON.stringify({finishReason: result.finishReason, textLength: result.text.length, outputTokens: result.usage.outputTokens}));
+  const provider = result.providerMetadata?.gateway?.routing?.finalProvider;
+  console.log('TMS_AI_RESPONSE', JSON.stringify({finishReason: result.finishReason, rawFinishReason: result.rawFinishReason, responseId: result.response?.id, provider: typeof provider === 'string' ? provider : undefined, textLength: result.text.length, outputTokens: result.usage.outputTokens}));
+  if (result.finishReason !== 'stop') throw new Error('generation_incomplete');
   if (result.output.progress !== 'collected' || result.output.delivered !== false) throw new Error('unexpected_answer');
   console.log('TMS_AI_GATEWAY_PASS', JSON.stringify({model: process.env.TMS_AI_MODEL, progress: result.output.progress, delivered: result.output.delivered, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens}));
-  if (!process.argv.includes('--gateway-only')) {
+  gatewayResult = {progress: result.output.progress, delivered: result.output.delivered};
+  }
+  if (!gatewayOnly) {
   stage = 'database-client';
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {auth: {persistSession: false, autoRefreshToken: false}});
   // The same columns and relationships used by the assistant must exist. The
@@ -30,10 +39,11 @@ try {
   stage = 'durable-limiter';
   const {data, error} = await admin.rpc('rate_limit_hit', {p_bucket: 'tms-ai:smoke', p_key: process.env.VERCEL_GIT_COMMIT_SHA || 'manual', p_window_seconds: 60, p_max: 5});
   if (error || data !== true) throw new Error(`rate_limiter_${error?.code || 'denied'}`);
+  console.log('TMS_AI_DATABASE_PASS', JSON.stringify({schemaRead: 'passed', durableLimiter: 'passed'}));
   }
-  console.log('TMS_AI_SMOKE_PASS', JSON.stringify({model: process.env.TMS_AI_MODEL, progress: result.output.progress, delivered: result.output.delivered, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens, databaseChecks: process.argv.includes('--gateway-only') ? 'skipped' : 'passed'}));
+  console.log('TMS_AI_SMOKE_PASS', JSON.stringify({model: process.env.TMS_AI_MODEL, gatewayChecks: databaseOnly ? 'skipped' : 'passed', ...gatewayResult, databaseChecks: gatewayOnly ? 'skipped' : 'passed'}));
 } catch (error) {
-  const safeCode = error instanceof Error && /^(configuration_missing|context_query_[A-Za-z0-9]*|rate_limiter_[A-Za-z0-9]+|unexpected_answer)$/.test(error.message) ? error.message : 'gateway_request_failed';
+  const safeCode = error instanceof Error && /^(configuration_missing|context_query_[A-Za-z0-9]*|rate_limiter_[A-Za-z0-9]+|unexpected_answer|generation_incomplete)$/.test(error.message) ? error.message : 'gateway_request_failed';
   console.error('TMS_AI_SMOKE_FAILED', JSON.stringify({stage, code: safeCode, type: error?.name, status: error?.statusCode}));
   process.exitCode = 1;
 }
