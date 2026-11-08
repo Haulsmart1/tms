@@ -158,7 +158,7 @@ export default function JobsPage() {
         accepted_at, accepted_by, collection_eta, delivery_eta, acceptance_note,
         customers ( name, contact_name, phone, mobile, email, accounts_email, operations_email, address_line_1, address_line_2, city, county_region, postcode, country_code ), vehicles ( registration ), drivers ( name ),
         subcontractors ( name, vehicle_reg, driver_name ),
-        job_stops ( id, stop_order, type, address_line, city, postcode, contact_name, contact_phone, contact_email, status, pod_status, recipient_name, delivered_at, collected_at, pod_notes, pod_photo_url, pod_flags ),
+        job_stops ( id, stop_order, type, address_line, city, postcode, contact_name, contact_phone, contact_email, status, pod_status, recipient_name, delivered_at, collected_at, pod_notes, pod_photo_url, pod_document_url, pod_flags ),
         job_items ( id, sku, description, quantity, serial_numbers, external_reference, notes )
       `, { count: "exact" });
 
