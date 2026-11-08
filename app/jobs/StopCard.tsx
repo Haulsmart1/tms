@@ -67,6 +67,7 @@ export type Stop = {
   collected_at?: string | null;
   pod_notes: string | null;
   pod_photo_url: string | null;
+  pod_document_url?: string | null;
   /** Set by the driver routes (tracking_02): pod_time_untrusted, pod_late_sync. */
   pod_flags?: string[] | null;
 };
@@ -172,10 +173,10 @@ export default function StopCard({
   }
 
   async function uploadFiles(
-    files: FileList | null,
+    files: File[],
     evidenceType: EvidenceType
   ) {
-    if (!files?.length) {
+    if (!files.length) {
       return;
     }
 
@@ -205,7 +206,7 @@ export default function StopCard({
         );
       }
 
-      for (const file of Array.from(files)) {
+      for (const file of files) {
         if (file.size > MAX_FILE_SIZE) {
           throw new Error(
             `${file.name} exceeds the 15 MB POD upload limit.`
@@ -251,9 +252,11 @@ export default function StopCard({
       setEvidenceMessage(
         evidenceType === "photo"
           ? stop.type === "delivery"
-            ? "Photo saved. You can mark delivered without a separate POD document."
+            ? "Photo saved. You can now mark delivered."
             : "POD photo uploaded successfully."
-          : "POD document uploaded successfully."
+          : stop.type === "delivery"
+            ? "POD document saved. You can now mark delivered."
+            : "POD document uploaded successfully."
       );
 
       await loadEvidence();
@@ -332,9 +335,9 @@ export default function StopCard({
       return;
     }
 
-    if (stop.type === "delivery" && evidence.length === 0 && !stop.pod_photo_url) {
+    if (stop.type === "delivery" && evidence.length === 0 && !stop.pod_photo_url && !stop.pod_document_url) {
       setEvidenceError(
-        "Add one delivery photo, then mark delivered. A separate POD document is optional."
+        "Add one delivery photo or POD document, then mark delivered. Either one is enough."
       );
       return;
     }
@@ -460,6 +463,12 @@ export default function StopCard({
         </div>
       ) : null}
 
+      {stop.pod_document_url ? (
+        <div className="mt-2">
+          <PodLink value={stop.pod_document_url} label="View POD document" />
+        </div>
+      ) : null}
+
       {evidence.length > 0 ? (
         <div className="mt-3 grid gap-2">
           <div className="text-xs font-semibold uppercase tracking-wide text-ink-3">
@@ -551,7 +560,7 @@ export default function StopCard({
             <div className="mt-1 text-xs text-ink-3">
               {stop.type === "collection"
                 ? "Confirm the goods have been collected. You can add a photo or document if available; it is not required."
-                : "One delivery photo is enough. A separate POD document is optional. Maximum 15 MB per file."}
+                : "Upload one delivery photo or one POD document. Either one is enough. Maximum 15 MB per file."}
             </div>
 
             <input
@@ -565,7 +574,9 @@ export default function StopCard({
                 event: ChangeEvent<HTMLInputElement>
               ) => {
                 void uploadFiles(
-                  event.target.files,
+                  // Copy the FileList before resetting the input: authentication
+                  // awaits below, and resetting empties the live FileList.
+                  Array.from(event.target.files ?? []),
                   "photo"
                 );
                 event.target.value = "";
@@ -583,7 +594,7 @@ export default function StopCard({
                 event: ChangeEvent<HTMLInputElement>
               ) => {
                 void uploadFiles(
-                  event.target.files,
+                  Array.from(event.target.files ?? []),
                   "photo"
                 );
                 event.target.value = "";
@@ -601,7 +612,7 @@ export default function StopCard({
                 event: ChangeEvent<HTMLInputElement>
               ) => {
                 void uploadFiles(
-                  event.target.files,
+                  Array.from(event.target.files ?? []),
                   "document"
                 );
                 event.target.value = "";
@@ -646,7 +657,7 @@ export default function StopCard({
               >
                 {uploading === "document"
                   ? "Uploading..."
-                  : "Upload POD (optional)"}
+                  : "Upload POD"}
               </Button>
             </div>
           </div>

@@ -405,7 +405,7 @@ export default function PodPage() {
             : uploadedCount === 1
               ? "document"
               : "documents"
-        } uploaded successfully.${evidenceType === "photo" && stop.type === "delivery" ? " You can mark delivered without a separate POD document." : ""}`
+        } uploaded successfully.${stop.type === "delivery" ? " You can now mark delivered." : ""}`
       );
     } catch (error) {
       setErrorMessage(
@@ -498,7 +498,7 @@ export default function PodPage() {
       setErrorMessage(
         isCollection
           ? "Upload at least one collection photo or document before marking the stop collected."
-          : "Add one delivery photo, then mark delivered. A separate POD document is optional."
+          : "Add one delivery photo or POD document, then mark delivered. Either one is enough."
       );
       return;
     }
@@ -1450,7 +1450,7 @@ export default function PodPage() {
                                 <EvidenceUpload
                                   title={stop.type === "collection" ? "Collection Photos" : "Delivery Photos"}
                                   buttonLabel="ADD PHOTO"
-                                  description={stop.type === "delivery" ? "One photo is enough to complete delivery. No separate POD document is needed." : "Upload one or more photos."}
+                                  description={stop.type === "delivery" ? "Upload one photo or one POD document to complete delivery. Either one is enough." : "Upload one or more photos."}
                                   accept="image/*"
                                   multiple
                                   uploading={
@@ -1476,7 +1476,7 @@ export default function PodPage() {
                                 />
 
                                 <details className="rounded-lg border border-line bg-surface p-3">
-                                  <summary className="cursor-pointer text-sm font-semibold text-ink">Add POD document (optional)</summary>
+                                  <summary className="cursor-pointer text-sm font-semibold text-ink">Add POD document (or upload a photo above)</summary>
                                   <EvidenceUpload
                                     title={stop.type === "collection" ? "Collection Documents" : "Delivery Documents"}
                                     buttonLabel="ADD DOCUMENT (OPTIONAL)"
