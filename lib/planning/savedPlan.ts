@@ -10,6 +10,7 @@ export type SavedPlanLaneSnapshot = {
   vehicleId: string;
   driverId: string | null;
   jobIds: string[];
+  preserveJobDrivers?: boolean;
 };
 
 export type SavedPlanVisitSnapshot = {
@@ -104,6 +105,7 @@ function isLane(value: unknown): value is SavedPlanLaneSnapshot {
   if (!isRecord(value)) return false;
 
   return (
+    (value.preserveJobDrivers === undefined || typeof value.preserveJobDrivers === "boolean") &&
     isNonEmptyString(value.vehicleId) &&
     isNullableString(value.driverId) &&
     Array.isArray(value.jobIds) &&
@@ -290,6 +292,7 @@ export function createSavedPlanSnapshot(input: {
       vehicleId: lane.vehicleId,
       driverId: lane.driverId,
       jobIds: [...lane.jobIds],
+      ...(lane.preserveJobDrivers ? { preserveJobDrivers: true } : {}),
     })),
     canonicalItineraries: [...canonicalByVehicle.values()]
       .filter((itinerary) => laneVehicleIds.has(itinerary.vehicleId))

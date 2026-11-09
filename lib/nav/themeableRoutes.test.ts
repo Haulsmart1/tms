@@ -114,6 +114,7 @@ describe("isThemeableRoute", () => {
         "/dashboard",
         "/jobs",
         "/planning",
+  "/warehouse",
         "/shifts",
         "/pod",
         "/tracking",

@@ -5,6 +5,8 @@ export type LanePlan = {
   driverId: string | null;
   /** Job ids in running order. Position in this array IS the route_order. */
   jobIds: string[];
+  /** Warehouse moves can keep separate driver assignments on the same van. */
+  preserveJobDrivers?: boolean;
 };
 
 export type JobUpdate = {
@@ -30,13 +32,15 @@ export function computeSaveDiff(
   unassignedJobIds: string[],
   planningDate?: string
 ): JobUpdate[] {
+  const originalById = new Map(original.map(job => [job.id, job]));
   const target = new Map<string, JobUpdate>();
   for (const lane of lanes) {
     lane.jobIds.forEach((id, index) => {
       target.set(id, {
         id,
         vehicle_id: lane.vehicleId,
-        driver_id: lane.driverId,
+        driver_id: lane.preserveJobDrivers && originalById.get(id)?.vehicle_id === lane.vehicleId
+          ? originalById.get(id)!.driver_id : lane.driverId,
         route_order: index + 1,
         ...(planningDate === undefined ? {} : { planning_date: planningDate }),
       });

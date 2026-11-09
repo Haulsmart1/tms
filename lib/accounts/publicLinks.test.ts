@@ -14,7 +14,10 @@ import { describe, expect, it } from "vitest";
 */
 
 const ROOT = join(__dirname, "..", "..");
-const ALLOWED = new Set<string>();
+const ALLOWED = new Set<string>([
+  // Used only to reject cross-origin Assistant requests; never emitted in links.
+  "app/api/assistant/route.ts",
+]);
 const PATTERN = /new URL\(\s*request\.url\s*\)\.origin|request\.nextUrl\.origin|headers\.get\(\s*["'](?:host|x-forwarded-host)["']\s*\)/;
 
 function routeFiles(dir: string): string[] {

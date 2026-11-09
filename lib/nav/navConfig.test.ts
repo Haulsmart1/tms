@@ -4,7 +4,7 @@ import { isNavItemActive, NAV_GROUPS } from "./navConfig";
 describe("console navigation", () => {
   it("keeps commercial, fleet and daily work in separate groups", () => {
     expect(NAV_GROUPS.find((group) => group.label === "Operations")?.items.map((item) => item.id)).toEqual([
-      "planning", "load-transfer", "shifts", "jobs", "pod", "tracking",
+      "planning", "warehouse", "load-transfer", "shifts", "jobs", "pod", "tracking",
     ]);
     expect(NAV_GROUPS.find((group) => group.label === "Commercial")?.items.map((item) => item.id)).toEqual([
       "customers", "subcontractors", "invoices",
