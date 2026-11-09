@@ -16,6 +16,7 @@ import SendTrackingLinkDialog from "./SendTrackingLinkDialog";
 import { useTenant } from "../components/TenantProvider";
 import { initialStopPodForm } from "../../lib/pod/consolePod";
 import { isStopLocked } from "../../lib/jobs/stopDiff";
+import { isDeferredDelivery } from "../../lib/pod/deferredEvidence";
 import {
   errorFromBody,
   readJsonSafe,
@@ -88,7 +89,7 @@ type Props = {
     field: keyof PodFormState,
     value: string
   ) => void;
-  onMarkDelivered: (stopId: string) => Promise<boolean>;
+  onMarkDelivered: (stopId: string, deferEvidence?: boolean) => Promise<boolean>;
   onMarkCollected: (stopId: string) => Promise<boolean>;
 };
 
@@ -110,6 +111,7 @@ export default function StopCard({
   const [evidenceMessage, setEvidenceMessage] = useState("");
   const [trackingOpen, setTrackingOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [addPhotoLater, setAddPhotoLater] = useState(false);
   const saveInFlight = useRef(false);
 
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -120,6 +122,8 @@ export default function StopCard({
 
   const form: PodFormState = podForm ?? initialStopPodForm(stop);
   const locked = isStopLocked(stop);
+  const deferredDelivery = isDeferredDelivery(stop);
+  const hasEvidence = evidence.length > 0 || Boolean(stop.pod_photo_url || stop.pod_document_url);
 
   const tenantMatches =
     Boolean(activeTenantId) && activeTenantId === tenantId;
@@ -250,7 +254,7 @@ export default function StopCard({
       }
 
       setEvidenceMessage(
-        evidenceType === "photo"
+        locked ? "Evidence saved. Delivery remains complete." : evidenceType === "photo"
           ? stop.type === "delivery"
             ? "Photo saved. You can now mark delivered."
             : "POD photo uploaded successfully."
@@ -317,7 +321,7 @@ export default function StopCard({
   }
 
   async function handleMarkComplete() {
-    if (saveInFlight.current || locked) return;
+    if (saveInFlight.current || uploading || locked) return;
     clearMessages();
 
     if (!tenantMatches) {
@@ -335,9 +339,9 @@ export default function StopCard({
       return;
     }
 
-    if (stop.type === "delivery" && evidence.length === 0 && !stop.pod_photo_url && !stop.pod_document_url) {
+    if (stop.type === "delivery" && !hasEvidence && !addPhotoLater) {
       setEvidenceError(
-        "Add one delivery photo or POD document, then mark delivered. Either one is enough."
+        "Add one delivery photo or POD document, or tick Add photo later to save this delivery now."
       );
       return;
     }
@@ -345,7 +349,7 @@ export default function StopCard({
     saveInFlight.current = true;
     setSaving(true);
     try {
-      const saved = await (stop.type === "collection" ? onMarkCollected(stop.id) : onMarkDelivered(stop.id));
+      const saved = await (stop.type === "collection" ? onMarkCollected(stop.id) : onMarkDelivered(stop.id, addPhotoLater && !hasEvidence));
       if (!saved) setEvidenceError("Unable to save. Check the job message and try again.");
     } catch (error) {
       setEvidenceError(error instanceof Error ? error.message : "Unable to save this stop.");
@@ -524,8 +528,15 @@ export default function StopCard({
         </div>
       ) : null}
 
-      {!locked ? (
+      {deferredDelivery && !hasEvidence ? (
+        <div role="status" className="mt-3 rounded-md border border-warning-border bg-warning-tint p-3 text-sm text-warning-strong">
+          Delivery saved. Photo/POD still to add. Upload it below when available.
+        </div>
+      ) : null}
+
+      {!locked || deferredDelivery ? (
         <div className="mt-3 grid max-w-xl gap-3">
+          {!locked ? <>
           <Field
             id={`recipient-${stop.id}`}
             label={stop.type === "collection" ? "Collected from" : "Recipient name"}
@@ -551,6 +562,7 @@ export default function StopCard({
               )
             }
           />
+          </> : null}
 
           <div className="rounded-md border border-line bg-surface p-3">
             <div className="text-sm font-semibold text-ink">
@@ -562,6 +574,25 @@ export default function StopCard({
                 ? "Confirm the goods have been collected. You can add a photo or document if available; it is not required."
                 : "Upload one delivery photo or one POD document. Either one is enough. Maximum 15 MB per file."}
             </div>
+
+            {stop.type === "delivery" && !locked && !hasEvidence ? (
+              <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-line p-3 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  checked={addPhotoLater}
+                  disabled={busy || !tenantMatches}
+                  onChange={(event) => {
+                    setAddPhotoLater(event.target.checked);
+                    clearMessages();
+                  }}
+                  className="h-5 w-5 accent-primary"
+                />
+                <span>
+                  <span className="block font-semibold">Add photo later</span>
+                  <span className="block text-xs text-ink-3">Save as delivered now. Reopen this job to add a photo or POD document later.</span>
+                </span>
+              </label>
+            ) : null}
 
             <input
               ref={cameraInputRef}
@@ -674,7 +705,7 @@ export default function StopCard({
             </div>
           ) : null}
 
-          <div className="flex flex-wrap gap-2">
+          {!locked ? <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               disabled={busy || !tenantMatches}
@@ -695,9 +726,9 @@ export default function StopCard({
                 Send tracking link
               </Button>
             ) : null}
-          </div>
+          </div> : null}
 
-          {tenantMatches && stop.type === "delivery" ? (
+          {!locked && tenantMatches && stop.type === "delivery" ? (
             <SendTrackingLinkDialog
               open={trackingOpen}
               onClose={() => setTrackingOpen(false)}

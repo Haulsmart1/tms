@@ -46,12 +46,12 @@ export async function loadOfficeStop(
   tenantId: string,
   jobId: unknown,
   stopId: unknown,
-): Promise<{ job: { id: string; status: string | null }; stop: { id: string; type: string; pod_status: string | null } }> {
+): Promise<{ job: { id: string; status: string | null }; stop: { id: string; type: string; pod_status: string | null; pod_flags?: string[] | null } }> {
   if (!isUuid(jobId) || !isUuid(stopId)) throw new OfficeEvidenceError(404, "Job stop not found.");
 
   const [jobResult, stopResult] = await Promise.all([
     admin.from("jobs").select("id,status").eq("id", jobId).eq("tenant_id", tenantId).maybeSingle(),
-    admin.from("job_stops").select("id,type,pod_status").eq("id", stopId).eq("job_id", jobId).eq("tenant_id", tenantId).maybeSingle(),
+    admin.from("job_stops").select("id,type,pod_status,pod_flags").eq("id", stopId).eq("job_id", jobId).eq("tenant_id", tenantId).maybeSingle(),
   ]);
 
   if (jobResult.error || stopResult.error) {

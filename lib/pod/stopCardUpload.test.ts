@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import StopCard, { type Stop } from "../../app/jobs/StopCard";
 import { saveStopPod } from "./savePod";
+import { DEFERRED_EVIDENCE_FLAG } from "./deferredEvidence";
 
 const fixture = vi.hoisted(() => ({ client: {} as any }));
 vi.mock("../supabase/browser", () => ({ createClient: () => fixture.client }));
@@ -17,7 +18,7 @@ let evidence: any[];
 let uploads: File[];
 let writes: { table: string; tenant: string | null; body: any }[];
 let releaseAuth: () => void;
-let markDelivered: Mock<(stopId: string) => Promise<boolean>>;
+let markDelivered: Mock<(stopId: string, deferEvidence?: boolean) => Promise<boolean>>;
 let uploadError: string | null;
 
 beforeEach(() => {
@@ -57,9 +58,9 @@ beforeEach(() => {
     }
     return Response.json(url.pathname.endsWith("/jobs") ? { id: "job", status: "planned" } : [stop]);
   } } });
-  markDelivered = vi.fn(async () => {
+  markDelivered = vi.fn(async (_stopId: string, deferEvidence?: boolean) => {
     await saveStopPod(client, { tenantId: "tenant", jobId: "job", stopId: "stop", stopType: "delivery",
-      recipientName: "Test Recipient", podNotes: "Test delivery", markComplete: true });
+      recipientName: "Test Recipient", podNotes: "Test delivery", markComplete: true, deferEvidence });
     return true;
   });
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
@@ -124,5 +125,59 @@ describe("job card evidence upload and delivery completion", () => {
     expect(container.textContent).not.toContain("Photo saved");
     expect(evidence).toHaveLength(0);
     expect(writes).toHaveLength(0);
+  });
+
+  it("saves without evidence only after opting in, then permits upload when the completed job is reopened", async () => {
+    stop.pod_flags = ["pod_late_sync"];
+    await render();
+    const checkbox = container.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    expect(checkbox.checked).toBe(false);
+    await act(async () => checkbox.click());
+    await deliver();
+    expect(markDelivered).toHaveBeenCalledWith("stop", true);
+    expect(writes).toHaveLength(2);
+    expect(writes[0].body).toMatchObject({ pod_status: "delivered", status: "completed",
+      pod_flags: ["pod_late_sync", DEFERRED_EVIDENCE_FLAG] });
+    expect(writes[0].body).not.toHaveProperty("pod_photo_url");
+    expect(writes[1].body.status).toBe("completed");
+    const deliveredAt = stop.delivered_at;
+
+    // Remount to prove the saved flag, rather than checkbox state, enables upload.
+    await act(async () => root.unmount()); root = createRoot(container);
+    await render();
+    expect(container.textContent).toContain("Photo/POD still to add");
+    expect(container.textContent).not.toContain("Mark Delivered");
+    expect(container.querySelector('input[type="checkbox"]')).toBeNull();
+    await selectFile(1, new File(["later evidence"], "later.jpg", { type: "image/jpeg" }));
+    expect(container.textContent).toContain("Evidence saved. Delivery remains complete.");
+    expect(container.textContent).not.toContain("Photo/POD still to add");
+    expect(writes).toHaveLength(2);
+    expect(stop.delivered_at).toBe(deliveredAt);
+    expect(stop.pod_status).toBe("delivered");
+  });
+
+  it("does not bypass the evidence check if Add photo later is unticked", async () => {
+    await render();
+    const checkbox = container.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    await act(async () => checkbox.click());
+    await act(async () => checkbox.click());
+    await deliver();
+    expect(writes).toHaveLength(0);
+  });
+
+  it("still requires a recipient when adding the photo later", async () => {
+    stop.recipient_name = "";
+    await render();
+    await act(async () => container.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
+    await deliver();
+    expect(container.textContent).toContain("Recipient name is required");
+    expect(writes).toHaveLength(0);
+  });
+
+  it("keeps ordinary completed stops locked", async () => {
+    stop.pod_status = "delivered"; stop.status = "completed";
+    await render();
+    expect(container.querySelector('input[type="file"]')).toBeNull();
+    expect(container.textContent).not.toContain("Mark Delivered");
   });
 });

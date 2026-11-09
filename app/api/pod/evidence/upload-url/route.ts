@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isDeferredDelivery } from "../../../../../lib/pod/deferredEvidence";
 import { validateEvidenceMetadata } from "../../../../../lib/pod/evidenceRules";
 import { createEvidenceUploadUrl } from "../../../../../lib/pod/evidenceServer";
 import {
@@ -38,7 +39,7 @@ export async function POST(request: Request) {
       throw new OfficeEvidenceError(409, "This job has been cancelled, so evidence can no longer be added.");
     }
 
-    if (isStopPodFinished(stop.pod_status)) {
+    if (isStopPodFinished(stop.pod_status) && !isDeferredDelivery(stop)) {
       throw new OfficeEvidenceError(409, "This stop's POD is complete, so evidence can no longer be added.");
     }
 
