@@ -14,6 +14,15 @@ function job(overrides: Partial<PlanJob>): PlanJob {
 }
 
 describe("computeSaveDiff", () => {
+  it("preserves warehouse-assigned drivers when reopening their saved lane", () => {
+    const original = [job({ id: "a", vehicle_id: "v1", driver_id: "d1", route_order: 1 }),
+      job({ id: "b", vehicle_id: "v1", driver_id: "d2", route_order: 2 })];
+    const lane = { vehicleId: "v1", driverId: "d1", jobIds: ["a", "b"], preserveJobDrivers: true };
+    expect(computeSaveDiff(original, [lane], [])).toEqual([]);
+    expect(computeSaveDiff(original, [{ ...lane, preserveJobDrivers: false }], [])).toEqual([
+      { id: "b", vehicle_id: "v1", driver_id: "d1", route_order: 2 },
+    ]);
+  });
   it("writes vehicle, driver and 1-based route_order for newly planned jobs", () => {
     const original = [job({ id: "a" }), job({ id: "b" })];
     const lanes: LanePlan[] = [{ vehicleId: "v1", driverId: "d1", jobIds: ["b", "a"] }];

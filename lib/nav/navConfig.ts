@@ -22,6 +22,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Operations",
     items: [
       { id: "planning", label: "Planning", href: "/planning", icon: "Route" },
+      { id: "warehouse", label: "Warehouse", href: "/warehouse", icon: "Boxes" },
       { id: "load-transfer", label: "Load transfer", href: "/load-transfer", icon: "Truck" },
       { id: "shifts", label: "Shifts", href: "/shifts", icon: "Clock" },
       { id: "jobs", label: "Jobs", href: "/jobs", icon: "ClipboardList" },

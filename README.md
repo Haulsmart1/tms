@@ -16,6 +16,12 @@ A multi-tenant Transport Management System (TMS) for UK and EU road-haulage oper
 
 ---
 
+## Warehouse dashboard — 9 November 2026
+
+`/warehouse` is the office barcode and job control screen. Scan a serial, job reference or master load barcode with a USB scanner, camera or keyboard; search by contact or address; select up to 200 whole jobs. Collection and delivery sign-off work at any job status, with photo/POD evidence deferred where absent. Reopen resets stop completion while preserving prior state in the warehouse audit. Moving changes operational van/driver/date assignments and saved-plan lanes, preserving completion status and invalidating affected route calculations. Physical serialized-item transfers remain on `/load-transfer`.
+
+API routes authorize office users against the selected workspace. Atomic service-only SQL functions update jobs, stops, plans and append-only warehouse history together, with idempotent request IDs. No driver permission, billing-licence or tenant-isolation rules are relaxed. Apply the warehouse migration individually; never replay the historical migration directory.
+
 ## What it does
 
 - **Operations:** create and edit transport jobs with collection and delivery stops, build load manifests, plan the day, capture proof of delivery (photos, documents, recipient, notes), mark stops delivered, and track vehicles.

@@ -8,7 +8,7 @@
 */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BrowserMultiFormatOneDReader, BrowserQRCodeReader, type IScannerControls } from "@zxing/browser";
+import { BrowserMultiFormatOneDReader, BrowserMultiFormatReader, BrowserQRCodeReader, type IScannerControls } from "@zxing/browser";
 import { cameraAccessErrorMessage, createCameraDecodeGate, stopMediaTracks } from "../../lib/driver/cameraBarcode";
 
 export type ScanAnswer = { ok: boolean; message: string };
@@ -30,7 +30,7 @@ export type ScannerCopy = {
 type ScannerState = "idle" | "starting" | "scanning" | "submitting" | "success" | "error";
 
 type Props = {
-  mode: "barcode" | "qr";
+  mode: "barcode" | "qr" | "all";
   copy: ScannerCopy;
   disabled?: boolean;
   onScan: (text: string) => Promise<ScanAnswer>;
@@ -38,6 +38,7 @@ type Props = {
 
 function createReader(mode: Props["mode"]) {
   const options = { delayBetweenScanAttempts: 300 };
+  if (mode === "all") return new BrowserMultiFormatReader(undefined, options);
   return mode === "qr" ? new BrowserQRCodeReader(undefined, options) : new BrowserMultiFormatOneDReader(undefined, options);
 }
 

@@ -202,6 +202,7 @@ export default function PlanningPage() {
   );
   const [positionNow, setPositionNow] = useState(() => new Date());
   const [laneOrders, setLaneOrders] = useState<Record<string, string[]>>({});
+  const [preserveLaneDrivers, setPreserveLaneDrivers] = useState<Set<string>>(new Set());
   const [laneDrivers, setLaneDrivers] = useState<Record<string, string | null>>({});
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const [bulkVehicleId, setBulkVehicleId] = useState("");
@@ -352,8 +353,9 @@ export default function PlanningPage() {
         vehicleId: v.id,
         driverId: laneDrivers[v.id] ?? null,
         jobIds: laneOrders[v.id] ?? [],
+        preserveJobDrivers: preserveLaneDrivers.has(v.id),
       })),
-    [vehicles, laneOrders, laneDrivers]
+    [vehicles, laneOrders, laneDrivers, preserveLaneDrivers]
   );
   const pendingUpdates = useMemo(
     () => computeSaveDiff(jobs, lanePlans, unassigned.map((j) => j.id), date),
@@ -556,8 +558,8 @@ export default function PlanningPage() {
         seen.add(job.driver_id);
       }
     }
-    // A lane can only carry one driver, so a lane whose jobs disagree is being
-    // silently normalised. Flag it rather than let Save surprise the planner.
+    // Flag mixed drivers and preserve their job assignments until the planner
+    // explicitly chooses a driver for the whole lane.
     const conflicts = new Set<string>();
     for (const [vid, seen] of laneDriverSets) if (seen.size > 1) conflicts.add(vid);
 
@@ -569,6 +571,7 @@ export default function PlanningPage() {
       vehicleId: v.id,
       driverId: laneDriverInit[v.id] ?? null,
       jobIds: orders[v.id] ?? [],
+      preserveJobDrivers: conflicts.has(v.id),
     }));
     const initialUnassignedIds = loaded
       .filter((j) => !j.subcontractor_id && !laneAssignedIds.has(j.id))
@@ -735,6 +738,7 @@ export default function PlanningPage() {
     setEditorDrafts({});
     setLaneOrders(orders);
     setLaneDrivers(laneDriverInit);
+    setPreserveLaneDrivers(new Set(conflicts));
     setPersistedItineraries(loadedPersistedItineraries);
     setDriverConflicts(conflicts);
     setBaselineDiff(JSON.stringify(initialDiff));
@@ -1701,6 +1705,7 @@ export default function PlanningPage() {
       lanes: lanePlans.map((lane) => ({
         vehicleId: lane.vehicleId,
         driverId: lane.driverId,
+        ...(lane.preserveJobDrivers ? { preserveJobDrivers: true } : {}),
         // Retain display-only history when updating CBA or another saved
         // plan, even if those jobs still carry an older operational date.
         jobIds: [...lane.jobIds, ...(completedByVehicle.get(lane.vehicleId) ?? []).map((job) => job.id)],
@@ -1823,6 +1828,7 @@ export default function PlanningPage() {
 
     setLaneOrders(orders);
     setLaneDrivers(driverAssignments);
+    setPreserveLaneDrivers(new Set(loaded.snapshot.lanes.filter(lane => lane.preserveJobDrivers).map(lane => lane.vehicleId)));
     setPendingItineraries(usableCanonical);
     setItineraryInvalidations(
       new Set(
@@ -3670,6 +3676,7 @@ export default function PlanningPage() {
                         if (planningReadOnly()) return;
                         invalidateCanonicalVehicles([v.id]);
                         setLaneDrivers((prev) => ({ ...prev, [v.id]: driverId }));
+                        setPreserveLaneDrivers(prev => { const next = new Set(prev); next.delete(v.id); return next; });
                         setRoutes((prev) => {
                           const next = { ...prev };
                           delete next[v.id];

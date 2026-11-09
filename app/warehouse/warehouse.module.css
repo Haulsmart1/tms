@@ -1,0 +1,60 @@
+.page { padding: 28px; max-width: 1700px; margin: 0 auto; }
+.header { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
+.header h1 { display: flex; align-items: center; gap: 12px; font-size: 30px; font-weight: 650; margin: 8px 0; }
+.header p, .hint, .scan > p, .actions > p, .move > p, .reopen > p { color: var(--ink-2); font-size: 14px; line-height: 1.6; }
+.eyebrow { font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); }
+.link { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; font-size: 14px; }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 22px; }
+.stats button { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; text-align: left; padding: 18px; cursor: pointer; }
+.stats button span { display: block; font-size: 13px; color: var(--ink-2); }
+.stats strong { display: block; font-size: 29px; margin-top: 5px; }
+.stats .activeStat { border-color: var(--accent); }
+.scan, .actions, .history { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+.sectionTitle, .resultsHeader, .actionHeading, .jobTop { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.sectionTitle h2, .resultsHeader h2, .actions h2, .history h2 { font-size: 18px; font-weight: 650; }
+.sectionTitle span { margin-left: auto; font-size: 13px; color: var(--ink-2); }
+.scanForm { display: flex; align-items: end; gap: 12px; margin: 18px 0 10px; flex-wrap: wrap; }
+.field { display: flex; flex-direction: column; gap: 7px; font-size: 13px; font-weight: 550; min-width: 0; }
+.field input, .field select, .field textarea { border: 1px solid var(--line); background: var(--canvas); color: var(--ink); border-radius: 7px; padding: 10px 12px; min-height: 42px; width: 100%; }
+.field input:focus, .field select:focus, .field textarea:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+.field textarea { min-height: 70px; resize: vertical; }
+.grow { flex: 1; min-width: 220px; }
+.message, .error { border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-top: 16px; }
+.message { background: var(--success-tint); color: var(--success); }
+.error { background: var(--danger-tint); color: var(--danger); }
+.workspace { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 22px; margin-top: 24px; align-items: start; }
+.resultsHeader { margin-bottom: 15px; }
+.resultsHeader h2 { margin-right: auto; }
+.jobs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.job { border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 10px; padding: 16px; background: var(--surface); min-width: 0; }
+.collected { border-left-color: var(--warning); }
+.delivered { border-left-color: var(--success); }
+.badge { padding: 3px 8px; border-radius: 20px; font-size: 11px; text-transform: capitalize; background: var(--surface-2); margin-left: auto; }
+.collected .badge { color: var(--warning); background: var(--warning-tint); }
+.delivered .badge { color: var(--success); background: var(--success-tint); }
+.jobSelect { display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer; }
+.jobSelect input { width: 19px; height: 19px; accent-color: var(--accent); }
+.assignment { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; color: var(--ink-2); font-size: 12px; margin: 12px 0; }
+.stops { display: grid; gap: 12px; font-size: 13px; overflow-wrap: anywhere; }
+.stops strong, .stops .eyebrow, .stops a { display: block; }
+.stops p { margin: 4px 0; line-height: 1.5; }
+.stops a { color: var(--accent); margin-top: 3px; }
+.barcodes { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0; }
+.barcodes code { background: var(--canvas); padding: 5px 7px; border-radius: 4px; font-size: 11px; overflow-wrap: anywhere; }
+.actions { position: sticky; top: 20px; display: flex; flex-direction: column; gap: 14px; }
+.actionHeading { justify-content: space-between; }
+.selection { display: flex; gap: 6px; flex-wrap: wrap; max-height: 160px; overflow: auto; }
+.selection button { font-size: 11px; background: var(--canvas); border: 1px solid var(--line); padding: 5px 7px; border-radius: 5px; cursor: pointer; }
+.signoff { display: grid; gap: 10px; }
+.move, .reopen { display: flex; flex-direction: column; gap: 12px; border-top: 1px solid var(--line); padding-top: 18px; }
+.move h3, .reopen h3 { font-weight: 650; font-size: 16px; }
+.pagination { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin: 20px 0; font-size: 13px; }
+.history { margin-top: 24px; }
+.history > div { border-top: 1px solid var(--line); padding: 12px 0; font-size: 13px; overflow-wrap: anywhere; }
+.history h2 { margin-bottom: 15px; }
+.history time { float: right; color: var(--ink-2); }
+.history p { margin-top: 5px; color: var(--ink-2); }
+.empty { padding: 30px 0; color: var(--ink-2); }
+@media (max-width: 1250px) { .jobs { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .page { padding: 18px; } .workspace { grid-template-columns: 1fr; } .actions { position: static; grid-row: 1; } .stats { grid-template-columns: repeat(2, 1fr); } .header { align-items: start; } }
+@media (max-width: 500px) { .header { flex-direction: column; } .scanForm { align-items: stretch; } .scanForm .field { width: 100%; } .history time { float: none; display: block; } .sectionTitle span { margin-left: 0; } }
