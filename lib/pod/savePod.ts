@@ -12,6 +12,7 @@
 */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { DEFERRED_EVIDENCE_FLAG } from "./deferredEvidence";
 import { WORKABLE_JOB_STATUSES, isWorkableJobStatus, jobNotWorkableMessage } from "../jobs/jobStatus";
 
 export type SavePodInput = {
@@ -22,6 +23,7 @@ export type SavePodInput = {
   recipientName: string;
   podNotes: string;
   markComplete: boolean;
+  deferEvidence?: boolean;
 };
 
 export function buildStopPodPatch(input: Pick<SavePodInput, "stopType" | "recipientName" | "podNotes" | "markComplete">, now: Date): Record<string, unknown> {
@@ -67,9 +69,20 @@ export async function saveStopPod(
     if (!isWorkableJobStatus(job.status)) throw new Error(jobNotWorkableMessage(job.status));
   }
 
+  const patch = buildStopPodPatch(input, now);
+  if (input.markComplete && input.stopType === "delivery" && input.deferEvidence) {
+    const { data: stop, error } = await supabase.from("job_stops")
+      .select("id,pod_flags")
+      .eq("id", input.stopId).eq("tenant_id", input.tenantId)
+      .eq("job_id", input.jobId).eq("type", "delivery").maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!stop) throw new Error("Job stop not found.");
+    patch.pod_flags = [...new Set([...(stop.pod_flags ?? []), DEFERRED_EVIDENCE_FLAG])];
+  }
+
   let stopUpdate = supabase
     .from("job_stops")
-    .update(buildStopPodPatch(input, now))
+    .update(patch)
     .eq("id", input.stopId)
     .eq("tenant_id", input.tenantId)
     .eq("job_id", input.jobId)

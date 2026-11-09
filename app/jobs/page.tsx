@@ -928,7 +928,7 @@ export default function JobsPage() {
   /* Same save as /pod (review POD-14): lib/pod/savePod.ts stamps
      pod_updated_at, filters by tenant and job, and refuses to complete a
      cancelled or unaccepted job. */
-  async function savePod(jobId: string, stopId: string): Promise<boolean> {
+  async function savePod(jobId: string, stopId: string, deferEvidence = false): Promise<boolean> {
     const job = jobs.find((candidate) => candidate.id === jobId);
     const stop = job?.job_stops?.find((candidate: any) => candidate.id === stopId);
     if (!job?.tenant_id || !stop) { setMessage("This stop is no longer loaded. Refresh and try again."); return false; }
@@ -945,9 +945,12 @@ export default function JobsPage() {
         recipientName: podForm.recipient_name,
         podNotes: podForm.pod_notes,
         markComplete: true,
+        deferEvidence,
       });
       await loadData();
-      setMessage(stop.type === "collection" ? "Collection confirmed. Marked as collected." : "Delivery confirmed. POD saved.");
+      setMessage(stop.type === "collection" ? "Collection confirmed. Marked as collected."
+        : deferEvidence ? "Delivery saved. Photo/POD still to add — reopen this job to upload it later."
+          : "Delivery confirmed. POD saved.");
       return true;
     } catch (error) {
       setMessage(`POD save error: ${error instanceof Error ? error.message : "Unable to save POD."}`);
@@ -1797,11 +1800,11 @@ export default function JobsPage() {
                               updatePodForm
                             }
                             onMarkDelivered={(
-                              stopId
+                              stopId, deferEvidence
                             ) =>
                               savePod(
                                 selectedJob.id,
-                                stopId
+                                stopId, deferEvidence
                               )
                             }
                             onMarkCollected={(stopId) => savePod(selectedJob.id, stopId)}

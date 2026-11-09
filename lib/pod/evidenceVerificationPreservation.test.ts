@@ -21,6 +21,8 @@ vi.mock("./officeEvidence", async (importOriginal) => {
   };
 });
 import { POST } from "../../app/api/pod/evidence/route";
+import { POST as uploadUrl } from "../../app/api/pod/evidence/upload-url/route";
+import { DEFERRED_EVIDENCE_FLAG } from "./deferredEvidence";
 import { MAX_POD_EVIDENCE_BYTES } from "./evidenceRules";
 import { verifyUploadedEvidence } from "./evidenceServer";
 import { eventOutcome } from "../offline/driverSync";
@@ -28,7 +30,8 @@ import { shouldHoldPodFailure } from "../offline/podFailureRetention";
 
 beforeEach(() => { state.deny = false; });
 
-function fixture(options: { bytes?: Uint8Array; jobTenant?: string; stopJob?: string; downloadFails?: boolean; newUpload?: boolean } = {}) {
+function fixture(options: { bytes?: Uint8Array; jobTenant?: string; stopJob?: string; downloadFails?: boolean; newUpload?: boolean;
+  jobStatus?: string; podStatus?: string; podFlags?: string[]; stopType?: string } = {}) {
   const path = `${ids.tenant}/${ids.job}/${ids.stop}/photos/1-existing-pod.jpg`;
   const bytes = options.bytes ?? new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]);
   const saved = { id: "evidence-one", tenant_id: ids.tenant, job_id: ids.job, stop_id: ids.stop,
@@ -41,6 +44,9 @@ function fixture(options: { bytes?: Uint8Array; jobTenant?: string; stopJob?: st
     global: { fetch: async (input, init) => {
       const url = new URL(String(input)); const method = init?.method ?? "GET";
       requests.push({ url, method });
+      if (url.pathname.startsWith("/storage/v1/object/upload/sign/") && method === "POST") {
+        return Response.json({ url: "/object/upload/sign/pod-files/fixture?token=synthetic-token" });
+      }
       if (url.pathname.startsWith("/storage/v1/object/") && method === "GET") {
         if (options.downloadFails) return new Response(JSON.stringify({ message: "Unavailable" }), { status: 503 });
         return new Response(bytes as BodyInit, { headers: { "Content-Type": "application/octet-stream" } });
@@ -55,9 +61,10 @@ function fixture(options: { bytes?: Uint8Array; jobTenant?: string; stopJob?: st
       }
       if (url.pathname.startsWith("/rest/v1/") && method === "GET") {
         const rows = url.pathname.endsWith("/jobs")
-          ? [{ id: ids.job, tenant_id: options.jobTenant ?? ids.tenant, status: "planned" }]
+          ? [{ id: ids.job, tenant_id: options.jobTenant ?? ids.tenant, status: options.jobStatus ?? "planned" }]
           : url.pathname.endsWith("/job_stops")
-            ? [{ id: ids.stop, tenant_id: ids.tenant, job_id: options.stopJob ?? ids.job, type: "delivery", pod_status: "awaiting" }]
+            ? [{ id: ids.stop, tenant_id: ids.tenant, job_id: options.stopJob ?? ids.job,
+              type: options.stopType ?? "delivery", pod_status: options.podStatus ?? "awaiting", pod_flags: options.podFlags ?? [] }]
             : url.pathname.endsWith("/pod_evidence") ? options.newUpload ? [] : [saved] : [];
         return new Response(JSON.stringify(rows.filter(row => [...url.searchParams].every(([key, value]) =>
           !value.startsWith("eq.") || (row as Record<string, unknown>)[key] === value.slice(3)))),
@@ -137,4 +144,39 @@ it("shared verification rejects untrusted bytes without relying on a race-prone 
   const f = fixture({ bytes: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]) });
   expect(await verifyUploadedEvidence(f.sdk, f.path, "image/jpeg")).toMatchObject({ ok: false, status: 415 });
   expect(f.objectExists()).toBe(true); expect(f.requests).toHaveLength(1);
+});
+
+async function prepareUpload() {
+  return uploadUrl(new Request("https://tms.synthetic/api/pod/evidence/upload-url", { method: "POST",
+    body: JSON.stringify({ tenantId: ids.tenant, jobId: ids.job, stopId: ids.stop,
+      evidenceType: "photo", mimeType: "image/jpeg", size: 8, filename: "later.jpg" }),
+  }));
+}
+
+it("allows deferred evidence through both upload stages after delivery without changing completion", async () => {
+  const f = fixture({ newUpload: true, jobStatus: "completed", podStatus: "delivered", podFlags: [DEFERRED_EVIDENCE_FLAG] });
+  const prepared = await prepareUpload();
+  expect(prepared.status).toBe(200);
+  expect(await prepared.json()).toMatchObject({ ok: true, token: "synthetic-token" });
+  expect((await submit(f.path, "image/jpeg")).status).toBe(201);
+  expect(f.requests.some(r => r.method === "PATCH" || r.method === "DELETE")).toBe(false);
+});
+
+it.each([
+  { jobStatus: "completed", podStatus: "delivered" },
+  { jobStatus: "cancelled", podStatus: "delivered", podFlags: [DEFERRED_EVIDENCE_FLAG] },
+  { podStatus: "collected", stopType: "collection", podFlags: [DEFERRED_EVIDENCE_FLAG] },
+])("rejects late evidence without an eligible deferred delivery: %j", async options => {
+  const f = fixture(options);
+  expect((await prepareUpload()).status).toBe(409);
+  expect((await submit(f.path, "image/jpeg")).status).toBe(409);
+  expect(f.requests.every(r => r.method === "GET" && r.url.pathname.startsWith("/rest/v1/"))).toBe(true);
+});
+
+it("still enforces tenant and file validation for deferred uploads", async () => {
+  const f = fixture({ jobStatus: "completed", podStatus: "delivered", podFlags: [DEFERRED_EVIDENCE_FLAG] });
+  expect((await submit(f.path.replace(ids.tenant, ids.user), "image/jpeg")).status).toBe(400);
+  expect((await submit(f.path, "image/png")).status).toBe(415);
+  state.deny = true;
+  expect((await prepareUpload()).status).toBe(403);
 });

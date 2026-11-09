@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isDeferredDelivery } from "../../../../lib/pod/deferredEvidence";
 import { isPodEvidencePathFor } from "../../../../lib/pod/evidencePath";
 import { POD_DOCUMENT_MIME_TYPES, POD_PHOTO_MIME_TYPES } from "../../../../lib/pod/evidenceRules";
 import { recordEvidenceRow, verifyUploadedEvidence } from "../../../../lib/pod/evidenceServer";
@@ -45,7 +46,7 @@ export async function POST(request: Request) {
     const { admin, userId, tenantId } = await requireOfficeCaller(body.tenantId);
     const { job, stop } = await loadOfficeStop(admin, tenantId, body.jobId, body.stopId);
 
-    if (job.status === "cancelled" || isStopPodFinished(stop.pod_status)) {
+    if (job.status === "cancelled" || (isStopPodFinished(stop.pod_status) && !isDeferredDelivery(stop))) {
       throw new OfficeEvidenceError(409, "Evidence can no longer be added to this stop.");
     }
 
