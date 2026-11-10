@@ -48,6 +48,7 @@ export function WarehouseWorkspace({ tenantId, appAccess }: { tenantId: string; 
   }, [tenantId]);
   const [data, setData] = useState<WarehouseResult | null>(null);
   const [selected, setSelected] = useState<Map<string, WarehouseJob>>(new Map());
+  const [collectionSaved, setCollectionSaved] = useState(false);
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState("scan");
   const [filter, setFilter] = useState("all");
@@ -90,6 +91,9 @@ export function WarehouseWorkspace({ tenantId, appAccess }: { tenantId: string; 
     if (operationLock.current) return { ok: false, message: "Wait for the current save to finish." };
     const text = value.trim();
     if (!text) return { ok: false, message: "Scan or enter a barcode first." };
+    // Keep a collected batch ready for delivery, but never carry it into the next scan batch.
+    const selection = collectionSaved ? new Map<string, WarehouseJob>() : selected;
+    if (collectionSaved) { setSelected(new Map()); setCollectionSaved(false); }
     setQuery(text); setMode("scan"); setFilter("all"); setMessage("");
     const result = await load({ query: text, exact: true, filter: "all", page: 0 });
     if (!result) return { ok: false, message: "The lookup failed. Please try again." };
@@ -100,8 +104,8 @@ export function WarehouseWorkspace({ tenantId, appAccess }: { tenantId: string; 
         if (!previous.has(job.id) && previous.size >= 200) return previous;
         return new Map(previous).set(job.id, job);
       });
-      if (selected.size >= 200 && !selected.has(job.id)) { setError("Save or clear your selection before adding more than 200 jobs."); return { ok: false, message: "Selection is full." }; }
-      const msg = selected.has(job.id) ? `${job.reference || "Job"} is already selected.` : `${job.reference || "Job"} added. Ready for the next scan.`;
+      if (selection.size >= 200 && !selection.has(job.id)) { setError("Save or clear your selection before adding more than 200 jobs."); return { ok: false, message: "Selection is full." }; }
+      const msg = selection.has(job.id) ? `${job.reference || "Job"} is already selected.` : `${job.reference || "Job"} added. Ready for the next scan.`;
       setMessage(msg); setQuery(""); scanInput.current?.focus();
       return { ok: true, message: msg };
     }
@@ -111,19 +115,22 @@ export function WarehouseWorkspace({ tenantId, appAccess }: { tenantId: string; 
 
   function toggleJob(job: WarehouseJob) {
     setSelected(previous => {
-      const next = new Map(previous);
+      const next = new Map(collectionSaved && !previous.has(job.id) ? [] : previous);
       if (next.has(job.id)) next.delete(job.id);
       else if (next.size < 200) next.set(job.id, job);
       return next;
     });
+    setCollectionSaved(false);
   }
   function selectPage() {
     setSelected(previous => {
-      const next = new Map(previous);
+      const next = new Map(collectionSaved ? [] : previous);
       for (const job of data?.jobs ?? []) if (next.size < 200 || next.has(job.id)) next.set(job.id, job);
       return next;
     });
+    setCollectionSaved(false);
   }
+  function clearSelection() { setSelected(new Map()); setCollectionSaved(false); }
   async function apply(action: WarehouseAction) {
     if (operationLock.current || selected.size === 0) return;
     operationLock.current = true; setBusy(true); setError(""); setMessage("");
@@ -137,11 +144,17 @@ export function WarehouseWorkspace({ tenantId, appAccess }: { tenantId: string; 
         body: JSON.stringify({ ...payload, requestId: retry.current.id }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "The changes could not be saved.");
-      retry.current = null; setSelected(new Map()); setNote("");
-      await load(currentSearch.current);
+      retry.current = null; setNote("");
+      if (action === "collect") setCollectionSaved(true);
+      else clearSelection();
+      const refreshed = await load(currentSearch.current);
+      if (action === "collect" && refreshed) {
+        const freshJobs = new Map(refreshed.jobs.map(job => [job.id, job]));
+        setSelected(previous => new Map([...previous].map(([id, job]) => [id, freshJobs.get(id) ?? job])));
+      }
       const label = action === "collect" ? "collected" : action === "deliver" ? "delivered" : action === "reopen" ? "reopened for collection" : vehicleId ? "moved" : "unassigned";
       setMessage(`${result.result.count} job${result.result.count === 1 ? "" : "s"} ${label}. Saved successfully.`);
-      scanInput.current?.focus();
+      // Do not reopen the mobile keyboard or scroll away from the sign-off buttons.
     } catch (error) { setError(errorMessage(error)); }
     finally { operationLock.current = false; setBusy(false); }
   }
@@ -190,7 +203,7 @@ export function WarehouseWorkspace({ tenantId, appAccess }: { tenantId: string; 
       </div>
       <div className={styles.sectionTitle}><Barcode aria-hidden="true" /><h2>Scan a job</h2><span>USB scanner, camera or keyboard</span></div>
       <form className={styles.scanForm} onSubmit={event => { event.preventDefault(); if (busy || loading) return;
-        if (mode === "scan") void scan(query); else { setMessage(""); void load({ query, exact: false, filter, page: 0 }); } }}>
+        if (mode === "scan") void scan(query); else { if (collectionSaved) clearSelection(); setMessage(""); void load({ query, exact: false, filter, page: 0 }); } }}>
         <label className={styles.field}>Find by<select value={mode} onChange={e => setMode(e.target.value)} disabled={busy || loading}>
           <option value="scan">Scan barcode</option><option value="search">Search jobs</option></select></label>
         <label className={`${styles.field} ${styles.grow}`}>{mode === "scan" ? "Barcode or job reference" : "Name, address, phone or reference"}
@@ -203,19 +216,22 @@ export function WarehouseWorkspace({ tenantId, appAccess }: { tenantId: string; 
     </section>
 
     <section className={styles.quickActions} aria-label="Sign off scanned jobs">
-        <div className={styles.actionHeading}><h2>{selected.size} selected</h2><Button variant="ghost" size="sm" disabled={busy || !selected.size} onClick={() => setSelected(new Map())}>Clear</Button></div>
-        <p>Scan more jobs to build a batch. Actions apply to the whole selected jobs.</p>
+    <div aria-live="polite">{message && <p className={styles.message} role="status">{message}</p>}</div>
+    {error && <p className={styles.error} role="alert">{error}</p>}
+        <div className={styles.actionHeading}><h2>{selected.size} selected</h2><Button variant="ghost" size="sm" disabled={busy || !selected.size} onClick={clearSelection}>Clear</Button></div>
+        <p id="warehouse-selection-help">{collectionSaved
+          ? "Collection saved. These jobs are still selected: tap Mark delivered when they have arrived, or scan the next barcode to start a new batch."
+          : selected.size ? "Actions apply to all selected jobs. You can mark delivered directly when the delivery is complete."
+          : "Scan a barcode or select a job below to enable Mark collected and Mark delivered."}</p>
         {selected.size > 0 && <div className={styles.selection}>{[...selected.values()].map(job => <button key={job.id} type="button" disabled={busy}
           onClick={() => toggleJob(job)} aria-label={`Remove ${job.reference || job.id} from selection`}>{job.reference || job.id} ×</button>)}</div>}
         <label className={styles.field}>Warehouse note (optional)<textarea value={note} maxLength={2000} disabled={busy} onChange={e => setNote(e.target.value)} placeholder="Received by, bay number or reason for correction" /></label>
-        <div className={styles.signoff}><Button disabled={busy || loading || !selected.size} onClick={() => void apply("collect")} variant="secondary"><PackageCheck size={18} aria-hidden="true" />Mark collected</Button>
-          <Button disabled={busy || loading || !selected.size} onClick={() => void apply("deliver")}><CheckCircle2 size={18} aria-hidden="true" />Mark delivered</Button></div>
+        <div className={styles.signoff}><Button aria-describedby="warehouse-selection-help" disabled={busy || loading || !selected.size || collectionSaved} onClick={() => void apply("collect")} variant="secondary"><PackageCheck size={18} aria-hidden="true" />Mark collected</Button>
+          <Button aria-describedby="warehouse-selection-help" disabled={busy || loading || !selected.size} onClick={() => void apply("deliver")}><CheckCircle2 size={18} aria-hidden="true" />Mark delivered</Button></div>
         <p className={styles.hint}>Delivery signs off all collection and delivery stops. Photos and POD documents can be added later.</p>
         {busy && <p role="status">Saving warehouse changes…</p>}
     </section>
 
-    <div aria-live="polite">{message && <p className={styles.message} role="status">{message}</p>}</div>
-    {error && <p className={styles.error} role="alert">{error}</p>}
 
     <div className={styles.workspace}>
       <section className={styles.results} aria-label="Warehouse jobs">

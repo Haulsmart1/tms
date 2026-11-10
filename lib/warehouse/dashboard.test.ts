@@ -110,3 +110,39 @@ it("returns to the exact saved plan, but ignores another workspace's return cont
   expect(container.textContent).not.toContain("Back to saved plan");
   expect(posts).toHaveLength(0);
 });
+
+it("can deliver the same scanned job immediately after collection without rescanning or opening the keyboard", async () => {
+  await render(); await scan("FD C10930 6860 0134");
+  const collect = [...container.querySelectorAll("button")].find(b => b.textContent === "Mark collected")!;
+  collect.focus(); await click("Mark collected");
+  expect(posts[0]).toMatchObject({ action: "collect", jobIds: [id(2)] });
+  expect(container.textContent).toContain("These jobs are still selected");
+  expect(document.activeElement).not.toBe(container.querySelector('input[placeholder="Scan here, then press Enter"]'));
+  const deliver = [...container.querySelectorAll("button")].find(b => b.textContent === "Mark delivered")!;
+  expect(deliver.disabled).toBe(false); await click("Mark delivered");
+  expect(posts[1]).toMatchObject({ action: "deliver", jobIds: [id(2)] });
+  expect(posts[1].requestId).not.toBe(posts[0].requestId);
+  expect(container.textContent).toContain("1 job delivered. Saved successfully.");
+  expect(container.textContent).toContain("0 selected");
+});
+it("starts a fresh selection when scanning another barcode after collection", async () => {
+  await render(); await scan("WH-ONE"); await click("Mark collected");
+  jobs = [{ ...jobs[0], id: id(3), reference: "WH-TWO" }];
+  await scan("WH-TWO"); await click("Mark delivered");
+  expect(posts[1]).toMatchObject({ action: "deliver", jobIds: [id(3)] });
+});
+it("does not leave the last collected job selected after an unknown next scan", async () => {
+  await render(); await scan("WH-ONE"); await click("Mark collected"); await scan("UNKNOWN");
+  expect(container.textContent).toContain("0 selected");
+  expect([...container.querySelectorAll("button")].find(b => b.textContent === "Mark delivered")!.disabled).toBe(true);
+  expect(posts).toHaveLength(1);
+});
+it("keeps the collected batch for retry if its delivery save fails and shows the error by the button", async () => {
+  await render(); await scan("WH-ONE"); await click("Mark collected");
+  failSave = true; await click("Mark delivered");
+  expect(container.querySelector('[aria-label="Sign off scanned jobs"] [role="alert"]')?.textContent).toBe("Temporary failure");
+  expect(container.textContent).toContain("1 selected");
+  failSave = false; await click("Mark delivered");
+  expect(posts[2].requestId).toBe(posts[1].requestId);
+  expect(container.textContent).toContain("1 job delivered. Saved successfully.");
+});
