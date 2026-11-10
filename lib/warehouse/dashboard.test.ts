@@ -23,7 +23,7 @@ beforeEach(() => {
     const found = params.get("q") === "UNKNOWN" ? [] : ambiguous ? [...jobs, { ...jobs[0], id: id(3), reference: "WH-TWO" }] : jobs;
     const result: WarehouseResult = { jobs: found, total: found.length, page: 0, manifest: false,
       stats: { total: 1, outstanding: 1, delivered: 0, collected: 0, unassigned: 1 }, recent: [],
-      options: { vehicles: [{ id: id(4), registration: "HT21 EOR" }], drivers: [], plans: [{ id: id(5), name: "CBA", planning_date: "2026-11-10" }] } };
+      options: { vehicles: [{ id: id(4), registration: "HT21 EOR" }], drivers: [], plans: [{ id: id(5), name: "CBA", planning_date: "2026-11-07" }] } };
     return Response.json(result);
   }));
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
@@ -61,7 +61,20 @@ it("moves a completed job to a saved plan and destination van", async () => {
   await act(async () => { selects[2].value = id(4); selects[2].dispatchEvent(new Event("change", { bubbles: true })); });
   await act(async () => { selects[4].value = id(5); selects[4].dispatchEvent(new Event("change", { bubbles: true })); });
   await click("Move selected jobs");
-  expect(posts[0]).toMatchObject({ action: "move", vehicleId: id(4), planId: id(5), planningDate: "2026-11-10" });
+  expect(posts[0]).toMatchObject({ action: "move", vehicleId: id(4), planId: id(5), planningDate: "2026-11-07" });
+});
+it("shows saved plans before the scanner and opens the saved date and workspace without choosing a van", async () => {
+  await render();
+  const section = container.querySelector('section[aria-labelledby="warehouse-saved-plans"]')!;
+  expect(section.textContent).toContain("CBA");
+  expect(section.textContent).toContain("7 November 2026");
+  const link = section.querySelector('a[aria-label="Open saved plan CBA"]')!;
+  const href = new URL(link.getAttribute("href")!, "https://fixture.invalid");
+  expect(href.pathname).toBe("/planning");
+  expect(Object.fromEntries(href.searchParams)).toEqual({ date: "2026-11-07", tenant: id(1), plan: id(5) });
+  expect(section.compareDocumentPosition(container.querySelector('section[aria-label="Barcode scanner"]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(posts).toHaveLength(0);
+  expect(container.textContent).toContain("0 selected");
 });
 it("adds a scanned job once and keeps repeated scans idempotent in the selection", async () => {
   await render(); await scan("FD C10930 6860 0134");
