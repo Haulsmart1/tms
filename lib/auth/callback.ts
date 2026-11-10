@@ -1,21 +1,13 @@
 export type AuthCallbackVerificationDecision =
   | "verified"
-  | "recover-existing-session"
   | "reject";
 
 export function decideAuthCallbackVerification(
   verificationFailed: boolean,
-  hasAuthenticatedUser: boolean,
 ): AuthCallbackVerificationDecision {
-  if (!verificationFailed) {
-    return "verified";
-  }
-
-  if (hasAuthenticatedUser) {
-    return "recover-existing-session";
-  }
-
-  return "reject";
+  // The old cookie may belong to a different person/account. A failed login
+  // must never be presented as a successful switch to that existing session.
+  return verificationFailed ? "reject" : "verified";
 }
 
 export function authCallbackRedirectStatus(
