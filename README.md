@@ -22,6 +22,8 @@ A multi-tenant Transport Management System (TMS) for UK and EU road-haulage oper
 
 API routes authorize office users against the selected workspace. Atomic service-only SQL functions update jobs, stops, plans and append-only warehouse history together, with idempotent request IDs. No driver permission, billing-licence or tenant-isolation rules are relaxed. Apply the warehouse migration individually; never replay the historical migration directory.
 
+The Warehouse page has its own **TMS Warehouse** home-screen shortcut, distinct from **TMS Driver**, and shows the signed-in email, workspace and office role. Open `/warehouse` and use the install prompt when available, or Safari’s Share → Add to Home Screen. Warehouse needs an internet connection; it does not register a service worker. The Driver app includes a Warehouse link that opens a new tab so unsent driver work stays open. Driver-only accounts must sign in with a separately authorized office account; the link does not grant access or change roles.
+
 ## What it does
 
 - **Operations:** create and edit transport jobs with collection and delivery stops, build load manifests, plan the day, capture proof of delivery (photos, documents, recipient, notes), mark stops delivered, and track vehicles.
