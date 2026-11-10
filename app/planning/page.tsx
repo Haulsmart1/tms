@@ -11,6 +11,7 @@ import MessageBanner from "../../components/MessageBanner";
 import PlanningMap, { type MapMarker } from "./PlanningMap";
 import UnassignedPool from "./UnassignedPool";
 import VehicleLane from "./VehicleLane";
+import type { PlanSignOff } from "./PlanJobCard";
 import { useVehicleLayout } from "./useVehicleLayout";
 import Link from "next/link";
 import JobDetailDialog from "./JobDetailDialog";
@@ -1708,7 +1709,69 @@ export default function PlanningPage() {
     }
   }
 
-  function currentSavedPlanSnapshot() {
+  async function signOffVanJob(vehicleId: string, jobId: string, action: PlanSignOff, requestId: string) {
+    const job = jobById.get(jobId);
+    if (!planningTenantId || !job || job.tenant_id !== planningTenantId ||
+        !laneOrders[vehicleId]?.includes(jobId)) {
+      throw new Error("This job is no longer on the selected van.");
+    }
+
+    const sequence = loadSeq.current;
+    const response = await fetch("/api/warehouse/actions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tenantId: planningTenantId, requestId, jobIds: [jobId], action,
+        note: "Signed off from the Planning van card.",
+      }),
+    });
+    const body = await response.json();
+    if (!response.ok || !body.ok) {
+      throw new Error(body.error ?? "Could not save sign-off. Try again.");
+    }
+    if (loadSeq.current !== sequence) return;
+
+    const delivered = action === "deliver";
+    const recordedAt = body.result.recordedAt as string;
+    const signedJob: PlanJob = {
+      ...job,
+      status: delivered ? "completed" : "collected",
+      stops: job.stops.map((stop) => {
+        if (stop.type === "collection") {
+          return { ...stop, status: "completed", pod_status: "collected", collected_at: stop.collected_at ?? recordedAt };
+        }
+        if (delivered && stop.type === "delivery") {
+          return { ...stop, status: "completed", pod_status: "delivered", delivered_at: stop.delivered_at ?? recordedAt };
+        }
+        return stop;
+      }),
+    };
+    if (delivered) {
+      setJobs((previous) => previous.filter((entry) => entry.id !== jobId));
+      setCompletedJobs((previous) => [
+        ...previous.filter((entry) => entry.id !== jobId),
+        { ...signedJob, vehicle_id: vehicleId },
+      ]);
+      setLaneOrders((previous) => Object.fromEntries(
+        Object.entries(previous).map(([id, jobs]) => [id, jobs.filter((entry) => entry !== jobId)])
+      ));
+      invalidateCanonicalVehicles([vehicleId]);
+      setRoutes((previous) => {
+        const next = { ...previous };
+        delete next[vehicleId];
+        return next;
+      });
+    } else {
+      setJobs((previous) => previous.map((entry) => entry.id === jobId
+        ? { ...entry, status: signedJob.status, stops: signedJob.stops }
+        : entry));
+    }
+  }
+
+  function currentSavedPlanSnapshot(existingPlan?: LoadedSavedPlan) {
+    const savedJobIds = existingPlan
+      ? new Set(existingPlan.snapshot.lanes.flatMap((lane) => lane.jobIds))
+      : null;
     return createSavedPlanSnapshot({
       planningDate: date,
       editorDrafts,
@@ -1716,9 +1779,13 @@ export default function PlanningPage() {
         vehicleId: lane.vehicleId,
         driverId: lane.driverId,
         ...(lane.preserveJobDrivers ? { preserveJobDrivers: true } : {}),
-        // Retain display-only history when updating CBA or another saved
-        // plan, even if those jobs still carry an older operational date.
-        jobIds: [...lane.jobIds, ...(completedByVehicle.get(lane.vehicleId) ?? []).map((job) => job.id)],
+        // Keep saved delivery history without bringing back jobs removed from the snapshot.
+        jobIds: [
+          ...lane.jobIds,
+          ...(completedByVehicle.get(lane.vehicleId) ?? [])
+            .filter((job) => !savedJobIds || savedJobIds.has(job.id))
+            .map((job) => job.id),
+        ],
       })),
       pendingItineraries,
       persistedItineraries,
@@ -1984,7 +2051,7 @@ export default function PlanningPage() {
         tenantId: planningTenantId,
         id: stagedSavedPlan.id,
         planningDate: date,
-        snapshot: currentSavedPlanSnapshot(),
+        snapshot: currentSavedPlanSnapshot(stagedSavedPlan),
       });
 
       setMessage(`Updated saved plan "${stagedSavedPlan.name}".`);
@@ -3697,6 +3764,8 @@ export default function PlanningPage() {
                       }}
                       onOpenJob={setDetailJobId}
                       onAcceptJob={openAcceptance}
+                      onSignOff={planningTenantId ? (jobId, action, requestId) =>
+                        signOffVanJob(v.id, jobId, action, requestId) : undefined}
                       onMoveJob={(jobId, offset) =>
                         moveLaneJob(jobId, v.id, offset)
                       }

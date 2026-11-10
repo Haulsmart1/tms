@@ -1,9 +1,12 @@
 "use client";
 
-import { useRef, type DragEvent, type KeyboardEvent, type MouseEvent } from "react";
+import { useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { isRoutable, sortedStops } from "../../lib/planning/waypoints";
 import type { PlanJob } from "../../lib/planning/types";
 import { planningJobProgress } from "../../lib/planning/jobProgress";
+
+export type PlanSignOff = "collect" | "deliver";
+export type PlanSignOffHandler = (jobId: string, action: PlanSignOff, requestId: string) => Promise<void>;
 
 type Props = {
   job: PlanJob;
@@ -23,6 +26,7 @@ type Props = {
   onAccept?: (jobId: string) => void;
   onCollectionReceipt?: () => void;
   onAppointmentEmail?: () => void;
+  onSignOff?: PlanSignOffHandler;
   selected?: boolean;
   onSelectedChange?: (selected: boolean) => void;
   canMoveUp?: boolean;
@@ -45,6 +49,7 @@ export default function PlanJobCard({
   onAccept,
   onCollectionReceipt,
   onAppointmentEmail,
+  onSignOff,
   selected = false,
   onSelectedChange,
   canMoveUp = false,
@@ -54,6 +59,10 @@ export default function PlanJobCard({
   readOnly = false,
 }: Props) {
   const dragged = useRef(false);
+  const signOffLock = useRef(false);
+  const signOffRequests = useRef<Partial<Record<PlanSignOff, string>>>({});
+  const [signingOff, setSigningOff] = useState<PlanSignOff | null>(null);
+  const [signOffError, setSignOffError] = useState<string | null>(null);
   const stops = sortedStops(job);
   const first = stops[0];
   const last = stops[stops.length - 1];
@@ -83,6 +92,28 @@ export default function PlanJobCard({
         : dropNumbers.length === 1
           ? `Drop ${dropNumbers[0]}`
           : `Drops ${dropNumbers.join(", ")}`;
+
+  async function signOff(action: PlanSignOff) {
+    if (!onSignOff || signOffLock.current) return;
+    signOffLock.current = true;
+    setSigningOff(action);
+    setSignOffError(null);
+    try {
+      const requestId = signOffRequests.current[action] ??= crypto.randomUUID();
+      await onSignOff(job.id, action, requestId);
+      delete signOffRequests.current[action];
+    } catch (error) {
+      setSignOffError(error instanceof Error ? error.message : "Could not save sign-off. Try again.");
+    } finally {
+      signOffLock.current = false;
+      setSigningOff(null);
+    }
+  }
+
+  const canSignOff = !readOnly && onSignOff && progress !== "delivered" &&
+    !["cancelled", "canceled"].includes(job.status ?? "");
+  const hasCollection = stops.some((stop) => stop.type === "collection");
+  const hasDelivery = stops.some((stop) => stop.type === "delivery");
 
   function handleDragStart(e: DragEvent) {
     dragged.current = true;
@@ -227,6 +258,29 @@ export default function PlanJobCard({
           >
             Down
           </button>
+        </div>
+      ) : null}
+
+      {canSignOff ? (
+        <div className="mt-2 flex flex-wrap gap-1" onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+          onDragStart={(event) => { event.preventDefault(); event.stopPropagation(); }}>
+          {hasCollection && progress !== "collected" ? (
+            <button type="button" disabled={signingOff !== null}
+              className="min-h-11 rounded-md border border-warning px-2 text-xs font-semibold text-ink disabled:opacity-50"
+              onClick={() => void signOff("collect")}>
+              {signingOff === "collect" ? "Saving…" : "Mark collected"}
+            </button>
+          ) : null}
+          {hasDelivery ? (
+            <button type="button" disabled={signingOff !== null || (hasCollection && progress !== "collected")}
+              className="min-h-11 rounded-md border border-success px-2 text-xs font-semibold text-ink disabled:opacity-50"
+              title={hasCollection && progress !== "collected" ? "Mark collected first" : "Record delivery. Evidence can be added later."}
+              onClick={() => void signOff("deliver")}>
+              {signingOff === "deliver" ? "Saving…" : "Mark delivered"}
+            </button>
+          ) : null}
+          {signOffError ? <p role="alert" className="w-full text-xs text-danger">{signOffError}</p> : null}
         </div>
       ) : null}
 

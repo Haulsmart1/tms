@@ -3,7 +3,7 @@
 import { useId, useState, type DragEvent } from "react";
 import CollectionEmailDialog from "./CollectionEmailDialog";
 import type { CollectionEmailKind, CollectionEmailOptions } from "../../lib/planning/collectionEmail";
-import PlanJobCard, { JOB_ID_MIME } from "./PlanJobCard";
+import PlanJobCard, { JOB_ID_MIME, type PlanSignOffHandler } from "./PlanJobCard";
 import VehicleLabelPrinter from "./VehicleLabelPrinter";
 import type { PlanJob } from "../../lib/planning/types";
 import type { PlanningCompliance } from "../../lib/planning/compliance";
@@ -41,6 +41,7 @@ type Props = {
   onDriverChange: (driverId: string | null) => void;
   onOpenJob: (jobId: string) => void;
   onAcceptJob: (jobId: string) => void;
+  onSignOff?: PlanSignOffHandler;
   onMoveJob: (jobId: string, offset: -1 | 1) => void;
   /** beforeJobId null means append to the end of the lane. */
   onDropJob: (draggedJobId: string, beforeJobId: string | null) => void;
@@ -50,7 +51,7 @@ export default function VehicleLane({
   vehicle, jobs, completedJobs = [], canonicalDropNumbersByJobId, driverId, drivers, selected, summary, regimeSummary,
   compliance,
   geocodeSettled, driverConflict, onSelect, onDriverChange, onOpenJob,
-  onAcceptJob, onMoveJob, onDropJob, planningDate, emailEnabled = false,
+  onAcceptJob, onSignOff, onMoveJob, onDropJob, planningDate, emailEnabled = false,
   collapsed = false, onToggleCollapsed, onMoveVehicle, canMoveVehicleUp = false, canMoveVehicleDown = false,
 }: Props) {
   const contentId = useId();
@@ -251,6 +252,7 @@ export default function VehicleLane({
             geocodeSettled={geocodeSettled}
             onOpen={onOpenJob}
             onAccept={onAcceptJob}
+            onSignOff={onSignOff}
             selected={selectedJobs.has(job.id)}
             onSelectedChange={emailEnabled ? (checked) => setSelectedJobs((previous) => {
               const next = new Set(previous); if (checked) next.add(job.id); else next.delete(job.id); return next;
