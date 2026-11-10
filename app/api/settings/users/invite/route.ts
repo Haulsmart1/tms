@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { checkRateLimit, RATE_LIMITS } from "../../../../../lib/rateLimit";
 import {
   buildListedUsers,
@@ -22,27 +22,45 @@ function getSiteUrl(): string {
   return process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/, "") || "https://tmswizard.cloud";
 }
 
-/*
-  An account that already existed (for example someone who typed their email
-  on /login before being invited) gets no invite email from Supabase, so send
-  them an ordinary sign-in link instead. Uses the anon key and
-  shouldCreateUser:false, exactly like the login page, so it can never create
-  an account. Failures are logged only: the response must not differ.
-*/
-async function sendSignInLink(email: string) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anon) return;
-
+// Only called after provisioning has verified this company's membership.
+// Unconfirmed accounts need an invite: ordinary OTPs can be rejected when
+// public signups are disabled. Confirmed members get a normal sign-in link.
+async function sendAccessLink(admin: SupabaseClient, userId: string, email: string) {
   try {
+    const { data, error: lookupError } = await admin.auth.admin.getUserById(userId);
+    if (lookupError || !data.user || data.user.id !== userId || data.user.email?.toLowerCase() !== email) {
+      console.warn("[settings/users/invite] unable to verify email recipient");
+      return { status: 502, code: "email_recipient_unavailable" };
+    }
+
+    const redirectTo = `${getSiteUrl()}/auth/confirm?next=${encodeURIComponent("/dashboard")}`;
+    if (!data.user.email_confirmed_at) {
+      const { error } = await admin.auth.admin.inviteUserByEmail(email, { redirectTo });
+      if (error) {
+        console.warn("[settings/users/invite] invitation not sent", error.status, error.code);
+        return { status: error.status, code: error.code };
+      }
+      return null;
+    }
+
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !anon) return { status: 503, code: "email_not_configured" };
+
     const client = createClient(url, anon, { auth: { autoRefreshToken: false, persistSession: false } });
     const { error } = await client.auth.signInWithOtp({
       email,
-      options: { shouldCreateUser: false, emailRedirectTo: `${getSiteUrl()}/auth/confirm?next=/dashboard` },
+      options: { shouldCreateUser: false, emailRedirectTo: redirectTo },
     });
-    if (error) console.warn("[settings/users/invite] sign-in link not sent", error.status);
-  } catch (error) {
-    console.warn("[settings/users/invite] sign-in link not sent", error);
+    if (error) {
+      console.warn("[settings/users/invite] sign-in link not sent", error.status, error.code);
+      return { status: error.status, code: error.code };
+    }
+    return null;
+  } catch {
+    // Do not log email addresses, tokens or raw provider responses.
+    console.warn("[settings/users/invite] access email request failed");
+    return { status: 502, code: "email_request_failed" };
   }
 }
 
@@ -177,8 +195,19 @@ export async function POST(request: NextRequest) {
     return json(userAdminErrorResponse(provision.error ?? null));
   }
 
-  if (!createdUserId && (outcome === "created" || outcome === "repaired")) {
-    await sendSignInLink(email);
+  if (!createdUserId && outcome !== "other_company") {
+    // Re-inviting a member resends access; provision_tenant_user preserves
+    // their existing role and membership. Never email another company's user.
+    const emailError = await sendAccessLink(admin, userId!, email);
+    if (emailError) {
+      const rateLimited = emailError.status === 429;
+      return NextResponse.json({
+        accountReady: true,
+        error: rateLimited
+          ? "The account is ready, but email sending is temporarily rate-limited. Try Invite User again later."
+          : "The account is ready, but the sign-in email could not be sent. Use Invite User again to retry. If it still fails, check the email service settings.",
+      }, { status: rateLimited ? 429 : emailError.status === 503 ? 503 : 502 });
+    }
   }
 
   return json(inviteResponse(outcome, email));
