@@ -31,6 +31,7 @@ import {
   duplicateSavedPlan,
   listSavedPlans,
   loadSavedPlan,
+  moveSavedPlanToNextDay,
   renameSavedPlan,
   updateSavedPlanSnapshot,
   type LoadedSavedPlan,
@@ -262,6 +263,9 @@ export default function PlanningPage() {
   const [editorDrafts, setEditorDrafts] = useState<Record<string, SevenDayPlanEditorDraft>>({});
   const [stagedSavedPlan, setStagedSavedPlan] =
     useState<LoadedSavedPlan | null>(null);
+  const stagedPlanMoved = stagedSavedPlan !== null && savedPlans.some((plan) =>
+    plan.id === stagedSavedPlan.id && plan.planningDate !== stagedSavedPlan.planningDate
+  );
   const [returnContext, setReturnContext] = useState<PlanningReturnContext | null>(null);
   const restoredReturnPlan = useRef<string | null>(null);
   const pendingSavedPlanOpen = useRef<LoadedSavedPlan | null>(null);
@@ -2040,7 +2044,7 @@ export default function PlanningPage() {
   }
 
   async function updateNamedPlan() {
-    if (!planningTenantId || !stagedSavedPlan?.id || savedPlanBusy) {
+    if (!planningTenantId || !stagedSavedPlan?.id || savedPlanBusy || stagedPlanMoved) {
       return;
     }
 
@@ -2134,6 +2138,21 @@ export default function PlanningPage() {
     }
   }
 
+  async function moveNamedPlanToNextDay(plan: SavedPlanSummary) {
+    if (!planningTenantId || savedPlanBusy || saving || loading) return;
+
+    setSavedPlanBusy(true);
+    try {
+      const moved = await moveSavedPlanToNextDay(supabase, planningTenantId, plan);
+      setSavedPlans((plans) => [moved, ...plans.filter((entry) => entry.id !== moved.id)]);
+      setMessage(`Moved "${moved.name}" to ${moved.planningDate}. Open it and select Apply plan when ready.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Saved plan could not be moved.");
+    } finally {
+      setSavedPlanBusy(false);
+    }
+  }
+
   async function deleteNamedPlan(plan: SavedPlanSummary) {
     if (!planningTenantId || savedPlanBusy) return;
 
@@ -2177,6 +2196,7 @@ export default function PlanningPage() {
   }
 
   async function savePlan() {
+    if (stagedPlanMoved || savedPlanBusy) return;
     if (stagedSavedPlan) {
       const applied = await persistPlan("manual");
 
@@ -3241,7 +3261,7 @@ export default function PlanningPage() {
               onClick={savePlan}
               loading={saving}
               disabled={
-                !planningTenantId ||
+                !planningTenantId || savedPlanBusy || stagedPlanMoved ||
                 (!stagedSavedPlan && !dirty && !hasCanonicalWork)
               }
             >
@@ -3255,7 +3275,7 @@ export default function PlanningPage() {
                     variant="secondary"
                     size="sm"
                     onClick={() => void updateNamedPlan()}
-                    disabled={savedPlanBusy}
+                    disabled={savedPlanBusy || stagedPlanMoved}
                   >
                     Update saved
                   </Button>
@@ -3441,6 +3461,14 @@ export default function PlanningPage() {
                                 disabled={savedPlanBusy}
                               >
                                 Duplicate
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => void moveNamedPlanToNextDay(plan)}
+                                disabled={savedPlanBusy || saving || loading}
+                              >
+                                Move to next day
                               </Button>
                               <Button
                                 size="sm"
