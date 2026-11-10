@@ -4,6 +4,7 @@ import DriverPwa from "./DriverPwa";
 import DriverSessionBoundary from "./DriverSessionBoundary";
 
 import DriverGpsTracker from "./DriverGpsTracker";
+import DriverWorkspaceLink from "./DriverWorkspaceLink";
 
 export const metadata: Metadata = {
   title: "TMS Wizard Driver",
@@ -21,6 +22,7 @@ export default function DriverLayout({
   return (
     <>
       <DriverPwa />
+      <DriverWorkspaceLink />
       <DriverGpsTracker />
       <DriverSessionBoundary>{children}</DriverSessionBoundary>
     </>
