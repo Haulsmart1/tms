@@ -36,8 +36,10 @@ describe("inviteResponse", () => {
     expect(inviteResponse("other_company", "x@y.com")).toEqual(inviteResponse("created", "x@y.com"));
   });
 
-  it("refuses to re-invite an existing member instead of changing their role", () => {
-    expect(inviteResponse("already_member", "x@y.com").status).toBe(409);
+  it("reports a resent sign-in link without changing an existing member's role", () => {
+    const result = inviteResponse("already_member", "x@y.com");
+    expect(result.status).toBe(200);
+    expect(result.body.message).toContain("existing role is unchanged");
   });
 
   it("only recognises known outcomes", () => {
