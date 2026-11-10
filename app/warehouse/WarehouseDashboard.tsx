@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { Barcode, Boxes, CheckCircle2, PackageCheck, Truck } from "lucide-react";
-import Button from "../../components/Button";
+import Button, { buttonClasses } from "../../components/Button";
 import TenantGate from "../components/TenantGate";
 import { useTenant } from "../components/TenantProvider";
 import { planningReturnHref } from "../../lib/planning/navigation";
@@ -147,6 +147,28 @@ export function WarehouseWorkspace({ tenantId, appAccess }: { tenantId: string; 
       <Link href="/planning" className={styles.link}>Back to planning →</Link></header>
 
     {appAccess}
+
+    <section className={styles.savedPlans} aria-labelledby="warehouse-saved-plans">
+      <div className={styles.resultsHeader}>
+        <h2 id="warehouse-saved-plans">Saved plans</h2>
+        <Button variant="secondary" size="sm" disabled={busy || loading}
+          onClick={() => void load(currentSearch.current)}>Refresh saved plans</Button>
+      </div>
+      <p>Open a saved plan to see its vans and jobs.</p>
+      {!data ? <p role="status">{loading ? "Loading saved plans…" : "Saved plans could not be loaded. Please refresh."}</p>
+        : options.plans.length === 0 ? <p>No saved plans in this workspace.</p>
+        : <ul className={styles.planList}>{options.plans.map(plan => <li key={plan.id}>
+          <div><h3>{plan.name}</h3><time dateTime={plan.planning_date}>
+            {new Date(`${plan.planning_date}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })}
+          </time></div>
+          <Link className={buttonClasses("primary", "md")} prefetch={false}
+            aria-label={`Open saved plan ${plan.name}`} aria-disabled={busy || undefined}
+            onClick={event => { if (busy) event.preventDefault(); }}
+            href={planningReturnHref({ tenantId, date: plan.planning_date, planId: plan.id, vehicleId: null })}>
+            Open saved plan
+          </Link>
+        </li>)}</ul>}
+    </section>
 
     <div className={styles.stats}>{filters.slice(0, 4).map((item, index) => <button key={item.value}
       type="button" className={filter === item.value ? styles.activeStat : ""} disabled={busy || loading}
