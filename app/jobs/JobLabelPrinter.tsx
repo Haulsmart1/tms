@@ -9,6 +9,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import PrintedBoxLabel, { labelLayoutError } from "../../components/printing/PrintedBoxLabel";
+import BoxLabelPrintStyles from "../../components/printing/BoxLabelPrintStyles";
 import Button from "../../components/Button";
 import {
   BOX_LABEL_TEMPLATES,
@@ -259,51 +260,12 @@ export default function JobLabelPrinter({
                   setOpen(false);
                 }
               }}
-              className="ds fixed inset-0 z-[100] overflow-auto bg-black/50 p-4 font-sans text-ink outline-none print:static print:bg-white print:p-0"
+              className="box-label-print-dialog ds fixed inset-0 z-[100] overflow-auto bg-black/50 p-4 font-sans text-ink outline-none print:static print:bg-white print:p-0"
             >
-          <style jsx global>{`
-            @media print {
-              body * {
-                visibility: hidden !important;
-              }
-
-              .label-print-root,
-              .label-print-root * {
-                visibility: visible !important;
-              }
-
-              .label-print-root {
-                position: absolute !important;
-                left: 0 !important;
-                top: 0 !important;
-                margin: 0 !important;
-                padding: 0 !important;
-              }
-
-              .label-print-controls {
-                display: none !important;
-              }
-
-              .label-print-page {
-                break-after: page;
-                page-break-after: always;
-              }
-
-              .label-print-page:last-child {
-                break-after: auto;
-                page-break-after: auto;
-              }
-            }
-
-            @page {
-              size: ${selectedTemplate.pageWidthMm}mm
-                ${selectedTemplate.pageHeightMm}mm;
-              margin: 0;
-            }
-          `}</style>
+          <BoxLabelPrintStyles template={selectedTemplate} />
 
           <div className="mx-auto max-w-5xl rounded-xl bg-surface shadow-xl print:max-w-none print:rounded-none print:shadow-none">
-            <div className="label-print-controls border-b border-line p-5">
+            <div className="box-label-print-controls border-b border-line p-5">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <h2 id={titleId} className="text-lg font-semibold text-ink">
@@ -571,7 +533,7 @@ export default function JobLabelPrinter({
                 </div>
               ) : (
                 <div className="mt-4 rounded-lg border border-line bg-surface-2 p-3 text-xs text-ink-2">
-                  Print at 100% / Actual Size. Disable browser headers
+                  {pages.length} {pages.length === 1 ? "sheet" : "sheets"}. Print at 100% / Actual Size. Disable browser headers
                   and footers. Test new label stock on plain paper before
                   using adhesive sheets.
                 </div>
@@ -591,12 +553,12 @@ export default function JobLabelPrinter({
               </div>
             </div>
 
-            <div ref={printRootRef} className="label-print-root bg-white">
+            <div ref={printRootRef} className="bg-white">
               {previewStops
                 ? pages.map((page, pageIndex) => (
                 <div
                   key={pageIndex}
-                  className="label-print-page relative bg-white"
+                  className="box-label-print-page relative bg-white"
                   style={{
                     width: `${selectedTemplate.pageWidthMm}mm`,
                     height: `${selectedTemplate.pageHeightMm}mm`,
