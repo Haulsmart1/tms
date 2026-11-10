@@ -50,16 +50,16 @@ export function inviteResponse(outcome: ProvisionOutcome, email: string): ApiOut
   switch (outcome) {
     case "created":
     case "other_company":
-      return { status: 200, body: { ok: true, message: `Invitation sent to ${email}.` } };
+      return { status: 200, body: { ok: true, message: `Invitation requested for ${email}. Check their inbox and junk folder.` } };
     case "repaired":
       return {
         status: 200,
-        body: { ok: true, message: `${email} is now linked to this company and can sign in.` },
+        body: { ok: true, message: `${email} is now linked to this company. A sign-in link has been sent; check their inbox and junk folder.` },
       };
     case "already_member":
       return {
-        status: 409,
-        body: { error: `${email} already belongs to this company. Edit their role from the list instead.` },
+        status: 200,
+        body: { ok: true, message: `A new sign-in link has been sent to ${email}. Their existing role is unchanged. Check their inbox and junk folder.` },
       };
   }
 }
