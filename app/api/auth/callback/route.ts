@@ -267,42 +267,7 @@ async function completeAuthentication(
     return redirectTo("/login?error=auth");
   }
 
-  // Invalid fragment credentials must never fall back to a different signed-in
-  // account, or issue cookies accumulated by a failed setSession call.
-  if (input.kind === "session" && verificationError) {
-    return redirectTo("/login?error=link_unavailable");
-  }
-
-  const {
-    data: {
-      user: existingUser,
-    },
-    error: existingUserError,
-  } =
-    verificationError
-      ? await supabase.auth.getUser()
-      : {
-          data: {
-            user: null,
-          },
-          error: null,
-        };
-
-  const verificationDecision =
-    decideAuthCallbackVerification(
-      Boolean(
-        verificationError,
-      ),
-      Boolean(
-        existingUser &&
-          !existingUserError,
-      ),
-    );
-
-  if (
-    verificationDecision ===
-    "reject"
-  ) {
+  if (decideAuthCallbackVerification(Boolean(verificationError)) === "reject") {
     console.error(
       "Magic link verification failed:",
       verificationError?.code ??
@@ -310,47 +275,18 @@ async function completeAuthentication(
     );
 
     const recovery = new URLSearchParams({
-      error: authVerificationErrorCode(verificationError),
+      error: input.kind === "session" ? "link_unavailable" : authVerificationErrorCode(verificationError),
       next: input.requestedNext,
     });
-    return withCookies(redirectTo(`/login?${recovery}`));
+    // Do not reuse or refresh the prior account, or issue cookies accumulated
+    // by a failed attempt. Its unsent driver evidence remains untouched.
+    return redirectTo(`/login?${recovery}`);
   }
 
-  let user =
-    existingUser;
-
-  if (
-    verificationDecision ===
-    "verified"
-  ) {
-    const {
-      data: {
-        user: verifiedUser,
-      },
-      error: userError,
-    } =
-      await supabase.auth.getUser();
-
-    if (
-      userError ||
-      !verifiedUser
-    ) {
-      console.error(
-        "Auth callback could not resolve authenticated user:",
-        userError?.message ??
-          "No user returned",
-      );
-
-      const failed = redirectTo("/login?error=user");
-      return input.kind === "session" ? failed : withCookies(failed);
-    }
-
-    user =
-      verifiedUser;
-  }
-
-  if (!user) {
-    return withCookies(redirectTo("/login?error=user"));
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  if (userError || !user) {
+    console.error("Auth callback could not resolve authenticated user:", userError?.code ?? "No user returned");
+    return redirectTo(`/login?${new URLSearchParams({ error: "user", next: input.requestedNext })}`);
   }
 
   const destination =

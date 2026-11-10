@@ -41,6 +41,55 @@ beforeEach(() => {
 });
 
 describe("real callback handler with isolated Auth fixtures", () => {
+  it.each(["email", "invite", "magiclink"])("does not fall back to the old driver account after a failed %s switch", async type => {
+    fake.createServerClient.mockImplementation((_url, _key, options) => {
+      fake.verifyOtp.mockImplementation(async () => {
+        options.cookies.setAll([{ name: "fixture-session", value: "old-driver", options: { path: "/" } }]);
+        return { error: { code: "otp_expired" } };
+      });
+      return { auth: fake };
+    });
+    fake.getUser.mockResolvedValue({ data: { user: { id: "old-driver", email: "driver@example.test" } }, error: null });
+    const response = await POST(post(type, "fixture-session=old-driver"));
+    expect(location(response).pathname).toBe("/login");
+    expect(location(response).searchParams.get("error")).toBe("link_unavailable");
+    expect(location(response).searchParams.get("next")).toBe("/jobs");
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(fake.getUser).not.toHaveBeenCalled();
+    expect(fake.createAdminClient).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back to an old account after failed PKCE verification", async () => {
+    fake.exchangeCodeForSession.mockResolvedValue({ error: { code: "flow_state_expired" } });
+    const response = await GET(new NextRequest(`${origin}/api/auth/callback?code=old-code&next=%2Fwarehouse`, {
+      headers: { cookie: "fixture-session=old-driver" },
+    }));
+    expect(location(response).pathname).toBe("/login");
+    expect(location(response).searchParams.get("next")).toBe("/warehouse");
+    expect(fake.getUser).not.toHaveBeenCalled();
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("routes a successful account switch using the newly verified office identity", async () => {
+    const eq = vi.fn().mockReturnThis();
+    const query = { select: vi.fn().mockReturnThis(), eq, limit: vi.fn().mockReturnThis(), maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }) };
+    fake.createAdminClient.mockReturnValue({ from: vi.fn().mockReturnValue(query) });
+    fake.getUser.mockResolvedValue({ data: { user: { id: "new-office-user", email: "warehouse@example.test" } }, error: null });
+    const response = await POST(post("email", "fixture-session=old-driver"));
+    expect(location(response).pathname).toBe("/jobs");
+    expect(eq).toHaveBeenCalledWith("user_id", "new-office-user");
+    expect(eq).not.toHaveBeenCalledWith("user_id", "old-driver");
+    expect(response.headers.get("set-cookie")).toContain("fixture-session=signed-in");
+  });
+
+  it.each(["email", "invite", "magiclink"])("does not issue cookies if the %s user cannot be verified", async type => {
+    fake.getUser.mockResolvedValue({ data: { user: null }, error: { code: "bad_jwt" } });
+    const response = await POST(post(type));
+    expect(location(response).searchParams.get("error")).toBe("user");
+    expect(location(response).searchParams.get("next")).toBe("/jobs");
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
   it.each(["email", "invite", "magiclink"])("redeems a fresh %s link without any originating browser cookies or verifier", async type => {
     const response = await POST(post(type));
     expect(fake.verifyOtp).toHaveBeenCalledWith({ token_hash: "fixture-token", type });
@@ -55,7 +104,9 @@ describe("real callback handler with isolated Auth fixtures", () => {
     expect(location(await POST(post("invite"))).pathname).toBe("/jobs");
     fake.createServerClient.mockReturnValue({ auth: fake });
     fake.verifyOtp.mockResolvedValue({ error: { code: "otp_expired", message: "Token has expired or is invalid" } });
-    expect(location(await POST(post("invite", "fixture-session=signed-in"))).pathname).toBe("/jobs");
+    const replay = await POST(post("invite", "fixture-session=signed-in"));
+    expect(location(replay).searchParams.get("error")).toBe("link_unavailable");
+    expect(replay.headers.get("set-cookie")).toBeNull();
     fake.getUser.mockResolvedValue({ data: { user: null }, error: { message: "No session" } });
     const safari = await POST(post("invite"));
     expect(location(safari).searchParams.get("error")).toBe("link_unavailable");

@@ -25,7 +25,7 @@ export default function ImplicitLinkConfirmation({ next }: { next: string }) {
     <p className="mt-2 text-sm text-ink-2">{link.kind === "unavailable"
       ? "This sign-in link has expired or has already been used. Request a fresh link below."
       : "This sign-in link is incomplete or invalid. Request a fresh link below."}</p>
-    <Link href="/login" prefetch={false} className="mt-5 inline-block text-sm font-semibold text-primary-deep underline">Request a new login link</Link>
+    <Link href={`/login?next=${encodeURIComponent(next)}`} prefetch={false} className="mt-5 inline-block text-sm font-semibold text-primary-deep underline">Request a new login link</Link>
   </>;
 
   return <>
