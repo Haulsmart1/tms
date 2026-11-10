@@ -1,3 +1,4 @@
+import { addCalendarDays } from "../invoices/dates";
 import {
   parseSavedPlanSnapshot,
   savedPlanSummary,
@@ -116,19 +117,66 @@ export async function updateSavedPlanSnapshot(
     snapshot: SavedPlanSnapshot;
   },
 ): Promise<void> {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("planning_saved_plans")
     .update({
-      planning_date: input.planningDate,
       snapshot: input.snapshot,
       updated_at: new Date().toISOString(),
     })
     .eq("tenant_id", input.tenantId)
-    .eq("id", input.id);
+    .eq("id", input.id)
+    .eq("planning_date", input.planningDate)
+    .select("id")
+    .maybeSingle();
 
   if (error) {
     throw new Error(`Saved plan could not be updated: ${error.message}`);
   }
+  if (!data) {
+    throw new Error("This saved plan moved or was removed. Refresh Saved Plans and reopen it.");
+  }
+}
+
+export async function moveSavedPlanToNextDay(
+  supabase: SupabaseClientLike,
+  tenantId: string,
+  plan: SavedPlanSummary,
+): Promise<LoadedSavedPlan> {
+  const source = await loadSavedPlan(supabase, tenantId, plan.id);
+  const conflictMessage = "This saved plan changed. Refresh Saved Plans and try again.";
+  if (source.updatedAt !== plan.updatedAt || source.planningDate !== plan.planningDate) {
+    throw new Error(conflictMessage);
+  }
+
+  const planningDate = addCalendarDays(source.planningDate, 1);
+  if (!planningDate) throw new Error("The saved plan date is invalid.");
+
+  const snapshot = { ...source.snapshot, planningDate };
+  if (snapshot.editorDrafts) {
+    snapshot.editorDrafts = Object.fromEntries(Object.entries(snapshot.editorDrafts).map(([vehicleId, draft]) => {
+      const [draftDate, ...signatureParts] = draft.signature.split("\u001f");
+      return [vehicleId, draftDate === source.planningDate
+        ? { ...draft, signature: [planningDate, ...signatureParts].join("\u001f") }
+        : draft];
+    }));
+  }
+
+  const { data, error } = await supabase.from("planning_saved_plans")
+    .update({ planning_date: planningDate, snapshot, updated_at: new Date().toISOString() })
+    .eq("tenant_id", tenantId)
+    .eq("id", plan.id)
+    .eq("planning_date", source.planningDate)
+    .eq("updated_at", source.updatedAt)
+    .select("id, tenant_id, planning_date, name, snapshot, created_by, created_at, updated_at")
+    .maybeSingle();
+  if (error) {
+    if (error.code === "23505") {
+      throw new Error("A saved plan with this name already exists on the next day.");
+    }
+    throw new Error(`Saved plan could not be moved: ${error.message}`);
+  }
+  if (!data) throw new Error(conflictMessage);
+  return parseLoadedRow(data as SavedPlanRow);
 }
 export async function renameSavedPlan(
   supabase: SupabaseClientLike,
