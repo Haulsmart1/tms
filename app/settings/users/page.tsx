@@ -21,7 +21,7 @@ const SKELETON_CARDS = 4;
    reads one more. */
 const PLACEHOLDER_USER = { membership_id: "skeleton" } as TenantUser;
 
-async function readJson(response: Response): Promise<{ error?: string; message?: string; users?: TenantUser[] }> {
+async function readJson(response: Response): Promise<{ error?: string; message?: string; users?: TenantUser[]; accountReady?: boolean }> {
   try {
     return await response.json();
   } catch {
@@ -148,6 +148,7 @@ export default function UsersPage() {
       const body = await readJson(response);
 
       if (!response.ok) {
+        if (body.accountReady) await loadUsers();
         throw new Error(body.error || "Unable to invite user.");
       }
 
@@ -332,6 +333,11 @@ export default function UsersPage() {
                   </Button>
                 </div>
               </div>
+
+              <p className="mt-3 text-sm text-ink-2">
+                Already invited? Enter the same email and choose Invite User to
+                send a new sign-in link. Their existing role stays unchanged.
+              </p>
 
               {/* H-2: a console Driver role was a full staff principal.
                   Drivers get the driver portal instead. */}
