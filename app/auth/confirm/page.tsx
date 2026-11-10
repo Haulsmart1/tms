@@ -1,4 +1,5 @@
 import Link from "next/link";
+import ImplicitLinkConfirmation from "./ImplicitLinkConfirmation";
 import AuthSurface from "../../../components/landing/AuthSurface";
 import {
   isMagicLinkEmailType,
@@ -111,18 +112,7 @@ export default async function AuthConfirmPage({
             <Link href="/login" className="mt-3 inline-block text-sm text-primary-deep underline">Request a new login link</Link>
           </>
         ) : (
-          <>
-            <p className="mt-2 text-sm text-ink-2">
-              This sign-in link is incomplete or invalid.
-            </p>
-
-            <Link
-              href="/login"
-              className="mt-5 inline-block text-sm font-semibold text-primary-deep underline"
-            >
-              Request a new login link
-            </Link>
-          </>
+          <ImplicitLinkConfirmation next={next} />
         )}
       </section>
     </AuthSurface>
