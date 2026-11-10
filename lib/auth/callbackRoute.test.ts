@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 const fake = vi.hoisted(() => ({
-  verifyOtp: vi.fn(), exchangeCodeForSession: vi.fn(), getUser: vi.fn(),
+  setSession: vi.fn(), verifyOtp: vi.fn(), exchangeCodeForSession: vi.fn(), getUser: vi.fn(),
   createServerClient: vi.fn(), createAdminClient: vi.fn(),
 }));
 vi.mock("@supabase/ssr", () => ({ createServerClient: fake.createServerClient }));
@@ -27,6 +27,10 @@ beforeEach(() => {
   fake.createServerClient.mockImplementation((_url, _key, options) => {
     fake.verifyOtp.mockImplementation(async () => {
       options.cookies.setAll([{ name: "fixture-session", value: "signed-in", options: { path: "/", sameSite: "lax" } }]);
+      return { error: null };
+    });
+    fake.setSession.mockImplementation(async () => {
+      options.cookies.setAll([{ name: "fixture-session", value: "fragment-session", options: { path: "/", sameSite: "lax" } }]);
       return { error: null };
     });
     return { auth: fake };
@@ -83,4 +87,62 @@ describe("real callback handler with isolated Auth fixtures", () => {
     expect((await POST(request)).status).toBe(403);
     expect(fake.verifyOtp).not.toHaveBeenCalled();
   });
+});
+
+function implicitPost(overrides: Record<string, string> = {}, requestOrigin = origin) {
+  return new NextRequest(`${origin}/api/auth/callback`, {
+    method: "POST", headers: { origin: requestOrigin, "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ mode: "implicit", access_token: "header.payload.signature", refresh_token: "fixture-refresh", type: "invite", next: "/warehouse", ...overrides }),
+  });
+}
+
+it("finishes a default-template invitation from a new Safari browser and sets the verified session cookie", async () => {
+  const response = await POST(implicitPost());
+  expect(fake.setSession).toHaveBeenCalledExactlyOnceWith({ access_token: "header.payload.signature", refresh_token: "fixture-refresh" });
+  expect(fake.getUser).toHaveBeenCalledTimes(1);
+  expect(fake.verifyOtp).not.toHaveBeenCalled();
+  expect(location(response).pathname).toBe("/warehouse");
+  expect(response.status).toBe(303);
+  expect(response.headers.get("set-cookie")).toContain("fragment-session");
+  expect(response.headers.get("cache-control")).toBe("private, no-store");
+});
+it("rejects a cross-origin fragment POST without installing a session", async () => {
+  expect((await POST(implicitPost({}, "https://attacker.invalid"))).status).toBe(403);
+  expect(fake.setSession).not.toHaveBeenCalled();
+});
+it.each([
+  { access_token: "" }, { refresh_token: "" }, { access_token: "forged" },
+  { access_token: "a".repeat(17000) }, { refresh_token: "a".repeat(5000) }, { type: "recovery" },
+] as Record<string, string>[])("rejects incomplete or unsupported fragment credentials", async values => {
+  const response = await POST(implicitPost(values));
+  expect(location(response).searchParams.get("error")).toBe("invalid_link");
+  expect(fake.setSession).not.toHaveBeenCalled();
+});
+it("never falls back to an unrelated old session when submitted fragment credentials are invalid", async () => {
+  fake.createServerClient.mockReturnValue({ auth: fake });
+  fake.setSession.mockResolvedValue({ error: { code: "bad_jwt" } });
+  const response = await POST(implicitPost());
+  expect(location(response).searchParams.get("error")).toBe("link_unavailable");
+  expect(response.headers.get("set-cookie")).toBeNull();
+  expect(fake.getUser).not.toHaveBeenCalled();
+});
+it("does not issue session cookies when the signed-in user cannot be verified", async () => {
+  fake.getUser.mockResolvedValue({ data: { user: null }, error: { code: "bad_jwt" } });
+  const response = await POST(implicitPost());
+  expect(location(response).searchParams.get("error")).toBe("user");
+  expect(response.headers.get("set-cookie")).toBeNull();
+});
+it("keeps post-login navigation on the TMS origin", async () => {
+  const response = await POST(implicitPost({ next: "https://attacker.invalid/" }));
+  expect(location(response).origin).toBe(origin);
+  expect(location(response).pathname).toBe("/dashboard");
+});
+it("does not log or return credentials when session verification throws", async () => {
+  fake.createServerClient.mockReturnValue({ auth: fake });
+  fake.setSession.mockRejectedValue(new Error("secret-credential"));
+  const response = await POST(implicitPost());
+  expect(response.status).toBe(303);
+  expect(response.headers.get("set-cookie")).toBeNull();
+  expect(await response.text()).not.toContain("secret-credential");
+  expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("secret-credential");
 });

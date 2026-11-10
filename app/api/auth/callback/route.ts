@@ -8,6 +8,7 @@ import {
 import type {
   EmailOtpType,
 } from "@supabase/supabase-js";
+import { readImplicitSession, type ImplicitSession } from "../../../../lib/auth/implicit";
 import { authVerificationErrorCode } from "../../../../lib/auth/loginError";
 import {
   authCallbackRedirectStatus,
@@ -173,19 +174,11 @@ async function resolveDestination(
   }
 }
 
-type VerificationInput =
-  | {
-      tokenHash: string;
-      type: EmailOtpType;
-      code: null;
-      requestedNext: string;
-    }
-  | {
-      tokenHash: null;
-      type: null;
-      code: string;
-      requestedNext: string;
-    };
+type VerificationInput = { requestedNext: string } & (
+  | { kind: "token"; tokenHash: string; type: EmailOtpType }
+  | { kind: "code"; code: string }
+  | { kind: "session"; session: ImplicitSession }
+);
 
 async function completeAuthentication(
   request: NextRequest,
@@ -201,11 +194,11 @@ async function completeAuthentication(
   const url =
     new URL(request.url);
 
-  const redirectTo = (path: string) =>
-    NextResponse.redirect(
-      new URL(path, url.origin),
-      { status: redirectStatus },
-    );
+  const redirectTo = (path: string) => {
+    const response = NextResponse.redirect(new URL(path, url.origin), { status: redirectStatus });
+    response.headers.set("Cache-Control", "private, no-store");
+    return response;
+  };
 
   const supabaseUrl =
     process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -260,18 +253,25 @@ async function completeAuthentication(
     return response;
   };
 
-  const {
-    error: verificationError,
-  } =
-    input.code === null
-      ? await supabase.auth.verifyOtp({
-          type: input.type,
-          token_hash: input.tokenHash,
-        })
-      : await supabase.auth
-          .exchangeCodeForSession(
-            input.code,
-          );
+  let verificationError: { code?: string; message?: string } | null;
+  try {
+    const result = input.kind === "session"
+      ? await supabase.auth.setSession(input.session)
+      : input.kind === "token"
+        ? await supabase.auth.verifyOtp({ type: input.type, token_hash: input.tokenHash })
+        : await supabase.auth.exchangeCodeForSession(input.code);
+    verificationError = result.error;
+  } catch {
+    // Provider errors may contain credentials; never log the raw exception.
+    console.error("Auth callback verification request failed");
+    return redirectTo("/login?error=auth");
+  }
+
+  // Invalid fragment credentials must never fall back to a different signed-in
+  // account, or issue cookies accumulated by a failed setSession call.
+  if (input.kind === "session" && verificationError) {
+    return redirectTo("/login?error=link_unavailable");
+  }
 
   const {
     data: {
@@ -305,7 +305,7 @@ async function completeAuthentication(
   ) {
     console.error(
       "Magic link verification failed:",
-      verificationError?.message ??
+      verificationError?.code ??
         "Unknown verification error",
     );
 
@@ -341,7 +341,8 @@ async function completeAuthentication(
           "No user returned",
       );
 
-      return withCookies(redirectTo("/login?error=user"));
+      const failed = redirectTo("/login?error=user");
+      return input.kind === "session" ? failed : withCookies(failed);
     }
 
     user =
@@ -404,8 +405,7 @@ export async function GET(
   return completeAuthentication(
     request,
     {
-      tokenHash: null,
-      type: null,
+      kind: "code",
       code: action.code,
       requestedNext: safeAuthNextPath(
         url.searchParams.get("next"),
@@ -520,6 +520,16 @@ export async function POST(
       ? rawNext
       : null;
 
+  if (formData.get("mode") === "implicit") {
+    const session = readImplicitSession(formData);
+    if (!session || !isMagicLinkEmailType(type)) {
+      return NextResponse.redirect(new URL("/login?error=invalid_link", url.origin), { status: 303 });
+    }
+    return completeAuthentication(request, {
+      kind: "session", session, requestedNext: safeAuthNextPath(next, url.origin),
+    });
+  }
+
   if (
     !isValidMagicLinkTokenHash(
       tokenHash,
@@ -546,9 +556,9 @@ export async function POST(
   return completeAuthentication(
     request,
     {
+      kind: "token",
       tokenHash,
       type,
-      code: null,
       requestedNext,
     },
   );
