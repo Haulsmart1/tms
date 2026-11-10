@@ -4,6 +4,11 @@
 .header p, .hint, .scan > p, .actions > p, .move > p, .reopen > p { color: var(--ink-2); font-size: 14px; line-height: 1.6; }
 .eyebrow { font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); }
 .link { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; font-size: 14px; }
+.appAccess { display: flex; flex-wrap: wrap; align-items: start; gap: 12px 24px; padding: 16px; margin-bottom: 22px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; font-size: 14px; overflow-wrap: anywhere; }
+.appAccess p { margin: 5px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.5; }
+.install { margin-left: auto; max-width: 480px; display: grid; gap: 8px; }
+.install summary { cursor: pointer; color: var(--accent); padding: 6px 0; }
+.appAccess .connectionHint { flex-basis: 100%; }
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 22px; }
 .stats button { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; text-align: left; padding: 18px; cursor: pointer; }
 .stats button span { display: block; font-size: 13px; color: var(--ink-2); }
@@ -57,4 +62,4 @@
 .empty { padding: 30px 0; color: var(--ink-2); }
 @media (max-width: 1250px) { .jobs { grid-template-columns: 1fr; } }
 @media (max-width: 900px) { .page { padding: 18px; } .workspace { grid-template-columns: 1fr; } .actions { position: static; grid-row: 1; } .stats { grid-template-columns: repeat(2, 1fr); } .header { align-items: start; } }
-@media (max-width: 500px) { .header { flex-direction: column; } .scanForm { align-items: stretch; } .scanForm .field { width: 100%; } .history time { float: none; display: block; } .sectionTitle span { margin-left: 0; } }
+@media (max-width: 500px) { .header { flex-direction: column; } .scanForm { align-items: stretch; } .scanForm .field { width: 100%; } .history time { float: none; display: block; } .sectionTitle span { margin-left: 0; } .install { margin-left: 0; width: 100%; } }

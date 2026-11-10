@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { Barcode, Boxes, CheckCircle2, PackageCheck, Truck } from "lucide-react";
@@ -11,6 +11,7 @@ import { planningReturnHref } from "../../lib/planning/navigation";
 import { WAREHOUSE_ACTION_LABELS, type WarehouseAction, type WarehouseJob, type WarehouseResult } from "../../lib/warehouse/types";
 import type { ScannerCopy } from "../driver/CameraScanner";
 import styles from "./warehouse.module.css";
+import WarehouseAppAccess from "./WarehouseAppAccess";
 
 const CameraScanner = dynamic(() => import("../driver/CameraScanner"), { ssr: false });
 const scannerCopy: ScannerCopy = { open: "Use camera", title: "Warehouse scanner",
@@ -32,12 +33,14 @@ export default function WarehouseDashboard() {
   const tenant = useTenant();
   return <TenantGate><main className={`ds font-sans bg-canvas text-ink ${styles.page}`}>
     {tenant.status === "ready" && tenant.activeTenantId
-      ? <WarehouseWorkspace key={tenant.activeTenantId} tenantId={tenant.activeTenantId} />
+      ? <WarehouseWorkspace key={tenant.activeTenantId} tenantId={tenant.activeTenantId}
+          appAccess={<WarehouseAppAccess email={tenant.userEmail} role={tenant.role}
+            workspace={tenant.tenants.find(t => t.id === tenant.activeTenantId)?.name ?? null} />} />
       : <><h1>Warehouse</h1><p>Select a workspace to scan and manage its jobs.</p></>}
   </main></TenantGate>;
 }
 
-export function WarehouseWorkspace({ tenantId }: { tenantId: string }) {
+export function WarehouseWorkspace({ tenantId, appAccess }: { tenantId: string; appAccess?: ReactNode }) {
   const [data, setData] = useState<WarehouseResult | null>(null);
   const [selected, setSelected] = useState<Map<string, WarehouseJob>>(new Map());
   const [query, setQuery] = useState("");
@@ -142,6 +145,8 @@ export function WarehouseWorkspace({ tenantId }: { tenantId: string }) {
     <header className={styles.header}><div><p className={styles.eyebrow}>OPERATIONS / WAREHOUSE</p>
       <h1><Boxes aria-hidden="true" /> Warehouse</h1><p>Scan, sign off and move jobs from one place.</p></div>
       <Link href="/planning" className={styles.link}>Back to planning →</Link></header>
+
+    {appAccess}
 
     <div className={styles.stats}>{filters.slice(0, 4).map((item, index) => <button key={item.value}
       type="button" className={filter === item.value ? styles.activeStat : ""} disabled={busy || loading}
