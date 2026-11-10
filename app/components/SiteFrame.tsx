@@ -10,6 +10,9 @@ const ApplicationFrame = dynamic(() => import("./ApplicationFrame"));
 
 export default function SiteFrame({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  // The confirm page owns fragment credentials and explicit consent. Do not
+  // mount TenantProvider here: its auth client auto-consumes URL fragments.
+  if (pathname === "/auth/confirm") return <>{children}</>;
   // No tenant lookup or operational sidebar bundle on marketing/policy pages.
   // Auth and customer token pages retain their existing application providers.
   if (isPublicMarketingSurface(pathname) || isLegalPath(pathname)) return <>{children}</>;
