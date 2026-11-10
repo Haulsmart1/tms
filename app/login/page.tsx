@@ -7,11 +7,14 @@ import AuthSurface from "../../components/landing/AuthSurface";
 import Field from "../../components/Field";
 import Button from "../../components/Button";
 import { loginErrorMessage } from "../../lib/auth/loginError";
+import { useTenant } from "../components/TenantProvider";
 
 /* AuthSurface provides the public brand. Login recovery and destination
    handling remain independent of its presentation. */
 export default function LoginPage() {
+  const tenant = useTenant();
   const [email, setEmail] = useState("");
+  const [requestedEmail, setRequestedEmail] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   /* The deep link the proxy (or TenantGate) sent us here with. The server
@@ -32,6 +35,7 @@ export default function LoginPage() {
     if (loading) return;
 
     setMessage("");
+    setRequestedEmail("");
     const trimmed = email.trim();
     if (!trimmed) {
       setMessage("Please enter your email address.");
@@ -57,6 +61,7 @@ export default function LoginPage() {
         return;
       }
       setMessage(payload.message ?? "Check your email for a sign-in link.");
+      setRequestedEmail(trimmed);
     } catch {
       setMessage("Unable to start login. Check your connection and try again.");
     } finally {
@@ -76,6 +81,11 @@ export default function LoginPage() {
         <h1 className="mt-2 text-xl font-semibold text-ink">Sign in</h1>
         <p className="mt-1 text-sm text-ink-2">We&apos;ll email you a magic link.</p>
         <p className="mt-2 text-xs text-ink-3">Each link works once. To sign in again or use another browser, request a new login link with your existing account email.</p>
+
+        {tenant.status !== "loading" && tenant.userEmail && <p className="mt-4 rounded-md border border-line p-3 text-sm text-ink-2">
+          This browser is currently signed in as <strong className="break-words text-ink">{tenant.userEmail}</strong>.
+          {" "}To switch accounts, enter the other email below, open its newest login email and press Continue to TMS Wizard.
+        </p>}
 
         <form onSubmit={handleLogin} className="mt-4 grid gap-4" noValidate>
           <Field
@@ -97,6 +107,10 @@ export default function LoginPage() {
         {message ? (
           <div className="mt-4 space-y-3 text-sm text-ink-2">
             <p role="status" aria-live="polite">{message}</p>
+            {requestedEmail && <p className="break-words font-semibold text-ink">
+              Check {requestedEmail}. Requesting a link does not switch accounts yet.
+              {" "}Open the newest email, then press Continue to TMS Wizard to finish signing in.
+            </p>}
             <p>
               No email? Delivery can be temporarily limited. Avoid repeatedly
               requesting links. If it still does not arrive, contact{" "}
