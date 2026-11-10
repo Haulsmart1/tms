@@ -11,8 +11,10 @@ import MessageBanner from "../../components/MessageBanner";
 import PlanningMap, { type MapMarker } from "./PlanningMap";
 import UnassignedPool from "./UnassignedPool";
 import VehicleLane from "./VehicleLane";
+import { useVehicleLayout } from "./useVehicleLayout";
+import Link from "next/link";
 import JobDetailDialog from "./JobDetailDialog";
-import { readPlanningReturnContext, type PlanningReturnContext } from "../../lib/planning/navigation";
+import { warehousePlanningHref, readPlanningReturnContext, type PlanningReturnContext } from "../../lib/planning/navigation";
 import { draftAssignment } from "../../lib/planning/jobDetail";
 import { stopsNeedingGeocode } from "../../lib/planning/geocoding";
 import { computeSaveDiff, type LanePlan } from "../../lib/planning/saveDiff";
@@ -346,6 +348,14 @@ export default function PlanningPage() {
       ),
     [unassigned, selectedUnassignedJobIds]
   );
+
+  const vehicleLayout = useVehicleLayout(vehicles,
+    `${planningTenantId ?? "all"}:${date}:${stagedSavedPlan?.id ?? "live"}`,
+    stagedSavedPlan?.snapshot.lanes.map(lane => lane.vehicleId) ?? []);
+  const displayVehicles = vehicleLayout.vehicles;
+  const warehouseHref = planningTenantId ? warehousePlanningHref({
+    tenantId: planningTenantId, date, planId: stagedSavedPlan?.id ?? null, vehicleId: selectedVehicleId,
+  }) : null;
 
   const lanePlans: LanePlan[] = useMemo(
     () =>
@@ -1702,7 +1712,7 @@ export default function PlanningPage() {
     return createSavedPlanSnapshot({
       planningDate: date,
       editorDrafts,
-      lanes: lanePlans.map((lane) => ({
+      lanes: displayVehicles.map(vehicle => lanePlans.find(lane => lane.vehicleId === vehicle.id)!).map((lane) => ({
         vehicleId: lane.vehicleId,
         driverId: lane.driverId,
         ...(lane.preserveJobDrivers ? { preserveJobDrivers: true } : {}),
@@ -2442,23 +2452,6 @@ export default function PlanningPage() {
     ? vehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? null
     : null;
 
-  const displayVehicles = useMemo(() => {
-    if (!selectedVehicleId) return vehicles;
-
-    const selected = vehicles.find(
-      (vehicle) => vehicle.id === selectedVehicleId
-    );
-
-    if (!selected) return vehicles;
-
-    return [
-      selected,
-      ...vehicles.filter(
-        (vehicle) => vehicle.id !== selectedVehicleId
-      ),
-    ];
-  }, [vehicles, selectedVehicleId]);
-
   const selectedRoute = selectedVehicleId ? (routes[selectedVehicleId] ?? null) : null;
   const selectedVehicleReading = selectedVehicleId
     ? (positions.get(selectedVehicleId) ?? null)
@@ -3142,6 +3135,10 @@ export default function PlanningPage() {
               })
             </Button>
 
+            {warehouseHref && <Link href={warehouseHref} target="_blank" rel="noopener" prefetch={false}
+              className="min-h-11 rounded-md border border-line px-3 py-2 text-sm font-semibold text-ink">
+              Scan barcode / Warehouse mode ↗
+            </Link>}
             <span className="hidden h-7 w-px bg-line sm:block" aria-hidden />
 
             <Button
@@ -3622,15 +3619,30 @@ export default function PlanningPage() {
                   </section>
                 ) : null}
 
+                <div className="flex flex-wrap items-center gap-2" aria-label="Vehicle display controls">
+                  <Button size="sm" variant="secondary" onClick={() => vehicleLayout.collapseAll(true)}>Collapse all vehicles</Button>
+                  <Button size="sm" variant="secondary" onClick={() => vehicleLayout.collapseAll(false)}>Expand all vehicles</Button>
+                  {warehouseHref && <Link href={warehouseHref} target="_blank" rel="noopener" prefetch={false}
+                    className="min-h-11 rounded-md border border-primary bg-primary px-3 py-2 text-sm font-semibold text-white">
+                    Scan barcode / Warehouse mode ↗
+                  </Link>}
+                  <span className="text-xs text-ink-3">Warehouse opens in a new tab. Use Update saved to share the vehicle order.</span>
+                </div>
+
                 {vehicles.length === 0 ? (
                   <p className="text-sm text-ink-3">No active vehicles. Add one under Fleet.</p>
                 ) : (
-                  displayVehicles.map((v) => (
+                  displayVehicles.map((v, vehicleIndex) => (
                     <VehicleLane
                       key={`${v.id}:${date}:${planningTenantId}`}
                       planningDate={date}
                       emailEnabled={Boolean(planningTenantId)}
                       vehicle={v}
+                      collapsed={vehicleLayout.collapsed.has(v.id)}
+                      onToggleCollapsed={() => vehicleLayout.toggle(v.id)}
+                      onMoveVehicle={(offset) => vehicleLayout.move(v.id, offset)}
+                      canMoveVehicleUp={vehicleIndex > 0}
+                      canMoveVehicleDown={vehicleIndex < displayVehicles.length - 1}
                       jobs={(laneOrders[v.id] ?? [])
                         .map((id) => jobById.get(id))
                         .filter((j): j is PlanJob => Boolean(j))}

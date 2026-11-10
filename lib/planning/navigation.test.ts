@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
-import { findSavedPlanForJob, planningJobHref, planningReturnHref, readPlanningReturnContext } from "./navigation";
+import { findSavedPlanForJob, warehousePlanningHref, planningJobHref, planningReturnHref, readPlanningReturnContext } from "./navigation";
 
 const context = { tenantId: "20000000-0000-4000-8000-000000000001", date: "2026-11-07",
   planId: "30000000-0000-4000-8000-000000000001", vehicleId: "40000000-0000-4000-8000-000000000001" };
@@ -38,4 +38,10 @@ describe("return from Jobs to the saved plan", () => {
     rows = [...rows, { ...rows[0], id: "other" }];
     expect(await findSavedPlanForJob(client, context.tenantId, jobId)).toBeNull();
   });
+});
+
+it("opens the warehouse scanner with an exact planning return context", () => {
+  const url = new URL(warehousePlanningHref(context), "https://tms.example");
+  expect(url.pathname).toBe("/warehouse"); expect(url.hash).toBe("#warehouse-scanner");
+  expect(readPlanningReturnContext(url.search)).toEqual(context);
 });

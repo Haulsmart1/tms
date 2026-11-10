@@ -7,7 +7,7 @@ import { Barcode, Boxes, CheckCircle2, PackageCheck, Truck } from "lucide-react"
 import Button, { buttonClasses } from "../../components/Button";
 import TenantGate from "../components/TenantGate";
 import { useTenant } from "../components/TenantProvider";
-import { planningReturnHref } from "../../lib/planning/navigation";
+import { planningReturnHref, readPlanningReturnContext, type PlanningReturnContext } from "../../lib/planning/navigation";
 import { WAREHOUSE_ACTION_LABELS, type WarehouseAction, type WarehouseJob, type WarehouseResult } from "../../lib/warehouse/types";
 import type { ScannerCopy } from "../driver/CameraScanner";
 import styles from "./warehouse.module.css";
@@ -41,6 +41,11 @@ export default function WarehouseDashboard() {
 }
 
 export function WarehouseWorkspace({ tenantId, appAccess }: { tenantId: string; appAccess?: ReactNode }) {
+  const [returnContext, setReturnContext] = useState<PlanningReturnContext | null>(null);
+  useEffect(() => {
+    const context = readPlanningReturnContext(window.location.search);
+    setReturnContext(context?.tenantId === tenantId ? context : null);
+  }, [tenantId]);
   const [data, setData] = useState<WarehouseResult | null>(null);
   const [selected, setSelected] = useState<Map<string, WarehouseJob>>(new Map());
   const [query, setQuery] = useState("");
@@ -144,7 +149,10 @@ export function WarehouseWorkspace({ tenantId, appAccess }: { tenantId: string; 
   return <>
     <header className={styles.header}><div><p className={styles.eyebrow}>OPERATIONS / WAREHOUSE</p>
       <h1><Boxes aria-hidden="true" /> Warehouse</h1><p>Scan, sign off and move jobs from one place.</p></div>
-      <Link href="/planning" className={styles.link}>Back to planning →</Link></header>
+      <Link href={returnContext ? planningReturnHref(returnContext) : "/planning"} className={styles.link}
+        aria-disabled={busy || undefined} onClick={event => { if (busy) event.preventDefault(); }}>
+        {returnContext?.planId ? "Back to saved plan →" : "Back to planning →"}
+      </Link></header>
 
     {appAccess}
 
@@ -176,7 +184,10 @@ export function WarehouseWorkspace({ tenantId, appAccess }: { tenantId: string; 
       <span>{item.label}</span><strong>{data ? [data.stats.total, data.stats.outstanding, data.stats.collected, data.stats.delivered][index] : "—"}</strong>
     </button>)}</div>
 
-    <section className={styles.scan} aria-label="Barcode scanner">
+    <section id="warehouse-scanner" className={styles.scan} aria-label="Barcode scanner">
+      <div className={styles.adminMode}><strong>Warehouse admin mode</strong>
+        <p>Scan or search any job in this workspace, then mark it collected or delivered. Photos and POD documents can be added later.</p>
+      </div>
       <div className={styles.sectionTitle}><Barcode aria-hidden="true" /><h2>Scan a job</h2><span>USB scanner, camera or keyboard</span></div>
       <form className={styles.scanForm} onSubmit={event => { event.preventDefault(); if (busy || loading) return;
         if (mode === "scan") void scan(query); else { setMessage(""); void load({ query, exact: false, filter, page: 0 }); } }}>
@@ -189,6 +200,18 @@ export function WarehouseWorkspace({ tenantId, appAccess }: { tenantId: string; 
         <CameraScanner mode="all" copy={scannerCopy} disabled={busy || loading} onScan={scan} />
       </form>
       <p>Scans find matching item barcodes, job references and master load labels, including completed or cancelled jobs.</p>
+    </section>
+
+    <section className={styles.quickActions} aria-label="Sign off scanned jobs">
+        <div className={styles.actionHeading}><h2>{selected.size} selected</h2><Button variant="ghost" size="sm" disabled={busy || !selected.size} onClick={() => setSelected(new Map())}>Clear</Button></div>
+        <p>Scan more jobs to build a batch. Actions apply to the whole selected jobs.</p>
+        {selected.size > 0 && <div className={styles.selection}>{[...selected.values()].map(job => <button key={job.id} type="button" disabled={busy}
+          onClick={() => toggleJob(job)} aria-label={`Remove ${job.reference || job.id} from selection`}>{job.reference || job.id} ×</button>)}</div>}
+        <label className={styles.field}>Warehouse note (optional)<textarea value={note} maxLength={2000} disabled={busy} onChange={e => setNote(e.target.value)} placeholder="Received by, bay number or reason for correction" /></label>
+        <div className={styles.signoff}><Button disabled={busy || loading || !selected.size} onClick={() => void apply("collect")} variant="secondary"><PackageCheck size={18} aria-hidden="true" />Mark collected</Button>
+          <Button disabled={busy || loading || !selected.size} onClick={() => void apply("deliver")}><CheckCircle2 size={18} aria-hidden="true" />Mark delivered</Button></div>
+        <p className={styles.hint}>Delivery signs off all collection and delivery stops. Photos and POD documents can be added later.</p>
+        {busy && <p role="status">Saving warehouse changes…</p>}
     </section>
 
     <div aria-live="polite">{message && <p className={styles.message} role="status">{message}</p>}</div>
@@ -226,15 +249,7 @@ export function WarehouseWorkspace({ tenantId, appAccess }: { tenantId: string; 
             onClick={() => void load({ ...currentSearch.current, page: page + 1 })}>Next</Button></div>
       </section>
 
-      <aside className={styles.actions} aria-label="Selected job actions">
-        <div className={styles.actionHeading}><h2>{selected.size} selected</h2><Button variant="ghost" size="sm" disabled={busy || !selected.size} onClick={() => setSelected(new Map())}>Clear</Button></div>
-        <p>Scan more jobs to build a batch. Actions apply to the whole selected jobs.</p>
-        {selected.size > 0 && <div className={styles.selection}>{[...selected.values()].map(job => <button key={job.id} type="button" disabled={busy}
-          onClick={() => toggleJob(job)} aria-label={`Remove ${job.reference || job.id} from selection`}>{job.reference || job.id} ×</button>)}</div>}
-        <label className={styles.field}>Warehouse note (optional)<textarea value={note} maxLength={2000} disabled={busy} onChange={e => setNote(e.target.value)} placeholder="Received by, bay number or reason for correction" /></label>
-        <div className={styles.signoff}><Button disabled={busy || loading || !selected.size} onClick={() => void apply("collect")} variant="secondary"><PackageCheck size={18} aria-hidden="true" />Mark collected</Button>
-          <Button disabled={busy || loading || !selected.size} onClick={() => void apply("deliver")}><CheckCircle2 size={18} aria-hidden="true" />Mark delivered</Button></div>
-        <p className={styles.hint}>Delivery signs off all collection and delivery stops. Photos and POD documents can be added later.</p>
+      <aside className={styles.actions} aria-label="Move and reopen selected jobs">
         <div className={styles.move}><h3>Move jobs</h3><p>Change the van, driver or saved plan at any job status.</p>
           <label className={styles.field}>Destination van<select value={vehicleId} disabled={busy} onChange={e => { setVehicleId(e.target.value); if (!e.target.value) { setDriverId(""); setPlanId(""); } }}>
             <option value="">Unassigned / warehouse</option>{options.vehicles.map(v => <option key={v.id} value={v.id}>{v.registration}</option>)}</select></label>

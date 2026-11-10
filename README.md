@@ -16,6 +16,12 @@ A multi-tenant Transport Management System (TMS) for UK and EU road-haulage oper
 
 ---
 
+## Vehicle layout and warehouse sign-off — 10 November 2026
+
+Planning vehicle headings have **Collapse / Expand** and **Up / Down** controls. Up/Down swaps the whole vehicle one position; selecting a vehicle no longer moves it to the top. The layout is remembered on this device per workspace, date and saved plan. **Update saved** (or Save As) includes the vehicle order in the saved snapshot for other devices. Collapse/Expand all keeps the headings and job totals visible. Layout controls never reassign jobs or change route drop order.
+
+**Scan barcode / Warehouse mode** opens Warehouse in a separate tab, keeping unsaved planning work open, and retains a **Back to saved plan** link. Warehouse admin mode uses the existing office authorization and audited, atomic operations. Scan with a camera/USB scanner or type a barcode; **Mark collected / Mark delivered** are directly below the scanner and above the job list. Photos/POD can be added later. Unknown and ambiguous barcodes require selection; scans alone never sign off jobs.
+
 ## Warehouse dashboard — 9 November 2026
 
 `/warehouse` is the office barcode and job control screen. Scan a serial, job reference or master load barcode with a USB scanner, camera or keyboard; search by contact or address; select up to 200 whole jobs. Collection and delivery sign-off work at any job status, with photo/POD evidence deferred where absent. Reopen resets stop completion while preserving prior state in the warehouse audit. Moving changes operational van/driver/date assignments and saved-plan lanes, preserving completion status and invalidating affected route calculations. Physical serialized-item transfers remain on `/load-transfer`.

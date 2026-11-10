@@ -53,3 +53,8 @@ export async function findSavedPlanForJob(client: SupabaseClient, tenantId: stri
   if (error || data?.length !== 1) return null;
   return data[0] as { id: string; name: string; planning_date: string };
 }
+
+/** Open the existing office-authorized warehouse scanner with a safe plan return. */
+export function warehousePlanningHref(context: PlanningReturnContext): string {
+  return planningReturnHref(context).replace("/planning?", "/warehouse?") + "#warehouse-scanner";
+}

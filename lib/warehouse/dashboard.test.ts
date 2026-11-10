@@ -9,6 +9,7 @@ const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")
 let root: Root, container: HTMLDivElement, jobs: WarehouseJob[], posts: Record<string, unknown>[], failSave: boolean, ambiguous: boolean;
 beforeEach(() => {
   (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+  window.history.replaceState({}, "", "/warehouse");
   jobs = [{ id: id(2), reference: "WH-ONE", status: "cancelled", pod_status: "pending", vehicle_id: null,
     driver_id: null, planning_date: null, customer_reference: null, external_reference: null,
     barcodes: ["FD C10930 6860 0134"], stops: [] }];
@@ -86,4 +87,26 @@ it("does not automatically select ambiguous or unknown barcode matches", async (
   expect(container.textContent).toContain("2 jobs match. Select the correct job below.");
   expect(container.textContent).toContain("0 selected");
   await scan("UNKNOWN"); expect(container.textContent).toContain("No matching barcode."); expect(posts).toHaveLength(0);
+});
+
+it("places both sign-off actions above results and signs off a scanned job without evidence", async () => {
+  await render(); await scan("FD C10930 6860 0134");
+  const actions = container.querySelector('[aria-label="Sign off scanned jobs"]')!;
+  const results = container.querySelector('[aria-label="Warehouse jobs"]')!;
+  expect(actions.compareDocumentPosition(results) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(actions.textContent).toContain("Mark collected"); expect(actions.textContent).toContain("Mark delivered");
+  expect(container.textContent).toContain("Warehouse admin mode");
+  await click("Mark collected");
+  expect(posts[0]).toMatchObject({ action: "collect", jobIds: [id(2)] });
+});
+it("returns to the exact saved plan, but ignores another workspace's return context", async () => {
+  window.history.replaceState({}, "", `/warehouse?tenant=${id(1)}&date=2026-11-07&plan=${id(5)}&vehicle=${id(4)}`);
+  await render();
+  const link = [...container.querySelectorAll("a")].find(a => a.textContent?.includes("Back to saved plan"))!;
+  expect(link.getAttribute("href")).toBe(`/planning?date=2026-11-07&tenant=${id(1)}&plan=${id(5)}&vehicle=${id(4)}`);
+  await act(async () => root.unmount()); root = createRoot(container);
+  window.history.replaceState({}, "", `/warehouse?tenant=${id(9)}&date=2026-11-07&plan=${id(5)}`);
+  await render();
+  expect(container.textContent).not.toContain("Back to saved plan");
+  expect(posts).toHaveLength(0);
 });

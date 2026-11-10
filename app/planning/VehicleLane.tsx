@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type DragEvent } from "react";
+import { useId, useState, type DragEvent } from "react";
 import CollectionEmailDialog from "./CollectionEmailDialog";
 import type { CollectionEmailKind, CollectionEmailOptions } from "../../lib/planning/collectionEmail";
 import PlanJobCard, { JOB_ID_MIME } from "./PlanJobCard";
@@ -16,6 +16,11 @@ import { jobsInCanonicalDropOrder } from "../../lib/planning/canonicalLaneOrder"
 
 type Props = {
   vehicle: { id: string; registration: string };
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
+  onMoveVehicle?: (offset: -1 | 1) => void;
+  canMoveVehicleUp?: boolean;
+  canMoveVehicleDown?: boolean;
   jobs: PlanJob[];
   completedJobs?: PlanJob[];
   planningDate?: string;
@@ -46,7 +51,9 @@ export default function VehicleLane({
   compliance,
   geocodeSettled, driverConflict, onSelect, onDriverChange, onOpenJob,
   onAcceptJob, onMoveJob, onDropJob, planningDate, emailEnabled = false,
+  collapsed = false, onToggleCollapsed, onMoveVehicle, canMoveVehicleUp = false, canMoveVehicleDown = false,
 }: Props) {
+  const contentId = useId();
   const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
   const [emailTarget, setEmailTarget] = useState<{ jobs: PlanJob[]; kind: CollectionEmailKind; window?: CollectionEmailOptions["window"] } | null>(null);
   const selectedOnVan = jobs.filter((job) => selectedJobs.has(job.id));
@@ -77,6 +84,19 @@ export default function VehicleLane({
     >
       <header className="mb-2 flex min-w-0 flex-wrap items-center gap-3">
         <h3 className="text-sm font-semibold text-ink">{vehicle.registration}</h3>
+        <div className="flex flex-wrap gap-2" onClick={event => event.stopPropagation()}>
+          {onToggleCollapsed && <button type="button" aria-expanded={!collapsed} aria-controls={contentId}
+            aria-label={`${collapsed ? "Expand" : "Collapse"} ${vehicle.registration}`}
+            className="min-h-11 rounded-md border border-line px-3 text-sm text-ink" onClick={onToggleCollapsed}>
+            {collapsed ? "Expand" : "Collapse"}
+          </button>}
+          {onMoveVehicle && <>
+            <button type="button" aria-label={`Move ${vehicle.registration} up one level`} disabled={!canMoveVehicleUp}
+              className="min-h-11 rounded-md border border-line px-3 text-sm text-ink disabled:opacity-40" onClick={() => onMoveVehicle(-1)}>↑ Up</button>
+            <button type="button" aria-label={`Move ${vehicle.registration} down one level`} disabled={!canMoveVehicleDown}
+              className="min-h-11 rounded-md border border-line px-3 text-sm text-ink disabled:opacity-40" onClick={() => onMoveVehicle(1)}>↓ Down</button>
+          </>}
+        </div>
         <select
           aria-label={`Driver for ${vehicle.registration}`}
           value={driverId ?? ""}
@@ -112,6 +132,7 @@ export default function VehicleLane({
         </div>
       </header>
 
+      <div id={contentId} hidden={collapsed}>
       {emailEnabled && jobs.length > 0 ? <div className="mb-3 flex flex-wrap items-center gap-2" onClick={(event) => event.stopPropagation()}>
         <button type="button" className="min-h-11 rounded-md border border-line px-3 text-sm text-ink" onClick={() => setSelectedJobs(new Set(jobs.map((job) => job.id)))}>Select all on van</button>
         <button type="button" className="min-h-11 rounded-md border border-line px-3 text-sm text-ink" onClick={() => setSelectedJobs(new Set())}>Clear</button>
@@ -260,6 +281,7 @@ export default function VehicleLane({
           </div>
         </div>
       ) : null}
+      </div>
       {emailTarget ? <CollectionEmailDialog jobs={emailTarget.jobs} kind={emailTarget.kind} date={planningDate ?? ""}
         initialWindow={emailTarget.window}
         vehicleRegistration={vehicle.registration} onClose={() => setEmailTarget(null)} /> : null}
