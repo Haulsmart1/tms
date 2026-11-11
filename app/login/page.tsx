@@ -82,10 +82,20 @@ export default function LoginPage() {
         <p className="mt-1 text-sm text-ink-2">We&apos;ll email you a magic link.</p>
         <p className="mt-2 text-xs text-ink-3">Each link works once. To sign in again or use another browser, request a new login link with your existing account email.</p>
 
-        {tenant.status !== "loading" && tenant.userEmail && <p className="mt-4 rounded-md border border-line p-3 text-sm text-ink-2">
-          This browser is currently signed in as <strong className="break-words text-ink">{tenant.userEmail}</strong>.
-          {" "}To switch accounts, enter the other email below, open its newest login email and press Continue to TMS Wizard.
-        </p>}
+        {tenant.status !== "loading" && tenant.userEmail && (
+          <div className="mt-4 space-y-2 rounded-md border border-line p-3 text-sm text-ink-2">
+            <p>
+              This browser is currently signed in as{" "}
+              <strong className="break-words text-ink">{tenant.userEmail}</strong>.
+            </p>
+            {tenant.status === "ready" && (
+              <a href="/dashboard" className="inline-block font-semibold text-ink underline">
+                Continue to dashboard with this account
+              </a>
+            )}
+            <p>To switch accounts, enter the other email below, open its newest login email and press Continue to TMS Wizard.</p>
+          </div>
+        )}
 
         <form onSubmit={handleLogin} className="mt-4 grid gap-4" noValidate>
           <Field
