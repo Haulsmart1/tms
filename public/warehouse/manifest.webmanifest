@@ -4,7 +4,7 @@
   "short_name": "Warehouse",
   "description": "Scan barcodes, sign off collections and deliveries, and move jobs between vehicles.",
   "start_url": "/warehouse",
-  "scope": "/",
+  "scope": "/warehouse",
   "display": "standalone",
   "background_color": "#0F1626",
   "theme_color": "#0F1626",

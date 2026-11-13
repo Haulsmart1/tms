@@ -3511,6 +3511,11 @@ export default function PlanningPage() {
                 onDropJob={(jobId) => moveJob(jobId, null, null)}
               />
               <div className="flex min-w-0 w-full flex-1 flex-col gap-3">
+                {selectedVehicle && (
+                  <p className="text-sm font-semibold text-ink">
+                    Route map · {selectedVehicle.registration}
+                  </p>
+                )}
                 <PlanningMap
                   markers={markers}
                   route={selectedRoute}

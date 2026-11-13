@@ -193,7 +193,7 @@ export default function PlanJobCard({
       ) : null}
 
       <p className="font-semibold text-ink">
-        {sequence !== null ? `${sequence} · ` : ""}
+        {dropNumbers?.length ? `${dropLabel} · ` : sequence !== null && dropNumbers === undefined ? `${sequence} · ` : ""}
         {job.reference ?? "No reference"}
         {warn ? (
           <span
@@ -227,7 +227,7 @@ export default function PlanJobCard({
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
-          {dropLabel ? (
+          {dropLabel && !dropNumbers?.length ? (
             <span className="mr-1 text-xs text-ink-3">{dropLabel}</span>
           ) : null}
 
