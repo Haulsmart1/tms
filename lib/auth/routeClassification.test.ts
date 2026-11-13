@@ -30,6 +30,8 @@ const PUBLIC_ROUTES = [
   "/guides/choosing-transport-management-software",
   "/social-preview",
   "/login",
+  "/driver/login",
+  "/warehouse/login",
   "/auth/confirm",
   "/api/auth/callback",
   "/api/auth/magic-link",

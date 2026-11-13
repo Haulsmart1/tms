@@ -86,7 +86,7 @@ function SyncStrip({ shift }: { shift: DriverShift }) {
       {shift.paused ? (
         <p className="m-0">
           {shift.paused}{" "}
-          <a className="font-semibold text-primary-deep" href="/login?next=/driver/dashboard">
+          <a className="font-semibold text-primary-deep" href="/driver/login?next=/driver/dashboard">
             Sign in
           </a>
         </p>

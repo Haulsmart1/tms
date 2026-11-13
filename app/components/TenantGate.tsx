@@ -1,5 +1,6 @@
 "use client";
 
+import { installedAppLoginPath } from "../../lib/auth/appLogin";
 import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useTenant, useTenantRecovery } from "./TenantProvider";
@@ -75,7 +76,8 @@ export default function TenantGate({ children }: { children: ReactNode }) {
     /* Carry the page they were on, so signing in returns them to it (AUTH-12).
        The login route re-validates next against its own origin. */
     const next = `${window.location.pathname}${window.location.search}`;
-    router.replace(next && next !== "/" ? `/login?next=${encodeURIComponent(next)}` : "/login");
+    const login = installedAppLoginPath(window.location.pathname);
+    router.replace(next && next !== "/" ? `${login}?next=${encodeURIComponent(next)}` : login);
   }, [status, router]);
 
   /* Checked before loading: a failed first resolve used to leave the page on

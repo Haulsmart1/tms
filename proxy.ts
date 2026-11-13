@@ -2,11 +2,14 @@ import { createServerClient } from "@supabase/ssr";
 import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { installedAppLoginPath } from "./lib/auth/appLogin";
 import { isApiPath, isPublicPath } from "./lib/auth/publicRoutes";
 import { isTransientAuthFailure } from "./lib/auth/authAvailability";
 
 const SESSION_ENTRY_PATHS = new Set([
   "/login",
+  "/driver/login",
+  "/warehouse/login",
   "/auth/confirm",
   "/api/auth/magic-link",
   "/api/auth/callback",
@@ -48,7 +51,7 @@ function unauthenticated(
   }
 
   const loginUrl = request.nextUrl.clone();
-  loginUrl.pathname = "/login";
+  loginUrl.pathname = installedAppLoginPath(pathname);
   loginUrl.search = "";
 
   /* Only ever a same-origin path+query. The consuming side runs this back
