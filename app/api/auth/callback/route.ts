@@ -9,6 +9,7 @@ import type {
   EmailOtpType,
 } from "@supabase/supabase-js";
 import { readImplicitSession, type ImplicitSession } from "../../../../lib/auth/implicit";
+import { installedAppLoginPath } from "../../../../lib/auth/appLogin";
 import { authVerificationErrorCode } from "../../../../lib/auth/loginError";
 import {
   authCallbackRedirectStatus,
@@ -175,7 +176,7 @@ async function resolveDestination(
 }
 
 type VerificationInput = { requestedNext: string } & (
-  | { kind: "token"; tokenHash: string; type: EmailOtpType }
+  | { kind: "token"; tokenHash: string; type: EmailOtpType; installedApp?: boolean }
   | { kind: "code"; code: string }
   | { kind: "session"; session: ImplicitSession }
 );
@@ -194,8 +195,14 @@ async function completeAuthentication(
   const url =
     new URL(request.url);
 
+  const appLogin = input.kind === "token" && input.installedApp
+    ? installedAppLoginPath(input.requestedNext.split(/[?#]/, 1)[0]) : null;
   const redirectTo = (path: string) => {
-    const response = NextResponse.redirect(new URL(path, url.origin), { status: redirectStatus });
+    const destination = appLogin && path.startsWith("/login?")
+      ? appLogin + path.slice("/login".length) : path;
+    const response = appLogin
+      ? NextResponse.json({ destination })
+      : NextResponse.redirect(new URL(destination, url.origin), { status: redirectStatus });
     response.headers.set("Cache-Control", "private, no-store");
     return response;
   };
@@ -495,6 +502,7 @@ export async function POST(
       kind: "token",
       tokenHash,
       type,
+      installedApp: formData.get("installed_app") === "1",
       requestedNext,
     },
   );

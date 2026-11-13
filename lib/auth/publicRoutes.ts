@@ -26,6 +26,8 @@ const PUBLIC_EXACT = new Set([
   "/guides/choosing-transport-management-software",
   "/social-preview",
   "/login",
+  "/driver/login",
+  "/warehouse/login",
   /* Scanner-safe confirmation page for emailed sign-in links. It performs no
      verification on GET; the human presses Continue, which POSTs below. */
   "/auth/confirm",

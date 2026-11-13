@@ -197,3 +197,30 @@ it("does not log or return credentials when session verification throws", async 
   expect(await response.text()).not.toContain("secret-credential");
   expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("secret-credential");
 });
+
+it.each(["/driver/dashboard", "/warehouse"])("sets session cookies through an in-app request for %s", async next => {
+  const request = new NextRequest(`${origin}/api/auth/callback`, {
+    method: "POST",
+    headers: { origin },
+    body: new URLSearchParams({ token_hash: "fixture-token", type: "email", next, installed_app: "1" }),
+  });
+  const response = await POST(request);
+  expect(await response.json()).toEqual({ destination: next });
+  expect(response.headers.get("set-cookie")).toContain("fixture-session=signed-in");
+  expect(response.headers.get("location")).toBeNull();
+});
+
+it("keeps expired pasted links inside the Driver app without issuing cookies", async () => {
+  fake.createServerClient.mockReturnValue({ auth: fake });
+  fake.verifyOtp.mockResolvedValue({ error: { code: "otp_expired" } });
+  const response = await POST(new NextRequest(`${origin}/api/auth/callback`, {
+    method: "POST",
+    headers: { origin },
+    body: new URLSearchParams({ token_hash: "fixture-token", type: "email", next: "/driver/dashboard", installed_app: "1" }),
+  }));
+  const { destination } = await response.json();
+  const recovery = new URL(destination, origin);
+  expect(recovery.pathname).toBe("/driver/login");
+  expect(recovery.searchParams.get("error")).toBe("link_unavailable");
+  expect(response.headers.get("set-cookie")).toBeNull();
+});

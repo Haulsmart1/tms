@@ -1,13 +1,16 @@
 "use client";
+import { usePathname } from "next/navigation";
 import { Fragment, useSyncExternalStore, type ReactNode } from "react";
 import { useDriverIdentity } from "./driverIdentity";
 import { getQueueSnapshot, getServerQueueSnapshot, subscribe } from "./driverQueue";
 
 /** Remount all driver forms when a shared phone changes accounts. */
 export default function DriverSessionBoundary({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
   const owner = useDriverIdentity();
   const queue = useSyncExternalStore(subscribe, getQueueSnapshot, getServerQueueSnapshot);
   const volatileHeldItems = queue.memoryOnly && queue.heldForOthers > 0;
+  if (pathname === "/driver/login" && !volatileHeldItems) return <>{children}</>;
   return <>
     {volatileHeldItems ? (
       <p role="alert" className="m-3 rounded-md border border-danger-border bg-danger-tint p-3 text-sm font-semibold text-danger-strong">
@@ -15,7 +18,7 @@ export default function DriverSessionBoundary({ children }: { children: ReactNod
       </p>
     ) : null}
     {!owner
-      ? <main className="ds bg-canvas p-6 font-sans text-ink"><p>Connect and sign in to load your driver app.</p><a href="/login?next=/driver/dashboard" target={volatileHeldItems ? "_blank" : undefined} rel={volatileHeldItems ? "noopener" : undefined}>{volatileHeldItems ? "Sign in in another tab" : "Sign in"}</a></main>
+      ? <main className="ds bg-canvas p-6 font-sans text-ink"><p>Connect and sign in to load your driver app.</p><a href={volatileHeldItems ? "/login?next=/driver/dashboard" : "/driver/login?next=/driver/dashboard"} target={volatileHeldItems ? "_blank" : undefined} rel={volatileHeldItems ? "noopener" : undefined}>{volatileHeldItems ? "Sign in in another tab" : "Sign in"}</a></main>
       : <Fragment key={owner}>{children}</Fragment>}
   </>;
 }

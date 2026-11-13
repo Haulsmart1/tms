@@ -331,7 +331,7 @@ export default function DriverJobPage({
           >
             {queue.paused}{" "}
             <Link
-              href={`/login?next=${encodeURIComponent(`/driver/jobs/${jobId}`)}`}
+              href={`/driver/login?next=${encodeURIComponent(`/driver/jobs/${jobId}`)}`}
               className="underline"
             >
               Sign in
