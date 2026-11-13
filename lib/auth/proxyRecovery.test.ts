@@ -15,7 +15,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("login recovery with stale session cookies", () => {
-  it.each(["/login", "/auth/confirm", "/api/auth/magic-link", "/api/auth/callback"])(
+  it.each(["/login", "/driver/login", "/warehouse/login", "/auth/confirm", "/api/auth/magic-link", "/api/auth/callback"])(
     "leaves %s to its own handler without refreshing or deleting cookies", async path => {
       const request = new NextRequest(`https://tmswizard.cloud${path}`, {
         headers: { cookie: "sb-fixture-auth-token=stale; driver-setting=preserve" },
@@ -29,12 +29,17 @@ describe("login recovery with stale session cookies", () => {
     },
   );
 
-  it.each(["/dashboard", "/driver/dashboard", "/api/jobs", "/api/auth/callback/private"])(
+  it.each(["/dashboard", "/driver/dashboard", "/warehouse", "/api/jobs", "/api/auth/callback/private"])(
     "continues to reject stale authentication on %s", async path => {
       const response = await proxy(new NextRequest(`https://tmswizard.cloud${path}`));
       expect(fake.getUser).toHaveBeenCalledOnce();
       if (path.startsWith("/api/")) expect(response.status).toBe(401);
-      else expect(new URL(response.headers.get("location")!).pathname).toBe("/login");
+      else {
+        const location = new URL(response.headers.get("location")!);
+        const login = path === "/driver/dashboard" ? "/driver/login" : path === "/warehouse" ? "/warehouse/login" : "/login";
+        expect(location.pathname).toBe(login);
+        expect(location.searchParams.get("next")).toBe(path);
+      }
     },
   );
 
