@@ -15,7 +15,7 @@ describe("planningMapMarkerPresentation", () => {
     expect(
       planningMapMarkerPresentation("17/18")
     ).toEqual({
-      text: "17?18",
+      text: "17–18",
       title: "Drops 17, 18",
     });
   });
@@ -33,7 +33,7 @@ describe("planningMapMarkerPresentation", () => {
     expect(
       planningMapMarkerPresentation("95/96/97/98/99")
     ).toEqual({
-      text: "95?99",
+      text: "95–99",
       title: "Drops 95, 96, 97, 98, 99",
     });
   });
@@ -47,7 +47,7 @@ describe("planningMapMarkerPresentation", () => {
     const presentation =
       planningMapMarkerPresentation(label);
 
-    expect(presentation.text).toBe("95?162");
+    expect(presentation.text).toBe("95–162");
     expect(presentation.text).not.toContain("+");
   });
 
@@ -64,7 +64,7 @@ describe("planningMapMarkerPresentation", () => {
     expect(
       planningMapMarkerPresentation("95//96/97/")
     ).toEqual({
-      text: "95?97",
+      text: "95–97",
       title: "Drops 95, 96, 97",
     });
   });

@@ -30,7 +30,7 @@ function contiguousDropRange(parts: string[]): string | null {
     return null;
   }
 
-  return `${numbers[0]}?${numbers[numbers.length - 1]}`;
+  return `${numbers[0]}–${numbers[numbers.length - 1]}`;
 }
 
 /**

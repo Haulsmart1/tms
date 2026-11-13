@@ -136,13 +136,13 @@ export default function PlanningMap({
         el.setAttribute("aria-label", `Drop ${m.label}`);
       }
 
-      const shared = presentation.text.includes("/");
+      const shared = presentation.title !== null;
 
       el.style.cssText = [
         shared ? "min-width:34px" : "min-width:28px",
-        shared ? "height:28px" : "height:28px",
+        "height:28px",
         shared ? "padding:0 5px" : "padding:0 3px",
-        "max-width:52px",
+        shared ? "max-width:96px" : "max-width:52px",
         "box-sizing:border-box",
         "border-radius:999px",
         "background:var(--primary)",

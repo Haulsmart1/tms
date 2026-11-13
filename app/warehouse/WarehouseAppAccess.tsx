@@ -51,6 +51,9 @@ export default function WarehouseAppAccess({ email, role, workspace }: {
       </details>
       {problem && <p role="status">{problem}</p>}
     </div>}
+    <a href="/driver/dashboard" target="_blank" rel="noopener noreferrer" className="underline">
+      Open TMS Driver
+    </a>
     <p className={styles.connectionHint}>Connect to the internet to scan, load and save jobs.</p>
   </section>;
 }

@@ -1,6 +1,6 @@
 {
   "id": "/driver/",
-  "name": "TMS Wizzard Driver",
+  "name": "TMS Wizard Driver",
   "short_name": "TMS Driver",
   "description": "Driver routes, walkarounds and proof of delivery",
   "start_url": "/driver/dashboard",
