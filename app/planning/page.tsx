@@ -439,7 +439,2933 @@ export default function PlanningPage() {
 
     const resolvedTimeZone = await timeZonePromise;
     const savedPlan = pendingSavedPlanOpen.current;
-    const { data: jobsData, completedData, error: jobsError } = await load…24029 tokens truncated…    size="sm"
+    const { data: jobsData, completedData, error: jobsError } = await loadPlanningBoardJobs(supabase, {
+      tenantIds: tenant.activeTenantId ? [tenant.activeTenantId] : tenant.tenants.map((option) => option.id),
+      planningDate: date,
+      savedJobIds: savedPlan?.tenantId === planningTenantId && savedPlan.planningDate === date
+        ? savedPlan.snapshot.lanes.flatMap((lane) => lane.jobIds)
+        : [],
+    });
+    const { data: vehicleData, error: vehicleError } = await tenant
+      .filterByTenant(
+        supabase.from("vehicles").select(`
+          id,
+          registration,
+          active,
+          mam_kg,
+          trailer_mam_kg,
+          tachograph_fitted,
+          tachograph_type,
+          home_country_code
+        `)
+      )
+      .order("registration", { ascending: true });
+    const { data: driverData, error: driverError } = await tenant
+      .filterByTenant(
+        supabase.from("drivers").select(`
+          id,
+          name,
+          tachograph_required,
+          tachograph_card_number,
+          tachograph_expiry,
+          tachograph_next_download_due,
+          cpc_required,
+          cpc_qualified,
+          cpc_expiry,
+          planning_profile,
+          normal_start_time
+        `)
+      )
+      .eq("active", true)
+      .order("name", { ascending: true });
+
+    if (isCancelled()) return;
+    if (jobsError) { pendingSavedPlanOpen.current = null; setMessage(`Jobs load error: ${jobsError.message}`); setLoading(false); return; }
+    if (vehicleError) { pendingSavedPlanOpen.current = null; setMessage(`Vehicles load error: ${vehicleError.message}`); setLoading(false); return; }
+    if (driverError) { pendingSavedPlanOpen.current = null; setMessage(`Drivers load error: ${driverError.message}`); setLoading(false); return; }
+
+    const loadedTimeZone = resolvedTimeZone.timeZone;
+    const loadNotices: string[] = [];
+
+    const toPlanJob = (row: any): PlanJob => ({
+      id: row.id,
+      tenant_id: row.tenant_id,
+      reference: row.reference,
+      status: row.status,
+      collection_eta: row.collection_eta,
+      delivery_eta: row.delivery_eta,
+      acceptance_note: row.acceptance_note,
+      accepted_at: row.accepted_at,
+      accepted_by: row.accepted_by,
+      vehicle_id: row.vehicle_id,
+      driver_id: row.driver_id,
+      subcontractor_id: row.subcontractor_id,
+      route_order: row.route_order,
+      planning_date: row.planning_date,
+      scheduled_date: row.scheduled_date,
+      journey_scope: row.journey_scope,
+      origin_country_code: row.origin_country_code,
+      destination_country_code: row.destination_country_code,
+      compliance_regime_override: row.compliance_regime_override,
+      compliance_override_reason: row.compliance_override_reason,
+      customer_name: rel(row.customers)?.name ?? null,
+      stops: (row.job_stops ?? []).map((s: any) => ({
+        id: s.id, stop_order: s.stop_order, type: s.type,
+        address_line: s.address_line, city: s.city, postcode: s.postcode,
+        contact_name: s.contact_name, contact_phone: s.contact_phone, contact_email: s.contact_email,
+        status: s.status, pod_status: s.pod_status, last_failed_attempt: s.last_failed_attempt, collected_at: s.collected_at, delivered_at: s.delivered_at,
+        lat: s.lat, lng: s.lng,
+      })),
+      items: (row.job_items ?? []).map((item: any) => ({
+        id: item.id,
+        sku: item.sku,
+        description: item.description,
+        quantity: item.quantity,
+        serial_numbers: item.serial_numbers,
+        external_reference: item.external_reference,
+        notes: item.notes,
+      })),
+    });
+    const loaded: PlanJob[] = (jobsData ?? []).map(toPlanJob);
+    const completed: PlanJob[] = (completedData ?? []).map(toPlanJob);
+
+    // Fetched unfiltered so retired vehicles' registrations are still known
+    // (for the displaced-job disclosure below); lanes and everything else
+    // stay driven by the active-only derived list, in the same registration
+    // order the query already produced.
+    const allVehicles: VehicleRow[] = vehicleData ?? [];
+    const vehicleList: Vehicle[] = allVehicles
+      .filter((v) => v.active)
+      .map((v) => ({
+        id: v.id,
+        registration: v.registration,
+        mam_kg: v.mam_kg,
+        trailer_mam_kg: v.trailer_mam_kg,
+        tachograph_fitted: v.tachograph_fitted,
+        tachograph_type: v.tachograph_type,
+        home_country_code: v.home_country_code,
+      }));
+    const activeVehicleIds = new Set(vehicleList.map((v) => v.id));
+    const registrationById = new Map(allVehicles.map((v) => [v.id, v.registration]));
+
+    // Lanes from the saved plan: group by vehicle, order by route_order with
+    // unsequenced jobs after, in load order. Lane drivers come from the first
+    // job that names one, so a saved plan round-trips exactly.
+    /* Only jobs on an ACTIVE vehicle become lane jobs. A job pinned to a
+       retired vehicle has no lane to render in, so grouping it there would
+       hide it from the board entirely; falling through to the derived
+       unassigned pool keeps it visible and re-plannable. Visible-in-pool beats
+       invisible: saving after a user edit genuinely unassigns it, and the pool
+       makes that plain before they press the button. */
+    const orders: Record<string, string[]> = {};
+    const laneDriverInit: Record<string, string | null> = {};
+    const laneDriverSets = new Map<string, Set<string>>();
+    const grouped = loaded
+      .filter((j) => j.vehicle_id && !j.subcontractor_id && activeVehicleIds.has(j.vehicle_id))
+      .sort((a, b) => (a.route_order ?? 1e9) - (b.route_order ?? 1e9));
+    for (const job of grouped) {
+      const vid = job.vehicle_id as string;
+      (orders[vid] ??= []).push(job.id);
+      if (laneDriverInit[vid] === undefined && job.driver_id) laneDriverInit[vid] = job.driver_id;
+      if (job.driver_id) {
+        let seen = laneDriverSets.get(vid);
+        if (!seen) { seen = new Set(); laneDriverSets.set(vid, seen); }
+        seen.add(job.driver_id);
+      }
+    }
+    // Flag mixed drivers and preserve their job assignments until the planner
+    // explicitly chooses a driver for the whole lane.
+    const conflicts = new Set<string>();
+    for (const [vid, seen] of laneDriverSets) if (seen.size > 1) conflicts.add(vid);
+
+    /* Baseline: the diff this load already implies, before any user action.
+       `dirty` compares against it, so load-time normalisation (one driver per
+       lane, inactive-vehicle fallout) does not masquerade as an unsaved edit. */
+    const laneAssignedIds = new Set(Object.values(orders).flat());
+    const initialLanePlans: LanePlan[] = vehicleList.map((v) => ({
+      vehicleId: v.id,
+      driverId: laneDriverInit[v.id] ?? null,
+      jobIds: orders[v.id] ?? [],
+      preserveJobDrivers: conflicts.has(v.id),
+    }));
+    const initialUnassignedIds = loaded
+      .filter((j) => !j.subcontractor_id && !laneAssignedIds.has(j.id))
+      .map((j) => j.id);
+    const initialDiff = computeSaveDiff(loaded, initialLanePlans, initialUnassignedIds, date);
+
+    /* The pool's disclosure for jobs displaced by a retired vehicle: the
+       unassignment already rides the baseline diff above, so it is only
+       actually written once the user makes a deliberate edit and saves. The
+       badge is what makes that quiet trade honest in the meantime. */
+    const displaced: Record<string, string> = {};
+    for (const job of loaded) {
+      if (job.subcontractor_id) continue;
+      if (job.vehicle_id && !activeVehicleIds.has(job.vehicle_id)) {
+        displaced[job.id] = `was on ${registrationById.get(job.vehicle_id) ?? "a retired vehicle"}`;
+      }
+    }
+
+    if (isCancelled()) return;
+
+    const activeTenantId =
+      typeof tenant.activeTenantId === "string" && tenant.activeTenantId.length > 0
+        ? tenant.activeTenantId
+        : null;
+
+    const planningScope = activeTenantId
+      ? planningDraftStorageKey(activeTenantId, date)
+      : null;
+
+    let loadedPersistedItineraries: Record<
+      string,
+      PersistedPlanningItinerary
+    > = {};
+
+    if (activeTenantId) {
+      const { data: itineraryRows, error: itineraryError } = await supabase
+        .from("planning_route_itineraries")
+        .select("id, vehicle_id, driver_id")
+        .eq("tenant_id", activeTenantId)
+        .eq("planning_date", date);
+
+      if (isCancelled()) return;
+
+      if (itineraryError) {
+        setMessage(`Canonical itinerary load error: ${itineraryError.message}`);
+        setLoading(false);
+        return;
+      }
+
+      const itineraryIds = (itineraryRows ?? []).map(
+        (row: any) => row.id as string
+      );
+
+      if (itineraryIds.length > 0) {
+        const { data: visitRows, error: visitError } = await supabase
+          .from("planning_route_visits")
+          .select("id, itinerary_id, sequence_number, lat, lng")
+          .eq("tenant_id", activeTenantId)
+          .in("itinerary_id", itineraryIds);
+
+        if (isCancelled()) return;
+
+        if (visitError) {
+          setMessage(`Canonical visit load error: ${visitError.message}`);
+          setLoading(false);
+          return;
+        }
+
+        const { data: serviceRows, error: serviceError } = await supabase
+          .from("planning_route_visit_stops")
+          .select(
+            "itinerary_id, visit_id, service_sequence_number, visit_service_order, job_id, stop_id, service_seconds"
+          )
+          .eq("tenant_id", activeTenantId)
+          .in("itinerary_id", itineraryIds);
+
+        if (isCancelled()) return;
+
+        if (serviceError) {
+          setMessage(`Canonical service load error: ${serviceError.message}`);
+          setLoading(false);
+          return;
+        }
+
+        loadedPersistedItineraries = parsePersistedPlanningItineraries(
+          (itineraryRows ?? []) as any[],
+          (visitRows ?? []) as any[],
+          (serviceRows ?? []) as any[],
+          loaded.filter(isRoutable)
+        );
+
+        /* A saved route that no longer matches its lane (stops edited on
+           /jobs, a job moved or removed) is dropped by the parser. Say so
+           rather than silently falling back to the unoptimized order
+           (review PLAN-23). */
+        const droppedRoutes = (itineraryRows ?? []).filter(
+          (row: any) => !loadedPersistedItineraries[row.vehicle_id as string]
+        ).length;
+
+        if (droppedRoutes > 0) {
+          loadNotices.push(
+            `The saved Smart Optimize order for ${droppedRoutes} ${
+              droppedRoutes === 1 ? "vehicle" : "vehicles"
+            } no longer matches its jobs (stops were edited or jobs moved), so it is not used. Re-run Smart Optimize for those lanes.`
+          );
+        }
+      }
+    }
+
+    let cachedDraft: PlanningDraft | null = null;
+
+    if (planningScope && activeTenantId && typeof window !== "undefined") {
+      try {
+        cachedDraft = parsePlanningDraft(
+          window.localStorage.getItem(planningScope),
+          {
+            tenantId: activeTenantId,
+            date,
+            validVehicleIds: new Set(vehicleList.map((vehicle) => vehicle.id)),
+            validJobIds: new Set(loaded.map((job) => job.id)),
+            validDriverIds: new Set(
+              (driverData ?? []).map((driver) => driver.id)
+            ),
+            now: Date.now(),
+          }
+        );
+
+        if (
+          cachedDraft &&
+          planningDraftMatchesPlan(
+            cachedDraft,
+            orders,
+            laneDriverInit,
+            vehicleList.map((vehicle) => vehicle.id)
+          )
+        ) {
+          window.localStorage.removeItem(planningScope);
+          cachedDraft = null;
+        }
+
+        /* A draft made against an older server plan would overwrite newer
+           changes if restored and autosaved (review PLAN-11). */
+        if (cachedDraft && planningDraftIsStale(cachedDraft, loaded)) {
+          window.localStorage.removeItem(planningScope);
+          cachedDraft = null;
+          loadNotices.push(
+            "An unsaved draft in this browser was discarded because the plan was changed and saved elsewhere after it was made."
+          );
+        }
+      } catch {
+        cachedDraft = null;
+      }
+    }
+
+    setPlanningTimeZone(loadedTimeZone);
+    setTimeZoneNote(resolvedTimeZone.note);
+    if (loadNotices.length > 0) setMessage(loadNotices.join(" "));
+    setJobs(loaded);
+    setCompletedJobs(completed);
+    setSelectedUnassignedJobIds(new Set());
+    setBulkVehicleId("");
+    setVehicles(vehicleList);
+    setDrivers(driverData ?? []);
+    setEditorDrafts({});
+    setLaneOrders(orders);
+    setLaneDrivers(laneDriverInit);
+    setPreserveLaneDrivers(new Set(conflicts));
+    setPersistedItineraries(loadedPersistedItineraries);
+    setDriverConflicts(conflicts);
+    setBaselineDiff(JSON.stringify(initialDiff));
+    setDisplacedNotes(displaced);
+    setRecoveryDraft(cachedDraft);
+    loadedPlanningScope.current = planningScope;
+
+    // Keep the planner's current lane if it survived the reload; only fall
+    // back when it did not, so a save-triggered reload does not jump the board.
+    setSelectedVehicleId((prev) =>
+      prev && activeVehicleIds.has(prev)
+        ? prev
+        : vehicleList.find((v) => (orders[v.id] ?? []).length > 0)?.id ?? vehicleList[0]?.id ?? null
+    );
+    setLoading(false);
+
+    // Geocode cache misses, then merge results into state. Failures leave
+    // lat/lng null; geocodeSettled turns the null into a "no map fix" badge.
+    const missing = stopsNeedingGeocode(loaded);
+    if (missing.length === 0) { setGeocodeSettled(true); return; }
+    try {
+      // Sequential batches of at most GEOCODE_BATCH ids, merged as each lands.
+      for (let start = 0; start < missing.length; start += GEOCODE_BATCH) {
+        if (isCancelled()) return;
+        const batch = missing.slice(start, start + GEOCODE_BATCH);
+        const response = await fetch("/api/tomtom/geocode", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ stopIds: batch }),
+        });
+        // A refusal will refuse the next batch too, so stop asking. A 503
+        // (or 401/403/429) means the geocoder is not configured or is
+        // refusing us outright, not that these particular addresses are bad,
+        // so that case is tracked separately from a plain per-batch failure.
+        if (!response.ok) {
+          if ([401, 403, 429, 503].includes(response.status)) {
+            if (!isCancelled()) setGeocodeUnavailable(true);
+          }
+          break;
+        }
+        const { geocoded } = await response.json();
+        if (isCancelled()) return;
+        const byStop = new Map<string, { lat: number; lng: number }>(
+          (geocoded ?? []).map((g: any) => [g.id, { lat: g.lat, lng: g.lng }])
+        );
+        setJobs((prev) =>
+          prev.map((job) => ({
+            ...job,
+            stops: job.stops.map((s) => {
+              const hit = byStop.get(s.id);
+              return hit ? { ...s, lat: hit.lat, lng: hit.lng } : s;
+            }),
+          }))
+        );
+      }
+    } catch {
+      // Board-only mode: badges explain themselves once settled.
+    }
+    if (isCancelled()) return;
+    setGeocodeSettled(true);
+  }
+
+  useEffect(() => {
+    if (tenant.status !== "ready") return;
+    const seq = ++loadSeq.current;
+    loadData(() => loadSeq.current !== seq);
+    // Any newer load (a later effect run, or a save-triggered reload) or an
+    // unmount bumps the counter, which invalidates this load's predicate.
+    return () => { loadSeq.current++; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenant.status, tenant.activeTenantId, date]);
+
+  useEffect(() => {
+    if (tenant.status !== "ready") {
+      setPositions(new Map());
+      return;
+    }
+
+    let cancelled = false;
+    let inFlight = false;
+
+    async function loadPositions() {
+      /* Same reason as loadData above: the effect already returned for this
+         case, but the narrowing does not reach into this function. Before the
+         inFlight latch, so an unresolved tenant never marks a load in flight. */
+      if (tenant.status !== "ready") return;
+      if (inFlight) return;
+      inFlight = true;
+
+      const startedAt = new Date();
+
+      try {
+        const vehicleIds = vehicles.map((vehicle) => vehicle.id);
+        const source = createSupabasePositionSource(supabase, tenant);
+        const readings = await source.getPositions(vehicleIds);
+
+        if (cancelled) return;
+
+        setPositions(readings);
+        setPositionNow(startedAt);
+      } catch {
+        if (!cancelled) {
+          // Preserve the last known fixes across a transient refresh failure,
+          // but advance "now" so an old reading can correctly become stale.
+          setPositionNow(startedAt);
+        }
+      } finally {
+        inFlight = false;
+      }
+    }
+
+    loadPositions();
+
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        loadPositions();
+      }
+    }, POSITION_POLL_MS);
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        loadPositions();
+      }
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange
+      );
+    };
+
+    // supabase and tenant are stable providers for the lifetime of this
+    // tenant selection; vehicle membership is the trigger that matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenant.status, tenant.activeTenantId, vehicles]);
+
+  // Route for the selected vehicle, refetched when its lane content changes.
+  const selectedLaneJobs = useMemo(() => {
+    if (!selectedVehicleId) return [];
+    return (laneOrders[selectedVehicleId] ?? [])
+      .map((id) => jobById.get(id))
+      .filter((j): j is PlanJob => Boolean(j));
+  }, [selectedVehicleId, laneOrders, jobById]);
+
+  useEffect(() => {
+    if (!selectedVehicleId || !geocodeSettled) return;
+
+    if (selectedLaneJobs.length > MAX_PLANNING_ROUTE_JOBS) {
+      setRoutes((prev) => {
+        const next = { ...prev };
+        delete next[selectedVehicleId];
+        return next;
+      });
+      setMapNotice(
+        `Planning routes support up to ${MAX_PLANNING_ROUTE_JOBS} jobs per vehicle.`
+      );
+      return;
+    }
+
+    const routableJobs = selectedLaneJobs.filter(isRoutable);
+    const physicalPointCount = new Set(
+      routableJobs.flatMap((job) =>
+        job.stops
+          .filter((stop) => stop.lat !== null && stop.lng !== null)
+          .map((stop) => `${stop.lat},${stop.lng}`)
+      )
+    ).size;
+    if (physicalPointCount < 2) {
+      setRoutes((prev) => {
+        const next = { ...prev };
+        delete next[selectedVehicleId];
+        return next;
+      });
+      setMapNotice(
+        selectedLaneJobs.length > 0 && physicalPointCount < 2
+          ? "Not enough mappable stops to draw a route."
+          : null
+      );
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        // The lane order is already the planner's proposed order. The map must
+        // render that proposal rather than independently optimizing it again.
+        const canonical =
+          pendingItineraries[selectedVehicleId] ??
+          persistedItineraries[selectedVehicleId];
+
+        const routePoints = canonical
+          ? canonical.orderedVisits.map((visit) => visit.point)
+          : buildFastPlotVisits(selectedLaneJobs).map((visit) => visit.point);
+        if (cancelled) return;
+
+        if (routePoints.length < 2) {
+          setMapNotice("Not enough mappable stops to draw a route.");
+          return;
+        }
+
+        const chunks = splitRoutePoints(routePoints);
+        const chunkResults: RouteResult[] = [];
+
+        for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+          const response = await fetch("/api/tomtom/route", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ points: chunks[chunkIndex] }),
+          });
+
+          if (cancelled) return;
+
+          if (!response.ok) {
+            const body = await response.json().catch(() => null);
+            setMapNotice(
+              body?.error ??
+                `Route segment ${chunkIndex + 1} of ${chunks.length} failed.`
+            );
+            return;
+          }
+
+          const chunkRoute: RouteResult = await response.json();
+          chunkResults.push(chunkRoute);
+        }
+
+        const route = mergeRouteResults(chunkResults);
+
+        if (!route) {
+          setMapNotice("Route calculation failed.");
+          return;
+        }
+
+        setRoutes((prev) => ({ ...prev, [selectedVehicleId]: route }));
+        setMapNotice(null);
+      } catch {
+        if (!cancelled) setMapNotice("Route calculation failed.");
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    selectedVehicleId,
+    selectedLaneJobs,
+    geocodeSettled,
+    pendingItineraries,
+    persistedItineraries,
+  ]);
+
+  function invalidateCanonicalVehicles(vehicleIds: Iterable<string>) {
+    const ids = [...new Set(vehicleIds)];
+
+    if (ids.length === 0) return;
+
+    for (const vehicleId of ids) {
+      canonicalGeneration.current += 1;
+      canonicalMutationGeneration.current[vehicleId] =
+        canonicalGeneration.current;
+    }
+
+    setPersistedItineraries((previous) => {
+      const next = { ...previous };
+      for (const vehicleId of ids) delete next[vehicleId];
+      return next;
+    });
+
+    setPendingItineraries((previous) => {
+      const next = { ...previous };
+      for (const vehicleId of ids) delete next[vehicleId];
+      return next;
+    });
+
+    setItineraryInvalidations((previous) => {
+      const next = new Set(previous);
+      for (const vehicleId of ids) next.add(vehicleId);
+      return next;
+    });
+  }
+
+  /* True (and explains why) when the board is read-only because no single
+     tenant is selected. Every edit path checks this first (PLAN-8). */
+  function planningReadOnly(): boolean {
+    if (planningTenantId) return false;
+    setMessage(PLANNING_SAVE_BLOCKED_MESSAGES.no_tenant_selected);
+    return true;
+  }
+
+  function reloadBoard() {
+    const seq = ++loadSeq.current;
+    void loadData(() => loadSeq.current !== seq);
+  }
+
+  function moveJob(jobId: string, vehicleId: string | null, beforeJobId: string | null) {
+    if (planningReadOnly()) {
+      setAssignmentRefusal(PLANNING_ASSIGNMENT_BLOCKED_MESSAGE);
+      return;
+    }
+    setAssignmentRefusal(null);
+    const job = jobById.get(jobId);
+    if (!job || job.subcontractor_id) return;
+
+    if (vehicleId) {
+      const targetLane = laneOrders[vehicleId] ?? [];
+
+      if (
+        !targetLane.includes(jobId) &&
+        wouldExceedPlanningRouteJobLimit(targetLane, [jobId])
+      ) {
+        setMessage(
+          `A vehicle route can contain up to ${MAX_PLANNING_ROUTE_JOBS} jobs.`
+        );
+        return;
+      }
+    }
+
+    setSelectedUnassignedJobIds((prev) => {
+      if (!prev.has(jobId)) return prev;
+      const next = new Set(prev);
+      next.delete(jobId);
+      return next;
+    });
+
+    /* `routes` is keyed by vehicle id, so a cached route outlives the lane it
+       described. Every lane this job leaves, plus the one it enters, now has a
+       different composition: drop just those entries and let the route effect
+       refetch the selected one. */
+    const affected = new Set<string>();
+    if (vehicleId) affected.add(vehicleId);
+    for (const [vid, ids] of Object.entries(laneOrders)) {
+      if (ids.includes(jobId)) affected.add(vid);
+    }
+    if (affected.size > 0) {
+      invalidateCanonicalVehicles(affected);
+      setRoutes((prev) => {
+        const next = { ...prev };
+        for (const vid of affected) delete next[vid];
+        return next;
+      });
+    }
+    setLaneOrders((prev) => {
+      const next: Record<string, string[]> = {};
+      for (const [vid, ids] of Object.entries(prev)) next[vid] = ids.filter((id) => id !== jobId);
+      if (vehicleId) {
+        const lane = next[vehicleId] ?? [];
+        const at = beforeJobId ? lane.indexOf(beforeJobId) : -1;
+        if (at === -1) lane.push(jobId);
+        else lane.splice(at, 0, jobId);
+        next[vehicleId] = lane;
+      }
+      return next;
+    });
+  }
+
+  function openAcceptanceTargets(targetJobs: PlanJob[]) {
+    const pendingTargets = targetJobs.filter(
+      (job) => job.status === "pending_acceptance"
+    );
+
+    if (pendingTargets.length === 0) {
+      setMessage("There are no jobs awaiting acceptance.");
+      return;
+    }
+
+    if (pendingTargets.some((job) => !job.tenant_id)) {
+      setMessage(
+        "Cannot accept these jobs because tenant information is unavailable."
+      );
+      return;
+    }
+
+    const pendingJobs = pendingTargets.filter(
+      (job): job is PlanJob & { tenant_id: string } =>
+        typeof job.tenant_id === "string" && job.tenant_id.length > 0
+    );
+
+    if (pendingJobs.length !== pendingTargets.length) {
+      setMessage(
+        "Cannot accept these jobs because tenant information is unavailable."
+      );
+      return;
+    }
+
+    const tenantIds = new Set(pendingJobs.map((job) => job.tenant_id));
+
+    if (tenantIds.size !== 1) {
+      setMessage("Cannot accept jobs belonging to different tenants together.");
+      return;
+    }
+
+    setMessage("");
+    setAcceptanceTarget({
+      jobs: pendingJobs.map((job) => ({
+        id: job.id,
+        tenant_id: job.tenant_id,
+        reference: job.reference,
+      })),
+    });
+    setAcceptanceForm({
+      collection_eta: "",
+      delivery_eta: "",
+      acceptance_note: "",
+    });
+  }
+
+  function openAcceptance(jobId: string) {
+    const job = jobById.get(jobId);
+
+    if (!job || job.status !== "pending_acceptance") {
+      setMessage("This job is no longer awaiting acceptance.");
+      return;
+    }
+
+    openAcceptanceTargets([job]);
+  }
+
+  function openAcceptAllPending() {
+    openAcceptanceTargets(
+      jobs.filter((job) => job.status === "pending_acceptance")
+    );
+  }
+
+  function cancelAcceptance() {
+    if (accepting) {
+      return;
+    }
+
+    setAcceptanceTarget(null);
+    setAcceptanceForm({
+      collection_eta: "",
+      delivery_eta: "",
+      acceptance_note: "",
+    });
+  }
+
+  async function confirmAcceptance() {
+    if (!acceptanceTarget || accepting) {
+      return;
+    }
+
+    setMessage("");
+
+    if (!acceptanceForm.collection_eta) {
+      setMessage("Enter a collection ETA before accepting the job.");
+      return;
+    }
+
+    const collectionDate = new Date(acceptanceForm.collection_eta);
+
+    if (Number.isNaN(collectionDate.getTime())) {
+      setMessage("Enter a valid collection ETA.");
+      return;
+    }
+
+    let deliveryDate: Date | null = null;
+
+    if (acceptanceForm.delivery_eta) {
+      deliveryDate = new Date(acceptanceForm.delivery_eta);
+
+      if (Number.isNaN(deliveryDate.getTime())) {
+        setMessage("Enter a valid delivery ETA.");
+        return;
+      }
+
+      if (deliveryDate.getTime() < collectionDate.getTime()) {
+        setMessage(
+          "Delivery ETA cannot be earlier than collection ETA."
+        );
+        return;
+      }
+    }
+
+    const targets = acceptanceTarget.jobs;
+
+    if (targets.length === 0) {
+      setMessage("There are no jobs awaiting acceptance.");
+      setAcceptanceTarget(null);
+      return;
+    }
+
+    const tenantIds = new Set(targets.map((target) => target.tenant_id));
+
+    if (tenantIds.size !== 1) {
+      setMessage("Cannot accept jobs belonging to different tenants together.");
+      return;
+    }
+
+    const tenantId = targets[0].tenant_id;
+    const targetIds = Array.from(
+      new Set(targets.map((target) => target.id))
+    );
+
+    if (targetIds.length !== targets.length) {
+      setMessage("Acceptance stopped because duplicate jobs were selected.");
+      return;
+    }
+
+    setAccepting(true);
+
+    try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        setMessage(
+          "Your session has expired. Please sign in again."
+        );
+        return;
+      }
+
+      const acceptedAt = new Date().toISOString();
+      const collectionEta = collectionDate.toISOString();
+      const deliveryEta = deliveryDate
+        ? deliveryDate.toISOString()
+        : null;
+      const acceptanceNote =
+        acceptanceForm.acceptance_note.trim() || null;
+
+      const {
+        data: acceptedJobs,
+        error: acceptanceError,
+      } = await supabase
+        .from("jobs")
+        .update({
+          status: "planned",
+          accepted_at: acceptedAt,
+          accepted_by: user.id,
+          collection_eta: collectionEta,
+          delivery_eta: deliveryEta,
+          acceptance_note: acceptanceNote,
+        })
+        .in("id", targetIds)
+        .eq("tenant_id", tenantId)
+        .eq("status", "pending_acceptance")
+        .select("id");
+
+      if (acceptanceError) {
+        setMessage(
+          `Accept job error: ${acceptanceError.message}`
+        );
+        return;
+      }
+
+      const acceptedIds = new Set(
+        (acceptedJobs ?? []).map((job) => job.id)
+      );
+
+      if (acceptedIds.size !== targetIds.length) {
+        const failure =
+          acceptedIds.size === 0
+            ? "These jobs have already been accepted or are no longer awaiting acceptance."
+            : `${acceptedIds.size} of ${targetIds.length} jobs were accepted. The board has been reloaded because another job changed.`;
+
+        setAcceptanceTarget(null);
+
+        const seq = ++loadSeq.current;
+        await loadData(() => loadSeq.current !== seq);
+        setMessage(failure);
+        return;
+      }
+
+      setJobs((prev) =>
+        prev.map((job) =>
+          acceptedIds.has(job.id)
+            ? {
+                ...job,
+                status: "planned",
+                collection_eta: collectionEta,
+                delivery_eta: deliveryEta,
+                acceptance_note: acceptanceNote,
+                accepted_at: acceptedAt,
+                accepted_by: user.id,
+              }
+            : job
+        )
+      );
+
+      setMessage(
+        targetIds.length === 1
+          ? `Job ${targets[0].reference ?? targets[0].id} accepted.`
+          : `${targetIds.length} jobs accepted.`
+      );
+
+      setAcceptanceTarget(null);
+      setAcceptanceForm({
+        collection_eta: "",
+        delivery_eta: "",
+        acceptance_note: "",
+      });
+    } finally {
+      setAccepting(false);
+    }
+  }
+
+  function toggleUnassignedSelection(jobId: string, selected: boolean) {
+    if (!unassigned.some((job) => job.id === jobId)) return;
+
+    setSelectedUnassignedJobIds((prev) => {
+      const next = new Set(prev);
+
+      if (selected) {
+        next.add(jobId);
+      } else {
+        next.delete(jobId);
+      }
+
+      return next;
+    });
+  }
+
+  function selectAllUnassigned() {
+    setSelectedUnassignedJobIds(new Set(unassigned.map((job) => job.id)));
+  }
+
+  function clearUnassignedSelection() {
+    setSelectedUnassignedJobIds(new Set());
+  }
+
+  function assignSelectedToVehicle() {
+    if (planningReadOnly()) {
+      setAssignmentRefusal(PLANNING_ASSIGNMENT_BLOCKED_MESSAGE);
+      return;
+    }
+    setAssignmentRefusal(null);
+    const vehicleId = bulkVehicleId || selectedVehicleId;
+
+    if (!vehicleId || !vehicles.some((vehicle) => vehicle.id === vehicleId)) {
+      setMessage("Choose a vehicle before assigning selected jobs.");
+      return;
+    }
+
+    const selectedIds = unassigned
+      .filter((job) => selectedUnassignedJobIds.has(job.id))
+      .map((job) => job.id);
+
+    if (selectedIds.length === 0) {
+      setMessage("Check at least one unassigned job first.");
+      return;
+    }
+
+    const targetLane = laneOrders[vehicleId] ?? [];
+
+    if (wouldExceedPlanningRouteJobLimit(targetLane, selectedIds)) {
+      setMessage(
+        `A vehicle route can contain up to ${MAX_PLANNING_ROUTE_JOBS} jobs.`
+      );
+      return;
+    }
+
+    invalidateCanonicalVehicles([vehicleId]);
+
+    setLaneOrders((prev) =>
+      assignJobsToLane(prev, selectedIds, vehicleId)
+    );
+
+    setRoutes((prev) => {
+      const next = { ...prev };
+      delete next[vehicleId];
+      return next;
+    });
+
+    setSelectedVehicleId(vehicleId);
+    setBulkVehicleId(vehicleId);
+    setSelectedUnassignedJobIds(new Set());
+    setMessage("");
+  }
+
+  function moveLaneJob(jobId: string, vehicleId: string, offset: -1 | 1) {
+    if (planningReadOnly()) return;
+    const currentLane = laneOrders[vehicleId] ?? [];
+    const currentIndex = currentLane.indexOf(jobId);
+
+    if (
+      currentIndex === -1 ||
+      currentIndex + offset < 0 ||
+      currentIndex + offset >= currentLane.length
+    ) {
+      return;
+    }
+
+    invalidateCanonicalVehicles([vehicleId]);
+
+    setLaneOrders((prev) =>
+      moveJobInLane(prev, vehicleId, jobId, offset)
+    );
+
+    setRoutes((prev) => {
+      const next = { ...prev };
+      delete next[vehicleId];
+      return next;
+    });
+
+    setSelectedVehicleId(vehicleId);
+    setBulkVehicleId(vehicleId);
+    setMessage("");
+  }
+
+  async function persistPlan(mode: "manual" | "auto"): Promise<boolean> {
+    if (saveInFlight.current || (!dirty && !hasCanonicalWork && !stagedSavedPlan)) return false;
+
+    const updates = pendingUpdates.map((update) => ({ ...update }));
+    const snapshotJson = pendingUpdatesJson;
+    const invalidationSnapshot = [...itineraryInvalidations];
+    const canonicalSnapshot = Object.values(pendingItineraries);
+    const generationSnapshot = { ...canonicalMutationGeneration.current };
+
+    const failedSnapshot = autosaveSnapshot;
+
+    /* Validated before anything is written: no tenant selected, or a job
+       from another tenant, refuses the save outright (PLAN-8). */
+    const savePlanResult = buildPlanningSavePlan(
+      updates,
+      jobById,
+      planningTenantId
+    );
+
+    if (!savePlanResult.ok) {
+      setMessage(
+        `Save error: ${PLANNING_SAVE_BLOCKED_MESSAGES[savePlanResult.reason]}`
+      );
+      setSaveStatus("local-only");
+      if (mode === "auto") {
+        setAutosaveFailure((previous) =>
+          recordAutosaveFailure(previous, failedSnapshot, false)
+        );
+      }
+      return false;
+    }
+
+    const activeTenantId = savePlanResult.tenantId;
+    let failureKind: PlanningSaveErrorKind | null = null;
+
+    saveInFlight.current = true;
+    setSaving(true);
+    setSaveStatus("saving");
+
+    if (mode === "manual") {
+      setMessage("");
+    }
+
+    try {
+      /* One atomic call. Every job carries the assignment this tab last saw;
+         the RPC refuses the whole save if any job changed since (PLAN-11). */
+      if (savePlanResult.rows.length > 0) {
+        const { error } = await savePlanningAssignments(supabase, savePlanResult, date);
+
+        if (error) {
+          failureKind = classifyPlanningSaveError(error);
+
+          if (failureKind === "failed") {
+            console.error("planning save failed:", error.code, error.message);
+          }
+
+          throw new Error(planningSaveErrorMessage(failureKind, error));
+        }
+      }
+
+      const invalidations = invalidationSnapshot;
+
+      for (const vehicleId of invalidations) {
+        const { error } = await supabase.rpc(
+          "invalidate_planning_route_itinerary",
+          {
+            p_tenant_id: activeTenantId,
+            p_planning_date: date,
+            p_vehicle_id: vehicleId,
+          }
+        );
+
+        if (error) {
+          throw new Error(`canonical itinerary invalidation failed: ${error.message}`);
+        }
+      }
+
+      const pendingCanonical = canonicalSnapshot;
+
+      for (const itinerary of pendingCanonical) {
+        const rpcVisits = buildPlanningItineraryRpcVisits(
+          itinerary.orderedVisits,
+          itinerary.serviceStops
+        );
+
+        const { error } = await supabase.rpc(
+          "replace_planning_route_itinerary",
+          {
+            p_tenant_id: activeTenantId,
+            p_planning_date: date,
+            p_vehicle_id: itinerary.vehicleId,
+            p_driver_id: itinerary.driverId,
+            p_visits: rpcVisits,
+          }
+        );
+
+        if (error) {
+          if (isUnlicensedVehicleError(error)) {
+            failureKind = "unlicensed_vehicle";
+            throw new Error(planningSaveErrorMessage(failureKind, error));
+          }
+          throw new Error(`canonical itinerary save failed: ${error.message}`);
+        }
+      }
+
+      const completedInvalidations = invalidations.filter(
+        (vehicleId) =>
+          canonicalMutationGeneration.current[vehicleId] ===
+          generationSnapshot[vehicleId]
+      );
+
+      const completedCanonical = pendingCanonical.filter(
+        (itinerary) =>
+          canonicalMutationGeneration.current[itinerary.vehicleId] ===
+          generationSnapshot[itinerary.vehicleId]
+      );
+
+      if (completedInvalidations.length > 0) {
+        setItineraryInvalidations((previous) => {
+          const next = new Set(previous);
+
+          for (const vehicleId of completedInvalidations) {
+            next.delete(vehicleId);
+          }
+
+          return next;
+        });
+      }
+
+      if (completedCanonical.length > 0) {
+        setPersistedItineraries((previous) => {
+          const next = { ...previous };
+
+          for (const itinerary of completedCanonical) {
+            next[itinerary.vehicleId] = itinerary;
+          }
+
+          return next;
+        });
+
+        setPendingItineraries((previous) => {
+          const next = { ...previous };
+
+          for (const itinerary of completedCanonical) {
+            if (previous[itinerary.vehicleId] === itinerary) {
+              delete next[itinerary.vehicleId];
+            }
+          }
+
+          return next;
+        });
+      }
+
+      for (const vehicleId of completedInvalidations) {
+        if (
+          canonicalMutationGeneration.current[vehicleId] ===
+          generationSnapshot[vehicleId]
+        ) {
+          delete canonicalMutationGeneration.current[vehicleId];
+        }
+      }
+
+      for (const itinerary of completedCanonical) {
+        if (
+          canonicalMutationGeneration.current[itinerary.vehicleId] ===
+          generationSnapshot[itinerary.vehicleId]
+        ) {
+          delete canonicalMutationGeneration.current[itinerary.vehicleId];
+        }
+      }
+
+      const savedByJobId = new Map(
+        updates.map((update) => [update.id, update])
+      );
+
+      // Move the in-memory server baseline forward to exactly what landed.
+      // If the planner edited again while this request was in flight, those
+      // newer lane changes remain in laneOrders/laneDrivers and become the
+      // next diff rather than being overwritten by a reload.
+      setJobs((previous) =>
+        previous.map((job) => {
+          const saved = savedByJobId.get(job.id);
+          return saved
+            ? {
+                ...job,
+                vehicle_id: saved.vehicle_id,
+                driver_id: saved.driver_id,
+                route_order: saved.route_order,
+                planning_date: saved.planning_date,
+              }
+            : job;
+        })
+      );
+      setBaselineDiff("[]");
+
+      const newerCanonicalEditsExist = Object.entries(
+        canonicalMutationGeneration.current
+      ).some(
+        ([vehicleId, generation]) =>
+          generationSnapshot[vehicleId] !== generation
+      );
+
+      const newerEditsExist =
+        latestPendingUpdatesJson.current !== snapshotJson ||
+        newerCanonicalEditsExist;
+
+      if (!newerEditsExist) {
+        if (activeTenantId && typeof window !== "undefined") {
+          try {
+            if (!Object.values(editorDrafts).some((draft) => draft.edited)) window.localStorage.removeItem(
+              planningDraftStorageKey(activeTenantId, date)
+            );
+          } catch {
+            // Saving to the database succeeded; storage cleanup is best effort.
+          }
+        }
+
+        setSaveStatus("saved");
+      } else {
+        setSaveStatus("pending");
+      }
+
+      setAutosaveFailure(null);
+      setSaveConflict(false);
+      setSaveRound((round) => round + 1);
+
+      return true;
+    } catch (error) {
+      const reason =
+        error instanceof Error ? error.message : "unknown save failure";
+
+      if (failureKind === "conflict") {
+        setSaveConflict(true);
+      }
+
+      /* Conflicts and a missing RPC will fail the same way every time, so
+         autosave stops at once; anything else backs off (PLAN-7). */
+      setAutosaveFailure((previous) =>
+        recordAutosaveFailure(
+          previous,
+          failedSnapshot,
+          failureKind === null || failureKind === "failed"
+        )
+      );
+
+      setMessage(
+        mode === "auto"
+          ? `Autosave failed: ${reason}`
+          : `Save error: ${reason}`
+      );
+      setSaveStatus("local-only");
+      return false;
+    } finally {
+      saveInFlight.current = false;
+      setSaving(false);
+    }
+  }
+
+  async function signOffVanJob(vehicleId: string, jobId: string, action: PlanSignOff, requestId: string, failure?: CollectionFailure | CollectionFailureUndo) {
+    const job = jobById.get(jobId);
+    if (!planningTenantId || !job || job.tenant_id !== planningTenantId ||
+        !laneOrders[vehicleId]?.includes(jobId)) {
+      throw new Error("This job is no longer on the selected van.");
+    }
+
+    const sequence = loadSeq.current;
+    const isFailureAction = action === "fail" || action === "undo-failure";
+    if (isFailureAction && !failure) throw new Error("Choose a collection stop.");
+    const response = await fetch(isFailureAction ? "/api/planning/collection-failure" : "/api/warehouse/actions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(isFailureAction ? { tenantId: planningTenantId, requestId, jobId, action, ...failure } : {
+        tenantId: planningTenantId, requestId, jobIds: [jobId], action,
+        note: "Signed off from the Planning van card.",
+      }),
+    });
+    const body = await response.json();
+    if (!response.ok || !body.ok) {
+      throw new Error(body.error ?? "Could not save sign-off. Try again.");
+    }
+    if (loadSeq.current !== sequence) return;
+
+    if (isFailureAction && failure) {
+      setJobs((previous) => previous.map((entry) => entry.id === jobId ? {
+        ...entry,
+        stops: entry.stops.map((stop) => {
+          if (stop.id !== failure.stopId) return stop;
+          if ("attemptId" in failure) {
+            return stop.last_failed_attempt?.clientId === failure.attemptId &&
+              stop.status === "failed" && stop.pod_status === "failed" && !stop.collected_at && !stop.delivered_at
+              ? { ...stop, status: "planned", pod_status: "pending" }
+              : stop;
+          }
+          return { ...stop, status: "failed", pod_status: "failed",
+            last_failed_attempt: { reason: failure.reason, clientId: requestId, flags: ["office"] } };
+        }),
+      } : entry));
+      if (action === "undo-failure") setMessage("Failed collection undone.");
+      return;
+    }
+
+    const delivered = action === "deliver";
+    const recordedAt = body.result.recordedAt as string;
+    const signedJob: PlanJob = {
+      ...job,
+      status: delivered ? "completed" : "collected",
+      stops: job.stops.map((stop) => {
+        if (stop.type === "collection") {
+          return { ...stop, status: "completed", pod_status: "collected", collected_at: stop.collected_at ?? recordedAt };
+        }
+        if (delivered && stop.type === "delivery") {
+          return { ...stop, status: "completed", pod_status: "delivered", delivered_at: stop.delivered_at ?? recordedAt };
+        }
+        return stop;
+      }),
+    };
+    if (delivered) {
+      setJobs((previous) => previous.filter((entry) => entry.id !== jobId));
+      setCompletedJobs((previous) => [
+        ...previous.filter((entry) => entry.id !== jobId),
+        { ...signedJob, vehicle_id: vehicleId },
+      ]);
+      setLaneOrders((previous) => Object.fromEntries(
+        Object.entries(previous).map(([id, jobs]) => [id, jobs.filter((entry) => entry !== jobId)])
+      ));
+      invalidateCanonicalVehicles([vehicleId]);
+      setRoutes((previous) => {
+        const next = { ...previous };
+        delete next[vehicleId];
+        return next;
+      });
+    } else {
+      setJobs((previous) => previous.map((entry) => entry.id === jobId
+        ? { ...entry, status: signedJob.status, stops: signedJob.stops }
+        : entry));
+    }
+  }
+
+  function currentSavedPlanSnapshot(existingPlan?: LoadedSavedPlan) {
+    const savedJobIds = existingPlan
+      ? new Set(existingPlan.snapshot.lanes.flatMap((lane) => lane.jobIds))
+      : null;
+    return createSavedPlanSnapshot({
+      planningDate: date,
+      editorDrafts,
+      lanes: displayVehicles.map(vehicle => lanePlans.find(lane => lane.vehicleId === vehicle.id)!).map((lane) => ({
+        vehicleId: lane.vehicleId,
+        driverId: lane.driverId,
+        ...(lane.preserveJobDrivers ? { preserveJobDrivers: true } : {}),
+        // Keep saved delivery history without bringing back jobs removed from the snapshot.
+        jobIds: [
+          ...lane.jobIds,
+          ...(completedByVehicle.get(lane.vehicleId) ?? [])
+            .filter((job) => !savedJobIds || savedJobIds.has(job.id))
+            .map((job) => job.id),
+        ],
+      })),
+      pendingItineraries,
+      persistedItineraries,
+    });
+  }
+
+  async function refreshSavedPlans() {
+    if (!planningTenantId) {
+      setSavedPlans([]);
+      return;
+    }
+
+    setSavedPlansLoading(true);
+
+    try {
+      setSavedPlans(await listSavedPlans(supabase, planningTenantId));
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Saved plans could not be loaded."
+      );
+    } finally {
+      setSavedPlansLoading(false);
+    }
+  }
+
+  function stageLoadedSavedPlan(loaded: LoadedSavedPlan) {
+    const activeVehicleIds = new Set(vehicles.map((vehicle) => vehicle.id));
+    const knownJobIds = new Set(jobs.map((job) => job.id));
+    const completedJobIds = new Set(completedJobs.map((job) => job.id));
+    const knownDriverIds = new Set(drivers.map((driver) => driver.id));
+
+    const orders: Record<string, string[]> = {};
+    const driverAssignments: Record<string, string | null> = {};
+
+    for (const vehicle of vehicles) {
+      orders[vehicle.id] = [];
+      driverAssignments[vehicle.id] = null;
+    }
+
+    let omittedJobs = 0;
+    let omittedVehicles = 0;
+    let omittedDrivers = 0;
+
+    for (const lane of loaded.snapshot.lanes) {
+      if (!activeVehicleIds.has(lane.vehicleId)) {
+        omittedVehicles += 1;
+        omittedJobs += lane.jobIds.length;
+        continue;
+      }
+
+      orders[lane.vehicleId] = lane.jobIds.filter((jobId) => {
+        if (completedJobIds.has(jobId)) return false;
+        if (!knownJobIds.has(jobId)) {
+          omittedJobs += 1;
+          return false;
+        }
+
+        return true;
+      });
+
+      if (lane.driverId && knownDriverIds.has(lane.driverId)) {
+        driverAssignments[lane.vehicleId] = lane.driverId;
+      } else {
+        driverAssignments[lane.vehicleId] = null;
+        if (lane.driverId) omittedDrivers += 1;
+      }
+    }
+
+    const reconstructed =
+      savedPlanSnapshotToPendingItineraries(loaded.snapshot);
+
+    const usableCanonical: Record<string, PendingPlanningItinerary> = {};
+    let staleCanonicalRoutes = 0;
+
+    for (const [vehicleId, itinerary] of Object.entries(reconstructed)) {
+      if (!activeVehicleIds.has(vehicleId)) continue;
+
+      const laneJobIds = new Set(orders[vehicleId] ?? []);
+      const laneJobs = jobs.filter((job) => laneJobIds.has(job.id));
+      const expectedStopIds = new Set(
+        laneJobs.flatMap((job) => job.stops.map((stop) => stop.id))
+      );
+      const seenStopIds = new Set<string>();
+      let canonicalMatchesLane = itinerary.serviceStops.length > 0;
+
+      for (const service of itinerary.serviceStops) {
+        const job = laneJobs.find((candidate) => candidate.id === service.jobId);
+
+        if (
+          !job ||
+          !knownJobIds.has(service.jobId) ||
+          !laneJobIds.has(service.jobId) ||
+          seenStopIds.has(service.stopId) ||
+          !job.stops.some((stop) => stop.id === service.stopId)
+        ) {
+          canonicalMatchesLane = false;
+          break;
+        }
+
+        seenStopIds.add(service.stopId);
+      }
+
+      if (
+        canonicalMatchesLane &&
+        expectedStopIds.size === seenStopIds.size &&
+        [...expectedStopIds].every((stopId) => seenStopIds.has(stopId))
+      ) {
+        usableCanonical[vehicleId] = itinerary;
+      } else {
+        staleCanonicalRoutes += 1;
+      }
+    }
+
+    const canonicalVehicleIds = new Set(Object.keys(usableCanonical));
+
+    setLaneOrders(orders);
+    setLaneDrivers(driverAssignments);
+    setPreserveLaneDrivers(new Set(loaded.snapshot.lanes.filter(lane => lane.preserveJobDrivers).map(lane => lane.vehicleId)));
+    setPendingItineraries(usableCanonical);
+    setItineraryInvalidations(
+      new Set(
+        Object.keys(persistedItineraries).filter(
+          (vehicleId) => !canonicalVehicleIds.has(vehicleId)
+        )
+      )
+    );
+    setRoutes({});
+    setSelectedUnassignedJobIds(new Set());
+    setBulkVehicleId("");
+    setDriverConflicts(new Set());
+    setRecoveryDraft(null);
+    setStagedSavedPlan(loaded);
+    setEditorDrafts(loaded.snapshot.editorDrafts ?? {});
+    setSaveStatus("pending");
+
+    setSelectedVehicleId(
+      (returnContext?.planId === loaded.id && returnContext.vehicleId && activeVehicleIds.has(returnContext.vehicleId)
+        ? returnContext.vehicleId : null) ?? vehicles.find(
+        (vehicle) => (orders[vehicle.id] ?? []).length > 0
+      )?.id ??
+        vehicles[0]?.id ??
+        null
+    );
+
+    const warnings: string[] = [];
+
+    if (omittedVehicles) {
+      warnings.push(`${omittedVehicles} unavailable vehicle(s) omitted`);
+    }
+
+    if (omittedJobs) {
+      warnings.push(`${omittedJobs} unavailable job(s) omitted`);
+    }
+
+    if (omittedDrivers) {
+      warnings.push(`${omittedDrivers} unavailable driver(s) cleared`);
+    }
+
+    if (staleCanonicalRoutes) {
+      warnings.push(
+        `Smart Optimize order for ${staleCanonicalRoutes} ${
+          staleCanonicalRoutes === 1 ? "vehicle" : "vehicles"
+        } no longer matches its current jobs or stops and was not restored; re-run Smart Optimize for those lanes`
+      );
+    }
+
+    setMessage(
+      warnings.length
+        ? `Loaded "${loaded.name}". ${warnings.join(
+            "; "
+          )}. Review it, then press Apply plan.`
+        : `Loaded "${loaded.name}". Review it, then press Apply plan.`
+    );
+  }
+
+  async function saveNamedPlan() {
+    if (!planningTenantId || savedPlanBusy) return;
+
+    const name = savedPlanName.trim();
+
+    if (!name) {
+      setMessage("Enter a name for the saved plan.");
+      return;
+    }
+
+    setSavedPlanBusy(true);
+
+    try {
+      const { data, error } = await supabase.auth.getUser();
+
+      if (error || !data.user) {
+        throw new Error("You must be signed in to save a plan.");
+      }
+
+      const created = await createSavedPlan(supabase, {
+        tenantId: planningTenantId,
+        planningDate: date,
+        name,
+        snapshot: currentSavedPlanSnapshot(),
+        userId: data.user.id,
+      });
+
+      setSavedPlanName("");
+      setMessage(`Saved plan "${created.name}".`);
+      await refreshSavedPlans();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Saved plan could not be created."
+      );
+    } finally {
+      setSavedPlanBusy(false);
+    }
+  }
+
+  async function openNamedPlan(id: string) {
+    if (!planningTenantId || savedPlanBusy) return;
+
+    setSavedPlanBusy(true);
+
+    try {
+      const loaded = await loadSavedPlan(
+        supabase,
+        planningTenantId,
+        id
+      );
+
+      pendingSavedPlanOpen.current = loaded;
+      setStagedSavedPlan(null);
+      if (loaded.planningDate !== date) {
+        setDate(loaded.planningDate);
+        return;
+      }
+
+      // Reload the snapshot's jobs even when their operational dates moved.
+      // The loading effect stages the plan only after that read completes.
+      const seq = ++loadSeq.current;
+      await loadData(() => loadSeq.current !== seq);
+    } catch (error) {
+      pendingSavedPlanOpen.current = null;
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Saved plan could not be opened."
+      );
+    } finally {
+      setSavedPlanBusy(false);
+    }
+  }
+
+  async function updateNamedPlan() {
+    if (!planningTenantId || !stagedSavedPlan?.id || savedPlanBusy || stagedPlanMoved) {
+      return;
+    }
+
+    setSavedPlanBusy(true);
+
+    try {
+      await updateSavedPlanSnapshot(supabase, {
+        tenantId: planningTenantId,
+        id: stagedSavedPlan.id,
+        planningDate: date,
+        snapshot: currentSavedPlanSnapshot(stagedSavedPlan),
+      });
+
+      setMessage(`Updated saved plan "${stagedSavedPlan.name}".`);
+      await refreshSavedPlans();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Saved plan could not be updated."
+      );
+    } finally {
+      setSavedPlanBusy(false);
+    }
+  }
+
+  async function renameNamedPlan(plan: SavedPlanSummary) {
+    if (!planningTenantId || savedPlanBusy) return;
+
+    const proposed = window.prompt("Saved plan name", plan.name);
+    if (proposed === null) return;
+
+    const name = proposed.trim();
+    if (!name || name === plan.name) return;
+
+    setSavedPlanBusy(true);
+
+    try {
+      await renameSavedPlan(
+        supabase,
+        planningTenantId,
+        plan.id,
+        name
+      );
+
+      if (stagedSavedPlan?.id === plan.id) {
+        setStagedSavedPlan({ ...stagedSavedPlan, name });
+      }
+
+      await refreshSavedPlans();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Saved plan could not be renamed."
+      );
+    } finally {
+      setSavedPlanBusy(false);
+    }
+  }
+
+  async function duplicateNamedPlan(plan: SavedPlanSummary) {
+    if (!planningTenantId || savedPlanBusy) return;
+
+    setSavedPlanBusy(true);
+
+    try {
+      const { data, error } = await supabase.auth.getUser();
+
+      if (error || !data.user) {
+        throw new Error("You must be signed in to duplicate a plan.");
+      }
+
+      const duplicate = await duplicateSavedPlan(
+        supabase,
+        planningTenantId,
+        plan.id,
+        data.user.id
+      );
+
+      setMessage(`Duplicated as "${duplicate.name}".`);
+      await refreshSavedPlans();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Saved plan could not be duplicated."
+      );
+    } finally {
+      setSavedPlanBusy(false);
+    }
+  }
+
+  async function moveNamedPlanToNextDay(plan: SavedPlanSummary) {
+    if (!planningTenantId || savedPlanBusy || saving || loading) return;
+
+    setSavedPlanBusy(true);
+    try {
+      const moved = await moveSavedPlanToNextDay(supabase, planningTenantId, plan);
+      setSavedPlans((plans) => [moved, ...plans.filter((entry) => entry.id !== moved.id)]);
+      setMessage(`Moved "${moved.name}" to ${moved.planningDate}. Open it and select Apply plan when ready.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Saved plan could not be moved.");
+    } finally {
+      setSavedPlanBusy(false);
+    }
+  }
+
+  async function deleteNamedPlan(plan: SavedPlanSummary) {
+    if (!planningTenantId || savedPlanBusy) return;
+
+    if (!window.confirm(`Delete saved plan "${plan.name}"?`)) return;
+
+    setSavedPlanBusy(true);
+
+    try {
+      await deleteSavedPlan(
+        supabase,
+        planningTenantId,
+        plan.id
+      );
+
+      if (stagedSavedPlan?.id === plan.id) {
+        setStagedSavedPlan({
+          ...stagedSavedPlan,
+          id: "",
+          name: `${stagedSavedPlan.name} (deleted)`,
+        });
+      }
+
+      setMessage(`Deleted saved plan "${plan.name}".`);
+      await refreshSavedPlans();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Saved plan could not be deleted."
+      );
+    } finally {
+      setSavedPlanBusy(false);
+    }
+  }
+
+  async function discardStagedPlan() {
+    pendingSavedPlanOpen.current = null;
+    setStagedSavedPlan(null);
+    await loadData(() => false);
+    setMessage("Staged saved plan discarded.");
+  }
+
+  async function savePlan() {
+    if (stagedPlanMoved || savedPlanBusy) return;
+    if (stagedSavedPlan) {
+      const applied = await persistPlan("manual");
+
+      if (applied) {
+        setStagedSavedPlan(null);
+        setMessage("Saved plan applied to the live plan.");
+      }
+
+      return;
+    }
+
+    await persistPlan("manual");
+  }
+
+  useEffect(() => {
+    void refreshSavedPlans();
+
+    // Refresh only when the tenant changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planningTenantId]);
+
+  useEffect(() => {
+    setReturnContext(readPlanningReturnContext(window.location.search));
+  }, []);
+
+  useEffect(() => {
+    if (!returnContext?.planId || !planningTenantId || returnContext.tenantId !== planningTenantId || loading || savedPlanBusy) return;
+    const key = `${planningTenantId}:${returnContext.planId}`;
+    if (restoredReturnPlan.current === key) return;
+    restoredReturnPlan.current = key;
+    // Reuse the read-only saved-plan open path. This stages its current jobs;
+    // returning from a job never applies or overwrites the saved plan.
+    void openNamedPlan(returnContext.planId);
+    // Open once after the initial board has loaded, not after subsequent edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [returnContext, planningTenantId, loading, savedPlanBusy]);
+
+  useEffect(() => {
+    if (
+      !planningTenantId ||
+      loading ||
+      recoveryDraft ||
+      stagedSavedPlan ||
+      (!hasUnsavedWork && !Object.values(editorDrafts).some((draft) => draft.edited))
+    ) {
+      return;
+    }
+
+    const storageKey = planningDraftStorageKey(
+      planningTenantId,
+      date
+    );
+
+    if (loadedPlanningScope.current !== storageKey) {
+      return;
+    }
+
+    const draft = createPlanningDraft({
+      tenantId: planningTenantId,
+      date,
+      laneOrders,
+      laneDrivers,
+      selectedVehicleId,
+      updatedAt: Date.now(),
+      baseline: draftBaseline,
+      editorDrafts,
+    });
+
+    try {
+      window.localStorage.setItem(
+        storageKey,
+        JSON.stringify(draft)
+      );
+    } catch {
+      setSaveStatus("local-only");
+      return;
+    }
+
+    if (!hasUnsavedWork) return;
+
+    /* A refused save waits for the planner to reload; retrying cannot help. */
+    if (saveConflict) {
+      setSaveStatus("local-only");
+      return;
+    }
+
+    /* No timer while a save is in flight. `saveRound` (success) or
+       `autosaveFailure` (failure) re-runs this effect when it settles, so
+       `saving` is deliberately not a dependency: it used to re-arm autosave
+       every 1.2 s after every failure, forever (PLAN-7). */
+    if (saveInFlight.current) {
+      setSaveStatus("pending");
+      return;
+    }
+
+    const delay = autosaveDelay(autosaveSnapshot, autosaveFailure);
+
+    if (delay === null) {
+      setSaveStatus("local-only");
+      return;
+    }
+
+    setSaveStatus("pending");
+
+    const timer = window.setTimeout(() => {
+      void persistPlan("auto");
+    }, delay);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+
+    // persistPlan intentionally uses the exact render snapshot represented by
+    // pendingUpdatesJson. A new edit tears down this timer and schedules a new
+    // snapshot rather than racing the old one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    planningTenantId,
+    date,
+    loading,
+    recoveryDraft,
+    stagedSavedPlan,
+    dirty,
+    hasCanonicalWork,
+    hasUnsavedWork,
+    autosaveSnapshot,
+    autosaveFailure,
+    saveConflict,
+    saveRound,
+    draftBaselineKey,
+    editorDrafts,
+    laneOrders,
+    laneDrivers,
+    selectedVehicleId,
+  ]);
+
+  useEffect(() => {
+    const pending = pendingSavedPlanOpen.current;
+
+    if (!pending || !savedPlanBoardReady({
+      loading,
+      loadedScope: loadedPlanningScope.current,
+      requestedScope: planningDraftStorageKey(planningTenantId ?? "", date),
+      tenantId: planningTenantId,
+      planningDate: date,
+      savedPlan: pending,
+    })) {
+      return;
+    }
+
+    pendingSavedPlanOpen.current = null;
+    stageLoadedSavedPlan(pending);
+
+    // Uses the freshly loaded board for the Saved Plan's date.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, date, planningTenantId]);
+
+  function restoreRecoveryDraft() {
+    if (!recoveryDraft || planningReadOnly()) return;
+
+    // Allocation-only recovery must retain the route it describes. A changed
+    // lane order or driver still invalidates its canonical itinerary.
+    const changedVehicles = Object.keys(recoveryDraft.laneOrders).filter((vehicleId) =>
+      JSON.stringify(recoveryDraft.laneOrders[vehicleId]) !== JSON.stringify(laneOrders[vehicleId] ?? []) ||
+      (recoveryDraft.laneDrivers[vehicleId] ?? null) !== (laneDrivers[vehicleId] ?? null)
+    );
+    invalidateCanonicalVehicles(changedVehicles);
+    setEditorDrafts(recoveryDraft.editorDrafts ?? {});
+    setLaneOrders(recoveryDraft.laneOrders);
+    setLaneDrivers(recoveryDraft.laneDrivers);
+    setSelectedVehicleId(recoveryDraft.selectedVehicleId);
+    setBulkVehicleId(recoveryDraft.selectedVehicleId ?? "");
+    if (changedVehicles.length) setRoutes({});
+    setDriverConflicts(new Set());
+    setRecoveryDraft(null);
+    setSaveStatus("pending");
+    setMessage(
+      "Recovered the local planning draft. Assignment changes use autosave; manual day allocations remain drafts until scheduling review."
+    );
+  }
+
+  function discardRecoveryDraft() {
+    if (
+      tenant.status === "ready" &&
+      typeof tenant.activeTenantId === "string" &&
+      typeof window !== "undefined"
+    ) {
+      try {
+        window.localStorage.removeItem(
+          planningDraftStorageKey(tenant.activeTenantId, date)
+        );
+      } catch {
+        // Discarding browser recovery data is best effort.
+      }
+    }
+
+    setRecoveryDraft(null);
+    setSaveStatus("saved");
+    setMessage("");
+  }
+
+  async function optimize() {
+    if (optimizing || !selectedVehicleId || planningReadOnly()) return;
+
+    const routable = selectedLaneJobs.filter(isRoutable);
+
+    if (routable.length < 2) {
+      setMessage(
+        "Optimize needs at least two mappable jobs in the selected lane."
+      );
+      return;
+    }
+
+    setOptimizing(true);
+    setMessage(
+      "Smart Optimize is calculating the physical drop order from the van..."
+    );
+
+    try {
+      const vehicleReading = positions.get(selectedVehicleId) ?? null;
+
+      if (
+        !vehicleReading ||
+        !Number.isFinite(vehicleReading.lat) ||
+        !Number.isFinite(vehicleReading.lng)
+      ) {
+        setMessage(
+          "Smart Optimize needs a last-known vehicle position so Drop 1 can start from the van."
+        );
+        return;
+      }
+
+      const controller = new AbortController();
+      optimizeAbort.current = controller;
+
+      const optimized = await optimizeFastPlotOrderFromStart(
+        selectedLaneJobs,
+        { lat: vehicleReading.lat, lng: vehicleReading.lng },
+        createBudgetedFastPlotCostLoader(
+          8,
+          loadCachedFastPlotCosts
+        ),
+        { signal: controller.signal }
+      );
+
+      if (controller.signal.aborted || (!optimized.ok && optimized.reason === "cancelled")) {
+        setMessage("Smart Optimize was cancelled. The lane order is unchanged.");
+        return;
+      }
+
+      if (!optimized.ok) {
+        const reason =
+          optimized.reason === "no_reachable_first_visit"
+            ? "TomTom could not reach any eligible first stop from the van."
+            : optimized.reason === "no_routable_visits"
+              ? "The selected lane has no routable stops."
+              : optimized.reason === "unsupported_physical_route"
+                ? "The selected lane has a physical stop sequence that Fast Plot cannot safely optimize."
+                : optimized.reason === "start_cost_unavailable"
+                  ? "TomTom could not calculate travel from the van to the eligible first stops."
+                  : "TomTom anchored Drop 1, but Fast Plot could not calculate the remaining route.";
+
+        setMessage(reason);
+        return;
+      }
+
+      const physicalItinerary = buildPlanningPhysicalItinerary(
+        selectedLaneJobs.filter(isRoutable),
+        optimized.orderedVisits
+      );
+
+      const reordered = jobsInFastPlotOrder(
+        selectedLaneJobs,
+        optimized.route
+      );
+
+      const expectedIds = new Set(
+        selectedLaneJobs.map((job) => job.id)
+      );
+      const reorderedIds = new Set(reordered);
+
+      if (
+        reordered.length !== selectedLaneJobs.length ||
+        reorderedIds.size !== expectedIds.size ||
+        reordered.some((id) => !expectedIds.has(id))
+      ) {
+        setMessage("Smart Optimize failed.");
+        return;
+      }
+
+      canonicalGeneration.current += 1;
+      canonicalMutationGeneration.current[selectedVehicleId] =
+        canonicalGeneration.current;
+
+      setPersistedItineraries((previous) => {
+        const next = { ...previous };
+        delete next[selectedVehicleId];
+        return next;
+      });
+
+      setItineraryInvalidations((previous) => {
+        const next = new Set(previous);
+        next.delete(selectedVehicleId);
+        return next;
+      });
+
+      setPendingItineraries((previous) => ({
+        ...previous,
+        [selectedVehicleId]: {
+          vehicleId: selectedVehicleId,
+          driverId: laneDrivers[selectedVehicleId] ?? null,
+          orderedVisits: optimized.orderedVisits,
+          serviceStops: physicalItinerary.serviceStops,
+        },
+      }));
+
+      setLaneOrders((prev) => ({
+        ...prev,
+        [selectedVehicleId]: reordered,
+      }));
+      setMessage(
+        "Smart Optimize updated the canonical physical drop order. Autosave will persist it."
+      );
+
+      // The lane's order changed, so its cached route describes the old one.
+      setRoutes((prev) => {
+        const next = { ...prev };
+        delete next[selectedVehicleId];
+        return next;
+      });
+    } catch {
+      setMessage("Smart Optimize failed.");
+    } finally {
+      optimizeAbort.current = null;
+      setOptimizing(false);
+    }
+  }
+
+  const selectedVehicle = selectedVehicleId
+    ? vehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? null
+    : null;
+
+  const selectedRoute = selectedVehicleId ? (routes[selectedVehicleId] ?? null) : null;
+  const selectedVehicleReading = selectedVehicleId
+    ? (positions.get(selectedVehicleId) ?? null)
+    : null;
+
+  const laneRegimeByVehicle = useMemo(() => {
+    const result = new Map<string, LaneRegimeSummary>();
+
+    for (const vehicle of vehicles) {
+      const laneJobs = (laneOrders[vehicle.id] ?? [])
+        .map((jobId) => jobById.get(jobId))
+        .filter((job): job is PlanJob => Boolean(job));
+
+      result.set(
+        vehicle.id,
+        summarizeLaneRegimes(vehicle, laneJobs)
+      );
+    }
+
+    return result;
+  }, [vehicles, laneOrders, jobById]);
+
+  useEffect(() => {
+    if (tenant.status !== "ready") {
+      setDriverHoursById({});
+      return;
+    }
+
+    const assignedDriverIds = [
+      ...new Set(
+        Object.values(laneDrivers).filter(
+          (value): value is string =>
+            typeof value === "string" && value.length > 0
+        )
+      ),
+    ];
+
+    if (assignedDriverIds.length === 0) {
+      setDriverHoursById({});
+      return;
+    }
+
+    const driversById = new Map(
+      drivers.map((driver) => [driver.id, driver])
+    );
+
+    /*
+     * Activity can only establish legal state up to an instant that has
+     * actually happened. A future planning start necessarily contains an
+     * unknown interval of future activity, so it remains incomplete.
+     *
+     * When planning TODAY after the driver's start time, the state is
+     * evaluated at now, not at the start time, so driving and duty already
+     * recorded today count (review PLAN-2). hoursClock re-runs this every few
+     * minutes so "now" does not freeze while the tab stays open.
+     */
+    const activityKnownThrough = new Date();
+
+    let cancelled = false;
+
+    void (async () => {
+      const entries = await Promise.all(
+        assignedDriverIds.map(async (driverId) => {
+          const driver = driversById.get(driverId);
+
+          if (!driver) {
+            return [driverId, null] as const;
+          }
+
+          const planningStart = planningStartForLocalDate(
+            date,
+            driver.normal_start_time,
+            planningTimeZone
+          );
+
+          if (!planningStart) {
+            return [driverId, null] as const;
+          }
+
+          const hoursWindow = planningHoursInstant(
+            date,
+            planningStart,
+            activityKnownThrough,
+            planningTimeZone
+          );
+
+          if (hoursWindow.kind === "future") {
+            return [driverId, null] as const;
+          }
+
+          const evaluatedAt = hoursWindow.instant;
+
+          const boundaries = planningDriverHoursBoundaries(
+            evaluatedAt,
+            planningTimeZone
+          );
+
+          const { data, error } = await tenant.filterByTenant(
+            supabase
+              .from("driver_activity_logs")
+              .select(`
+                id,
+                driver_id,
+                activity_type,
+                activity_kind,
+                start_time,
+                end_time,
+                duration_minutes
+              `)
+          )
+            .eq("driver_id", driverId)
+            .gt(
+              "end_time",
+              boundaries.historyCoverageStart.toISOString()
+            )
+            .lt("start_time", evaluatedAt.toISOString())
+            .order("start_time", { ascending: true })
+            .limit(PLANNING_DRIVER_ACTIVITY_ROW_LIMIT);
+
+          if (error) {
+            return [driverId, null] as const;
+          }
+
+          const rows = (data ?? []) as PlanningDriverActivityRow[];
+
+          /*
+           * A result at the limit may have been truncated. It is therefore
+           * never valid evidence of complete compliance history.
+           */
+          if (rows.length >= PLANNING_DRIVER_ACTIVITY_ROW_LIMIT) {
+            return [driverId, null] as const;
+          }
+
+          return [
+            driverId,
+            buildPlanningDriverHoursState(
+              rows,
+              evaluatedAt,
+              planningTimeZone
+            ),
+          ] as const;
+        })
+      );
+
+      if (cancelled) return;
+
+      setDriverHoursById(Object.fromEntries(entries));
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    tenant.status,
+    tenant.activeTenantId,
+    date,
+    drivers,
+    laneDrivers,
+    planningTimeZone,
+    supabase,
+    hoursClock,
+  ]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        setHoursClock(Date.now());
+      }
+    }, HOURS_REFRESH_MS);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+
+  useEffect(() => {
+    setSelectedDriverSchedule(null);
+    setDriverScheduleNotice(null);
+    setDriverScheduleNotes([]);
+    setDriverScheduleLoading(false);
+
+    if (!selectedVehicleId) return;
+
+    const canonical =
+      pendingItineraries[selectedVehicleId] ??
+      persistedItineraries[selectedVehicleId];
+
+    if (!canonical || canonical.orderedVisits.length === 0) {
+      setDriverScheduleNotice(
+        "Driver-hours preview needs a canonical Smart Optimize itinerary."
+      );
+      return;
+    }
+
+    const driverId = laneDrivers[selectedVehicleId] ?? null;
+
+    if (!driverId) {
+      setDriverScheduleNotice(
+        "Assign a driver to calculate the driver-hours preview."
+      );
+      return;
+    }
+
+    if (canonical.driverId !== driverId) {
+      setDriverScheduleNotice(
+        "The canonical itinerary belongs to a different driver. Re-run Smart Optimize."
+      );
+      return;
+    }
+
+    const driver = driverById.get(driverId) as Driver | undefined;
+
+    if (!driver) {
+      setDriverScheduleNotice(
+        "The assigned driver is unavailable."
+      );
+      return;
+    }
+
+    const planningStart = planningStartForLocalDate(
+      date,
+      driver.normal_start_time,
+      planningTimeZone
+    );
+
+    if (!planningStart) {
+      setDriverScheduleNotice(
+        planningStartIssue(
+          date,
+          driver.normal_start_time,
+          planningTimeZone
+        ) === "clock_change_gap"
+          ? `The driver's normal start time ${driver.normal_start_time?.slice(0, 5)} does not exist on ${date} in ${planningTimeZone}, because the clocks go forward then. The driver profile is fine; this day needs a start after the change.`
+          : "Set a valid normal start time for this driver before calculating driver hours."
+      );
+      return;
+    }
+
+    const scheduleNow = new Date();
+    const hoursWindow = planningHoursInstant(
+      date,
+      planningStart,
+      scheduleNow,
+      planningTimeZone
+    );
+    /* Today, after the start time: ETAs start from now (review PLAN-2). */
+    const scheduleStart =
+      hoursWindow.kind === "known" ? hoursWindow.instant : planningStart;
+    /* A later day: the vehicle's current GPS fix says nothing about where it
+       starts that day (review PLAN-24), and no depot coordinate exists. */
+    const futureDay =
+      date > operatorDayInTimeZone(scheduleNow, planningTimeZone);
+
+    const scheduleNotes: string[] = [];
+
+    if (hoursWindow.kind === "known" && hoursWindow.rebasedToNow) {
+      scheduleNotes.push(
+        "Today's start time has passed, so ETAs start from now and the driving already recorded today is counted."
+      );
+    }
+
+    if (futureDay) {
+      scheduleNotes.push(
+        "This is a future day, so travel to the first stop is not included: the vehicle's start location for that day is unknown. Recorded driver hours before that day are not applied either."
+      );
+    }
+
+    const regime = laneRegimeByVehicle.get(selectedVehicleId);
+
+    if (
+      !regime ||
+      regime.status !== "single" ||
+      regime.regime !== "assimilated" ||
+      regime.reviewRequired
+    ) {
+      setDriverScheduleNotice(
+        "Driver-hours preview requires a single assimilated lane regime without classification review."
+      );
+      return;
+    }
+
+    if (driver.planning_profile === "day") {
+      setDriverScheduleNotice(
+        "DAY driver scheduling needs an explicit operating-base coordinate before return-to-base travel can be calculated."
+      );
+      return;
+    }
+
+    const reading = positions.get(selectedVehicleId);
+
+    if (
+      !futureDay &&
+      (!reading ||
+        !Number.isFinite(reading.lat) ||
+        !Number.isFinite(reading.lng))
+    ) {
+      setDriverScheduleNotice(
+        "Driver-hours preview needs the vehicle's last-known position."
+      );
+      return;
+    }
+
+    const route = routes[selectedVehicleId] ?? null;
+
+    if (canonical.orderedVisits.length > 1 && !route) {
+      setDriverScheduleNotice(
+        "Waiting for the canonical TomTom route."
+      );
+      return;
+    }
+
+    let cancelled = false;
+
+    setDriverScheduleLoading(true);
+
+    void (async () => {
+      try {
+        const firstPoint = canonical.orderedVisits[0].point;
+
+        const firstTravelSeconds =
+          futureDay || !reading
+            ? 0
+            : await loadPointToPointTravelSeconds(
+                { lat: reading.lat, lng: reading.lng },
+                firstPoint
+              );
+
+        if (cancelled) return;
+
+        if (firstTravelSeconds === null) {
+          setDriverScheduleNotice(
+            "TomTom could not calculate travel from the van to Drop 1."
+          );
+          return;
+        }
+
+        const result = buildPlanningDriverSchedulePreview({
+          jobs: selectedLaneJobs.filter(isRoutable),
+          orderedVisits: canonical.orderedVisits,
+          serviceStops: canonical.serviceStops,
+          route,
+          firstTravelSeconds,
+          planningProfile: driver.planning_profile,
+          planningDate: date,
+          planningStart: scheduleStart,
+          driverHoursState: futureDay
+            ? null
+            : driverHoursById[driverId] ?? null,
+          activityDataAvailable:
+            !futureDay &&
+            driverHoursById[driverId]?.complete === true,
+          startLocationId: `vehicle:${selectedVehicleId}`,
+          regime: regime.regime,
+          regimeReviewRequired: regime.reviewRequired,
+        });
+
+        if (cancelled) return;
+
+        if (!result.ok) {
+          const notices = {
+            route_leg_mismatch:
+              "TomTom route legs do not match the canonical physical itinerary.",
+            route_unavailable:
+              "The canonical TomTom route is unavailable.",
+            unsupported_regime:
+              "This lane does not have a supported driver-hours regime.",
+            day_base_unavailable:
+              "DAY driver scheduling needs an operating-base coordinate.",
+            physical_route_mismatch:
+              "The canonical service order does not match the physical itinerary.",
+          } as const;
+
+          setDriverScheduleNotice(notices[result.reason]);
+          return;
+        }
+
+        setSelectedDriverSchedule(result.preview);
+        setDriverScheduleNotes(scheduleNotes);
+        setDriverScheduleNotice(null);
+      } catch {
+        if (!cancelled) {
+          setSelectedDriverSchedule(null);
+          setDriverScheduleNotice(
+            "Driver-hours preview could not be calculated."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setDriverScheduleLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selectedVehicleId,
+    selectedLaneJobs,
+    pendingItineraries,
+    persistedItineraries,
+    laneDrivers,
+    driverById,
+    date,
+    planningTimeZone,
+    laneRegimeByVehicle,
+    positions,
+    routes,
+    driverHoursById,
+  ]);
+
+  const laneComplianceByVehicle = useMemo(() => {
+    const today = operatorDayInTimeZone(positionNow, planningTimeZone);
+    const result = new Map<string, PlanningCompliance>();
+
+    for (const vehicle of vehicles) {
+      const jobCount = (laneOrders[vehicle.id] ?? []).length;
+      const driverId = laneDrivers[vehicle.id] ?? null;
+      const route = routes[vehicle.id] ?? null;
+
+      result.set(
+        vehicle.id,
+        evaluatePlanningCompliance({
+          driver: driverId ? (driverById.get(driverId) ?? null) : null,
+          hasPlannedJobs: jobCount > 0,
+          plannedDrivingSeconds:
+            jobCount === 0
+              ? 0
+              : route?.totalTravelTimeSeconds ?? null,
+          driverHours:
+            driverId !== null
+              ? driverHoursById[driverId] ?? null
+              : null,
+          today,
+        })
+      );
+    }
+
+    return result;
+  }, [
+    vehicles,
+    laneOrders,
+    laneDrivers,
+    routes,
+    driverById,
+    driverHoursById,
+    positionNow,
+    planningTimeZone,
+  ]);
+
+  const planningHealth = useMemo(() => {
+    const plannedVehicleIds = vehicles
+      .filter((vehicle) => (laneOrders[vehicle.id] ?? []).length > 0)
+      .map((vehicle) => vehicle.id);
+
+    const results = plannedVehicleIds
+      .map((vehicleId) => laneComplianceByVehicle.get(vehicleId))
+      .filter((value): value is PlanningCompliance => Boolean(value));
+
+    return {
+      plannedVehicles: plannedVehicleIds.length,
+      unassignedJobs: unassigned.length,
+      routesCalculated: plannedVehicleIds.filter(
+        (vehicleId) => Boolean(routes[vehicleId])
+      ).length,
+      warnings: results.filter(
+        (result) => result.status === "warning"
+      ).length,
+      incomplete: results.filter(
+        (result) => !result.dataComplete
+      ).length,
+    };
+  }, [
+    vehicles,
+    laneOrders,
+    laneComplianceByVehicle,
+    routes,
+    unassigned.length,
+  ]);
+
+  /* Canonical itineraries number every collection/delivery service occurrence
+     as a Drop. Shared physical locations therefore use a combined marker such
+     as "1/2". Without a canonical itinerary the legacy lane position remains
+     the manual-planning fallback. */
+  const markers: MapMarker[] = useMemo(() => {
+    const canonical = selectedVehicleId
+      ? pendingItineraries[selectedVehicleId] ??
+        persistedItineraries[selectedVehicleId]
+      : null;
+
+    if (canonical) {
+      return buildPlanningDropMarkers(
+        canonical.orderedVisits,
+        canonical.serviceStops
+      );
+    }
+
+    return selectedLaneJobs.flatMap((job, index) => {
+      const position = jobRepresentativePoint(job);
+      return position ? [{ position, label: String(index + 1) }] : [];
+    });
+  }, [
+    selectedVehicleId,
+    selectedLaneJobs,
+    pendingItineraries,
+    persistedItineraries,
+  ]);
+
+  function laneSummary(vehicleId: string): string | null {
+    const route = routes[vehicleId];
+    const count = (laneOrders[vehicleId] ?? []).length;
+    if (!route) return null;
+    return `${count} ${count === 1 ? "job" : "jobs"} · ${formatDistance(route.totalDistanceMeters)} · ${formatDuration(route.totalTravelTimeSeconds)}`;
+  }
+
+  return (
+    <TenantGate>
+      <div className="ds min-h-screen min-w-0 max-w-full bg-canvas font-sans text-ink">
+        <main className="flex min-w-0 max-w-full flex-col gap-4 p-3 sm:p-6">
+          <header className="flex flex-wrap items-center gap-3">
+            <h1 className="text-xl font-semibold">Planning</h1>
+            <input
+              type="date"
+              aria-label="Plan date"
+              value={date}
+              onChange={(e) => e.target.value && setDate(e.target.value)}
+              className="min-h-11 min-w-0 max-w-full rounded-md border border-line bg-surface px-2 py-1 text-sm text-ink"
+            />
+            {selectedRoute ? (
+              <span className="text-sm text-ink-2">
+                {formatDistance(selectedRoute.totalDistanceMeters)} · {formatDuration(selectedRoute.totalTravelTimeSeconds)}
+              </span>
+            ) : null}
+
+          </header>
+
+          {tenant.status === "ready" && !planningTenantId ? (
+            <p className="text-sm text-warning">
+              {PLANNING_SAVE_BLOCKED_MESSAGES.no_tenant_selected}
+            </p>
+          ) : null}
+          {timeZoneNote ? (
+            <p className="text-sm text-warning">{timeZoneNote}</p>
+          ) : null}
+          {message ? <p className="text-sm text-danger">{message}</p> : null}
+          {geocodeUnavailable ? (
+            <p className="text-sm text-ink-3">
+              Address lookup is unavailable, so routes and map pins are off. Assigning and sequencing still works.
+            </p>
+          ) : null}
+
+          <section
+            aria-label="Planning health"
+            className="grid gap-2 rounded-lg border border-line bg-surface p-3 shadow-sm sm:grid-cols-2 xl:grid-cols-5"
+          >
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ink-3">
+                Planned vehicles
+              </p>
+              <p className="text-lg font-semibold text-ink">
+                {planningHealth.plannedVehicles}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ink-3">
+                Unassigned jobs
+              </p>
+              <p className="text-lg font-semibold text-ink">
+                {planningHealth.unassignedJobs}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ink-3">
+                Routes calculated
+              </p>
+              <p className="text-lg font-semibold text-ink">
+                {planningHealth.routesCalculated}
+                <span className="text-sm font-normal text-ink-3">
+                  {" / "}
+                  {planningHealth.plannedVehicles}
+                </span>
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ink-3">
+                Wizard warnings
+              </p>
+              <p className="text-lg font-semibold text-warning">
+                {planningHealth.warnings}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ink-3">
+                Compliance incomplete
+              </p>
+              <p className="text-lg font-semibold text-ink">
+                {planningHealth.incomplete}
+              </p>
+            </div>
+
+            <p className="sm:col-span-2 xl:col-span-5 text-xs text-ink-3">
+              Advisory only: nothing here blocks dispatch or confirms a plan
+              is legal. With complete driver activity data each lane checks
+              daily (9 h), weekly (56 h) and two-week (90 h) driving and when
+              a 45 min break is due; without it, hours are not checked at all.{" "}
+              {PLANNING_CHECKS_NOT_PERFORMED}
+            </p>
+          </section>
+
+          <section
+            aria-label="Planning actions"
+            className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-2 p-3 [&_button]:min-h-11 [&_button]:h-auto [&_button]:max-w-full [&_button]:py-2"
+          >
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={selectAllUnassigned}
+              disabled={unassigned.length === 0}
+            >
+              Check all
+            </Button>
+
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={clearUnassignedSelection}
+              disabled={selectedUnassignedCount === 0}
+            >
+              Clear
+            </Button>
+
+            <span className="min-w-[80px] text-xs font-medium text-ink-2">
+              {selectedUnassignedCount} selected
+            </span>
+
+            <select
+              aria-label="Vehicle for selected jobs"
+              value={bulkVehicleId || selectedVehicleId || ""}
+              onChange={(e) => {
+                const vehicleId = e.target.value;
+                setBulkVehicleId(vehicleId);
+                setSelectedVehicleId(vehicleId || null);
+              }}
+              className="min-h-11 min-w-0 max-w-full rounded-md border border-line bg-surface px-2 py-1.5 text-sm text-ink"
+            >
+              <option value="">Choose vehicle</option>
+              {vehicles.map((vehicle) => (
+                <option key={vehicle.id} value={vehicle.id}>
+                  {vehicle.registration}
+                </option>
+              ))}
+            </select>
+
+            <Button
+              size="sm"
+              onClick={assignSelectedToVehicle}
+              disabled={
+                selectedUnassignedCount === 0 ||
+                !(bulkVehicleId || selectedVehicleId)
+              }
+            >
+              Send selected to vehicle
+            </Button>
+
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={openAcceptAllPending}
+              disabled={
+                accepting ||
+                jobs.every((job) => job.status !== "pending_acceptance")
+              }
+            >
+              Accept all pending ({
+                jobs.filter((job) => job.status === "pending_acceptance").length
+              })
+            </Button>
+
+            {warehouseHref && <Link href={warehouseHref} target="_blank" rel="noopener" prefetch={false}
+              className="min-h-11 rounded-md border border-line px-3 py-2 text-sm font-semibold text-ink">
+              Scan barcode / Warehouse mode ↗
+            </Link>}
+            <span className="hidden h-7 w-px bg-line sm:block" aria-hidden />
+
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={optimize}
+              loading={optimizing}
+              disabled={
+                optimizing ||
+                !selectedVehicleId ||
+                selectedLaneJobs.filter(isRoutable).length < 2
+              }
+            >
+              {optimizing
+                ? "Optimizing..."
+                : selectedVehicle
+                  ? `Smart Optimize ${selectedVehicle.registration}`
+                  : "Smart Optimize Route"}
+            </Button>
+
+            {optimizing ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => optimizeAbort.current?.abort()}
+              >
+                Cancel optimize
+              </Button>
+            ) : null}
+
+            <Button
+              size="sm"
+              onClick={savePlan}
+              loading={saving}
+              disabled={
+                !planningTenantId || savedPlanBusy || stagedPlanMoved ||
+                (!stagedSavedPlan && !dirty && !hasCanonicalWork)
+              }
+            >
+              {stagedSavedPlan ? "Apply plan" : "Save plan"}
+            </Button>
+
+            {stagedSavedPlan ? (
+              <>
+                {stagedSavedPlan.id ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void updateNamedPlan()}
+                    disabled={savedPlanBusy || stagedPlanMoved}
+                  >
+                    Update saved
+                  </Button>
+                ) : null}
+
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void discardStagedPlan()}
+                  disabled={savedPlanBusy}
+                >
+                  Discard loaded plan
+                </Button>
+
+                <span className="min-w-0 max-w-full break-words [overflow-wrap:anywhere] text-xs font-medium text-ink">
+                  Loaded: {stagedSavedPlan.name}
+                </span>
+              </>
+            ) : null}
+
+            <span className="text-xs text-ink-3">
+              {!planningTenantId
+                ? "Read-only: pick a tenant to plan"
+                : stagedSavedPlan
+                  ? "Loaded saved plan — not applied"
+                  : saveStatus === "saving"
+                  ? "Saving…"
+                  : saveConflict
+                    ? "Not saved: newer changes exist on the server"
+                    : saveStatus === "local-only"
+                      ? autosaveDelay(autosaveSnapshot, autosaveFailure) === null
+                        ? "Not saved. Autosave stopped; kept in this browser. Edit or press Save plan to retry."
+                        : "Not saved yet; kept in this browser, retrying shortly"
+                      : dirty || saveStatus === "pending"
+                        ? "Autosave pending"
+                        : "Plan saved ✓"}
+            </span>
+
+            {saveConflict ? (
+              <div className="basis-full rounded-md border border-line bg-surface p-3 text-sm">
+                <p className="font-medium text-warning">
+                  This plan was changed elsewhere
+                </p>
+                <p className="mt-1 text-xs text-ink-3">
+                  {PLANNING_SAVE_ERROR_MESSAGES.conflict}
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <Button size="sm" onClick={reloadBoard}>
+                    Reload board
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
+            {recoveryDraft ? (
+              <div className="basis-full rounded-md border border-line bg-surface p-3 text-sm">
+                <p className="font-medium">
+                  Recovered local planning draft available
+                </p>
+                <p className="mt-1 text-xs text-ink-3">
+                  This browser has a newer unsaved draft for this tenant and planning date.
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <Button size="sm" onClick={restoreRecoveryDraft}>
+                    Restore draft
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={discardRecoveryDraft}
                   >
                     Discard
