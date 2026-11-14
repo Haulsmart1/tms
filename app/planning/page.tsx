@@ -11,7 +11,7 @@ import MessageBanner from "../../components/MessageBanner";
 import PlanningMap, { type MapMarker } from "./PlanningMap";
 import UnassignedPool from "./UnassignedPool";
 import VehicleLane from "./VehicleLane";
-import type { PlanSignOff } from "./PlanJobCard";
+import type { CollectionFailure, PlanSignOff } from "./PlanJobCard";
 import { useVehicleLayout } from "./useVehicleLayout";
 import Link from "next/link";
 import JobDetailDialog from "./JobDetailDialog";
@@ -513,7 +513,7 @@ export default function PlanningPage() {
         id: s.id, stop_order: s.stop_order, type: s.type,
         address_line: s.address_line, city: s.city, postcode: s.postcode,
         contact_name: s.contact_name, contact_phone: s.contact_phone, contact_email: s.contact_email,
-        status: s.status, pod_status: s.pod_status, collected_at: s.collected_at, delivered_at: s.delivered_at,
+        status: s.status, pod_status: s.pod_status, last_failed_attempt: s.last_failed_attempt, collected_at: s.collected_at, delivered_at: s.delivered_at,
         lat: s.lat, lng: s.lng,
       })),
       items: (row.job_items ?? []).map((item: any) => ({
@@ -1713,7 +1713,7 @@ export default function PlanningPage() {
     }
   }
 
-  async function signOffVanJob(vehicleId: string, jobId: string, action: PlanSignOff, requestId: string) {
+  async function signOffVanJob(vehicleId: string, jobId: string, action: PlanSignOff, requestId: string, failure?: CollectionFailure) {
     const job = jobById.get(jobId);
     if (!planningTenantId || !job || job.tenant_id !== planningTenantId ||
         !laneOrders[vehicleId]?.includes(jobId)) {
@@ -1721,10 +1721,11 @@ export default function PlanningPage() {
     }
 
     const sequence = loadSeq.current;
-    const response = await fetch("/api/warehouse/actions", {
+    if (action === "fail" && !failure) throw new Error("Choose a collection reason.");
+    const response = await fetch(action === "fail" ? "/api/planning/collection-failure" : "/api/warehouse/actions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      body: JSON.stringify(action === "fail" ? { tenantId: planningTenantId, requestId, jobId, ...failure } : {
         tenantId: planningTenantId, requestId, jobIds: [jobId], action,
         note: "Signed off from the Planning van card.",
       }),
@@ -1734,6 +1735,16 @@ export default function PlanningPage() {
       throw new Error(body.error ?? "Could not save sign-off. Try again.");
     }
     if (loadSeq.current !== sequence) return;
+
+    if (failure && action === "fail") {
+      setJobs((previous) => previous.map((entry) => entry.id === jobId ? {
+        ...entry,
+        stops: entry.stops.map((stop) => stop.id === failure.stopId ? {
+          ...stop, status: "failed", pod_status: "failed", last_failed_attempt: { reason: failure.reason },
+        } : stop),
+      } : entry));
+      return;
+    }
 
     const delivered = action === "deliver";
     const recordedAt = body.result.recordedAt as string;
@@ -3797,8 +3808,8 @@ export default function PlanningPage() {
                       }}
                       onOpenJob={setDetailJobId}
                       onAcceptJob={openAcceptance}
-                      onSignOff={planningTenantId ? (jobId, action, requestId) =>
-                        signOffVanJob(v.id, jobId, action, requestId) : undefined}
+                      onSignOff={planningTenantId ? (jobId, action, requestId, failure) =>
+                        signOffVanJob(v.id, jobId, action, requestId, failure) : undefined}
                       onMoveJob={(jobId, offset) =>
                         moveLaneJob(jobId, v.id, offset)
                       }
