@@ -12,6 +12,17 @@ export async function POST(request: Request) {
       throw new OfficeEvidenceError(403, "Invalid request origin.");
     }
     const body = await request.json().catch(() => null);
+    if (body?.action === "undo-collection") {
+      if (!isUuid(body.jobId) || !isUuid(body.requestId)) {
+        throw new OfficeEvidenceError(400, "Choose a collected job to undo.");
+      }
+      const { admin, tenantId, userId } = await requireOfficeCaller(body.tenantId);
+      const { data, error } = await admin.rpc("undo_planning_collection", {
+        p_tenant: tenantId, p_job: body.jobId, p_actor: userId, p_request: body.requestId,
+      });
+      if (error) warehouseDatabaseError(error);
+      return NextResponse.json({ ok: true, result: data }, { headers: { "Cache-Control": "no-store" } });
+    }
     if (!isUuid(body?.jobId) || !isUuid(body?.stopId) || !isUuid(body?.requestId)
       || !isCollectionFailureReason(body?.reason)) {
       throw new OfficeEvidenceError(400, "Choose a collection stop and reason.");

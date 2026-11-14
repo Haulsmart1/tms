@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import PlanJobCard from "../../app/planning/PlanJobCard";
-import { planningJobProgress } from "./jobProgress";
+import { canUndoPlanningCollection, planningJobProgress } from "./jobProgress";
 import type { PlanJob, PlanStop } from "./types";
 
 const collection: PlanStop = { id: "collect", type: "collection", stop_order: 1, address_line: "1 Test Road", city: "Test", postcode: "AA1 1AA", lat: null, lng: null };
@@ -32,6 +32,16 @@ describe("van job progress", () => {
   it("does not treat failed or cancelled collections as successful", () => {
     expect(planningJobProgress({ ...job, stops: [{ ...collection, status: "failed" }, delivery] })).toBe("pending");
     expect(planningJobProgress({ ...job, status: "cancelled", stops: [{ ...collection, pod_status: "collected" }, delivery] })).toBe("pending");
+  });
+  it("offers Undo collection on amber van cards before any delivery", () => {
+    const collected = { ...collection, pod_status: "collected" };
+    const amber = { ...job, stops: [collected, delivery] };
+    const markup = renderToStaticMarkup(createElement(PlanJobCard, {
+      job: amber, sequence: 1, geocodeSettled: false, onSignOff: async () => {},
+    }));
+    expect(markup).toContain("Undo collection");
+    expect(canUndoPlanningCollection(job)).toBe(false);
+    expect(canUndoPlanningCollection({ ...job, stops: [collected, { ...delivery, pod_status: "delivered" }, delivery] })).toBe(false);
   });
   it("keeps amber progress visible when the card is selected", () => {
     const markup = renderToStaticMarkup(createElement(PlanJobCard, { job: { ...job, stops: [{ ...collection, pod_status: "collected" }, delivery] }, sequence: 1, geocodeSettled: false, selected: true }));

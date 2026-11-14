@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useRef, useState } from "react";
+import { canUndoPlanningCollection } from "../../lib/planning/jobProgress";
 import Modal from "../../components/Modal";
 import Button, { buttonClasses } from "../../components/Button";
 import JobLabelPrinter from "../jobs/JobLabelPrinter";
@@ -29,6 +31,7 @@ type Props = {
   /** True once geocoding has been attempted, so a missing fix means "failed",
       never "still loading". Same meaning as on PlanJobCard. */
   geocodeSettled: boolean;
+  onUndoCollection?: (requestId: string) => Promise<void>;
   onClose: () => void;
   onAccept: (jobId: string) => void;
 };
@@ -49,9 +52,29 @@ export default function JobDetailDialog({
   timeZone,
   planningContext,
   geocodeSettled,
+  onUndoCollection,
   onClose,
   onAccept,
 }: Props) {
+  const undoRequest = useRef<string | null>(null);
+  const [undoing, setUndoing] = useState(false);
+  const [undoError, setUndoError] = useState<string | null>(null);
+
+  async function undoCollection() {
+    if (!onUndoCollection || undoing) return;
+    setUndoing(true);
+    setUndoError(null);
+    try {
+      undoRequest.current ??= crypto.randomUUID();
+      await onUndoCollection(undoRequest.current);
+      undoRequest.current = null;
+    } catch (error) {
+      setUndoError(error instanceof Error ? error.message : "Could not undo collection. Try again.");
+    } finally {
+      setUndoing(false);
+    }
+  }
+
   const stops = sortedStops(job);
   const items = job.items ?? [];
   const reference = job.reference ?? "No reference";
@@ -77,6 +100,11 @@ export default function JobDetailDialog({
               onClick={() => onAccept(job.id)}
             >
               Accept
+            </Button>
+          ) : null}
+          {onUndoCollection && canUndoPlanningCollection(job) ? (
+            <Button type="button" variant="secondary" loading={undoing} onClick={() => void undoCollection()}>
+              Undo collection
             </Button>
           ) : null}
           <JobLabelPrinter
@@ -105,6 +133,7 @@ export default function JobDetailDialog({
           </span>
         </div>
 
+        {undoError ? <p role="alert" className="text-danger">{undoError}</p> : null}
         <dl className="grid gap-1.5">
           <Row label="Assignment" value={assignment} />
           <Row label="Collection ETA" value={formatEta(job.collection_eta, timeZone)} />
