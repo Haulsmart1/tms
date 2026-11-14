@@ -25,6 +25,7 @@ export type PlanStop = {
   contact_email?: string | null;
   status?: string | null;
   pod_status?: string | null;
+  last_failed_attempt?: { reason?: string } | null;
   collected_at?: string | null;
   delivered_at?: string | null;
   /** TomTom geocode cache, written by app/api/tomtom/geocode. NULL until then. */

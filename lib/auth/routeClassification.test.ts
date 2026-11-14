@@ -70,6 +70,7 @@ const PROTECTED_ROUTES = [
   "/api/warehouse",
   "/api/warehouse/actions",
   "/api/planning/collection-email",
+  "/api/planning/collection-failure",
   "/api/assistant",
   "/api/integrations/catalogue",
   "/settings/integrations",

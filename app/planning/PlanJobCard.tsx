@@ -5,8 +5,11 @@ import { isRoutable, sortedStops } from "../../lib/planning/waypoints";
 import type { PlanJob } from "../../lib/planning/types";
 import { planningJobProgress } from "../../lib/planning/jobProgress";
 
-export type PlanSignOff = "collect" | "deliver";
-export type PlanSignOffHandler = (jobId: string, action: PlanSignOff, requestId: string) => Promise<void>;
+import { COLLECTION_FAILURE_REASONS, isCollectionFailureReason, type CollectionFailureReason } from "../../lib/planning/collectionFailure";
+
+export type CollectionFailure = { stopId: string; reason: CollectionFailureReason };
+export type PlanSignOff = "collect" | "deliver" | "fail";
+export type PlanSignOffHandler = (jobId: string, action: PlanSignOff, requestId: string, failure?: CollectionFailure) => Promise<void>;
 
 type Props = {
   job: PlanJob;
@@ -62,8 +65,18 @@ export default function PlanJobCard({
   const signOffLock = useRef(false);
   const signOffRequests = useRef<Partial<Record<PlanSignOff, string>>>({});
   const [signingOff, setSigningOff] = useState<PlanSignOff | null>(null);
+  const [showFailure, setShowFailure] = useState(false);
+  const [failedStopId, setFailedStopId] = useState("");
+  const [reason, setReason] = useState<CollectionFailureReason | "">("");
   const [signOffError, setSignOffError] = useState<string | null>(null);
   const stops = sortedStops(job);
+  const failedCollection = stops.find((stop) => stop.type === "collection" && stop.status === "failed");
+  const failureReason = failedCollection?.last_failed_attempt?.reason;
+  const pendingCollections = stops.filter((stop) => stop.type === "collection" &&
+    !stop.collected_at && !stop.delivered_at &&
+    ![stop.status, stop.pod_status].some((status) =>
+      ["failed", "completed", "collected", "delivered", "cancelled", "canceled"].includes(status ?? "")));
+  const failureStop = pendingCollections.find((stop) => stop.id === failedStopId) ?? pendingCollections[0];
   const first = stops[0];
   const last = stops[stops.length - 1];
   const progress = planningJobProgress(job);
@@ -93,14 +106,18 @@ export default function PlanJobCard({
           ? `Drop ${dropNumbers[0]}`
           : `Drops ${dropNumbers.join(", ")}`;
 
-  async function signOff(action: PlanSignOff) {
+  async function signOff(action: PlanSignOff, failure?: CollectionFailure) {
     if (!onSignOff || signOffLock.current) return;
     signOffLock.current = true;
     setSigningOff(action);
     setSignOffError(null);
     try {
       const requestId = signOffRequests.current[action] ??= crypto.randomUUID();
-      await onSignOff(job.id, action, requestId);
+      await onSignOff(job.id, action, requestId, failure);
+      if (action === "fail") {
+        setShowFailure(false);
+        setReason("");
+      }
       delete signOffRequests.current[action];
     } catch (error) {
       setSignOffError(error instanceof Error ? error.message : "Could not save sign-off. Try again.");
@@ -215,6 +232,11 @@ export default function PlanJobCard({
       <p className="text-xs text-ink-3">
         {job.customer_name ?? "No customer"} · {placeSummary}
       </p>
+      {failedCollection && progress !== "delivered" && (
+        <p className="mt-1 text-xs font-semibold text-danger">
+          Unable to collect{isCollectionFailureReason(failureReason) ? ` · ${COLLECTION_FAILURE_REASONS[failureReason]}` : ""}
+        </p>
+      )}
       {progressLabel ? (
         <p className={`mt-1 text-xs font-semibold ${progress === "delivered" ? "text-success" : "text-warning"}`}>
           {progressLabel}{progress === "collected" && sequence !== null ? " · On van" : ""}
@@ -280,6 +302,49 @@ export default function PlanJobCard({
               {signingOff === "deliver" ? "Saving…" : "Mark delivered"}
             </button>
           ) : null}
+          {failureStop && progress !== "collected" && (
+            <div className="w-full">
+              <button type="button" aria-expanded={showFailure} disabled={signingOff !== null}
+                className="min-h-11 rounded-md border border-line px-2 text-xs font-semibold text-ink"
+                onClick={() => setShowFailure(!showFailure)}>
+                Unable to collect
+              </button>
+              {showFailure && (
+                <div className="mt-2 grid gap-2">
+                  {pendingCollections.length > 1 && (
+                    <label className="grid gap-1 text-xs">
+                      Collection stop
+                      <select className="min-h-11 rounded-md border border-line bg-surface px-2"
+                        value={failureStop.id} disabled={signingOff !== null}
+                        onChange={(event) => { delete signOffRequests.current.fail; setFailedStopId(event.target.value); }}>
+                        {pendingCollections.map((stop) => <option key={stop.id} value={stop.id}>{stop.address_line}</option>)}
+                      </select>
+                    </label>
+                  )}
+                  <label className="grid gap-1 text-xs">
+                    Reason
+                    <select className="min-h-11 rounded-md border border-line bg-surface px-2"
+                      value={reason} disabled={signingOff !== null}
+                      onChange={(event) => {
+                        delete signOffRequests.current.fail;
+                        const value = event.target.value;
+                        setReason(isCollectionFailureReason(value) ? value : "");
+                      }}>
+                      <option value="">Choose a reason</option>
+                      {Object.entries(COLLECTION_FAILURE_REASONS).map(([value, label]) =>
+                        <option key={value} value={value}>{label}</option>
+                      )}
+                    </select>
+                  </label>
+                  <button type="button" disabled={!reason || signingOff !== null}
+                    className="min-h-11 rounded-md border border-warning px-2 text-xs font-semibold text-ink disabled:opacity-50"
+                    onClick={() => { if (reason) void signOff("fail", { stopId: failureStop.id, reason }); }}>
+                    {signingOff === "fail" ? "Saving…" : "Save failed collection"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           {signOffError ? <p role="alert" className="w-full text-xs text-danger">{signOffError}</p> : null}
         </div>
       ) : null}
