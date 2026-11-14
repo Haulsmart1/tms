@@ -33,6 +33,20 @@ describe("van job progress", () => {
     expect(planningJobProgress({ ...job, stops: [{ ...collection, status: "failed" }, delivery] })).toBe("pending");
     expect(planningJobProgress({ ...job, status: "cancelled", stops: [{ ...collection, pod_status: "collected" }, delivery] })).toBe("pending");
   });
+  it("offers undo only for active van-card collection failures", () => {
+    const failed = { ...collection, status: "failed", pod_status: "failed", last_failed_attempt: {
+      reason: "goods_not_available", clientId: "attempt", flags: ["office"],
+    } };
+    const render = (stop: PlanStop, readOnly = false) => renderToStaticMarkup(createElement(PlanJobCard, {
+      job: { ...job, stops: [stop, delivery] }, sequence: 1, geocodeSettled: false,
+      onSignOff: async () => {}, readOnly,
+    }));
+    expect(render(failed)).toContain("Goods not available");
+    expect(render(failed)).toContain('aria-label="Undo failed collection at 1 Test Road"');
+    expect(render({ ...failed, last_failed_attempt: { clientId: "driver-attempt", flags: [] } })).not.toContain("Undo");
+    expect(render({ ...failed, status: "planned", pod_status: "pending" })).not.toContain("Undo");
+    expect(render(failed, true)).not.toContain("Undo");
+  });
   it("keeps amber progress visible when the card is selected", () => {
     const markup = renderToStaticMarkup(createElement(PlanJobCard, { job: { ...job, stops: [{ ...collection, pod_status: "collected" }, delivery] }, sequence: 1, geocodeSettled: false, selected: true }));
     expect(markup).toContain("bg-warning-tint");

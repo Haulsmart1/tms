@@ -11,7 +11,7 @@ import MessageBanner from "../../components/MessageBanner";
 import PlanningMap, { type MapMarker } from "./PlanningMap";
 import UnassignedPool from "./UnassignedPool";
 import VehicleLane from "./VehicleLane";
-import type { CollectionFailure, PlanSignOff } from "./PlanJobCard";
+import type { CollectionFailure, CollectionFailureUndo, PlanSignOff } from "./PlanJobCard";
 import { useVehicleLayout } from "./useVehicleLayout";
 import Link from "next/link";
 import JobDetailDialog from "./JobDetailDialog";
@@ -1713,7 +1713,7 @@ export default function PlanningPage() {
     }
   }
 
-  async function signOffVanJob(vehicleId: string, jobId: string, action: PlanSignOff, requestId: string, failure?: CollectionFailure) {
+  async function signOffVanJob(vehicleId: string, jobId: string, action: PlanSignOff, requestId: string, failure?: CollectionFailure | CollectionFailureUndo) {
     const job = jobById.get(jobId);
     if (!planningTenantId || !job || job.tenant_id !== planningTenantId ||
         !laneOrders[vehicleId]?.includes(jobId)) {
@@ -1721,11 +1721,12 @@ export default function PlanningPage() {
     }
 
     const sequence = loadSeq.current;
-    if (action === "fail" && !failure) throw new Error("Choose a collection reason.");
-    const response = await fetch(action === "fail" ? "/api/planning/collection-failure" : "/api/warehouse/actions", {
+    const isFailureAction = action === "fail" || action === "undo-failure";
+    if (isFailureAction && !failure) throw new Error("Choose a collection stop.");
+    const response = await fetch(isFailureAction ? "/api/planning/collection-failure" : "/api/warehouse/actions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(action === "fail" ? { tenantId: planningTenantId, requestId, jobId, ...failure } : {
+      body: JSON.stringify(isFailureAction ? { tenantId: planningTenantId, requestId, jobId, action, ...failure } : {
         tenantId: planningTenantId, requestId, jobIds: [jobId], action,
         note: "Signed off from the Planning van card.",
       }),
@@ -1736,13 +1737,22 @@ export default function PlanningPage() {
     }
     if (loadSeq.current !== sequence) return;
 
-    if (failure && action === "fail") {
+    if (isFailureAction && failure) {
       setJobs((previous) => previous.map((entry) => entry.id === jobId ? {
         ...entry,
-        stops: entry.stops.map((stop) => stop.id === failure.stopId ? {
-          ...stop, status: "failed", pod_status: "failed", last_failed_attempt: { reason: failure.reason },
-        } : stop),
+        stops: entry.stops.map((stop) => {
+          if (stop.id !== failure.stopId) return stop;
+          if ("attemptId" in failure) {
+            return stop.last_failed_attempt?.clientId === failure.attemptId &&
+              stop.status === "failed" && stop.pod_status === "failed" && !stop.collected_at && !stop.delivered_at
+              ? { ...stop, status: "planned", pod_status: "pending" }
+              : stop;
+          }
+          return { ...stop, status: "failed", pod_status: "failed",
+            last_failed_attempt: { reason: failure.reason, clientId: requestId, flags: ["office"] } };
+        }),
       } : entry));
+      if (action === "undo-failure") setMessage("Failed collection undone.");
       return;
     }
 

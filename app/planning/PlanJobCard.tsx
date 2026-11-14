@@ -8,8 +8,9 @@ import { planningJobProgress } from "../../lib/planning/jobProgress";
 import { COLLECTION_FAILURE_REASONS, isCollectionFailureReason, type CollectionFailureReason } from "../../lib/planning/collectionFailure";
 
 export type CollectionFailure = { stopId: string; reason: CollectionFailureReason };
-export type PlanSignOff = "collect" | "deliver" | "fail";
-export type PlanSignOffHandler = (jobId: string, action: PlanSignOff, requestId: string, failure?: CollectionFailure) => Promise<void>;
+export type CollectionFailureUndo = { stopId: string; attemptId: string };
+export type PlanSignOff = "collect" | "deliver" | "fail" | "undo-failure";
+export type PlanSignOffHandler = (jobId: string, action: PlanSignOff, requestId: string, failure?: CollectionFailure | CollectionFailureUndo) => Promise<void>;
 
 type Props = {
   job: PlanJob;
@@ -63,15 +64,14 @@ export default function PlanJobCard({
 }: Props) {
   const dragged = useRef(false);
   const signOffLock = useRef(false);
-  const signOffRequests = useRef<Partial<Record<PlanSignOff, string>>>({});
+  const signOffRequests = useRef<Record<string, string>>({});
   const [signingOff, setSigningOff] = useState<PlanSignOff | null>(null);
   const [showFailure, setShowFailure] = useState(false);
   const [failedStopId, setFailedStopId] = useState("");
   const [reason, setReason] = useState<CollectionFailureReason | "">("");
   const [signOffError, setSignOffError] = useState<string | null>(null);
   const stops = sortedStops(job);
-  const failedCollection = stops.find((stop) => stop.type === "collection" && stop.status === "failed");
-  const failureReason = failedCollection?.last_failed_attempt?.reason;
+  const failedCollections = stops.filter((stop) => stop.type === "collection" && stop.status === "failed");
   const pendingCollections = stops.filter((stop) => stop.type === "collection" &&
     !stop.collected_at && !stop.delivered_at &&
     ![stop.status, stop.pod_status].some((status) =>
@@ -106,19 +106,20 @@ export default function PlanJobCard({
           ? `Drop ${dropNumbers[0]}`
           : `Drops ${dropNumbers.join(", ")}`;
 
-  async function signOff(action: PlanSignOff, failure?: CollectionFailure) {
+  async function signOff(action: PlanSignOff, failure?: CollectionFailure | CollectionFailureUndo) {
     if (!onSignOff || signOffLock.current) return;
     signOffLock.current = true;
     setSigningOff(action);
     setSignOffError(null);
+    const requestKey = failure && "attemptId" in failure ? failure.attemptId : action;
     try {
-      const requestId = signOffRequests.current[action] ??= crypto.randomUUID();
+      const requestId = signOffRequests.current[requestKey] ??= crypto.randomUUID();
       await onSignOff(job.id, action, requestId, failure);
       if (action === "fail") {
         setShowFailure(false);
         setReason("");
       }
-      delete signOffRequests.current[action];
+      delete signOffRequests.current[requestKey];
     } catch (error) {
       setSignOffError(error instanceof Error ? error.message : "Could not save sign-off. Try again.");
     } finally {
@@ -232,11 +233,30 @@ export default function PlanJobCard({
       <p className="text-xs text-ink-3">
         {job.customer_name ?? "No customer"} · {placeSummary}
       </p>
-      {failedCollection && progress !== "delivered" && (
-        <p className="mt-1 text-xs font-semibold text-danger">
-          Unable to collect{isCollectionFailureReason(failureReason) ? ` · ${COLLECTION_FAILURE_REASONS[failureReason]}` : ""}
-        </p>
-      )}
+      {progress !== "delivered" && failedCollections.map((stop) => {
+        const failure = stop.last_failed_attempt;
+        const failureReason = failure?.reason;
+        const attemptId = failure?.flags?.includes("office") && failure.clientId;
+        return (
+          <div key={stop.id} className="mt-1 flex flex-wrap items-center gap-2"
+            onClick={attemptId && canSignOff ? (event) => event.stopPropagation() : undefined}
+            onKeyDown={attemptId && canSignOff ? (event) => event.stopPropagation() : undefined}>
+            <p className="text-xs font-semibold text-danger">
+              Unable to collect{isCollectionFailureReason(failureReason) ? ` · ${COLLECTION_FAILURE_REASONS[failureReason]}` : ""}
+              {failedCollections.length > 1 ? ` · ${stop.address_line}` : ""}
+            </p>
+            {canSignOff && attemptId && !stop.collected_at && !stop.delivered_at && stop.pod_status === "failed" ? (
+              <button type="button" disabled={signingOff !== null} draggable={false}
+                aria-label={`Undo failed collection at ${stop.address_line}`}
+                className="min-h-11 rounded-md border border-line px-2 text-xs font-semibold text-ink disabled:opacity-50"
+                onDragStart={(event) => { event.preventDefault(); event.stopPropagation(); }}
+                onClick={() => void signOff("undo-failure", { stopId: stop.id, attemptId })}>
+                {signingOff === "undo-failure" ? "Undoing…" : "Undo"}
+              </button>
+            ) : null}
+          </div>
+        );
+      })}
       {progressLabel ? (
         <p className={`mt-1 text-xs font-semibold ${progress === "delivered" ? "text-success" : "text-warning"}`}>
           {progressLabel}{progress === "collected" && sequence !== null ? " · On van" : ""}
