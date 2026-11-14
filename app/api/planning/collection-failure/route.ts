@@ -29,7 +29,6 @@ export async function POST(request: Request) {
       const { error } = await admin.rpc("office_collection_failure", { ...args, p_reason: body.reason });
       if (error) warehouseDatabaseError(error);
     }
-    if (error) warehouseDatabaseError(error);
     return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return warehouseErrorResponse(error);
