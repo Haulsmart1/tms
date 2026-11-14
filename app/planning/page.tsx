@@ -1722,10 +1722,11 @@ export default function PlanningPage() {
 
     const sequence = loadSeq.current;
     if (action === "fail" && !failure) throw new Error("Choose a collection reason.");
-    const response = await fetch(action === "fail" ? "/api/planning/collection-failure" : "/api/warehouse/actions", {
+    const collectionCorrection = action === "fail" || action === "undo-collection";
+    const response = await fetch(collectionCorrection ? "/api/planning/collection-failure" : "/api/warehouse/actions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(action === "fail" ? { tenantId: planningTenantId, requestId, jobId, ...failure } : {
+      body: JSON.stringify(collectionCorrection ? { tenantId: planningTenantId, requestId, jobId, action, ...failure } : {
         tenantId: planningTenantId, requestId, jobIds: [jobId], action,
         note: "Signed off from the Planning van card.",
       }),
@@ -1743,6 +1744,18 @@ export default function PlanningPage() {
           ...stop, status: "failed", pod_status: "failed", last_failed_attempt: { reason: failure.reason },
         } : stop),
       } : entry));
+      return;
+    }
+
+    if (action === "undo-collection") {
+      const reopenedStops = new Set<string>(body.result.previous_stops.map((stop: { id: string }) => stop.id));
+      setJobs((previous) => previous.map((entry) => entry.id === jobId ? {
+        ...entry, status: body.result.status,
+        stops: entry.stops.map((stop) => reopenedStops.has(stop.id) ? {
+          ...stop, status: "planned", pod_status: "pending", collected_at: null, delivered_at: null,
+        } : stop),
+      } : entry));
+      setMessage("Collection undone.");
       return;
     }
 
@@ -3956,6 +3969,8 @@ export default function PlanningPage() {
               planningContext={planningTenantId ? { tenantId: planningTenantId, date,
                 planId: stagedSavedPlan?.id || null, vehicleId } : undefined}
               geocodeSettled={geocodeSettled && !geocodeUnavailable}
+              onUndoCollection={vehicleId && laneOrders[vehicleId]?.includes(detailJob.id) && planningTenantId
+                ? (requestId) => signOffVanJob(vehicleId, detailJob.id, "undo-collection", requestId) : undefined}
               onClose={() => setDetailJobId(null)}
               onAccept={(jobId) => {
                 setDetailJobId(null);

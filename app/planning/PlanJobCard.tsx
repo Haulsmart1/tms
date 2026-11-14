@@ -3,12 +3,12 @@
 import { useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { isRoutable, sortedStops } from "../../lib/planning/waypoints";
 import type { PlanJob } from "../../lib/planning/types";
-import { planningJobProgress } from "../../lib/planning/jobProgress";
+import { canUndoPlanningCollection, planningJobProgress } from "../../lib/planning/jobProgress";
 
 import { COLLECTION_FAILURE_REASONS, isCollectionFailureReason, type CollectionFailureReason } from "../../lib/planning/collectionFailure";
 
 export type CollectionFailure = { stopId: string; reason: CollectionFailureReason };
-export type PlanSignOff = "collect" | "deliver" | "fail";
+export type PlanSignOff = "collect" | "deliver" | "fail" | "undo-collection";
 export type PlanSignOffHandler = (jobId: string, action: PlanSignOff, requestId: string, failure?: CollectionFailure) => Promise<void>;
 
 type Props = {
@@ -300,6 +300,13 @@ export default function PlanJobCard({
               title={hasCollection && progress !== "collected" ? "Mark collected first" : "Record delivery. Evidence can be added later."}
               onClick={() => void signOff("deliver")}>
               {signingOff === "deliver" ? "Saving…" : "Mark delivered"}
+            </button>
+          ) : null}
+          {canUndoPlanningCollection(job) ? (
+            <button type="button" disabled={signingOff !== null} draggable={false}
+              className="min-h-11 rounded-md border border-line px-2 text-xs font-semibold text-ink disabled:opacity-50"
+              onClick={() => void signOff("undo-collection")}>
+              {signingOff === "undo-collection" ? "Undoing…" : "Undo collection"}
             </button>
           ) : null}
           {failureStop && progress !== "collected" && (

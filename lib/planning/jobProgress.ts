@@ -33,3 +33,9 @@ export function planningJobProgress(job: ProgressJob): "pending" | "part_collect
   if (collected > 0) return "part_collected";
   return status === "collected" ? "collected" : "pending";
 }
+
+export function canUndoPlanningCollection(job: ProgressJob): boolean {
+  const progress = planningJobProgress(job);
+  return (progress === "collected" || progress === "part_collected") &&
+    !(job.stops ?? []).some((stop) => stop.type === "delivery" && stopFinished(stop));
+}
