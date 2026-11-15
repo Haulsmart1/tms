@@ -73,7 +73,7 @@ export default function SuperAdminPage() {
     async (table: string, key: ChargeSource["key"], label: string, cutoffIso: string): Promise<ChargeSource> => {
       const { data, error } = await supabase
         .from(table)
-        .select("company_id, gross_pence, status, created_at")
+        .select("company_id, gross_pence, status, created_at, receipt_url")
         .eq("status", "succeeded")
         .gte("created_at", cutoffIso);
 
@@ -205,7 +205,7 @@ export default function SuperAdminPage() {
     { title: "Companies", description: "View and edit customer companies", href: "/super-admin/companies", icon: Building2 },
     { title: "Users", description: "Every user across every tenant", href: "/super-admin/users", icon: Users },
     { title: "Billing", description: "Vehicle based billing configuration", href: "/super-admin/billing", icon: Banknote },
-    { title: "Invoices", description: "Generate and track invoices", href: "/super-admin/invoices", icon: FileText },
+    { title: "Invoices", description: "Subscription invoices and Square payments", href: "/super-admin/invoices", icon: FileText },
     { title: "Requests", description: "Triage landing-page leads", href: "/super-admin/requests", icon: Inbox },
   ];
 

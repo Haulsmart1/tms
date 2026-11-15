@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../../../lib/supabase/browser";
 import { countBillableVehicles } from "../../../lib/billing/vehicleCount";
@@ -33,18 +34,12 @@ type VehicleLicence = {
     active: boolean | null;
 };
 
-type Invoice = {
-    id: string;
-    company_id: string;
-    vehicle_count: number | null;
-    amount: number | null;
-    status: string | null;
-    created_at?: string;
-};
-
 type CompanyBilling = {
     company_id: string;
     status: string | null;
+    billing_model?: string;
+    unit_amount_pence?: number;
+    min_invoice_pence?: number;
     next_charge_on: string | null;
     card_last4: string | null;
     retry_count: number | null;
@@ -57,7 +52,6 @@ export default function SuperAdminBillingPage() {
     const [tenants, setTenants] = useState<Tenant[]>([]);
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
     const [licences, setLicences] = useState<VehicleLicence[]>([]);
-    const [invoices, setInvoices] = useState<Invoice[]>([]);
     const [subscriptionRows, setSubscriptionRows] = useState<CompanyBilling[]>([]);
     const [loading, setLoading] = useState(true);
     const [message, setMessage] = useState("");
@@ -71,7 +65,6 @@ export default function SuperAdminBillingPage() {
             { data: tenantsData, error: tenantsError },
             { data: vehiclesData, error: vehiclesError },
             { data: licencesData, error: licencesError },
-            { data: invoicesData, error: invoicesError },
             { data: subscriptionRowsData, error: subscriptionRowsError },
         ] = await Promise.all([
             supabase.from("companies").select("*").order("name"),
@@ -80,10 +73,9 @@ export default function SuperAdminBillingPage() {
             // page with Postgres 42703. Ownership comes from tenant_id.
             supabase.from("vehicles").select("id, tenant_id, registration"),
             supabase.from("billable_vehicle_licences").select("id, tenant_id, vehicle_id, active"),
-            supabase.from("invoices").select("*").order("created_at", { ascending: false }),
             supabase
                 .from("company_billing")
-                .select("company_id, status, next_charge_on, card_last4, retry_count"),
+                .select("company_id, status, next_charge_on, card_last4, retry_count, billing_model, unit_amount_pence, min_invoice_pence"),
         ]);
 
         if (
@@ -91,7 +83,6 @@ export default function SuperAdminBillingPage() {
             tenantsError ||
             vehiclesError ||
             licencesError ||
-            invoicesError ||
             subscriptionRowsError
         ) {
             setMessage(
@@ -99,7 +90,6 @@ export default function SuperAdminBillingPage() {
                 tenantsError?.message ||
                 vehiclesError?.message ||
                 licencesError?.message ||
-                invoicesError?.message ||
                 subscriptionRowsError?.message ||
                 "Unable to load billing data."
             );
@@ -109,7 +99,6 @@ export default function SuperAdminBillingPage() {
         setTenants((tenantsData as Tenant[]) || []);
         setVehicles((vehiclesData as Vehicle[]) || []);
         setLicences((licencesData as VehicleLicence[]) || []);
-        setInvoices((invoicesData as Invoice[]) || []);
         setSubscriptionRows((subscriptionRowsData as CompanyBilling[]) || []);
         setLoading(false);
     }
@@ -137,25 +126,13 @@ export default function SuperAdminBillingPage() {
                 vehicles,
                 licences,
             });
-            // Whole pounds net. netPence is always a multiple of 400 under the
-            // tier table, so this never introduces a fraction, and invoices.amount
-            // stays the pounds figure it has always been.
-            const cycleChargePounds =
-                computeChargeAmounts(billableVehicleCount).netPence / 100;
-
-            const latestInvoice = invoices.find(
-                (invoice) => invoice.company_id === company.id
-            );
-
             return {
                 company,
                 totalVehicles: companyVehicles.length,
                 billableVehicleCount,
-                cycleChargePounds,
-                latestInvoice,
             };
         });
-    }, [companies, tenants, vehicles, licences, invoices]);
+    }, [companies, tenants, vehicles, licences]);
 
     /* READ-ONLY on purpose (AUTH-16, BILL1-8). This page used to have a
        "Create Invoice" button that inserted a row into `invoices` straight
@@ -180,17 +157,12 @@ export default function SuperAdminBillingPage() {
                         Super Admin Billing
                     </h1>
 
-                    {/* Both models are live, so naming one is wrong for the
-                        other half of the platform. The figures below this
-                        header are still v1-shaped (they read platform_charges,
-                        which v2 never writes); a v2 view of this console is
-                        deliberately out of scope, see the 2026-09-11 spec. */}
                     <p className="m-0 text-sm text-ink-3">
-                        Period billing (current): {pricingHeadline().summary}{" "}
-                        Legacy 4-weekly billing: £10 per licensed vehicle per
-                        week, less per vehicle on larger fleets. The figures
-                        below cover 4-weekly companies only.
+                        Period billing: {pricingHeadline().summary}
                     </p>
+                    <Link href="/super-admin/invoices" className="text-sm text-primary underline">
+                        View subscription invoices and Square payments
+                    </Link>
                 </header>
 
                 <MessageBanner tone="neutral">{message}</MessageBanner>
@@ -268,12 +240,15 @@ export default function SuperAdminBillingPage() {
                                             </span>
                                         </div>
 
-                                        <div>
-                                            4-Weekly Charge:{" "}
-                                            <span className="text-ink-2">
-                                                {formatPence(row.cycleChargePounds * 100)} (ex VAT)
-                                            </span>
-                                        </div>
+                                        {sub?.billing_model === "v2_period" ? (
+                                            <div>
+                                                Period rates (ex VAT): {formatPence(sub.unit_amount_pence ?? 0)} per vehicle · {formatPence(sub.min_invoice_pence ?? 0)} minimum
+                                            </div>
+                                        ) : sub ? (
+                                            <div>
+                                                4-week estimate: {formatPence(computeChargeAmounts(row.billableVehicleCount).netPence)} (ex VAT)
+                                            </div>
+                                        ) : null}
 
                                         {sub ? (
                                             <div
@@ -285,23 +260,14 @@ export default function SuperAdminBillingPage() {
                                                 {sub.card_last4
                                                     ? ` • card ****${sub.card_last4}`
                                                     : ""}
-                                                {sub.next_charge_on
-                                                    ? ` • next charge ${sub.next_charge_on}`
+                                                {sub.billing_model !== "v2_period" && sub.next_charge_on
+                                                    ? ` • next charge ${sub.billing_model !== "v2_period" && sub.next_charge_on}`
                                                     : ""}
                                                 {isPastDue
                                                     ? ` • ${sub.retry_count ?? 0} failed attempts`
                                                     : ""}
                                             </div>
                                         ) : null}
-
-                                        <div>
-                                            Latest Invoice:{" "}
-                                            <span className="text-ink-2">
-                                                {row.latestInvoice
-                                                    ? `£${row.latestInvoice.amount} • ${row.latestInvoice.status}`
-                                                    : "None"}
-                                            </span>
-                                        </div>
                                     </div>
                                 </div>
                             );

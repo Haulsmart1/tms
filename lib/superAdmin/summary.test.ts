@@ -84,6 +84,19 @@ describe("collectedRevenue", () => {
     expect(result.missingSources).toEqual(["v2 periods"]);
   });
 
+  it("excludes a Square Sandbox receipt from live collections", () => {
+    const result = collectedRevenue([{
+      key: "v2_period",
+      label: "Periods",
+      rows: [
+        { ...charge({ gross_pence: 25_710 }), receipt_url: "https://squareupsandbox.com/receipt/preview/example" },
+        { ...charge({ gross_pence: 5_000 }), receipt_url: "https://squareup.com/receipt/preview/example" },
+      ],
+    }], NOW);
+    expect(result.totalPence).toBe(5_000);
+    expect(result.companyCount).toBe(1);
+  });
+
   it("treats a null gross_pence as zero rather than NaN", () => {
     const sources: ChargeSource[] = [
       { key: "v1_cycle", label: "v1 cycles", rows: [charge({ gross_pence: null })] },
