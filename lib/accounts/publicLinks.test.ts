@@ -17,6 +17,11 @@ const ROOT = join(__dirname, "..", "..");
 const ALLOWED = new Set<string>([
   // Used only to reject cross-origin Assistant requests; never emitted in links.
   "app/api/assistant/route.ts",
+  // Request-origin checks for same-site writes. None use the origin for a URL.
+  "app/api/planning/collection-failure/route.ts",
+  "app/api/settings/portal-invites/route.ts",
+  "app/api/subcontractor/me/route.ts",
+  "app/api/subcontractors/[id]/invoices/route.ts",
 ]);
 const PATTERN = /new URL\(\s*request\.url\s*\)\.origin|request\.nextUrl\.origin|headers\.get\(\s*["'](?:host|x-forwarded-host)["']\s*\)/;
 
