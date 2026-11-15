@@ -1,4 +1,4 @@
-import { Building2, Users, Lock, FileText, Banknote, CreditCard, ClipboardCheck, Plug, type LucideIcon } from "lucide-react";
+import { Building2, Users, Mail, Lock, FileText, Banknote, CreditCard, ClipboardCheck, Plug, type LucideIcon } from "lucide-react";
 
 export default function SettingsPage() {
     const cards: Array<{ title: string; description: string; href: string; icon: LucideIcon }> = [
@@ -14,6 +14,12 @@ export default function SettingsPage() {
             description: "Add users and manage account access",
             href: "/settings/users",
             icon: Users,
+        },
+        {
+            title: "Invitation Control Board",
+            description: "Invite drivers and subcontractor users and manage their portal access",
+            href: "/settings/portal-invites",
+            icon: Mail,
         },
         {
             title: "Roles & Permissions",
