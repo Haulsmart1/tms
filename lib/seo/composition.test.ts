@@ -34,7 +34,8 @@ describe("composed public and operational experience", () => {
   });
 
   it("combines branded auth surfaces with the existing recovery and POST confirmation flow", () => {
-    const login = source("app/login/page.tsx");
+    expect(source("app/login/page.tsx")).toContain("<LoginForm />");
+    const login = source("app/login/LoginForm.tsx");
     expect(login).toContain("<AuthSurface>");
     expect(login).toContain("loginErrorMessage");
     expect(login).toContain('fetch("/api/auth/magic-link"');

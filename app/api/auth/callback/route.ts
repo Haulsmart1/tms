@@ -9,6 +9,7 @@ import type {
   EmailOtpType,
 } from "@supabase/supabase-js";
 import { readImplicitSession, type ImplicitSession } from "../../../../lib/auth/implicit";
+import { extractRoleName, SUPER_ADMIN_ROLE } from "../../../../lib/roles";
 import { installedAppLoginPath } from "../../../../lib/auth/appLogin";
 import { authVerificationErrorCode } from "../../../../lib/auth/loginError";
 import {
@@ -111,13 +112,13 @@ async function lookupPortal(
 /* A console profile is one that places the user in the operator console:
    a home tenant or a role. Read from profiles, the single source of truth for
    roles and tenancy (the same columns RLS and get_tenant_context() use). */
-async function lookupHasConsoleProfile(
+async function lookupConsoleProfile(
   admin: Admin,
   userId: string,
-): Promise<boolean | "unknown"> {
+): Promise<{ hasConsoleProfile: boolean | "unknown"; roleName: string | null }> {
   const { data, error } = await admin
     .from("profiles")
-    .select("tenant_id, role_id")
+    .select("tenant_id, role_id, roles(name)")
     .eq("id", userId)
     .maybeSingle();
 
@@ -127,10 +128,13 @@ async function lookupHasConsoleProfile(
       error.message,
     );
 
-    return "unknown";
+    return { hasConsoleProfile: "unknown", roleName: null };
   }
 
-  return Boolean(data?.tenant_id || data?.role_id);
+  return {
+    hasConsoleProfile: Boolean(data?.tenant_id || data?.role_id),
+    roleName: extractRoleName(data?.roles),
+  };
 }
 
 async function resolveDestination(
@@ -148,18 +152,19 @@ async function resolveDestination(
   }
 
   try {
-    const portal = await lookupPortal(admin, userId);
+    const defaultDashboard = requestedNext === "/dashboard";
+    const profile = defaultDashboard ? await lookupConsoleProfile(admin, userId) : null;
+    if (profile?.roleName === SUPER_ADMIN_ROLE) return "/super-admin";
 
-    /* Only a user with a portal link needs the profile read. */
-    const hasConsoleProfile =
-      portal.ok && portal.destination
-        ? await lookupHasConsoleProfile(admin, userId)
-        : "unknown";
+    const portal = await lookupPortal(admin, userId);
+    const consoleProfile = portal.ok && portal.destination
+      ? profile ?? await lookupConsoleProfile(admin, userId)
+      : null;
 
     return decidePostLoginDestination({
       requestedNext,
       portal,
-      hasConsoleProfile,
+      hasConsoleProfile: consoleProfile?.hasConsoleProfile ?? "unknown",
     });
   } catch (error) {
     console.error(

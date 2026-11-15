@@ -63,7 +63,7 @@ export default async function SuperAdminLayout({ children }: { children: ReactNo
             href="/dashboard"
             className="ml-auto text-sm font-medium text-ink-3 no-underline hover:text-ink"
           >
-            ← Back to app
+            ← Operations dashboard
           </Link>
         </div>
       </header>
