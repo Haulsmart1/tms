@@ -122,3 +122,7 @@ export function pickPortalLink<T extends PortalLink>(links: readonly T[], reques
   if (requestedId) return links.find((link) => link.id === requestedId) ?? null;
   return [...links].sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")))[0];
 }
+
+export function canViewSubcontractorInvoices(role: string): boolean {
+  return role === "subcontractor_admin" || role === "accounts";
+}

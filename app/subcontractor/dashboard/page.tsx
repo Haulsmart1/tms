@@ -1,6 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import CompanyDetails from "./CompanyDetails";
+import Invoices from "./Invoices";
+import { canViewSubcontractorInvoices } from "../../../lib/accounts/portalScope";
+import type { SubcontractorDetails } from "../../../lib/accounts/subcontractorDetails";
 import Skeleton from "../../../components/Skeleton";
 
 type PortalUser = {
@@ -24,7 +28,7 @@ type Employee = {
   owner: boolean;
 };
 
-type Subcontractor = {
+type Subcontractor = Partial<SubcontractorDetails> & {
   id: string;
   name: string;
   subcontractor_type: "owner_driver" | "fleet";
@@ -259,6 +263,7 @@ export default function SubcontractorDashboardPage() {
   }
 
   const canManageUsers = data.portalUser.role === "subcontractor_admin";
+  const canViewInvoices = canViewSubcontractorInvoices(data.portalUser.role);
   const eligibleEmployees = data.employees.filter(
     (employee) => employee.directly_employed && employee.active
   );
@@ -279,6 +284,14 @@ export default function SubcontractorDashboardPage() {
 
         {message ? <div className={styles.message}>{message}</div> : null}
 
+        <nav aria-label="Subcontractor menu" className="mb-4 flex flex-wrap gap-x-5 gap-y-2 rounded-lg border border-line bg-surface p-4 text-sm font-semibold">
+          <a className="underline" href="#assigned-jobs">Jobs</a>
+          <a className="underline" href="#vehicles">Vehicles</a>
+          {canManageUsers && <a className="underline" href="#company-details">Company details</a>}
+          {canViewInvoices && <a className="underline" href="#invoices">Invoices</a>}
+          {canManageUsers && <a className="underline" href="#portal-users">Portal users</a>}
+        </nav>
+
         <section className={styles.statGrid}>
           <Stat label="Jobs" value={stats.total} />
           <Stat label="Awaiting" value={stats.awaiting} />
@@ -287,7 +300,7 @@ export default function SubcontractorDashboardPage() {
           <Stat label="POD Attention" value={stats.podRequired} />
         </section>
 
-        <section className={styles.card}>
+        <section id="assigned-jobs" className={styles.card}>
           <h2 className={styles.sectionTitle}>Assigned Jobs</h2>
 
           {data.jobs.length === 0 ? (
@@ -322,7 +335,7 @@ export default function SubcontractorDashboardPage() {
           )}
         </section>
 
-        <section className={styles.card}>
+        <section id="vehicles" className={styles.card}>
           <h2 className={styles.sectionTitle}>Vehicles</h2>
 
           <div className={styles.listGrid}>
@@ -361,8 +374,22 @@ export default function SubcontractorDashboardPage() {
           </div>
         </section>
 
+        {canManageUsers && (
+          <section id="company-details" className={styles.card}>
+            <h2 className={styles.sectionTitle}>Company details</h2>
+            <CompanyDetails key={data.portalUser.id} details={data.subcontractor} linkId={data.portalUser.id} />
+          </section>
+        )}
+
+        {canViewInvoices && (
+          <section id="invoices" className={styles.card}>
+            <h2 className={styles.sectionTitle}>Invoices</h2>
+            <Invoices key={data.portalUser.id} linkId={data.portalUser.id} />
+          </section>
+        )}
+
         {canManageUsers ? (
-          <section className={styles.card}>
+          <section id="portal-users" className={styles.card}>
             <h2 className={styles.sectionTitle}>Portal Users</h2>
             <p className={styles.muted}>
               Only active, directly employed people can be given portal access.

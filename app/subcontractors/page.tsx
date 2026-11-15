@@ -10,6 +10,7 @@ import Button from "../../components/Button";
 import Select from "../../components/Select";
 import MessageBanner from "../../components/MessageBanner";
 import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
+import PublishInvoice from "./PublishInvoice";
 import SubcontractorCard from "./SubcontractorCard";
 import InfoField from "../../components/InfoField";
 import { getCompliance, mostUrgent } from "../../lib/compliance/expiry";
@@ -963,6 +964,11 @@ export default function SubcontractorsPage() {
               </div>
             ) : null}
           </section>
+
+          {isAdmin && selectedSubcontractor?.active && (
+            <PublishInvoice key={selectedSubcontractor.id} id={selectedSubcontractor.id}
+              tenantId={selectedSubcontractor.tenant_id} name={selectedSubcontractor.name} />
+          )}
 
           {selectedSubcontractor ? (
             <>
