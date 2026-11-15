@@ -3,10 +3,15 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
+import PortalSessionControls from "../../app/subcontractor/dashboard/PortalSessionControls";
 import SubcontractorDashboardPage from "../../app/subcontractor/dashboard/page";
 import { activeSubcontractorSection, subcontractorSections } from "./subcontractorNavigation";
 
+const { signOut } = vi.hoisted(() => ({ signOut: vi.fn() }));
+vi.mock("../supabase/browser", () => ({ createClient: () => ({ auth: { signOut } }) }));
+
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   window.history.replaceState(null, "", "/");
 });
@@ -47,6 +52,7 @@ it("opens each destination, preserves the portal link, and loads invoices when s
     const links = [...container.querySelectorAll<HTMLAnchorElement>('nav[aria-label="Subcontractor menu"] a')];
     expect(links).toHaveLength(5);
     expect(fetch).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('header a')?.getAttribute("href")).toBe("/");
     for (const link of links) {
       const id = link.hash.slice(1);
       await act(async () => {
@@ -64,8 +70,34 @@ it("opens each destination, preserves the portal link, and loads invoices when s
       window.history.pushState(null, "", "#invoices");
       window.dispatchEvent(new Event("hashchange"));
     });
+    const back = container.querySelector<HTMLAnchorElement>("header a");
+    expect(back?.textContent).toContain("Back to Jobs");
+    expect(back?.getAttribute("href")).toBe("#assigned-jobs");
     expect(container.querySelector('a[aria-label="Download invoice SB-7 PDF"]')?.getAttribute("href"))
       .toBe("/api/subcontractor/invoices?link=selected&download=invoice-id");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+it("logs out this session, or stays in the portal with an error if sign-out fails", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const replace = vi.spyOn(window.location, "replace").mockImplementation(() => {});
+  signOut.mockReset();
+  signOut.mockResolvedValueOnce({ error: new Error("Network unavailable") }).mockResolvedValueOnce({ error: null });
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(PortalSessionControls)); });
+    const logout = container.querySelector("button")!;
+    await act(async () => logout.click());
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("Could not log out");
+    expect(replace).not.toHaveBeenCalled();
+    await act(async () => logout.click());
+    expect(signOut).toHaveBeenCalledWith({ scope: "local" });
+    expect(replace).toHaveBeenCalledWith("/login?next=%2Fsubcontractor%2Fdashboard");
   } finally {
     await act(async () => root.unmount());
     container.remove();
