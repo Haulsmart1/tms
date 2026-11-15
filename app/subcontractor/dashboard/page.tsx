@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import CompanyDetails from "./CompanyDetails";
 import Invoices from "./Invoices";
+import PortalSessionControls from "./PortalSessionControls";
 import { activeSubcontractorSection, subcontractorSections } from "../../../lib/accounts/subcontractorNavigation";
 import type { SubcontractorDetails } from "../../../lib/accounts/subcontractorDetails";
 import Skeleton from "../../../components/Skeleton";
@@ -265,7 +266,8 @@ export default function SubcontractorDashboardPage() {
       <main className={styles.page}>
         <div className={styles.card}>
           <h1>Subcontractor Portal</h1>
-          <p>{message || "Portal access unavailable."}</p>
+          <p className="mb-3">{message || "Portal access unavailable."}</p>
+          <PortalSessionControls />
         </div>
       </main>
     );
@@ -283,7 +285,7 @@ export default function SubcontractorDashboardPage() {
   return (
     <main className={styles.page}>
       <div className={styles.container}>
-        <header className={styles.header}>
+        <header className={`${styles.header} flex flex-wrap items-start justify-between gap-4`}>
           <div>
             <p className={styles.eyebrow}>Subcontractor Portal</p>
             <h1 className={styles.title}>{data.subcontractor.name}</h1>
@@ -292,6 +294,7 @@ export default function SubcontractorDashboardPage() {
               {formatRole(data.portalUser.role)}
             </p>
           </div>
+          <PortalSessionControls awayFromJobs={Boolean(section && section !== "assigned-jobs")} />
         </header>
 
         {message ? <div className={styles.message}>{message}</div> : null}
