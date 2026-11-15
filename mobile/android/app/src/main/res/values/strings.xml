@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">TMS Wizard</string>
+    <string name="driver">Driver</string>
+    <string name="warehouse">Warehouse</string>
+    <string name="asset_statements" translatable="false">[{ \"relation\": [\"delegate_permission/common.handle_all_urls\"], \"target\": { \"namespace\": \"web\", \"site\": \"https://tmswizard.cloud\" } }]</string>
+</resources>
