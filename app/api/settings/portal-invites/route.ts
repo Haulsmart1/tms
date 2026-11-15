@@ -4,6 +4,7 @@ import { checkRateLimit, RATE_LIMITS } from "../../../../lib/rateLimit";
 import { operatorDay } from "../../../../lib/time";
 import { MIGRATION_MISSING_MESSAGE } from "../../../../lib/tenant/userAdmin";
 import { portalInviteMessage, portalLinkDecision } from "../../../../lib/tenant/portalInvite";
+import { isUuid } from "../../../../lib/auth/serverTenantAccess";
 import { requireUserAdmin } from "../users/shared";
 
 export const runtime = "nodejs";
@@ -202,7 +203,6 @@ export async function GET(request: NextRequest) {
           .from("subcontractors")
           .select("id,name,subcontractor_type,active")
           .eq("tenant_id", tenantId)
-          .eq("active", true)
           .order("name"),
         admin
           .from("subcontractor_employees")
@@ -241,6 +241,32 @@ export async function GET(request: NextRequest) {
     console.error("[portal-invites] load failed", error);
     return NextResponse.json({ error: "Unable to load portal access." }, { status: 500 });
   }
+}
+
+export async function PATCH(request: NextRequest) {
+  if (request.headers.get("origin") !== request.nextUrl.origin) {
+    return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
+  }
+  const body = await request.json().catch(() => null);
+  if (!isUuid(body?.tenantId) || !isUuid(body?.linkId) ||
+    (body?.type !== "driver" && body?.type !== "subcontractor")) {
+    return NextResponse.json({ error: "Choose a portal account." }, { status: 400 });
+  }
+  const access = await requireUserAdmin(body.tenantId);
+  if (!access.ok) return access.response;
+  const table = body.type === "driver" ? "driver_users" : "subcontractor_users";
+  const { data, error } = await access.ctx.admin.from(table)
+    .update({ active: false })
+    .eq("tenant_id", body.tenantId)
+    .eq("id", body.linkId)
+    .select("id")
+    .maybeSingle();
+  if (error) {
+    console.error("[portal-invites] revoke failed", error.code);
+    return NextResponse.json({ error: "Unable to revoke portal access." }, { status: 500 });
+  }
+  if (!data) return NextResponse.json({ error: "Portal account not found." }, { status: 404 });
+  return NextResponse.json({ ok: true, message: "Portal access revoked." });
 }
 
 export async function POST(request: NextRequest) {

@@ -5,6 +5,7 @@ import { useTenant } from "../../components/TenantProvider";
 import TenantGate from "../../components/TenantGate";
 import MessageBanner from "../../../components/MessageBanner";
 import Card from "../../../components/Card";
+import Field from "../../../components/Field";
 import Select from "../../../components/Select";
 import Button from "../../../components/Button";
 import { tenantDataView } from "../../../lib/loading/tenantDataView";
@@ -19,6 +20,7 @@ type Driver = {
 type Subcontractor = {
   id: string;
   name: string;
+  active?: boolean;
 };
 
 type Employee = {
@@ -35,8 +37,15 @@ type LoadData = {
   drivers: Driver[];
   subcontractors: Subcontractor[];
   employees: Employee[];
-  driverUsers: Array<{ driver_id: string; active: boolean }>;
-  subcontractorUsers: Array<{ employee_id: string; active: boolean }>;
+  driverUsers: Array<{ id: string; driver_id: string; active: boolean }>;
+  subcontractorUsers: Array<{ id: string; employee_id: string; role: string; active: boolean }>;
+};
+
+const roleLabels: Record<string, string> = {
+  subcontractor_admin: "Subcontractor Admin",
+  dispatcher: "Dispatcher",
+  driver: "Driver",
+  accounts: "Accounts",
 };
 
 export default function PortalInvitesPage() {
@@ -51,6 +60,7 @@ export default function PortalInvitesPage() {
     subcontractorUsers: [],
   });
 
+  const [filter, setFilter] = useState("");
   const [driverId, setDriverId] = useState("");
   const [subcontractorId, setSubcontractorId] = useState("");
   const [employeeId, setEmployeeId] = useState("");
@@ -64,7 +74,7 @@ export default function PortalInvitesPage() {
   const [dataTenantId, setDataTenantId] = useState<string | null | undefined>(undefined);
 
   const loadData = useCallback(async () => {
-    if (tenant.status !== "ready") return;   // stay in the loading view
+    if (tenant.status !== "ready" || !canManage) return;   // stay in the loading view
 
     if (!tenant.activeTenantId) {
       // A resolved admin on "All tenants". Nothing is coming, and the view
@@ -105,7 +115,7 @@ export default function PortalInvitesPage() {
       // leave the controls disabled forever.
       setLoading(false);
     }
-  }, [tenant.status, tenant.activeTenantId]);
+  }, [tenant.status, tenant.activeTenantId, canManage]);
 
   useEffect(() => {
     void loadData();
@@ -148,13 +158,13 @@ export default function PortalInvitesPage() {
     );
   }, [data.employees, subcontractorId]);
 
-  async function send(payload: object) {
+  async function send(payload: object, method: "POST" | "PATCH" = "POST") {
     setBusy(true);
     setMessage("");
 
     try {
       const response = await fetch("/api/settings/portal-invites", {
-        method: "POST",
+        method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
@@ -174,6 +184,25 @@ export default function PortalInvitesPage() {
     }
   }
 
+  const search = filter.trim().toLowerCase();
+  const matches = (...values: Array<string | null | undefined>) =>
+    values.some((value) => value?.toLowerCase().includes(search));
+  const accessRows = [
+    ...data.driverUsers.flatMap((link) => {
+      const person = data.drivers.find((driver) => driver.id === link.driver_id);
+      return person ? [{ ...link, name: person.name, email: person.email,
+        company: null, role: "driver", type: "driver", eligible: person.active !== false }] : [];
+    }),
+    ...data.subcontractorUsers.flatMap((link) => {
+      const person = data.employees.find((employee) => employee.id === link.employee_id);
+      const company = data.subcontractors.find((sub) => sub.id === person?.subcontractor_id);
+      return person ? [{ ...link, name: person.full_name, email: person.email,
+        company: company?.name, role: link.role, type: "subcontractor",
+        eligible: company?.active === true && person.active && person.directly_employed &&
+          (!person.employment_end_date || person.employment_end_date >= new Date().toISOString().slice(0, 10)) }] : [];
+    }),
+  ].filter((row) => matches(row.name, row.email, row.company, roleLabels[row.role]));
+
   return (
     <TenantGate>
       <div className="ds min-h-screen bg-canvas font-sans text-ink">
@@ -181,9 +210,9 @@ export default function PortalInvitesPage() {
           <header className="mb-4">
             <div className="text-kicker uppercase text-ink-3">Admin</div>
 
-            <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">Portal Invitations</h1>
+            <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">Invitation Control Board</h1>
             <p className="m-0 text-sm text-ink-3">
-              Invite ADR drivers or directly-employed subcontractor personnel.
+              Invite drivers and directly employed subcontractor staff. Review or remove their portal access.
             </p>
           </header>
 
@@ -211,6 +240,44 @@ export default function PortalInvitesPage() {
             <Card>Only tenant admins can manage invites.</Card>
           ) : (
             <>
+              {controlsEnabled ? (
+                <section className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm">
+                  <h2 className="mb-3 text-md font-semibold text-ink">Portal access</h2>
+                  <Field id="portal-access-search" label="Find by name, email, company or role"
+                    value={filter} onChange={(event) => setFilter(event.target.value)} />
+                  {accessRows.length ? (
+                    <div className="mt-3 overflow-x-auto">
+                      <table className="w-full text-left text-sm">
+                        <thead><tr>
+                          <th scope="col" className="p-2">Account</th>
+                          <th scope="col" className="p-2">Role</th>
+                          <th scope="col" className="p-2">Access</th>
+                          <th scope="col" className="p-2">Action</th>
+                        </tr></thead>
+                        <tbody>
+                          {accessRows.map((row) => (
+                            <tr key={row.id} className="border-t border-line">
+                              <td className="p-2">{row.name}<div className="text-ink-3">{row.email}</div>
+                                {row.company ? <div className="text-ink-3">{row.company}</div> : null}</td>
+                              <td className="p-2">{roleLabels[row.role] ?? row.role}</td>
+                              <td className="p-2">{!row.active ? "Revoked" : row.eligible ? "Enabled" : "Record inactive or ineligible"}</td>
+                              <td className="p-2">{row.active ? (
+                                <Button type="button" variant="secondary" size="sm" disabled={busy}
+                                  aria-label={`Revoke portal access for ${row.name}`}
+                                  onClick={() => {
+                                    if (window.confirm(`Revoke portal access for ${row.name}?`)) {
+                                      void send({ tenantId: tenant.activeTenantId, type: row.type, linkId: row.id }, "PATCH");
+                                    }
+                                  }}>Revoke access</Button>
+                              ) : null}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : <p className="mt-3 text-sm text-ink-3">{search ? "No matching portal accounts." : "No portal accounts yet."}</p>}
+                </section>
+              ) : null}
               <section className="mb-4 rounded-lg border border-line bg-surface p-4 shadow-sm">
                 <h2 className="mb-3 text-md font-semibold text-ink">Invite Driver</h2>
 
@@ -243,7 +310,7 @@ export default function PortalInvitesPage() {
                   onClick={() =>
                     void send({
                       type: "driver",
-                      tenantId: tenant.writeTenantId,
+                      tenantId: tenant.activeTenantId,
                       driverId,
                     })
                   }
@@ -267,7 +334,7 @@ export default function PortalInvitesPage() {
                     disabled={!controlsEnabled}
                   >
                     <option value="">Choose subcontractor</option>
-                    {data.subcontractors.map((sub) => (
+                    {data.subcontractors.filter((sub) => sub.active === true).map((sub) => (
                       <option key={sub.id} value={sub.id}>
                         {sub.name}
                       </option>
@@ -314,7 +381,7 @@ export default function PortalInvitesPage() {
                   onClick={() =>
                     void send({
                       type: "subcontractor",
-                      tenantId: tenant.writeTenantId,
+                      tenantId: tenant.activeTenantId,
                       employeeId,
                       role,
                     })
