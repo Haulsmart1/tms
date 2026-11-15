@@ -11,11 +11,11 @@ import { GET, POST } from "../../app/api/auth/callback/route";
 
 const origin = "https://tmswizard.cloud";
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
-function post(type = "email", cookie = "") {
+function post(type = "email", cookie = "", next = "/jobs") {
   return new NextRequest(`${origin}/api/auth/callback`, {
     method: "POST",
     headers: { origin, "content-type": "application/x-www-form-urlencoded", cookie },
-    body: new URLSearchParams({ token_hash: "fixture-token", type, next: "/jobs" }),
+    body: new URLSearchParams({ token_hash: "fixture-token", type, next }),
   });
 }
 function location(response: Response) { return new URL(response.headers.get("location")!); }
@@ -36,7 +36,11 @@ beforeEach(() => {
     return { auth: fake };
   });
   fake.getUser.mockResolvedValue({ data: { user: { id: "fixture-user" } }, error: null });
-  fake.createAdminClient.mockReturnValue({ from: () => ({ select: () => ({ eq: () => ({ eq: () => ({ limit: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) }) }) }) });
+  const maybeSingle = async () => ({ data: null, error: null });
+  const activePortal = { eq: () => ({ limit: () => ({ maybeSingle }) }) };
+  fake.createAdminClient.mockReturnValue({
+    from: () => ({ select: () => ({ eq: () => ({ ...activePortal, maybeSingle }) }) }),
+  });
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -124,6 +128,27 @@ describe("real callback handler with isolated Auth fixtures", () => {
     const response = await GET(new NextRequest(`${origin}/api/auth/callback?code=fixture-code`));
     expect(fake.exchangeCodeForSession).toHaveBeenCalledWith("fixture-code");
     expect(location(response).searchParams.get("error")).toBe("browser_context");
+  });
+
+  it.each([
+    ["super_admin", "/dashboard", "/super-admin"],
+    ["admin", "/dashboard", "/dashboard"],
+    ["super_admin", "/planning?date=2026-11-07", "/planning?date=2026-11-07"],
+    ["super_admin", "/warehouse", "/warehouse"],
+    ["super_admin", "/driver/dashboard", "/driver/dashboard"],
+  ])("routes %s from %s to %s", async (role, next, expected) => {
+    const admin = fake.createAdminClient();
+    const defaultFrom = admin.from;
+    admin.from = (table: string) => table === "profiles"
+      ? { select: () => ({ eq: () => ({ maybeSingle: async () => ({
+        data: { tenant_id: "home", role_id: "role", roles: { name: role } },
+        error: null,
+      }) }) }) }
+      : defaultFrom(table);
+    const response = await POST(post("email", "", next));
+    const destination = location(response);
+    expect(destination.pathname + destination.search).toBe(expected);
+    expect(response.headers.get("set-cookie")).toContain("fixture-session=signed-in");
   });
 
   it("does not redeem a token on a scanner GET", async () => {

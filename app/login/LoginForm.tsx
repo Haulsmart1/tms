@@ -8,6 +8,7 @@ import Field from "../../components/Field";
 import Button from "../../components/Button";
 import { readPastedLoginLink } from "../../lib/auth/appLogin";
 import { safeAuthNextPath } from "../../lib/auth/confirm";
+import { SUPER_ADMIN_ROLE } from "../../lib/roles";
 import { loginErrorMessage } from "../../lib/auth/loginError";
 import { useTenant } from "../components/TenantProvider";
 
@@ -19,6 +20,7 @@ export default function LoginForm({ installedApp }: { installedApp?: "driver" | 
   const [pasteError, setPasteError] = useState("");
   const [handoffPending, setHandoffPending] = useState(false);
   const tenant = useTenant();
+  const dashboard = tenant.role === SUPER_ADMIN_ROLE ? "/super-admin" : "/dashboard";
   const [email, setEmail] = useState("");
   const [requestedEmail, setRequestedEmail] = useState("");
   const [message, setMessage] = useState("");
@@ -134,7 +136,7 @@ export default function LoginForm({ installedApp }: { installedApp?: "driver" | 
               <strong className="break-words text-ink">{tenant.userEmail}</strong>.
             </p>
             {tenant.status === "ready" && (
-              <a href={appHome ? next ?? appHome : "/dashboard"} className="inline-block font-semibold text-ink underline">
+              <a href={appHome ? next ?? appHome : dashboard} className="inline-block font-semibold text-ink underline">
                 Continue to dashboard with this account
               </a>
             )}

@@ -128,6 +128,9 @@ export default function AppShell() {
         <div className={styles.shortcuts} aria-label="Operational shortcuts">
           <Link href="/jobs" className={styles.shortcut}><ClipboardList size={15} aria-hidden />Jobs board</Link>
           <Link href="/planning" className={styles.shortcut}><Route size={15} aria-hidden />Plan loads</Link>
+          {role === "super_admin" ? (
+            <Link href="/super-admin" className={`${styles.shortcut} col-span-2`}>Super Admin Dashboard</Link>
+          ) : null}
         </div>
         <div className={styles.search}>
           <Search size={16} aria-hidden className={styles.searchIcon} />
@@ -186,11 +189,6 @@ export default function AppShell() {
           <span className="block truncate text-xs font-semibold text-chrome-text-strong">
             {userEmail ?? "Signed in"}
           </span>
-          {role === "super_admin" ? (
-            <Link href="/super-admin" className="block truncate text-xs font-medium text-chrome-link no-underline hover:text-white">
-              Super Admin
-            </Link>
-          ) : null}
         </span>
         {/* Hidden on legacy routes. AppShell renders everywhere, so an
             unguarded toggle on /pod would turn the sidebar light while the
