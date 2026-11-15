@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import CompanyDetails from "./CompanyDetails";
 import Invoices from "./Invoices";
-import { canViewSubcontractorInvoices } from "../../../lib/accounts/portalScope";
+import { activeSubcontractorSection, subcontractorSections } from "../../../lib/accounts/subcontractorNavigation";
 import type { SubcontractorDetails } from "../../../lib/accounts/subcontractorDetails";
 import Skeleton from "../../../components/Skeleton";
 
@@ -91,7 +91,16 @@ type DashboardResponse = {
   portalUsers: PortalUserRow[];
 };
 
+function subscribeToHash(onChange: () => void) {
+  window.addEventListener("hashchange", onChange);
+  return () => window.removeEventListener("hashchange", onChange);
+}
+
+const currentHash = () => window.location.hash;
+const serverHash = () => "";
+
 export default function SubcontractorDashboardPage() {
+  const hash = useSyncExternalStore(subscribeToHash, currentHash, serverHash);
   const [data, setData] = useState<DashboardResponse | null>(null);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
@@ -99,8 +108,8 @@ export default function SubcontractorDashboardPage() {
   const [inviteRole, setInviteRole] = useState("driver");
   const [inviting, setInviting] = useState(false);
 
-  const loadDashboard = useCallback(async () => {
-    setLoading(true);
+  const loadDashboard = useCallback(async (refresh = false) => {
+    if (!refresh) setLoading(true);
     setMessage("");
 
     try {
@@ -125,7 +134,7 @@ export default function SubcontractorDashboardPage() {
 
       setData(body);
     } catch (error) {
-      setData(null);
+      if (!refresh) setData(null);
       setMessage(
         error instanceof Error
           ? error.message
@@ -194,9 +203,9 @@ export default function SubcontractorDashboardPage() {
         throw new Error(body.error || "Unable to invite employee.");
       }
 
-      setMessage(body.message || "Invitation sent.");
       setInviteEmployeeId("");
-      await loadDashboard();
+      await loadDashboard(true);
+      setMessage(body.message || "Invitation sent.");
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : "Unable to invite employee."
@@ -263,7 +272,10 @@ export default function SubcontractorDashboardPage() {
   }
 
   const canManageUsers = data.portalUser.role === "subcontractor_admin";
-  const canViewInvoices = canViewSubcontractorInvoices(data.portalUser.role);
+  const sections = subcontractorSections(data.portalUser.role);
+  const section = activeSubcontractorSection(data.portalUser.role, hash);
+  const canViewInvoices = sections.some(({ id }) => id === "invoices");
+  const canViewVehicles = sections.some(({ id }) => id === "vehicles");
   const eligibleEmployees = data.employees.filter(
     (employee) => employee.directly_employed && employee.active
   );
@@ -285,59 +297,64 @@ export default function SubcontractorDashboardPage() {
         {message ? <div className={styles.message}>{message}</div> : null}
 
         <nav aria-label="Subcontractor menu" className="mb-4 flex flex-wrap gap-x-5 gap-y-2 rounded-lg border border-line bg-surface p-4 text-sm font-semibold">
-          <a className="underline" href="#assigned-jobs">Jobs</a>
-          <a className="underline" href="#vehicles">Vehicles</a>
-          {canManageUsers && <a className="underline" href="#company-details">Company details</a>}
-          {canViewInvoices && <a className="underline" href="#invoices">Invoices</a>}
-          {canManageUsers && <a className="underline" href="#portal-users">Portal users</a>}
+          {sections.map(({ id, label }) => (
+            <a key={id} href={`#${id}`} aria-current={section === id ? "location" : undefined}
+              className={`inline-flex min-h-11 items-center rounded-md px-3 ${section === id
+                ? "bg-primary-tint text-ink" : "text-ink-2 hover:bg-surface-2"}`}>
+              {label}
+            </a>
+          ))}
         </nav>
 
-        <section className={styles.statGrid}>
-          <Stat label="Jobs" value={stats.total} />
-          <Stat label="Awaiting" value={stats.awaiting} />
-          <Stat label="In Progress" value={stats.inProgress} />
-          <Stat label="Completed" value={stats.completed} />
-          <Stat label="POD Attention" value={stats.podRequired} />
-        </section>
+        <div hidden={section !== "assigned-jobs"}>
+          <section className={styles.statGrid}>
+            <Stat label="Jobs" value={stats.total} />
+            <Stat label="Awaiting" value={stats.awaiting} />
+            <Stat label="In Progress" value={stats.inProgress} />
+            <Stat label="Completed" value={stats.completed} />
+            <Stat label="POD Attention" value={stats.podRequired} />
+          </section>
 
-        <section id="assigned-jobs" className={styles.card}>
-          <h2 className={styles.sectionTitle}>Assigned Jobs</h2>
+          <section id="assigned-jobs" className={styles.card}>
+            <h2 className={styles.sectionTitle}>Assigned Jobs</h2>
 
-          {data.jobs.length === 0 ? (
-            <p className={styles.muted}>No jobs are currently assigned.</p>
-          ) : (
-            <div className={styles.listGrid}>
-              {data.jobs.map((job) => (
-                <article key={job.id} className={styles.listCard}>
-                  <div className={styles.rowBetween}>
-                    <strong>{job.reference || "Job"}</strong>
-                    <span className={styles.badge}>{job.status || "Pending"}</span>
-                  </div>
-                  <p className={styles.muted}>
-                    {job.customer_reference || job.external_reference || "No external reference"}
-                  </p>
-                  <div className={styles.infoGrid}>
-                    <Info label="Job Date" value={formatDate(job.job_date || job.scheduled_date)} />
-                    <Info label="Priority" value={job.priority} />
-                    <Info
-                      label="Cost"
-                      value={
-                        job.subcontractor_cost === null
-                          ? "—"
-                          : `£${Number(job.subcontractor_cost).toFixed(2)}`
-                      }
-                    />
-                    <Info label="POD" value={job.pod_status || "Pending"} />
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
+            {data.jobs.length === 0 ? (
+              <p className={styles.muted}>No jobs are currently assigned.</p>
+            ) : (
+              <div className={styles.listGrid}>
+                {data.jobs.map((job) => (
+                  <article key={job.id} className={styles.listCard}>
+                    <div className={styles.rowBetween}>
+                      <strong>{job.reference || "Job"}</strong>
+                      <span className={styles.badge}>{job.status || "Pending"}</span>
+                    </div>
+                    <p className={styles.muted}>
+                      {job.customer_reference || job.external_reference || "No external reference"}
+                    </p>
+                    <div className={styles.infoGrid}>
+                      <Info label="Job Date" value={formatDate(job.job_date || job.scheduled_date)} />
+                      <Info label="Priority" value={job.priority} />
+                      <Info
+                        label="Cost"
+                        value={
+                          job.subcontractor_cost == null
+                            ? "—"
+                            : `£${Number(job.subcontractor_cost).toFixed(2)}`
+                        }
+                      />
+                      <Info label="POD" value={job.pod_status || "Pending"} />
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
 
-        <section id="vehicles" className={styles.card}>
+        {canViewVehicles && <section id="vehicles" hidden={section !== "vehicles"} className={styles.card}>
           <h2 className={styles.sectionTitle}>Vehicles</h2>
 
+          {data.vehicles.length === 0 && <p className={styles.muted}>No vehicles are registered.</p>}
           <div className={styles.listGrid}>
             {data.vehicles.map((vehicle) => {
               const compliance = mostUrgent([
@@ -372,24 +389,24 @@ export default function SubcontractorDashboardPage() {
               );
             })}
           </div>
-        </section>
+        </section>}
 
         {canManageUsers && (
-          <section id="company-details" className={styles.card}>
+          <section id="company-details" hidden={section !== "company-details"} className={styles.card}>
             <h2 className={styles.sectionTitle}>Company details</h2>
             <CompanyDetails key={data.portalUser.id} details={data.subcontractor} linkId={data.portalUser.id} />
           </section>
         )}
 
         {canViewInvoices && (
-          <section id="invoices" className={styles.card}>
+          <section id="invoices" hidden={section !== "invoices"} className={styles.card}>
             <h2 className={styles.sectionTitle}>Invoices</h2>
-            <Invoices key={data.portalUser.id} linkId={data.portalUser.id} />
+            {section === "invoices" && <Invoices key={data.portalUser.id} linkId={data.portalUser.id} />}
           </section>
         )}
 
         {canManageUsers ? (
-          <section id="portal-users" className={styles.card}>
+          <section id="portal-users" hidden={section !== "portal-users"} className={styles.card}>
             <h2 className={styles.sectionTitle}>Portal Users</h2>
             <p className={styles.muted}>
               Only active, directly employed people can be given portal access.
