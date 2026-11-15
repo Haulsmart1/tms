@@ -1,3 +1,4 @@
+import { isSquareSandboxReceipt } from "../payments/squareReceipt";
 import { countBillableVehicles, type VehicleRow, type LicenceRow } from "../billing/vehicleCount";
 
 /* Aggregation for the /super-admin dashboard and company list. Pure: the pages
@@ -10,6 +11,7 @@ export type ChargeRow = {
   gross_pence: number | string | null;
   status: string | null;
   created_at: string | null;
+  receipt_url?: string | null;
 };
 
 /* rows: null means the source could not be read at all, which on this project
@@ -76,7 +78,7 @@ export function collectedRevenue(
          succeeded/failed only, so a v1 row can never be 'refunded' today. If
          a v1 refund path is ever added, this function would overstate
          silently until it is taught to handle it too. */
-      if (row.status !== COLLECTED_STATUS) continue;
+      if (row.status !== COLLECTED_STATUS || isSquareSandboxReceipt(row.receipt_url)) continue;
 
       // created_at is `not null` on all three tables, so neither guard below
       // is reachable today. They stay as belt and braces: a malformed date

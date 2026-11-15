@@ -1,245 +1,109 @@
-"use client";
-
-import { useEffect, useMemo, useState } from "react";
-import { createClient } from "../../../lib/supabase/browser";
-import { filterBySearch } from "../../../lib/superAdmin/search";
-import Badge, { type Tone } from "../../../components/Badge";
-import Button from "../../../components/Button";
+import { isSquareSandboxReceipt } from "../../../lib/payments/squareReceipt";
+import { redirect } from "next/navigation";
+import { createClient } from "../../../lib/supabase/server";
+import { formatCycleDate, formatPence } from "../../../lib/billing/format";
 import MessageBanner from "../../../components/MessageBanner";
-import SearchInput from "../../../components/SearchInput";
-import Skeleton from "../../../components/Skeleton";
+import { resolveSuperAdmin, superAdminDenial } from "../../../lib/superAdmin/guard";
 
-type Invoice = {
+const HISTORY_LIMIT = 100;
+const CHARGE_COLUMNS = "id, company_id, gross_pence, currency, status, square_payment_id, receipt_url, created_at";
+
+type SquareCharge = {
   id: string;
-  company_id: string | null;
-  vehicle_count: number | null;
-  amount: number | null;
-  status: string | null;
+  company_id: string;
+  gross_pence: number;
+  currency: string;
+  status: string;
+  square_payment_id: string | null;
+  receipt_url: string | null;
+  created_at: string;
 };
 
-// PostgREST caps an unscoped select at 1000 rows by default. Mirrors
-// POSTGREST_ROW_CAP in lib/billing/server.ts:21 (not imported: server-only,
-// pulls in the service-role client and the Square SDK) and the same constant
-// in the sibling companies/dashboard/tenants/company-detail pages. Invoices
-// accrue every 28 days per company, so 1000 is reachable, and a search box
-// changes the symptom of hitting it: a truncated LIST reads as a short list,
-// but a search over a truncated read reads as "no such invoice" -- worse
-// than silent, actively misleading.
-const POSTGREST_ROW_CAP = 1000;
-
-function statusTone(status: string | null): Tone {
-  switch ((status ?? "").toLowerCase()) {
-    case "paid":
-      return "success";
-    case "overdue":
-      return "danger";
-    case "pending":
-      return "warning";
-    default:
-      return "neutral";
-  }
+function amount(pence: number, currency: string) {
+  return currency === "GBP" ? formatPence(pence) : `${(pence / 100).toFixed(2)} ${currency}`;
 }
 
-export default function SuperAdminInvoicesPage() {
-  const supabase = createClient();
-
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState("");
-  const [errorMessage, setErrorMessage] = useState("");
-  const [capWarning, setCapWarning] = useState("");
-  const [query, setQuery] = useState("");
-
-  async function loadInvoices() {
-    setLoading(true);
-    setCapWarning("");
-
-    const { data, error } = await supabase
-      .from("invoices")
-      .select("id, company_id, vehicle_count, amount, status")
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      setErrorMessage(error.message);
-    }
-
-    const rows = (data as Invoice[]) ?? [];
-    if (rows.length >= POSTGREST_ROW_CAP) {
-      setCapWarning(
-        `This list returned ${POSTGREST_ROW_CAP} or more rows, the PostgREST default cap. Some invoices may be missing below, and a search here may report "no matches" for an invoice that exists but was never read.`,
-      );
-    }
-
-    setInvoices(rows);
-    setLoading(false);
+function paymentStatus(charge: SquareCharge) {
+  if (isSquareSandboxReceipt(charge.receipt_url)) return "Square test payment";
+  if (charge.status === "succeeded") {
+    return charge.square_payment_id ? "Paid via Square" : "No Square payment reference";
   }
+  if (charge.status === "refunded") return "Refunded";
+  return charge.status;
+}
 
-  useEffect(() => {
-    loadInvoices();
-  }, []);
+export default async function SuperAdminInvoicesPage() {
+  const { userId, roleName } = await resolveSuperAdmin();
+  const denial = superAdminDenial(userId, roleName);
+  if (denial?.status === 401) redirect("/login?next=%2Fsuper-admin%2Finvoices");
+  if (denial) redirect("/dashboard");
 
-  const visibleInvoices = useMemo(
-    () =>
-      filterBySearch(query, invoices, (invoice) => [
-        // The rendered strings, not the raw values: the heading only ever
-        // shows the first 8 characters of id, and status falls back to the
-        // literal word "unknown" on screen, so search must match those, not
-        // the full uuid or a null that never appears.
-        invoice.id.slice(0, 8),
-        invoice.company_id,
-        invoice.status ?? "unknown",
-        invoice.amount != null ? String(invoice.amount) : null,
-      ]),
-    [query, invoices],
-  );
-
-  async function markStatus(id: string, status: string) {
-    setMessage("");
-    setErrorMessage("");
-
-    // Server-side since prodfix_95: the ledger tables take no browser writes,
-    // and the route records a super_admin_audit row the direct update never did.
-    let response: Response;
-    try {
-      response = await fetch(`/api/super-admin/invoices/${encodeURIComponent(id)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-    } catch {
-      setErrorMessage("Could not reach the server. Try again.");
-      return;
-    }
-
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-      setErrorMessage(payload?.error ?? "Unable to update this invoice.");
-      return;
-    }
-
-    setMessage(`Invoice marked ${status}.`);
-    await loadInvoices();
-  }
+  const supabase = await createClient();
+  const [companies, periods, cycles, additions] = await Promise.all([
+    supabase.from("companies").select("id, name"),
+    supabase.from("billing_periods")
+      .select("id, company_id, period_start, period_end, gross_pence, status, period_charges(gross_pence, status, square_payment_id, receipt_url)")
+      .not("gross_pence", "is", null)
+      .order("period_end", { ascending: false }).order("id").limit(HISTORY_LIMIT),
+    supabase.from("platform_charges").select(CHARGE_COLUMNS).gt("gross_pence", 0)
+      .order("created_at", { ascending: false }).order("id").limit(HISTORY_LIMIT),
+    supabase.from("vehicle_addon_charges").select(CHARGE_COLUMNS).gt("gross_pence", 0)
+      .order("created_at", { ascending: false }).order("id").limit(HISTORY_LIMIT),
+  ]);
+  const companyNames = new Map(companies.data?.map((row) => [row.id, row.name]));
+  const legacyCharges = [
+    ...(cycles.data ?? []).map((row) => ({ ...row, type: "Four-week cycle" })),
+    ...(additions.data ?? []).map((row) => ({ ...row, type: "Vehicle addition" })),
+  ].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, HISTORY_LIMIT);
 
   return (
-    /* Matches /super-admin/requests. The photo background and dark scrim that
-       used to live here are gone on purpose: the console has one surface
-       language and this area was the only thing outside it. */
-    <div className="ds min-h-screen bg-canvas px-4 py-8 font-sans text-ink md:px-8">
-      <div className="mx-auto w-full max-w-6xl">
-        <header className="mb-4">
-          <div className="text-kicker uppercase text-ink-3">Platform</div>
-
-          <h1 className="mb-1 mt-0.5 text-xl font-semibold tracking-tight text-ink">
-            Invoices
-          </h1>
-
-          <p className="m-0 text-sm text-ink-3">
-            Platform invoices across every company.
-          </p>
+    <main className="ds min-h-screen bg-canvas px-4 py-8 font-sans text-ink md:px-8">
+      <div className="mx-auto w-full max-w-6xl space-y-6">
+        <header>
+          <h1 className="text-xl font-semibold text-ink">Platform invoices</h1>
+          <p className="text-sm text-ink-3">TMS subscription invoices and Square payments across companies.</p>
         </header>
-
-        <MessageBanner tone="danger">{errorMessage}</MessageBanner>
-
-        <MessageBanner tone="success">{message}</MessageBanner>
-
-        <MessageBanner tone="warning">{capWarning}</MessageBanner>
-
-        <SearchInput
-          id="invoice-search"
-          label="Search invoices"
-          value={query}
-          onChange={setQuery}
-          placeholder="Search by id, company, status"
-          resultHint={!loading && query ? `${visibleInvoices.length} of ${invoices.length} invoices` : undefined}
-        />
-
-        {loading ? (
-          <div aria-busy className="grid gap-3">
-            <span className="sr-only" role="status">
-              Loading invoices
-            </span>
-
-            {[0, 1, 2, 3].map((index) => (
-              <div
-                key={`invoice-skeleton-${index}`}
-                className="rounded-lg border border-line bg-surface p-4 shadow-sm"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <Skeleton w="14ch" h="1rem" />
-                  <Skeleton w="4.5rem" h="1.375rem" pill />
-                </div>
-
-                <div className="mt-2 grid gap-1">
-                  <Skeleton w="22ch" h="0.75rem" />
-                  <Skeleton w="10ch" h="0.75rem" />
-                  <Skeleton w="12ch" h="0.75rem" />
-                </div>
-
-                <div className="mt-3 flex gap-2">
-                  <Skeleton w="6.5rem" h="2rem" />
-                  <Skeleton w="7.5rem" h="2rem" />
-                </div>
-              </div>
+        {companies.error ? <MessageBanner tone="warning">Company names could not be loaded.</MessageBanner> : null}
+        <section aria-labelledby="period-invoices">
+          <h2 id="period-invoices" className="text-md font-semibold">Subscription periods</h2>
+          {periods.error ? <MessageBanner tone="danger">Could not load subscription invoices.</MessageBanner> : null}
+          {!periods.error && !periods.data?.length ? <p className="text-sm text-ink-3">No subscription invoices yet.</p> : null}
+          <ul className="grid list-none gap-3 p-0">
+            {periods.data?.map((period) => {
+              const hasTestPayment = period.period_charges.some((charge) => isSquareSandboxReceipt(charge.receipt_url));
+              const squarePaid = period.period_charges
+                .filter((charge) => charge.status === "succeeded" && charge.square_payment_id && !isSquareSandboxReceipt(charge.receipt_url))
+                .reduce((sum, charge) => sum + Number(charge.gross_pence), 0);
+              return (
+                <li key={period.id} className="rounded-lg border border-line bg-surface p-4">
+                  <strong>{companyNames.get(period.company_id) ?? period.company_id}</strong>
+                  <p className="text-sm text-ink-3">
+                    {formatCycleDate(period.period_start)} to {formatCycleDate(period.period_end)}
+                  </p>
+                  <p className="text-sm">{formatPence(period.gross_pence)} incl. VAT · {hasTestPayment ? "Includes Square test payment" : period.status}</p>
+                  <p className="text-sm">Collected via Square: {formatPence(squarePaid)}</p>
+                </li>
+              );
+            })}
+          </ul>
+          {periods.data?.length === HISTORY_LIMIT ? <p className="text-sm">Showing the latest {HISTORY_LIMIT} invoices.</p> : null}
+        </section>
+        <section aria-labelledby="legacy-charges">
+          <h2 id="legacy-charges" className="text-md font-semibold">Legacy subscription charges</h2>
+          {cycles.error || additions.error ? <MessageBanner tone="danger">Some legacy charges could not be loaded.</MessageBanner> : null}
+          {!cycles.error && !additions.error && !legacyCharges.length ? <p className="text-sm text-ink-3">No legacy charges.</p> : null}
+          <ul className="grid list-none gap-3 p-0">
+            {legacyCharges.map((charge) => (
+              <li key={`${charge.type}-${charge.id}`} className="rounded-lg border border-line bg-surface p-4">
+                <strong>{companyNames.get(charge.company_id) ?? charge.company_id}</strong>
+                <p className="text-sm text-ink-3">{charge.type} · {formatCycleDate(charge.created_at.slice(0, 10))}</p>
+                <p className="text-sm">{amount(charge.gross_pence, charge.currency)} incl. VAT · {paymentStatus(charge)}</p>
+              </li>
             ))}
-          </div>
-        ) : visibleInvoices.length === 0 ? (
-          <div className="rounded-lg bg-surface-2 p-8 text-center text-sm text-ink-3">
-            {query ? `No invoices match "${query}".` : "No invoices found."}
-          </div>
-        ) : (
-          <div className="grid gap-3">
-            {visibleInvoices.map((invoice) => (
-              <div
-                key={invoice.id}
-                className="rounded-lg border border-line bg-surface p-4 shadow-sm"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <h3 className="m-0 text-md font-semibold text-ink">
-                    Invoice #{invoice.id.slice(0, 8)}
-                  </h3>
-
-                  <Badge tone={statusTone(invoice.status)}>{invoice.status ?? "unknown"}</Badge>
-                </div>
-
-                <div className="mt-2 grid gap-0.5 text-sm text-ink-3">
-                  <div>
-                    Company ID:{" "}
-                    <span className="font-mono text-ink-2">{invoice.company_id ?? "-"}</span>
-                  </div>
-
-                  <div>
-                    Vehicles: <span className="text-ink-2">{invoice.vehicle_count ?? "-"}</span>
-                  </div>
-
-                  <div>
-                    Amount: <span className="text-ink-2">£{invoice.amount ?? "-"}</span>
-                  </div>
-                </div>
-
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() => markStatus(invoice.id, "paid")}
-                  >
-                    Mark Paid
-                  </Button>
-
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => markStatus(invoice.id, "pending")}
-                  >
-                    Mark Pending
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+          </ul>
+          {legacyCharges.length === HISTORY_LIMIT ? <p className="text-sm">Showing the latest {HISTORY_LIMIT} charges.</p> : null}
+        </section>
       </div>
-    </div>
+    </main>
   );
 }
