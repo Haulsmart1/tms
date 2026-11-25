@@ -28,6 +28,7 @@ type ManifestItemRow = {
 };
 
 type JobAssignmentRow = {
+  archived_at: string | null;
   id: string;
   vehicle_id: string | null;
   driver_id: string | null;
@@ -291,7 +292,7 @@ export async function POST(
     } = await admin
       .from("jobs")
       .select(
-        "id,vehicle_id,driver_id,subcontractor_id",
+        "id,vehicle_id,driver_id,subcontractor_id,archived_at",
       )
       .eq("tenant_id", session.tenantId)
       .in("id", jobIds);
@@ -312,6 +313,16 @@ export async function POST(
           error:
             "One or more manifest jobs are no longer available.",
         },
+        { status: 409 },
+      );
+    }
+
+    const activeJobIds = new Set(
+      jobRows.filter((job) => !job.archived_at).map((job) => job.id),
+    );
+    if (activeJobIds.size === 0) {
+      return NextResponse.json(
+        { error: "This load manifest has no active jobs." },
         { status: 409 },
       );
     }
@@ -413,9 +424,9 @@ export async function POST(
         eventId:
           result.event_id,
         itemCount:
-          Number(result.item_count),
+          itemRows.filter((item) => activeJobIds.has(item.job_id)).length,
         jobCount:
-          Number(result.job_count),
+          activeJobIds.size,
         scannedAt:
           result.scanned_at,
         vehicleId,

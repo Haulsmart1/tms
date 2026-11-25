@@ -21,7 +21,7 @@ vi.mock("./operatorTimeZone", () => ({ loadOperatorTimeZone: mocks.zone }));
 const today = "2026-10-08";
 const job = (id: string, overrides: Record<string, unknown> = {}) => ({
   id, tenant_id: "tenant-bob", driver_id: "bob", subcontractor_id: null,
-  planning_date: null, scheduled_date: today, job_date: "2026-08-26",
+  archived_at: null, planning_date: null, scheduled_date: today, job_date: "2026-08-26",
   route_order: 2, reference: id, ...overrides,
 });
 const fixtures = [
@@ -86,7 +86,7 @@ beforeEach(() => {
       if (table === "jobs") {
         const params = url.searchParams;
         const rows = dashboardRows.filter((row) => {
-          if (!["tenant_id", "driver_id", "subcontractor_id", "id"].every((col) =>
+          if (!["tenant_id", "driver_id", "subcontractor_id", "id", "archived_at"].every((col) =>
             !params.has(col) || matches(row, `${col}.${params.get(col)}`))) return false;
           const or = params.get("or");
           return !or || terms(or.slice(1, -1)).some((term) => matches(row, term));
@@ -123,6 +123,13 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
 
 describe("driver dashboard API", () => {
+  it("excludes archived jobs from both driver worklists", async () => {
+    dashboardRows = [job("active"), job("archived", { archived_at: today })];
+    const data = await (await GET()).json();
+    expect(data.jobs.map((row: { id: string }) => row.id)).toEqual(["active"]);
+    expect(data.todayJobs.map((row: { id: string }) => row.id)).toEqual(["active"]);
+  });
+
   it("retains and prioritizes an authorized carried-over assignment for offline reads beyond the recent 100 jobs", async () => {
     dashboardRows = Array.from({ length: 120 }, (_, index) => job(`recent-${index}`, {
       job_date: "2026-10-07", scheduled_date: "2026-10-07", planning_date: null,

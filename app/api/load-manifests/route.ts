@@ -119,6 +119,7 @@ export async function POST(
     const { data: jobs, error: jobsError } = await admin
       .from("jobs")
       .select("id,reference,status")
+      .is("archived_at", null)
       .eq("tenant_id", tenantId)
       .in("id", jobIds);
 

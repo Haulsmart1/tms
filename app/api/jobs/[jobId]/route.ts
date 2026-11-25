@@ -45,6 +45,7 @@ export async function DELETE(
       .from("jobs")
       .select("id,status")
       .eq("id", jobId)
+      .is("archived_at", null)
       .eq("tenant_id", tenantId)
       .maybeSingle();
 
@@ -141,6 +142,7 @@ export async function DELETE(
       .from("jobs")
       .delete()
       .eq("id", jobId)
+      .is("archived_at", null)
       .eq("tenant_id", tenantId)
       .select("id")
       .maybeSingle();

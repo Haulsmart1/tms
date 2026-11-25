@@ -14,7 +14,8 @@ function clientFor(rows: Array<Record<string, unknown>>, failIds = false) {
       if (ids && failIds) return new Response(JSON.stringify({ message: "snapshot lookup failed", code: "TEST" }), { status: 500 });
       const tenants = url.searchParams.get("tenant_id")!.slice(4, -1).split(",");
       const allowed = ids?.slice(4, -1).split(",");
-      const data = rows.filter((row) => tenants.includes(String(row.tenant_id)) && (
+      const data = rows.filter((row) => tenants.includes(String(row.tenant_id)) &&
+        (url.searchParams.get("archived_at") !== "is.null" || row.archived_at == null) && (
         allowed ? allowed.includes(String(row.id)) : (row.planning_date ?? row.scheduled_date) === today
       ));
       return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
@@ -26,6 +27,8 @@ function clientFor(rows: Array<Record<string, unknown>>, failIds = false) {
 describe("saved plan board loading", () => {
   it("keeps open jobs but excludes completed/cancelled jobs from the day and old saved snapshots", async () => {
     const { client } = clientFor([
+      { id: "archived-day", tenant_id: "tenant", planning_date: today, status: "planned", archived_at: today },
+      { id: "archived-snapshot", tenant_id: "tenant", planning_date: "2026-10-01", status: "planned", archived_at: today },
       { id: "open", tenant_id: "tenant", planning_date: today, status: "planned" },
       { id: "unknown", tenant_id: "tenant", planning_date: today, status: null },
       { id: "complete", tenant_id: "tenant", planning_date: today, status: "completed" },
@@ -33,7 +36,7 @@ describe("saved plan board loading", () => {
       { id: "cancelled", tenant_id: "tenant", planning_date: "2026-10-01", status: "cancelled" },
       { id: "old-open", tenant_id: "tenant", planning_date: "2026-10-01", status: "planned" },
     ]);
-    const result = await loadPlanningBoardJobs(client, { tenantIds: ["tenant"], planningDate: today, savedJobIds: ["old-complete", "cancelled", "old-open"] });
+    const result = await loadPlanningBoardJobs(client, { tenantIds: ["tenant"], planningDate: today, savedJobIds: ["old-complete", "cancelled", "old-open", "archived-snapshot"] });
     expect(result.data!.map((row) => row.id)).toEqual(["open", "unknown", "old-open"]);
     expect(result.completedData.map((row) => row.id)).toEqual(["complete", "old-complete"]);
   });
