@@ -18,6 +18,7 @@ import Card from "../../components/Card";
 import MessageBanner from "../../components/MessageBanner";
 import Stat from "../../components/Stat";
 import Tabs from "../../components/Tabs";
+import PublishInvoice from "../subcontractors/PublishInvoice";
 import QuotationPanel from "./QuotationPanel";
 import { isOverdue, operatorToday } from "../../lib/invoices/dates";
 import { mayBeTruncated } from "../../lib/invoices/listLimits";
@@ -41,6 +42,7 @@ type Tab =
   | "chase"
   | "customer-pos"
   | "quotations"
+  | "self-billing"
   | "supplier-pos"
   | "accounting";
 
@@ -257,6 +259,7 @@ const TABS: Array<[Tab, string]> = [
   ["chase", "Chase Letters"],
   ["customer-pos", "Customer POs"],
   ["quotations", "Quotations"],
+  ["self-billing", "Subcontractor Self-Billing"],
   ["supplier-pos", "Supplier POs"],
   ["accounting", "Accounting"],
 ];
@@ -533,7 +536,7 @@ export default function CustomerAccountsPage() {
         return;
       }
 
-      if (tab === "quotations") {
+      if (tab === "quotations" || tab === "self-billing") {
         setRows([]);
         setDataTenantId(tenantId);
         return;
@@ -3613,6 +3616,13 @@ export default function CustomerAccountsPage() {
                   customers={customers}
                 />
               ) : null}
+              {tab === "self-billing" ? (
+                <SubcontractorSelfBilling
+                  key={tenantId}
+                  tenantId={tenant.writeTenantId}
+                  subcontractors={subcontractors}
+                />
+              ) : null}
               {tab === "supplier-pos" ? (
                 <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
                   <h2 className="m-0 mb-3 text-md font-semibold text-ink">Supplier / Subcontractor PO</h2>
@@ -5011,6 +5021,31 @@ function LoadMoreRow({
         </Button>
       ) : null}
     </div>
+  );
+}
+
+function SubcontractorSelfBilling({ tenantId, subcontractors }: {
+  tenantId: string | null;
+  subcontractors: Subcontractor[];
+}) {
+  const [selectedId, setSelectedId] = useState("");
+  const selected = subcontractors.find((subcontractor) => subcontractor.id === selectedId);
+
+  return (
+    <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
+      <h2 className="m-0 text-md font-semibold text-ink">Subcontractor Self-Billing</h2>
+      <p className="mt-1 text-sm text-ink-2">Upload an issued self-billing invoice PDF to the subcontractor’s private portal.</p>
+      {tenantId ? (
+        <div className="mt-4 grid gap-4">
+          <Select id="self-billing-subcontractor" label="Subcontractor"
+            value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>
+            <option value="">Choose subcontractor</option>
+            {subcontractors.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
+          </Select>
+          {selected ? <PublishInvoice key={selected.id} id={selected.id} tenantId={tenantId} name={selected.name} /> : null}
+        </div>
+      ) : <p className="mt-4 text-sm text-ink-2">Choose a workspace before publishing an invoice.</p>}
+    </section>
   );
 }
 

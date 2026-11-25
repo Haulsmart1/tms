@@ -24,6 +24,7 @@ const CREATE_MESSAGES: RpcMessages = {
   invoice_invalid: [400, "The invoice details are not valid."],
   no_jobs: [400, "Select at least one job."],
   customer_not_found: [404, "Customer not found."],
+  job_archived: [409, "Archived jobs cannot be invoiced. Refresh Ready to Invoice and try again."],
   jobs_not_found: [400, "One or more selected jobs were not found."],
   jobs_mixed_customer: [409, "All jobs on an invoice must belong to the same customer."],
   jobs_already_invoiced: [409, "One or more selected jobs have already been invoiced."],
