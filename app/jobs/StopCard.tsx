@@ -83,6 +83,7 @@ type Props = {
   jobId: string;
   tenantId: string;
   stop: Stop;
+  readOnly?: boolean;
   podForm: PodFormState | undefined;
   onPodFieldChange: (
     stopId: string,
@@ -97,6 +98,7 @@ export default function StopCard({
   jobId,
   tenantId,
   stop,
+  readOnly = false,
   podForm,
   onPodFieldChange,
   onMarkDelivered,
@@ -509,7 +511,7 @@ export default function StopCard({
                   label="View"
                 />
 
-                {stop.pod_status !== "delivered" ? (
+                {!readOnly && stop.pod_status !== "delivered" ? (
                   <Button
                     type="button"
                     variant="danger"
@@ -528,13 +530,13 @@ export default function StopCard({
         </div>
       ) : null}
 
-      {deferredDelivery && !hasEvidence ? (
+      {!readOnly && deferredDelivery && !hasEvidence ? (
         <div role="status" className="mt-3 rounded-md border border-warning-border bg-warning-tint p-3 text-sm text-warning-strong">
           Delivery saved. Photo/POD still to add. Upload it below when available.
         </div>
       ) : null}
 
-      {!locked || deferredDelivery ? (
+      {!readOnly && (!locked || deferredDelivery) ? (
         <div className="mt-3 grid max-w-xl gap-3">
           {!locked ? <>
           <Field

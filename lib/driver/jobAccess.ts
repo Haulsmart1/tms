@@ -36,6 +36,7 @@ export async function loadDriverJobStop(
     .from("jobs")
     .select("id,status,subcontractor_id,created_at")
     .eq("id", jobId)
+    .is("archived_at", null)
     .eq("tenant_id", session.tenantId)
     .eq("driver_id", session.driverId);
 

@@ -74,6 +74,8 @@ export default function JobsPage() {
   const supabase = createClient();
   const tenant = useTenant();
 
+  const [showArchived, setShowArchived] = useState(false);
+  const jobsLoadVersion = useRef(0);
   const [jobs, setJobs] = useState<any[]>([]);
   const [vehicles, setVehicles] = useState<any[]>([]);
   const [drivers, setDrivers] = useState<any[]>([]);
@@ -138,6 +140,7 @@ export default function JobsPage() {
     // Guard lives here, not in the effect: see TenantContextValue in lib/tenant/context.ts
     if (tenant.status !== "ready") return;
 
+    const version = ++jobsLoadVersion.current;
     setJobsLoading(true);
     setMessage("");
 
@@ -151,7 +154,7 @@ export default function JobsPage() {
     /* job_stops below selects pod_flags (tracking_02, applied 2026-10-08) for the
        "Time not trusted" and "Synced late" tags in StopCard. */
     const jobsQuery = () => supabase.from("jobs").select(`
-        id, tenant_id, reference, status, scheduled_date, planning_date, customer_id, vehicle_id, driver_id,
+        id, tenant_id, reference, status, scheduled_date, planning_date, customer_id, vehicle_id, driver_id, archived_at,
         customer_price, subcontractor_id, subcontractor_cost,
         journey_scope, origin_country_code, destination_country_code,
         compliance_regime_override, compliance_override_reason,
@@ -168,10 +171,12 @@ export default function JobsPage() {
         (from, to) =>
           tenant
             .filterByTenant(jobsQuery())
+            .filter("archived_at", showArchived ? "not.is" : "is", "null")
             .order("created_at", { ascending: false })
             .range(from, to) as unknown as PromiseLike<PageResponse<any>>,
         { pageSize: 500, maxRows: JOBS_MAX_ROWS },
       );
+      if (version !== jobsLoadVersion.current) return;
       jobsData = jobsPage.rows;
       setJobsNotice(
         jobsPage.truncated
@@ -179,6 +184,7 @@ export default function JobsPage() {
           : "",
       );
     } catch (error) {
+      if (version !== jobsLoadVersion.current) return;
       setMessage(`Jobs load error: ${error instanceof Error ? error.message : "unknown error"}`);
       settle();
       return;
@@ -188,6 +194,7 @@ export default function JobsPage() {
     const { data: customerData, error: customerError } = await tenant.filterByTenant(supabase.from("customers").select("id, name")).eq("active", true).order("name", { ascending: true });
     const { data: subcontractorData, error: subcontractorError } = await tenant.filterByTenant(supabase.from("subcontractors").select("id, name, vehicle_reg, driver_name")).eq("active", true).order("name", { ascending: true });
 
+    if (version !== jobsLoadVersion.current) return;
     if (vehicleError) { setMessage(`Vehicles load error: ${vehicleError.message}`); settle(); return; }
     if (driverError) { setMessage(`Drivers load error: ${driverError.message}`); settle(); return; }
     if (customerError) { setMessage(`Customers load error: ${customerError.message}`); settle(); return; }
@@ -207,7 +214,7 @@ export default function JobsPage() {
     settle();
   }
 
-  useEffect(() => { loadData(); }, [tenant.status, tenant.activeTenantId]);
+  useEffect(() => { loadData(); }, [tenant.status, tenant.activeTenantId, showArchived]);
 
   /* One region, one flag: the job table is the only thing here that renders
      tenant data. The filter-bar selects feed form controls, which
@@ -1016,6 +1023,7 @@ export default function JobsPage() {
           const search = jobFilters.search.trim().toLowerCase();
 
           const filteredJobs = jobs
+            .filter((job) => Boolean(job.archived_at) === showArchived)
             .filter((job) => {
               if (search) {
                 const searchable = [
@@ -1125,7 +1133,7 @@ export default function JobsPage() {
           ).length;
 
           const selectedJob = expandedJobId
-            ? jobs.find((job) => job.id === expandedJobId) ?? null
+            ? jobs.find((job) => job.id === expandedJobId && Boolean(job.archived_at) === showArchived) ?? null
             : null;
 
           const selectedMargin =
@@ -1161,6 +1169,20 @@ export default function JobsPage() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      aria-pressed={showArchived}
+                      onClick={() => {
+                        jobsLoadVersion.current++;
+                        setJobs([]);
+                        setExpandedJobId(null);
+                        setSelectedPlanningJobIds(new Set());
+                        setShowArchived(!showArchived);
+                      }}
+                    >
+                      {showArchived ? "Show active jobs" : "Search archived jobs"}
+                    </Button>
                     <Button
                       type="button"
                       variant="secondary"
@@ -1391,8 +1413,8 @@ export default function JobsPage() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    <BackToSavedPlan jobId={selectedJob.id} tenantId={selectedJob.tenant_id}
-                      planningDate={selectedJob.planning_date || selectedJob.scheduled_date} vehicleId={selectedJob.vehicle_id} />
+                    {!selectedJob.archived_at ? <BackToSavedPlan jobId={selectedJob.id} tenantId={selectedJob.tenant_id}
+                      planningDate={selectedJob.planning_date || selectedJob.scheduled_date} vehicleId={selectedJob.vehicle_id} /> : null}
                     <Button
                       variant="secondary"
                       onClick={() => {
@@ -1402,6 +1424,7 @@ export default function JobsPage() {
                     >
                       Back to board
                     </Button>
+                    {!selectedJob.archived_at ? <>
                     {selectedJob.status === "planned" ||
                     selectedJob.status === "pending_acceptance" ? (
                       <Button
@@ -1443,14 +1466,15 @@ export default function JobsPage() {
                     >
                       Delete
                     </Button>
+                    </> : null}
                   </div>
                 </div>
 
 
-                <RecordAssistant key={selectedJob.id} area="jobs" entityId={selectedJob.id} />
+                {!selectedJob.archived_at ? <RecordAssistant key={selectedJob.id} area="jobs" entityId={selectedJob.id} /> : null}
 
                 {/* ACCEPTANCE FORM */}
-                {acceptanceTarget?.id ===
+                {!selectedJob.archived_at && acceptanceTarget?.id ===
                 selectedJob.id ? (
                   <div className="mb-4 rounded-lg border border-line bg-surface-2 p-4">
                     <div className="text-sm font-semibold text-ink">
@@ -1791,6 +1815,7 @@ export default function JobsPage() {
                             jobId={selectedJob.id}
                             tenantId={selectedJob.tenant_id}
                             stop={stop}
+                            readOnly={Boolean(selectedJob.archived_at)}
                             podForm={
                               podForms[
                                 stop.id
@@ -1821,6 +1846,7 @@ export default function JobsPage() {
               </div>
               ) : null}
 
+              {!showArchived ? <>
               {/* BULK PLANNING */}
               <div className="rounded-lg border border-line bg-surface p-4">
                 <div className="flex flex-wrap items-end gap-3">
@@ -1886,6 +1912,8 @@ export default function JobsPage() {
                 tenantId={tenant.activeTenantId}
               />
               </section>
+
+              </> : null}
 
               {/* COMPACT JOB LIST */}
               <div className="overflow-x-auto rounded-lg border border-line bg-surface shadow-sm">
@@ -1966,7 +1994,7 @@ export default function JobsPage() {
                                 type="checkbox"
                                 aria-label={`Select ${job.reference || "job"} for Planning`}
                                 checked={selectedPlanningJobIds.has(job.id)}
-                                disabled={!isPlanningEligible(job)}
+                                disabled={Boolean(job.archived_at) || !isPlanningEligible(job)}
                                 onChange={() =>
                                   togglePlanningSelection(job.id)
                                 }

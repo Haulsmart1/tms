@@ -40,6 +40,7 @@ export async function GET(
         "id,tenant_id,reference,customer_reference,external_reference,status,job_date,scheduled_date,priority,notes,pod_status,vehicle_id,completed_at,subcontractor_id",
       )
       .eq("id", jobId)
+      .is("archived_at", null)
       .eq("tenant_id", session.tenantId)
       .eq("driver_id", session.driverId);
 

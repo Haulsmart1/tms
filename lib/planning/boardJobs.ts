@@ -21,7 +21,7 @@ export async function loadPlanningBoardJobs(
   input: { tenantIds: string[]; planningDate: string; savedJobIds: string[] },
 ) {
   if (input.tenantIds.length === 0) return { data: [], completedData: [], error: null };
-  const query = () => client.from("jobs").select(JOB_SELECT).in("tenant_id", input.tenantIds);
+  const query = () => client.from("jobs").select(JOB_SELECT).is("archived_at", null).in("tenant_id", input.tenantIds);
   const day = await query()
     .or(`planning_date.eq.${input.planningDate},and(planning_date.is.null,scheduled_date.eq.${input.planningDate})`)
     .order("created_at", { ascending: true });

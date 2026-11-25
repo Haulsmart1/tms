@@ -31,6 +31,7 @@ export async function GET() {
     const recentJobsQuery = admin
       .from("jobs")
       .select(JOB_SELECT)
+      .is("archived_at", null)
       .eq("tenant_id", session.tenantId)
       .eq("driver_id", session.driverId)
       .order("job_date", { ascending: false })
@@ -39,6 +40,7 @@ export async function GET() {
     const todayJobsQuery = admin
       .from("jobs")
       .select(JOB_SELECT)
+      .is("archived_at", null)
       .eq("tenant_id", session.tenantId)
       .eq("driver_id", session.driverId)
       // An explicit planning date supersedes both source dates.
