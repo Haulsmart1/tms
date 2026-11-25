@@ -306,6 +306,8 @@ export default function CustomerAccountsPage() {
   const [emailInvoiceSendingId, setEmailInvoiceSendingId] =
     useState<string | null>(null);
 
+  const paymentSubmitting = useRef(false);
+  const [paymentConfirmation, setPaymentConfirmation] = useState<{ tenantId: string; text: string } | null>(null);
   const [paymentCustomerId, setPaymentCustomerId] = useState("");
   const [paymentInvoiceId, setPaymentInvoiceId] = useState("");
   const [paymentAmount, setPaymentAmount] = useState("");
@@ -1402,6 +1404,8 @@ export default function CustomerAccountsPage() {
     }
   }
   async function createPayment() {
+    if (working || paymentSubmitting.current) return;
+    setPaymentConfirmation(null);
     const amountText = paymentAmount.trim();
     const amountPence = toPence(amountText);
 
@@ -1449,29 +1453,37 @@ export default function CustomerAccountsPage() {
       allocationInvoice?.balance_due ?? 0
     );
 
-    const success = await postJson(
-      "/api/accounts/payments",
-      {
-        tenantId: tenant.writeTenantId,
-        customerId: paymentCustomerId,
-        invoiceId: allocationInvoice?.id ?? null,
-        amount: amountPence / 100,
-        currency,
-        allocateAmount: allocationInvoice ? split.allocate : 0,
-        paymentMethod,
-        paymentReference: paymentReference.trim() || null,
-      },
-      allocationInvoice && split.unallocatedPence > 0
-        ? `Payment recorded. ${money(split.allocate, currency)} allocated to ${
-            allocationInvoice.invoice_number || "the invoice"
-          }; ${money(split.unallocated, currency)} left unallocated.`
-        : "Payment recorded."
-    );
+    const confirmation = allocationInvoice && split.unallocatedPence > 0
+      ? `Payment recorded. ${money(split.allocate, currency)} allocated to ${
+          allocationInvoice.invoice_number || "the invoice"
+        }; ${money(split.unallocated, currency)} left unallocated.`
+      : "Payment recorded.";
 
-    if (success) {
-      setPaymentAmount("");
-      setPaymentReference("");
-      setPaymentInvoiceId("");
+    paymentSubmitting.current = true;
+    try {
+      const success = await postJson(
+        "/api/accounts/payments",
+        {
+          tenantId: tenant.writeTenantId,
+          customerId: paymentCustomerId,
+          invoiceId: allocationInvoice?.id ?? null,
+          amount: amountPence / 100,
+          currency,
+          allocateAmount: allocationInvoice ? split.allocate : 0,
+          paymentMethod,
+          paymentReference: paymentReference.trim() || null,
+        },
+        confirmation,
+      );
+
+      if (success) {
+        setPaymentAmount("");
+        setPaymentReference("");
+        setPaymentInvoiceId("");
+        setPaymentConfirmation({ tenantId: tenant.writeTenantId, text: confirmation });
+      }
+    } finally {
+      paymentSubmitting.current = false;
     }
   }
 
@@ -2650,7 +2662,7 @@ export default function CustomerAccountsPage() {
                 <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
                   <h2 className="m-0 mb-3 text-md font-semibold text-ink">Record Customer Payment</h2>
 
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <fieldset disabled={working} className="m-0 grid min-w-0 gap-3 border-0 p-0 sm:grid-cols-2 lg:grid-cols-3">
                     <Select id="invoice-customer" label="Customer"
                         value={paymentCustomerId}
                         onChange={(event) => {
@@ -2733,17 +2745,22 @@ export default function CustomerAccountsPage() {
                         }
                       />
                     </Field>
-                  </div>
+                  </fieldset>
 
                   <div className="mt-3">
                     <ActionButton
                       working={working}
                       label="Record Payment"
+                      disabled={!tenant.writeTenantId || !paymentCustomerId ||
+                        !Number.isFinite(Number(paymentAmount)) || toPence(paymentAmount) <= 0}
                       onClick={createPayment}
                     />
                   </div>
 
-                  <RecordCards rows={rows} />
+                  {paymentConfirmation && paymentConfirmation.tenantId === tenantId ? (
+                    <p role="status" className="mt-3 text-sm font-medium text-ink">{paymentConfirmation.text}</p>
+                  ) : null}
+                  <PaymentCards rows={rows} customers={customers} />
                   <LoadMoreRow
                     info={rowsPage}
                     shown={rows.length}
@@ -4993,6 +5010,35 @@ function LoadMoreRow({
           {loading ? "Loading..." : "Load more"}
         </Button>
       ) : null}
+    </div>
+  );
+}
+
+function PaymentCards({ rows, customers }: { rows: GenericRow[]; customers: Customer[] }) {
+  const names = new Map(customers.map((customer) => [customer.id, customer.name]));
+  return (
+    <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {rows.length === 0 ? (
+        <p className="col-span-full py-10 text-center text-sm text-ink-3">No payments recorded yet.</p>
+      ) : rows.map((row) => {
+        const method = String(row.payment_method ?? "").replaceAll("_", " ");
+        const reference = String(row.payment_reference ?? row.bank_reference ?? "");
+        return (
+          <article key={String(row.id)} className="min-w-0 rounded-lg border border-line bg-surface-2 p-3">
+            <h3 className="m-0 break-words text-sm font-semibold text-ink">
+              {names.get(String(row.customer_id)) ?? "Customer payment"}
+            </h3>
+            <p className="mb-2 mt-1 text-lg font-semibold tabular-nums text-ink">
+              {money(Number(row.amount), String(row.currency ?? "GBP"))}
+            </p>
+            <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-ink-2">
+              <dt>Date</dt><dd className="m-0">{formatDate(String(row.payment_date ?? ""))}</dd>
+              <dt>Method</dt><dd className="m-0 capitalize">{method || "—"}</dd>
+              {reference ? <><dt>Reference</dt><dd className="m-0 break-all">{reference}</dd></> : null}
+            </dl>
+          </article>
+        );
+      })}
     </div>
   );
 }
