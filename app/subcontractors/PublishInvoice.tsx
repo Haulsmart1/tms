@@ -3,6 +3,10 @@
 import { useEffect, useState, type FormEvent } from "react";
 import Button from "../../components/Button";
 import Field from "../../components/Field";
+import Select from "../../components/Select";
+import { operatorToday } from "../../lib/invoices/dates";
+
+const blankLine = () => ({ description: "", quantity: "1", unitPrice: "", vat: "" });
 
 type PublishedInvoice = {
   id: string;
@@ -11,11 +15,23 @@ type PublishedInvoice = {
   expected_payment_date: string | null;
 };
 
-export default function PublishInvoice({ id, tenantId, name }: { id: string; tenantId: string; name: string }) {
+export default function PublishInvoice({ id, tenantId, name, generate = false }: {
+  id: string; tenantId: string; name: string; generate?: boolean;
+}) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState(false);
-  const [issueDate, setIssueDate] = useState("");
+  const [issueDate, setIssueDate] = useState(() => generate ? operatorToday() : "");
+  const [lines, setLines] = useState([blankLine()]);
+  const [previewUrl, setPreviewUrl] = useState("");
+  useEffect(() => () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
+
+  function editLine(index: number, field: keyof ReturnType<typeof blankLine>, value: string) {
+    setPreviewUrl("");
+    setLines((current) => current.map((line, i) => i === index ? { ...line, [field]: value } : line));
+  }
   const [page, setPage] = useState(1);
   const [revision, setRevision] = useState(0);
   const [published, setPublished] = useState<{ invoices: PublishedInvoice[]; pagination: { hasMore: boolean } } | null>(null);
@@ -51,20 +67,34 @@ export default function PublishInvoice({ id, tenantId, name }: { id: string; ten
     if (busy) return;
     const form = event.currentTarget;
     const data = new FormData(form);
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    const preview = generate && (submitter instanceof HTMLButtonElement && submitter.value === "preview");
+    if (generate) {
+      if (!preview && !previewUrl) return;
+      data.set("mode", preview ? "preview" : "generate");
+      data.set("lines", JSON.stringify(lines));
+    }
     setBusy(true);
     setMessage("");
     setError(false);
     try {
       const pdf = data.get("invoice");
-      if (!(pdf instanceof File) || pdf.size > 4_000_000) throw new Error("Choose a PDF up to 4 MB.");
+      if (!generate && (!(pdf instanceof File) || pdf.size > 4_000_000)) throw new Error("Choose a PDF up to 4 MB.");
       const response = await fetch(url, {
         method: "POST", headers: { "x-tenant-id": tenantId }, body: data,
       });
-      if (response.status === 413) throw new Error("Choose a PDF up to 4 MB.");
+      if (!generate && response.status === 413) throw new Error("Choose a PDF up to 4 MB.");
+      if (preview && response.ok) {
+        setPreviewUrl(URL.createObjectURL(await response.blob()));
+        setMessage("Draft generated. Review the PDF before issuing.");
+        return;
+      }
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Unable to publish the invoice.");
       form.reset();
-      setIssueDate("");
+      setIssueDate(generate ? operatorToday() : "");
+      setLines([blankLine()]);
+      setPreviewUrl("");
       changePage(1);
       setRevision((value) => value + 1);
       setMessage(`Invoice published to ${name}.`);
@@ -78,22 +108,75 @@ export default function PublishInvoice({ id, tenantId, name }: { id: string; ten
 
   return (
     <section className="mb-4 rounded-lg border border-line bg-surface p-4">
-      <h2 className="text-md font-semibold">Publish an invoice to {name}</h2>
-      <form onSubmit={publish} className="mt-3 grid gap-3">
+      <h2 className="text-md font-semibold">{generate ? `Generate a self-billing invoice for ${name}` : `Publish an invoice to ${name}`}</h2>
+      <form onSubmit={publish} onChange={(event) => {
+        if (event.target instanceof HTMLInputElement && event.target.name === "selfBillingAgreement") return;
+        if (previewUrl) setPreviewUrl("");
+      }} className="mt-3 grid gap-3">
+        <fieldset disabled={busy} className="m-0 grid min-w-0 gap-3 border-0 p-0">
         <div className="grid gap-3 sm:grid-cols-3">
           <Field id="supplier-invoice-number" name="invoiceNumber" label="Invoice number" required maxLength={100} />
           <Field id="supplier-invoice-date" name="issueDate" label="Invoice date" type="date" required
             value={issueDate} onChange={(event) => setIssueDate(event.target.value)} />
           <Field id="supplier-invoice-payment-date" name="expectedPaymentDate" label="Expected payment date"
             type="date" min={issueDate || undefined} aria-describedby="supplier-invoice-payment-help" />
-          <Field id="supplier-invoice-pdf" name="invoice" label="Issued invoice PDF (up to 4 MB)"
-            type="file" accept="application/pdf,.pdf" required />
+          {generate ? (
+            <Field id="supplier-invoice-supply-date" name="supplyDate" label="Supply date" type="date" required />
+          ) : (
+            <Field id="supplier-invoice-pdf" name="invoice" label="Issued invoice PDF (up to 4 MB)"
+              type="file" accept="application/pdf,.pdf" required />
+          )}
         </div>
         <p id="supplier-invoice-payment-help" className="m-0 text-xs text-ink-2">
           Leave the date blank to use the subcontractor’s payment terms. The expected date appears in their portal.
         </p>
+        {generate ? (
+          <div className="grid gap-3">
+            <h3 className="text-sm font-semibold">Invoice lines</h3>
+            {lines.map((line, index) => (
+              <div key={index} className="grid items-end gap-2 rounded-md border border-line p-3 sm:grid-cols-2 lg:grid-cols-[2fr_1fr_1fr_1fr_auto]">
+                <Field id={`self-billing-description-${index}`} label="Description / job reference" value={line.description}
+                  required maxLength={300} onChange={(event) => editLine(index, "description", event.target.value)} />
+                <Field id={`self-billing-quantity-${index}`} label="Quantity" type="number" min="0.01" step="0.01" required
+                  value={line.quantity} onChange={(event) => editLine(index, "quantity", event.target.value)} />
+                <Field id={`self-billing-price-${index}`} label="Unit price (£)" type="number" min="0.01" step="0.01" required
+                  value={line.unitPrice} onChange={(event) => editLine(index, "unitPrice", event.target.value)} />
+                <Select id={`self-billing-vat-${index}`} label="VAT" required value={line.vat}
+                  onChange={(event) => editLine(index, "vat", event.target.value)}>
+                  <option value="">Choose VAT</option>
+                  <option value="none">No VAT</option>
+                  <option value="0">0% (zero-rated)</option>
+                  <option value="5">5%</option>
+                  <option value="20">20%</option>
+                </Select>
+                {lines.length > 1 ? <Button type="button" variant="secondary" onClick={() => {
+                  setLines((current) => current.filter((_, i) => i !== index));
+                  setPreviewUrl("");
+                }}>Remove</Button> : null}
+              </div>
+            ))}
+            <div>
+              <Button type="button" variant="secondary" disabled={lines.length >= 25} onClick={() => {
+                setLines((current) => [...current, blankLine()]);
+                setPreviewUrl("");
+              }}>Add line</Button>
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" name="selfBillingAgreement" />
+              A self-billing agreement is in place with this subcontractor.
+            </label>
+          </div>
+        ) : null}
+        </fieldset>
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" loading={busy}>Publish to portal</Button>
+          {generate ? (
+            <>
+              <Button type="submit" value="preview" variant="secondary" disabled={busy}>Generate draft PDF</Button>
+              {previewUrl ? <a className="font-semibold text-primary underline" href={previewUrl}
+                target="_blank" rel="noopener noreferrer">Open draft PDF</a> : null}
+              <Button type="submit" loading={busy} disabled={!previewUrl}>Issue and publish</Button>
+            </>
+          ) : <Button type="submit" loading={busy}>Publish to portal</Button>}
           {message && <p role={error ? "alert" : "status"} className={error ? "text-danger" : "text-success"}>{message}</p>}
         </div>
       </form>
@@ -151,9 +234,30 @@ function PublishedInvoiceDate({ invoice, tenantId, url }: { invoice: PublishedIn
     }
   }
 
+  async function download() {
+    setFeedback(null);
+    try {
+      const response = await fetch(`${url}?download=${encodeURIComponent(invoice.id)}`, {
+        headers: { "x-tenant-id": tenantId }, cache: "no-store",
+      });
+      if (!response.ok) throw new Error("Unable to download the invoice PDF.");
+      const href = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = href;
+      link.download = `${invoice.invoice_number.replace(/[^A-Za-z0-9_-]/g, "_")}.pdf`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(href), 1000);
+    } catch (cause) {
+      setFeedback({ text: cause instanceof Error ? cause.message : "Unable to download the invoice PDF.", error: true });
+    }
+  }
+
   return (
     <li className="rounded-md border border-line p-3">
-      <strong className="text-sm">{invoice.invoice_number}</strong>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <strong className="text-sm">{invoice.invoice_number}</strong>
+        <Button type="button" variant="secondary" onClick={() => void download()}>Download PDF</Button>
+      </div>
       <form onSubmit={save} className="mt-2 flex flex-wrap items-end gap-3">
         <Field id={`expected-payment-${invoice.id}`} type="date" label="Expected payment date" required
           min={invoice.issue_date} value={date} disabled={busy} onChange={(event) => {
