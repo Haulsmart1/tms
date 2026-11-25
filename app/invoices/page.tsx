@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import Link from "next/link";
 import { useTenant } from "../components/TenantProvider";
 import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
 import TenantGate from "../components/TenantGate";
@@ -5035,6 +5036,7 @@ function SubcontractorSelfBilling({ tenantId, subcontractors }: {
     <section className="rounded-lg border border-line bg-surface p-4 shadow-sm">
       <h2 className="m-0 text-md font-semibold text-ink">Subcontractor Self-Billing</h2>
       <p className="mt-1 text-sm text-ink-2">Upload an issued self-billing invoice PDF to the subcontractor’s private portal.</p>
+      <Link href="/subcontractors" className="text-sm font-medium text-primary underline">Edit subcontractor payment terms</Link>
       {tenantId ? (
         <div className="mt-4 grid gap-4">
           <Select id="self-billing-subcontractor" label="Subcontractor"

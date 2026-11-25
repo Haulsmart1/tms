@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Button from "../../../components/Button";
 
-type Invoice = { id: string; invoice_number: string; issue_date: string };
+type Invoice = { id: string; invoice_number: string; issue_date: string; expected_payment_date: string | null };
 type InvoicePage = { invoices: Invoice[]; hasNext: boolean };
 
 export default function Invoices({ linkId }: { linkId: string }) {
@@ -45,7 +45,11 @@ export default function Invoices({ linkId }: { linkId: string }) {
           {result.invoices.map((invoice) => (
             <li key={invoice.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-line p-3">
               <div><strong>{invoice.invoice_number}</strong>
-                <p className="text-sm text-ink-3">{new Date(invoice.issue_date).toLocaleDateString("en-GB", { timeZone: "UTC" })}</p></div>
+                <p className="text-sm text-ink-3">{new Date(invoice.issue_date).toLocaleDateString("en-GB", { timeZone: "UTC" })}</p>
+                {invoice.expected_payment_date ? (
+                  <p className="text-sm text-ink">Expected payment {new Date(invoice.expected_payment_date).toLocaleDateString("en-GB", { timeZone: "UTC" })}</p>
+                ) : null}
+              </div>
               <a className="font-semibold underline" href={`${url}&download=${encodeURIComponent(invoice.id)}`}
                 aria-label={`Download invoice ${invoice.invoice_number} PDF`}>Download PDF</a>
             </li>
