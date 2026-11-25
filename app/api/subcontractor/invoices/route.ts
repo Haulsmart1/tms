@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     if (!canViewSubcontractorInvoices(link.role)) throw new ApiError(403, "You cannot view invoices.");
     const id = request.nextUrl.searchParams.get("download");
     const scoped = admin.from("subcontractor_portal_invoices")
-      .select("id, invoice_number, issue_date")
+      .select("id, invoice_number, issue_date, expected_payment_date")
       .eq("tenant_id", link.tenant_id).eq("subcontractor_id", link.subcontractor_id);
     if (id !== null) {
       if (!isUuid(id)) throw new ApiError(404, "Invoice not found.");

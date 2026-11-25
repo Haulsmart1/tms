@@ -45,6 +45,21 @@ it("lets accounts download its own PDF as a private attachment", async () => {
   expect(response.headers.get("Content-Disposition")).toBe('attachment; filename="SB-12.pdf"');
 });
 
+it("includes the stored expected date in the scoped portal list", async () => {
+  const invoice = { id: invoiceId, invoice_number: "SB-12", issue_date: "2026-11-25", expected_payment_date: "2026-12-18" };
+  const query = {
+    select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), order: vi.fn().mockReturnThis(),
+    range: vi.fn().mockResolvedValue({ data: [invoice], error: null }),
+  };
+  from.mockReturnValue(query);
+
+  const response = await GET(new NextRequest("https://tms.invalid/api/subcontractor/invoices"));
+  expect(response.status).toBe(200);
+  expect(query.select).toHaveBeenCalledWith("id, invoice_number, issue_date, expected_payment_date");
+  expect(query.eq.mock.calls).toEqual([["tenant_id", "tenant"], ["subcontractor_id", "supplier"]]);
+  expect(await response.json()).toEqual({ invoices: [invoice], hasNext: false });
+});
+
 it("denies dispatchers before querying invoices", async () => {
   vi.mocked(requireSubcontractorPortal).mockResolvedValue({ admin: { from }, link: { ...link, role: "dispatcher" } } as never);
   const response = await GET(new NextRequest("https://tms.invalid/api/subcontractor/invoices"));
