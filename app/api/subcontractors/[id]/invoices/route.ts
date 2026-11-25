@@ -3,7 +3,7 @@ import { loadBrandingRecords } from "../../../../../lib/accounts/documentBrandin
 import { generateInvoicePdf } from "../../../../../lib/invoices/generatePdf";
 import { parseSelfBillingDetails } from "../../../../../lib/invoices/selfBilling";
 import { isUuid } from "../../../../../lib/auth/serverTenantAccess";
-import { addCalendarDays, isValidYmd } from "../../../../../lib/invoices/dates";
+import { addCalendarDays, isValidYmd, operatorToday } from "../../../../../lib/invoices/dates";
 import { listPageInfo, parseListPage } from "../../../../../lib/accounts/listPaging";
 import { ApiError, apiDbError } from "../../../../../lib/api/server";
 import {
@@ -35,6 +35,14 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
         "Content-Disposition": `attachment; filename="${filename}.pdf"`, "X-Content-Type-Options": "nosniff" } });
     }
     const page = parseListPage(request.nextUrl.searchParams);
+    if (request.nextUrl.searchParams.get("drafts") === "signed-off") {
+      const { data, count, error } = await admin.from("subcontractor_self_billing_drafts")
+        .select("id, reference, completed_at, subcontractor_cost", { count: "exact" })
+        .eq("tenant_id", tenantId).eq("subcontractor_id", id)
+        .order("completed_at", { ascending: false }).order("id").range(page.from, page.to);
+      if (error) throw apiDbError(error, "Unable to load signed-off jobs.");
+      return NextResponse.json({ jobs: data, pagination: listPageInfo(page, count, data.length) }, { headers: PRIVATE });
+    }
     const { data, count, error } = await admin.from("subcontractor_portal_invoices")
       .select("id, invoice_number, issue_date, expected_payment_date", { count: "exact" })
       .eq("tenant_id", tenantId).eq("subcontractor_id", id)
@@ -98,8 +106,32 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       throw new ApiError(400, "Expected payment date must be on or after the invoice date.");
     }
     let pdf: Blob;
+    let jobSource: { source_job_id: string; source_job_cost: number; source_signed_off_at: string } | undefined;
     if (mode === "preview" || mode === "generate") {
-      const details = parseSelfBillingDetails(form?.get("supplyDate") ?? null, form?.get("lines") ?? null);
+      let supplyDate = form?.get("supplyDate") ?? null;
+      let invoiceLines = form?.get("lines") ?? null;
+      const jobId = form?.get("jobId");
+      if (jobId !== undefined && jobId !== null) {
+        if (!isUuid(jobId)) throw new ApiError(404, "Signed-off job not found.");
+        const { data: job, error } = await admin.from("subcontractor_self_billing_drafts")
+          .select("id, reference, completed_at, subcontractor_cost")
+          .eq("tenant_id", tenantId).eq("subcontractor_id", subcontractorId).eq("id", jobId)
+          .maybeSingle();
+        if (error) throw apiDbError(error, "Unable to load the signed-off job.");
+        if (!job) throw new ApiError(409, "This job is no longer ready for self-billing. Refresh the list.");
+        const cost = Number(job.subcontractor_cost);
+        if (!Number.isFinite(cost) || cost <= 0) throw new ApiError(400, "Enter the subcontractor cost on the job first.");
+        if (Number(form?.get("jobCost")) !== cost || form?.get("jobCompletedAt") !== job.completed_at ||
+          (form?.get("jobReference") ?? "") !== (job.reference ?? "")) {
+          throw new ApiError(409, "This job has changed. Refresh the signed-off jobs list and review the new draft.");
+        }
+        jobSource = { source_job_id: job.id, source_job_cost: cost, source_signed_off_at: job.completed_at };
+        supplyDate = operatorToday(new Date(job.completed_at));
+        invoiceLines = JSON.stringify([{ description: job.reference ? `Transport job ${job.reference}` : "Transport job",
+          quantity: "1", unitPrice: cost.toFixed(2), vat: form?.get("jobVat") }]);
+      }
+
+      const details = parseSelfBillingDetails(supplyDate, invoiceLines);
       if (details.error) throw new ApiError(400, details.error);
       const supplierVat = subcontractor.vat_number?.trim();
       if (details.usesVat && !supplierVat) {
@@ -161,11 +193,15 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     const { error } = await admin.from("subcontractor_portal_invoices").insert({
       id, tenant_id: tenantId, subcontractor_id: subcontractorId,
       invoice_number: reference.trim(), issue_date: issueDate, expected_payment_date: expectedPaymentDate,
+      ...jobSource,
     });
     if (error) {
       const cleanup = await bucket.remove([path]);
       if (cleanup.error) console.error("[subcontractor invoice cleanup]", cleanup.error.name);
-      if (error.code === "23505") throw new ApiError(409, "This invoice number is already published for this subcontractor.");
+      if (error.code === "23505") throw new ApiError(409, jobSource
+        ? "This job or invoice number has already been invoiced. Refresh the signed-off jobs list."
+        : "This invoice number is already published for this subcontractor.");
+      if (jobSource && error.code === "23514") throw new ApiError(409, "The signed-off job changed. Refresh the draft and try again.");
       throw apiDbError(error, "Unable to publish the invoice.");
     }
     return NextResponse.json({ id }, { status: 201, headers: { "Cache-Control": "no-store" } });
