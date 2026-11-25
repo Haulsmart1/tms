@@ -8,6 +8,13 @@ import { operatorToday } from "../../lib/invoices/dates";
 
 const blankLine = () => ({ description: "", quantity: "1", unitPrice: "", vat: "" });
 
+type SignedOffJob = {
+  id: string;
+  reference: string | null;
+  completed_at: string;
+  subcontractor_cost: number | string | null;
+};
+
 type PublishedInvoice = {
   id: string;
   invoice_number: string;
@@ -23,6 +30,14 @@ export default function PublishInvoice({ id, tenantId, name, generate = false }:
   const [error, setError] = useState(false);
   const [issueDate, setIssueDate] = useState(() => generate ? operatorToday() : "");
   const [lines, setLines] = useState([blankLine()]);
+  const [draftJob, setDraftJob] = useState<SignedOffJob | null>(null);
+
+  function selectDraft(job: SignedOffJob | null) {
+    setDraftJob(job);
+    setPreviewUrl("");
+    setMessage("");
+    setIssueDate(operatorToday());
+  }
   const [previewUrl, setPreviewUrl] = useState("");
   useEffect(() => () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -72,7 +87,14 @@ export default function PublishInvoice({ id, tenantId, name, generate = false }:
     if (generate) {
       if (!preview && !previewUrl) return;
       data.set("mode", preview ? "preview" : "generate");
-      data.set("lines", JSON.stringify(lines));
+      if (draftJob) {
+        data.set("jobId", draftJob.id);
+        data.set("jobCost", String(draftJob.subcontractor_cost));
+        data.set("jobCompletedAt", draftJob.completed_at);
+        data.set("jobReference", draftJob.reference ?? "");
+      } else {
+        data.set("lines", JSON.stringify(lines));
+      }
     }
     setBusy(true);
     setMessage("");
@@ -94,6 +116,7 @@ export default function PublishInvoice({ id, tenantId, name, generate = false }:
       form.reset();
       setIssueDate(generate ? operatorToday() : "");
       setLines([blankLine()]);
+      setDraftJob(null);
       setPreviewUrl("");
       changePage(1);
       setRevision((value) => value + 1);
@@ -109,19 +132,25 @@ export default function PublishInvoice({ id, tenantId, name, generate = false }:
   return (
     <section className="mb-4 rounded-lg border border-line bg-surface p-4">
       <h2 className="text-md font-semibold">{generate ? `Generate a self-billing invoice for ${name}` : `Publish an invoice to ${name}`}</h2>
-      <form onSubmit={publish} onChange={(event) => {
+      {generate ? (
+        <SignedOffJobs url={url} tenantId={tenantId} revision={revision} disabled={busy}
+          selectedId={draftJob?.id} onSelect={selectDraft} />
+      ) : null}
+      <form key={draftJob?.id ?? "manual"} onSubmit={publish} onChange={(event) => {
         if (event.target instanceof HTMLInputElement && event.target.name === "selfBillingAgreement") return;
         if (previewUrl) setPreviewUrl("");
       }} className="mt-3 grid gap-3">
         <fieldset disabled={busy} className="m-0 grid min-w-0 gap-3 border-0 p-0">
         <div className="grid gap-3 sm:grid-cols-3">
-          <Field id="supplier-invoice-number" name="invoiceNumber" label="Invoice number" required maxLength={100} />
+          <Field id="supplier-invoice-number" name="invoiceNumber" label="Invoice number" required maxLength={100}
+            defaultValue={draftJob ? `SB-${(draftJob.reference || "JOB").replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 40)}-${draftJob.id.slice(0, 8).toUpperCase()}` : ""} />
           <Field id="supplier-invoice-date" name="issueDate" label="Invoice date" type="date" required
             value={issueDate} onChange={(event) => setIssueDate(event.target.value)} />
           <Field id="supplier-invoice-payment-date" name="expectedPaymentDate" label="Expected payment date"
             type="date" min={issueDate || undefined} aria-describedby="supplier-invoice-payment-help" />
           {generate ? (
-            <Field id="supplier-invoice-supply-date" name="supplyDate" label="Supply date" type="date" required />
+            <Field id="supplier-invoice-supply-date" name="supplyDate" label="Supply date" type="date" required
+              readOnly={Boolean(draftJob)} defaultValue={draftJob ? operatorToday(new Date(draftJob.completed_at)) : undefined} />
           ) : (
             <Field id="supplier-invoice-pdf" name="invoice" label="Issued invoice PDF (up to 4 MB)"
               type="file" accept="application/pdf,.pdf" required />
@@ -133,7 +162,19 @@ export default function PublishInvoice({ id, tenantId, name, generate = false }:
         {generate ? (
           <div className="grid gap-3">
             <h3 className="text-sm font-semibold">Invoice lines</h3>
-            {lines.map((line, index) => (
+            {draftJob ? (
+              <div className="grid items-end gap-2 rounded-md border border-line p-3 sm:grid-cols-3">
+                <Field id="signed-off-description" label="Job reference" value={draftJob.reference || "Transport job"} readOnly />
+                <Field id="signed-off-cost" label="Subcontractor cost (£)" value={Number(draftJob.subcontractor_cost).toFixed(2)} readOnly />
+                <Select id="signed-off-vat" name="jobVat" label="VAT" required defaultValue="">
+                  <option value="">Choose VAT</option>
+                  <option value="none">No VAT</option>
+                  <option value="0">0% (zero-rated)</option>
+                  <option value="5">5%</option>
+                  <option value="20">20%</option>
+                </Select>
+              </div>
+            ) : lines.map((line, index) => (
               <div key={index} className="grid items-end gap-2 rounded-md border border-line p-3 sm:grid-cols-2 lg:grid-cols-[2fr_1fr_1fr_1fr_auto]">
                 <Field id={`self-billing-description-${index}`} label="Description / job reference" value={line.description}
                   required maxLength={300} onChange={(event) => editLine(index, "description", event.target.value)} />
@@ -155,12 +196,12 @@ export default function PublishInvoice({ id, tenantId, name, generate = false }:
                 }}>Remove</Button> : null}
               </div>
             ))}
-            <div>
+            {!draftJob ? <div>
               <Button type="button" variant="secondary" disabled={lines.length >= 25} onClick={() => {
                 setLines((current) => [...current, blankLine()]);
                 setPreviewUrl("");
               }}>Add line</Button>
-            </div>
+            </div> : null}
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" name="selfBillingAgreement" />
               A self-billing agreement is in place with this subcontractor.
@@ -202,6 +243,81 @@ export default function PublishInvoice({ id, tenantId, name, generate = false }:
           </>
         ) : !listError ? <p role="status" className="text-sm text-ink-2">Loading published invoices…</p> : null}
       </div>
+    </section>
+  );
+}
+
+function SignedOffJobs({ url, tenantId, revision, disabled, selectedId, onSelect }: {
+  url: string; tenantId: string; revision: number; disabled: boolean;
+  selectedId?: string; onSelect: (job: SignedOffJob | null) => void;
+}) {
+  const [page, setPage] = useState(1);
+  const [attempt, setAttempt] = useState(0);
+  const [result, setResult] = useState<{ jobs: SignedOffJob[]; pagination: { hasMore: boolean } } | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(`${url}?drafts=signed-off&page=${page}&pageSize=10`, {
+      headers: { "x-tenant-id": tenantId }, cache: "no-store", signal: controller.signal,
+    }).then(async (response) => {
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Unable to load signed-off jobs.");
+      if (!controller.signal.aborted) setResult(body);
+    }).catch((cause) => {
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Unable to load signed-off jobs.");
+    });
+    return () => controller.abort();
+  }, [url, tenantId, page, attempt, revision]);
+
+  function loadPage(nextPage: number) {
+    setResult(null);
+    setError("");
+    setPage(nextPage);
+    setAttempt((value) => value + 1);
+  }
+
+  return (
+    <section className="mt-3 rounded-md border border-line p-3" aria-label="Signed-off jobs">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">Signed-off jobs</h3>
+        <div className="flex gap-2">
+          {selectedId ? <Button type="button" variant="secondary" disabled={disabled} onClick={() => onSelect(null)}>Manual invoice</Button> : null}
+          <Button type="button" variant="secondary" disabled={disabled} onClick={() => loadPage(page)}>Refresh jobs</Button>
+        </div>
+      </div>
+      {error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}
+      {result ? (
+        <>
+          {result.jobs.length === 0 ? <p className="text-sm text-ink-2">No signed-off jobs awaiting self-billing.</p> : (
+            <ul className="mt-2 divide-y divide-line">
+              {result.jobs.map((job) => {
+                const cost = Number(job.subcontractor_cost);
+                const price = cost > 0 ? new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(cost) : "Subcontractor cost needed";
+                return (
+                  <li key={job.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                    <div className="text-sm">
+                      <strong>{job.reference || "Transport job"}</strong>
+                      <span className="ml-2 text-ink-2">{new Date(job.completed_at).toLocaleDateString("en-GB", { timeZone: "Europe/London" })} · {price}</span>
+                    </div>
+                    <Button type="button" variant="secondary" aria-pressed={selectedId === job.id}
+                      disabled={disabled || !(cost > 0)} onClick={() => onSelect(job)}>
+                      {selectedId === job.id ? "Reload draft" : "Review draft"}
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {page > 1 || result.pagination.hasMore ? (
+            <div className="mt-2 flex items-center gap-3">
+              <Button type="button" variant="secondary" disabled={disabled || page === 1} onClick={() => loadPage(page - 1)}>Previous</Button>
+              <span>Page {page}</span>
+              <Button type="button" variant="secondary" disabled={disabled || !result.pagination.hasMore} onClick={() => loadPage(page + 1)}>Next</Button>
+            </div>
+          ) : null}
+        </>
+      ) : !error ? <p role="status" className="text-sm text-ink-2">Loading signed-off jobs…</p> : null}
     </section>
   );
 }
