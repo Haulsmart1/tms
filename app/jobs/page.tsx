@@ -78,6 +78,10 @@ export default function JobsPage() {
   const jobsLoadVersion = useRef(0);
   const [jobs, setJobs] = useState<any[]>([]);
   const [vehicles, setVehicles] = useState<any[]>([]);
+  const [subcontractorDriverLinks, setSubcontractorDriverLinks] = useState<
+    { tenant_id: string; subcontractor_id: string; driver_id: string }[]
+  >([]);
+  const [linkedDrivers, setLinkedDrivers] = useState<{ id: string; name: string; tenant_id: string }[]>([]);
   const [drivers, setDrivers] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [subcontractors, setSubcontractors] = useState<any[]>([]);
@@ -190,9 +194,25 @@ export default function JobsPage() {
       return;
     }
     const { data: vehicleData, error: vehicleError } = await tenant.filterByTenant(supabase.from("vehicles").select("id, registration")).eq("active", true).order("registration", { ascending: true });
-    const { data: driverData, error: driverError } = await tenant.filterByTenant(supabase.from("drivers").select("id, name")).eq("active", true).order("name", { ascending: true });
+    const { data: driverData, error: driverError } = await tenant.filterByTenant(supabase.from("drivers").select("id, name, tenant_id")).eq("active", true).order("name", { ascending: true });
     const { data: customerData, error: customerError } = await tenant.filterByTenant(supabase.from("customers").select("id, name")).eq("active", true).order("name", { ascending: true });
     const { data: subcontractorData, error: subcontractorError } = await tenant.filterByTenant(supabase.from("subcontractors").select("id, name, vehicle_reg, driver_name")).eq("active", true).order("name", { ascending: true });
+
+    const links = tenant.writeTenantId
+      ? await supabase.from("subcontractor_drivers")
+          .select("tenant_id, subcontractor_id, driver_id")
+          .eq("tenant_id", tenant.writeTenantId)
+          .eq("active", true)
+      : { data: [], error: null };
+
+    const linkedDriverIds = [...new Set((links.data ?? []).map((link) => link.driver_id).filter(Boolean))];
+    // A linked subcontractor driver can be inactive on the in-house fleet roster.
+    const linkedRoster = tenant.writeTenantId && linkedDriverIds.length > 0
+      ? await supabase.from("drivers").select("id, name, tenant_id")
+          .eq("tenant_id", tenant.writeTenantId)
+          .in("id", linkedDriverIds)
+          .order("name", { ascending: true })
+      : { data: [], error: null };
 
     if (version !== jobsLoadVersion.current) return;
     if (vehicleError) { setMessage(`Vehicles load error: ${vehicleError.message}`); settle(); return; }
@@ -208,6 +228,9 @@ export default function JobsPage() {
     setJobs(normalizedJobs);
     setVehicles(vehicleData || []);
     setDrivers(driverData || []);
+    setSubcontractorDriverLinks(links.data || []);
+    setLinkedDrivers(linkedRoster.data || []);
+    if (links.error || linkedRoster.error) setMessage("Unable to load linked subcontractor drivers. Refresh jobs to try again.");
     setCustomers(customerData || []);
     setSubcontractors(subcontractorData || []);
     setDataTenantId(tenant.activeTenantId);
@@ -317,6 +340,20 @@ export default function JobsPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  const driverOptions = (form.subcontractor_id ? linkedDrivers : drivers).filter((driver) =>
+    driver.tenant_id === tenant.writeTenantId &&
+    (!form.subcontractor_id || subcontractorDriverLinks.some((link) =>
+      link.tenant_id === driver.tenant_id &&
+      link.subcontractor_id === form.subcontractor_id &&
+      link.driver_id === driver.id
+    ))
+  );
+  const originalJob = jobs.find((job) => job.id === editingJobId);
+  const keepExistingDriver = originalJob?.tenant_id === tenant.writeTenantId &&
+    originalJob?.driver_id && originalJob.driver_id === form.driver_id &&
+    (originalJob.subcontractor_id || "") === form.subcontractor_id &&
+    !driverOptions.some((driver) => driver.id === form.driver_id);
+
   function updatePodForm(stopId: string, field: string, value: string) {
     const stop = jobs.flatMap((job) => job.job_stops ?? []).find((stop) => stop.id === stopId);
     setPodForms((current) => ({
@@ -339,6 +376,12 @@ export default function JobsPage() {
     if (!validation.success) {
       setLoading(false);
       setMessage(validation.error.issues[0]?.message || "Please fill in all required fields.");
+      return;
+    }
+    if (form.subcontractor_id && form.driver_id && !keepExistingDriver &&
+      !driverOptions.some((driver) => driver.id === form.driver_id)) {
+      setLoading(false);
+      setMessage("Choose a linked driver for this subcontractor or leave the driver unassigned.");
       return;
     }
     const reference = validation.data.reference;
@@ -999,11 +1042,18 @@ export default function JobsPage() {
             loading={loading}
             customers={customers.map((c) => ({ id: c.id, label: c.name }))}
             vehicles={vehicles.map((v) => ({ id: v.id, label: v.registration }))}
-            drivers={drivers.map((d) => ({ id: d.id, label: d.name }))}
+            drivers={[
+              ...driverOptions.map((d) => ({ id: d.id, label: d.name })),
+              ...(keepExistingDriver ? [{ id: form.driver_id, label: originalJob.drivers?.name || "Current driver" }] : []),
+            ]}
             subcontractors={subcontractors.map((s) => ({
-              id: s.id, label: `${s.name} - ${s.vehicle_reg || "No reg"} - ${s.driver_name || "No driver"}`,
+              id: s.id, label: s.name,
             }))}
-            onFieldChange={(field, value) => setForm((f) => ({ ...f, [field]: value }))}
+            onFieldChange={(field, value) => setForm((f) => ({
+              ...f,
+              ...(field === "subcontractor_id" && value !== f.subcontractor_id ? { driver_id: "" } : {}),
+              [field]: value,
+            }))}
             onStopChange={updateStop}
             onAddStop={addStop}
             onRemoveStop={removeStop}

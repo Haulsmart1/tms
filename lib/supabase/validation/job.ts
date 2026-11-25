@@ -52,13 +52,11 @@ export const JobPageValidation = z.object({
 
     vehicle_id: z
         .string()
-        .trim()
-        .min(1, "Select a vehicle."),
+        .trim(),
 
     driver_id: z
         .string()
-        .trim()
-        .min(1, "Select a driver."),
+        .trim(),
 
     customer_price:
         optionalNonNegativeNumber(
@@ -74,6 +72,14 @@ export const JobPageValidation = z.object({
         optionalNonNegativeNumber(
             "Subcontractor cost cannot be negative.",
         ),
+}).superRefine((job, ctx) => {
+    if (job.subcontractor_id) return;
+    if (!job.vehicle_id) {
+        ctx.addIssue({ code: "custom", path: ["vehicle_id"], message: "Select a vehicle." });
+    }
+    if (!job.driver_id) {
+        ctx.addIssue({ code: "custom", path: ["driver_id"], message: "Select a driver." });
+    }
 });
 
 const optionalContactEmail = z

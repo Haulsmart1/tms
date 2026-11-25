@@ -152,7 +152,7 @@ export default function JobForm({
             value={form.vehicle_id}
             onChange={(e) => onFieldChange("vehicle_id", e.target.value)}
           >
-            <option value="">Select vehicle</option>
+            <option value="">{form.subcontractor_id ? "No fleet vehicle assigned" : "Select vehicle"}</option>
             {vehicles.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
           </select>
         </label>
@@ -163,9 +163,12 @@ export default function JobForm({
             value={form.driver_id}
             onChange={(e) => onFieldChange("driver_id", e.target.value)}
           >
-            <option value="">Select driver</option>
+            <option value="">{form.subcontractor_id ? "Driver not assigned" : "Select driver"}</option>
             {drivers.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
           </select>
+          {form.subcontractor_id && drivers.length === 0 ? (
+            <span className="text-xs text-ink-2">No active drivers are linked to this subcontractor.</span>
+          ) : null}
         </label>
         <Field id="job-price" label="Customer price" type="number" step="0.01" value={form.customer_price} onChange={(e) => onFieldChange("customer_price", e.target.value)} />
         <label className="grid min-w-0 gap-1.5">
