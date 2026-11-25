@@ -27,6 +27,7 @@ export type InvoicePdfLine = {
   quantity: number;
   unitPrice: number;
   vatRate: number;
+  vatLabel?: string;
   netAmount: number;
   vatAmount: number;
   grossAmount: number;
@@ -69,6 +70,7 @@ export type GenerateInvoicePdfInput = {
   companyProfile?: InvoicePdfCompanyProfile | null;
   documentSettings?: InvoicePdfDocumentSettings | null;
   customerName: string;
+  selfBilling?: { customerAddress: string; customerVatNumber?: string | null; supplyDate: string; draft: boolean };
   invoiceNumber: string;
   status?: string | null;
   issueDate: string | null;
@@ -336,7 +338,7 @@ function drawLine(context: Context, line: InvoicePdfLine, currency: string) {
         font: context.normal,
       });
 
-      draw(context.page, fitPdfText(`${line.vatRate}%`, context.normal, size, COLUMNS.vatWidth), {
+      draw(context.page, fitPdfText(line.vatLabel ?? `${line.vatRate}%`, context.normal, size, COLUMNS.vatWidth), {
         x: COLUMNS.vat,
         y: top,
         size,
@@ -436,6 +438,10 @@ export async function generateInvoicePdf(
     clean(input.companyName);
 
   const invoiceNumber = clean(input.invoiceNumber);
+  const title = input.selfBilling
+    ? input.selfBilling.draft ? "Draft self-billing invoice" : "Self-billing invoice"
+    : "Invoice";
+  pdf.setTitle(`${title} ${invoiceNumber}`);
 
   const context: Context = {
     pdf,
@@ -443,7 +449,7 @@ export async function generateInvoicePdf(
     normal,
     bold,
     y: PAGE_HEIGHT - MARGIN,
-    runningTitle: `${displayCompany}  |  Invoice ${invoiceNumber}`,
+    runningTitle: `${displayCompany}  |  ${title} ${invoiceNumber}`,
     onPageBreak: null,
   };
 
@@ -537,7 +543,7 @@ export async function generateInvoicePdf(
   context.y = PAGE_HEIGHT - 148;
   drawRule(context, context.y + 18);
 
-  drawText(context, "Invoice", { size: 22, bold: true, gapAfter: 3 });
+  drawText(context, title, { size: 22, bold: true, gapAfter: 3 });
   drawText(context, invoiceNumber, { size: 14, gapAfter: 12 });
 
   const detailTop = context.y;
@@ -546,10 +552,19 @@ export async function generateInvoicePdf(
 
   drawText(context, "CUSTOMER", { size: 7, bold: true, gapAfter: 4, maxWidth: leftWidth });
   drawText(context, input.customerName, { size: 10, bold: true, gapAfter: 8, maxWidth: leftWidth });
-  drawText(context, "CUSTOMER REFERENCE", { size: 7, bold: true, gapAfter: 3, maxWidth: leftWidth });
-  drawText(context, clean(input.customerReference) || "-", { size: 9, gapAfter: 8, maxWidth: leftWidth });
-  drawText(context, "PO REFERENCE", { size: 7, bold: true, gapAfter: 3, maxWidth: leftWidth });
-  drawText(context, clean(input.poReference) || "-", { size: 9, maxWidth: leftWidth });
+  if (input.selfBilling) {
+    drawText(context, input.selfBilling.customerAddress, { maxWidth: leftWidth, gapAfter: 5 });
+    if (input.selfBilling.customerVatNumber) {
+      drawText(context, `VAT No: ${input.selfBilling.customerVatNumber}`, { maxWidth: leftWidth, gapAfter: 5 });
+    }
+    drawText(context, "SUPPLY DATE", { size: 7, bold: true, gapAfter: 3, maxWidth: leftWidth });
+    drawText(context, date(input.selfBilling.supplyDate), { maxWidth: leftWidth });
+  } else {
+    drawText(context, "CUSTOMER REFERENCE", { size: 7, bold: true, gapAfter: 3, maxWidth: leftWidth });
+    drawText(context, clean(input.customerReference) || "-", { size: 9, gapAfter: 8, maxWidth: leftWidth });
+    drawText(context, "PO REFERENCE", { size: 7, bold: true, gapAfter: 3, maxWidth: leftWidth });
+    drawText(context, clean(input.poReference) || "-", { size: 9, maxWidth: leftWidth });
+  }
 
   /* The left column can wrap onto a second page for absurdly long input; the
      right column is drawn on the first page, where its labels belong. */
@@ -560,7 +575,7 @@ export async function generateInvoicePdf(
   draw(firstPage, "ISSUE DATE", { x: rightX, y: detailTop, size: 7, font: bold });
   rightText(firstPage, normal, date(input.issueDate), detailTop - 14, { size: 9, maxWidth: rightWidth });
 
-  draw(firstPage, "DUE DATE", { x: rightX, y: detailTop - 42, size: 7, font: bold });
+  draw(firstPage, input.selfBilling ? "EXPECTED PAYMENT DATE" : "DUE DATE", { x: rightX, y: detailTop - 42, size: 7, font: bold });
   rightText(firstPage, normal, date(input.dueDate), detailTop - 56, { size: 9, maxWidth: rightWidth });
 
   draw(firstPage, "STATUS", { x: rightX, y: detailTop - 84, size: 7, font: bold });
