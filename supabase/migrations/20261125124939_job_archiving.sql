@@ -4,6 +4,30 @@ create index jobs_archived_tenant_customer_idx
   on public.jobs (tenant_id, customer_id, archived_at)
   where archived_at is not null;
 
+-- This runs after jobs_set_updated_at, so an archive-only update retains
+-- the timestamp from the last operational edit.
+create function public.guard_job_archive_marker()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if current_user not in ('postgres', 'service_role', 'supabase_admin') then
+    raise exception 'Only a database operator can change the archive marker'
+      using errcode = '42501';
+  end if;
+
+  new.updated_at := old.updated_at;
+  return new;
+end;
+$$;
+
+create trigger zz_guard_job_archive_marker
+  before update of archived_at on public.jobs
+  for each row
+  when (old.archived_at is distinct from new.archived_at)
+  execute function public.guard_job_archive_marker();
+
 -- Called by a database operator after verifying the tenant and customer IDs.
 -- Check the whole job row so a pre-existing update trigger cannot silently
 -- rewrite historical timestamps or other fields as a side effect.
