@@ -22,6 +22,7 @@ import { createAdminClient } from "../supabase/admin";
 export type SubcontractorWriter = {
   admin: SupabaseClient;
   tenantId: string;
+  userId: string;
 };
 
 export async function requireSubcontractorWriter(
@@ -45,7 +46,7 @@ export async function requireSubcontractorWriter(
     throw new ApiError(500, "Unable to verify tenant access.");
   }
 
-  return { admin, tenantId };
+  return { admin, tenantId, userId: user.id };
 }
 
 /** Parse the JSON body, answering 400 for anything that is not JSON. */

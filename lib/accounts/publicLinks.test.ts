@@ -21,6 +21,8 @@ const ALLOWED = new Set<string>([
   "app/api/planning/collection-failure/route.ts",
   "app/api/settings/portal-invites/route.ts",
   "app/api/subcontractor/me/route.ts",
+  "app/api/subcontractor/bank-details/route.ts",
+  "app/api/subcontractors/[id]/bank-details/route.ts",
   "app/api/subcontractors/[id]/invoices/route.ts",
 ]);
 const PATTERN = /new URL\(\s*request\.url\s*\)\.origin|request\.nextUrl\.origin|headers\.get\(\s*["'](?:host|x-forwarded-host)["']\s*\)/;

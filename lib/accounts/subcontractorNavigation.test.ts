@@ -36,6 +36,9 @@ it("opens each destination, preserves the portal link, and loads invoices when s
         jobs: [], vehicles: [], employees: [], portalUsers: [],
       });
     }
+    if (url === "/api/subcontractor/bank-details?link=selected") {
+      return Response.json({ latest: null, approved: null });
+    }
     if (url === "/api/subcontractor/invoices?link=selected&page=1") {
       return Response.json({
         invoices: [{ id: "invoice-id", invoice_number: "SB-7", issue_date: "2026-01-15" }], hasNext: false,

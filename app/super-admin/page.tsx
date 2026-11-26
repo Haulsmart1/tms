@@ -222,6 +222,10 @@ export default function SuperAdminPage() {
           <p className="m-0 text-sm text-ink-3">
             Platform management, billing and company overview.
           </p>
+          <Link href="/super-admin/subcontractor-preview"
+            className="mt-3 inline-flex min-h-11 items-center rounded-md border border-line bg-surface px-3 text-sm font-semibold text-ink hover:bg-surface-2">
+            Preview as Subcontractor
+          </Link>
         </header>
 
         <MessageBanner tone="danger">{message}</MessageBanner>

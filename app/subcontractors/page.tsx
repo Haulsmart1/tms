@@ -11,6 +11,7 @@ import Select from "../../components/Select";
 import MessageBanner from "../../components/MessageBanner";
 import { shouldShowSkeleton } from "../../lib/loading/skeletonVisibility";
 import PublishInvoice from "./PublishInvoice";
+import ReviewBankDetails from "./ReviewBankDetails";
 import SubcontractorCard from "./SubcontractorCard";
 import InfoField from "../../components/InfoField";
 import { getCompliance, mostUrgent } from "../../lib/compliance/expiry";
@@ -964,6 +965,11 @@ export default function SubcontractorsPage() {
               </div>
             ) : null}
           </section>
+
+          {isAdmin && selectedSubcontractor && (
+            <ReviewBankDetails key={`bank-${selectedSubcontractor.id}`} id={selectedSubcontractor.id}
+              tenantId={selectedSubcontractor.tenant_id} name={selectedSubcontractor.name} />
+          )}
 
           {isAdmin && selectedSubcontractor?.active && (
             <PublishInvoice key={selectedSubcontractor.id} id={selectedSubcontractor.id}

@@ -32,6 +32,9 @@ type UserLinkRow = {
 };
 
 const EMPTY = { data: [], error: null } as const;
+const ADMIN_COMPANY_COLUMNS = [...new Set(
+  `${PORTAL_SUBCONTRACTOR_COLUMNS},${SUBCONTRACTOR_DETAIL_COLUMNS}`.split(","),
+)].join(",");
 
 /*
   Review ACC-12: the payload depends on the portal role (see
@@ -51,9 +54,7 @@ export async function GET(request: NextRequest) {
       await Promise.all([
         admin
           .from("subcontractors")
-          .select(scope.portalUsers
-            ? `${PORTAL_SUBCONTRACTOR_COLUMNS},${SUBCONTRACTOR_DETAIL_COLUMNS}`
-            : PORTAL_SUBCONTRACTOR_COLUMNS)
+          .select(scope.portalUsers ? ADMIN_COMPANY_COLUMNS : PORTAL_SUBCONTRACTOR_COLUMNS)
           .eq("id", subcontractorId)
           .eq("tenant_id", tenantId)
           .maybeSingle(),
@@ -172,7 +173,7 @@ export async function PATCH(request: NextRequest) {
     const { admin, link } = await requireSubcontractorPortal(request.nextUrl.searchParams.get("link"));
     if (link.role !== "subcontractor_admin") throw new ApiError(403, "Only a subcontractor admin can edit company details.");
     const parsed = parseSubcontractorDetails(await request.json().catch(() => null));
-    if (!parsed.success) throw new ApiError(400, "Check the company details and email addresses.");
+    if (!parsed.success) throw new ApiError(400, "Check the company details, email addresses and expiry dates.");
     const { data, error } = await admin.from("subcontractors")
       .update({ ...parsed.data, updated_at: new Date().toISOString() })
       .eq("id", link.subcontractor_id).eq("tenant_id", link.tenant_id).eq("active", true)
